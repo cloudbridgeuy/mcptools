@@ -587,6 +587,14 @@ pub fn release(args: &ReleaseArgs) -> Result<()> {
     );
     println!("{}", Colors::info(&format!("New version: {version}")));
 
+    // Check if version is different
+    if current_version == *version {
+        return Err(eyre!(
+            "New version ({}) is the same as current version. Please specify a different version.",
+            version
+        ));
+    }
+
     // Show what will happen
     println!();
     println!("{}", Colors::step("Release Plan:"));
