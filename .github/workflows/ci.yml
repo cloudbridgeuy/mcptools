@@ -82,7 +82,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Check compilation for ${{ matrix.target }}
-        run: cargo check --target ${{ matrix.target }} --verbose
+        run: cargo check --target ${{ matrix.target }} --workspace --exclude xtask --verbose
 
   unused-deps:
     name: Check Unused Dependencies
