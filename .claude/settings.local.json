@@ -13,7 +13,9 @@
       "Bash(curl:*)",
       "Read(//Users/guzmanmonne/.local/bin/**)",
       "Bash(xattr:*)",
-      "Bash(~/.local/bin/mcptools:*)"
+      "Bash(~/.local/bin/mcptools:*)",
+      "Bash(cat:*)",
+      "Bash(./target/debug/mcptools md fetch https://jobs.ashbyhq.com/Railway)"
     ],
     "deny": [],
     "ask": []
