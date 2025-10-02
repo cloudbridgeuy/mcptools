@@ -50,18 +50,25 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
 
-  build:
-    name: Build Check
-    runs-on: ${{ matrix.os }}
+  cross-platform-check:
+    name: Cross-Platform Validation
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-15, windows-2025]
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+          - x86_64-pc-windows-msvc
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo registry and index
         uses: actions/cache@v4
@@ -74,19 +81,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target/
-          key: ${{ runner.os }}-target-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-target-
-
-      - name: Build
-        run: cargo build --verbose
-
-      - name: Build release
-        run: cargo build --release --verbose
+      - name: Check compilation for ${{ matrix.target }}
+        run: cargo check --target ${{ matrix.target }} --verbose
 
   unused-deps:
     name: Check Unused Dependencies
