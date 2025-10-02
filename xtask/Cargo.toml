@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+publish = false
+license = "MIT"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.48", features = [
+  "derive",
+] } # A simple to use, efficient, and full-featured Command Line Argument Parser
+duct = "1.1.0" # A library for running child processes
+chrono = "0.4.42" # Date and time library for Rust
+bunt = "0.2.8"
+color-eyre = "0.6.5"

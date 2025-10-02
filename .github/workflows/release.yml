@@ -1,0 +1,233 @@
+name: Release
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux x86_64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            binary_name: vnt
+            asset_name: mcptools-Linux-x86_64
+
+          # macOS x86_64 (Intel)
+          - target: x86_64-apple-darwin
+            os: macos-15
+            binary_name: vnt
+            asset_name: mcptools-Darwin-x86_64
+
+          # macOS aarch64 (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-15
+            binary_name: vnt
+            asset_name: mcptools-Darwin-arm64
+
+          # Windows x86_64
+          - target: x86_64-pc-windows-msvc
+            os: windows-2025
+            binary_name: vnt.exe
+            asset_name: mcptools-Windows-x86_64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Cache cargo registry and index
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target/
+          key: ${{ runner.os }}-${{ matrix.target }}-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-target-
+
+      - name: Configure cross-compilation environment
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Strip binary (Unix)
+        if: matrix.os != 'windows-2025'
+        run: strip target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+
+      - name: Create asset
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-2025" ]]; then
+            cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} ${{ matrix.asset_name }}
+          else
+            cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} ${{ matrix.asset_name }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "mcptools-*" -type f -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          if [[ -f CHANGELOG.md ]]; then
+            # Extract changelog for this version if CHANGELOG.md exists
+            echo "changelog<<EOF" >> $GITHUB_OUTPUT
+            echo "See CHANGELOG.md for details." >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            # Generate simple changelog from git log
+            echo "changelog<<EOF" >> $GITHUB_OUTPUT
+            echo "## Changes in ${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^)..HEAD >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          body: |
+            # MCPTOOLS DevOps CLI ${{ steps.version.outputs.version }}
+
+            ## Installation
+
+            > **Note**: This is a private repository. You must be authenticated with GitHub to download the binaries.
+
+            ### Prerequisites
+            - Install GitHub CLI: https://cli.github.com/
+            - Authenticate with GitHub: `gh auth login`
+
+            ### Method 1: Download with GitHub CLI (Recommended)
+
+            ```bash
+            # Download the appropriate binary for your platform
+
+            # Linux x86_64
+            gh release download ${{ steps.version.outputs.version }} -R cloudbridgeuy/mcptools -p "mcptools-Linux-x86_64" -O vnt
+
+            # macOS Intel
+            gh release download ${{ steps.version.outputs.version }} -R cloudbridgeuy/mcptools -p "mcptools-Darwin-x86_64" -O vnt
+
+            # macOS Apple Silicon
+            gh release download ${{ steps.version.outputs.version }} -R cloudbridgeuy/mcptools -p "mcptools-Darwin-arm64" -O vnt
+
+            # Windows
+            gh release download ${{ steps.version.outputs.version }} -R cloudbridgeuy/mcptools -p "mcptools-Windows-x86_64.exe" -O vnt.exe
+
+            # Make executable and move to PATH (Unix systems)
+            chmod +x vnt
+            sudo mv vnt /usr/local/bin/
+
+            # Verify installation
+            vnt --version
+            ```
+
+            ### Method 2: One-liner with GitHub CLI (Unix systems)
+
+            ```bash
+            gh release download ${{ steps.version.outputs.version }} -R cloudbridgeuy/mcptools -p "mcptools-$(uname -s)-$(uname -m)" -O vnt && chmod +x vnt && sudo mv vnt /usr/local/bin/
+            ```
+
+            ### Method 3: Download with curl and GitHub Token
+
+            If you prefer using curl, you'll need a GitHub Personal Access Token with `repo` scope.
+
+            ```bash
+            # Set your GitHub token
+            export GITHUB_TOKEN=your_github_token_here
+
+            # Linux x86_64
+            curl -L -H "Authorization: token $GITHUB_TOKEN" \
+              "https://github.com/cloudbridgeuy/mcptools/releases/download/${{ steps.version.outputs.version }}/mcptools-Linux-x86_64" -o vnt
+
+            # macOS Intel
+            curl -L -H "Authorization: token $GITHUB_TOKEN" \
+              "https://github.com/cloudbridgeuy/mcptools/releases/download/${{ steps.version.outputs.version }}/mcptools-Darwin-x86_64" -o vnt
+
+            # macOS Apple Silicon
+            curl -L -H "Authorization: token $GITHUB_TOKEN" \
+              "https://github.com/cloudbridgeuy/mcptools/releases/download/${{ steps.version.outputs.version }}/mcptools-Darwin-arm64" -o vnt
+            ```
+
+            ## Platform Support
+
+            - ✅ Linux x86_64
+            - ✅ macOS Intel (x86_64)
+            - ✅ macOS Apple Silicon (ARM64)
+            - ✅ Windows x86_64
+
+            ${{ steps.changelog.outputs.changelog }}
+          files: release-assets/*
+          draft: false
+          prerelease: false
+          generate_release_notes: false
