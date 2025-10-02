@@ -34,3 +34,5 @@ chrono = "0.4.39"
 axum = "0.8.6"
 tower-http = { version = "0.6.6", features = ["cors"] }
 colored = "3.0.0"
+headless_chrome = "1.0"
+html2md = "0.2"

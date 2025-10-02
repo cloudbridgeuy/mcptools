@@ -1,4 +1,5 @@
 mod hn;
+mod md;
 
 use serde::{Deserialize, Serialize};
 
@@ -124,6 +125,28 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": []
             }),
         },
+        Tool {
+            name: "md_fetch".to_string(),
+            description: "Fetch a web page using headless Chrome, wait for all XHR requests to complete (network idle), and convert the HTML to Markdown. Returns the page title, markdown content, and fetch statistics.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL of the web page to fetch"
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Timeout in seconds (default: 30)"
+                    },
+                    "raw_html": {
+                        "type": "boolean",
+                        "description": "Return raw HTML instead of converting to Markdown (default: false)"
+                    }
+                },
+                "required": ["url"]
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -149,6 +172,7 @@ pub async fn handle_tools_call(
     match params.name.as_str() {
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
+        "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),
