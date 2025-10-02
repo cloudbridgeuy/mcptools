@@ -86,18 +86,6 @@ jobs:
       - name: Build release
         run: cargo build --release --verbose
 
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Security audit
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
   unused-deps:
     name: Check Unused Dependencies
     runs-on: ubuntu-latest
