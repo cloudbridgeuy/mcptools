@@ -19,7 +19,6 @@ serde_json = { workspace = true }
 clap = { workspace = true }
 color-eyre = { workspace = true }
 env_logger = { workspace = true }
-log = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 anstream = { workspace = true }
