@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::prelude::{println, *};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use regex::Regex;
@@ -63,42 +63,42 @@ struct HnItem {
 }
 
 #[derive(Debug, Serialize)]
-struct PostOutput {
-    id: u64,
-    title: Option<String>,
-    url: Option<String>,
-    author: Option<String>,
-    score: Option<u64>,
-    time: Option<String>,
-    text: Option<String>,
-    total_comments: Option<u64>,
-    comments: Vec<CommentOutput>,
-    pagination: PaginationInfo,
+pub struct PostOutput {
+    pub id: u64,
+    pub title: Option<String>,
+    pub url: Option<String>,
+    pub author: Option<String>,
+    pub score: Option<u64>,
+    pub time: Option<String>,
+    pub text: Option<String>,
+    pub total_comments: Option<u64>,
+    pub comments: Vec<CommentOutput>,
+    pub pagination: PaginationInfo,
 }
 
 #[derive(Debug, Serialize)]
-struct CommentOutput {
-    id: u64,
-    author: Option<String>,
-    time: Option<String>,
-    text: Option<String>,
-    replies_count: usize,
+pub struct CommentOutput {
+    pub id: u64,
+    pub author: Option<String>,
+    pub time: Option<String>,
+    pub text: Option<String>,
+    pub replies_count: usize,
 }
 
 #[derive(Debug, Serialize)]
-struct PaginationInfo {
-    current_page: usize,
-    total_pages: usize,
-    total_comments: usize,
-    limit: usize,
-    next_page_command: Option<String>,
-    prev_page_command: Option<String>,
+pub struct PaginationInfo {
+    pub current_page: usize,
+    pub total_pages: usize,
+    pub total_comments: usize,
+    pub limit: usize,
+    pub next_page_command: Option<String>,
+    pub prev_page_command: Option<String>,
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
     if global.verbose {
-        aprintln!("HackerNews API Base: {}", HN_API_BASE);
-        aprintln!();
+        println!("HackerNews API Base: {}", HN_API_BASE);
+        println!();
     }
 
     match app.command {
@@ -106,11 +106,114 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
     }
 }
 
+/// Fetches HackerNews item data and returns it as a structured PostOutput
+pub async fn read_item_data(
+    item: String,
+    limit: usize,
+    page: usize,
+    thread: Option<String>,
+) -> Result<PostOutput> {
+    let item_id = extract_item_id(&item)?;
+
+    // If thread option is provided, read the comment thread instead
+    if thread.is_some() {
+        return Err(eyre!("Thread reading not supported in data mode yet"));
+    }
+
+    // Fetch the main item
+    let client = reqwest::Client::new();
+    let hn_item = fetch_item(&client, item_id).await?;
+
+    // Validate it's a story
+    if hn_item.item_type != "story" {
+        return Err(eyre!(
+            "Item {} is not a story (type: {})",
+            item_id,
+            hn_item.item_type
+        ));
+    }
+
+    // Get top-level comment IDs
+    let comment_ids = hn_item.kids.clone().unwrap_or_default();
+    let total_comments = comment_ids.len();
+
+    // Calculate pagination
+    let start = (page - 1) * limit;
+    let paginated_ids: Vec<u64> = comment_ids
+        .iter()
+        .skip(start)
+        .take(limit)
+        .copied()
+        .collect();
+
+    // Fetch comments for this page
+    let comment_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
+    let comments: Vec<HnItem> = join_all(comment_futures)
+        .await
+        .into_iter()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let total_pages = total_comments.div_ceil(limit);
+
+    // Build comment outputs
+    let comment_outputs: Vec<CommentOutput> = comments
+        .iter()
+        .map(|c| CommentOutput {
+            id: c.id,
+            author: c.by.clone(),
+            time: format_timestamp(c.time),
+            text: c.text.as_ref().map(|t| strip_html(t)),
+            replies_count: c.kids.as_ref().map(|k| k.len()).unwrap_or(0),
+        })
+        .collect();
+
+    let next_page = if page < total_pages {
+        Some(format!(
+            "mcptools hn read {} --page {}",
+            hn_item.id,
+            page + 1
+        ))
+    } else {
+        None
+    };
+
+    let prev_page = if page > 1 {
+        Some(format!(
+            "mcptools hn read {} --page {}",
+            hn_item.id,
+            page - 1
+        ))
+    } else {
+        None
+    };
+
+    Ok(PostOutput {
+        id: hn_item.id,
+        title: hn_item.title.clone(),
+        url: hn_item.url.clone(),
+        author: hn_item.by.clone(),
+        score: hn_item.score,
+        time: format_timestamp(hn_item.time),
+        text: hn_item.text.as_ref().map(|t| strip_html(t)),
+        total_comments: hn_item.descendants,
+        comments: comment_outputs,
+        pagination: PaginationInfo {
+            current_page: page,
+            total_pages,
+            total_comments,
+            limit,
+            next_page_command: next_page,
+            prev_page_command: prev_page,
+        },
+    })
+}
+
 async fn read_item(options: ReadOptions, global: crate::Global) -> Result<()> {
     let item_id = extract_item_id(&options.item)?;
 
     if global.verbose {
-        aprintln!("Fetching item ID: {}", item_id);
+        println!("Fetching item ID: {}", item_id);
     }
 
     // If thread option is provided, read the comment thread instead
@@ -182,7 +285,7 @@ async fn read_thread(
         .map_err(|_| eyre!("Invalid thread ID: {}", thread_id))?;
 
     if global.verbose {
-        aprintln!("Fetching comment thread: {}", thread_item_id);
+        println!("Fetching comment thread: {}", thread_item_id);
     }
 
     let client = reqwest::Client::new();
@@ -362,7 +465,7 @@ fn output_json(
     };
 
     let json = serde_json::to_string_pretty(&output)?;
-    aprintln!("{}", json);
+    println!("{}", json);
 
     Ok(())
 }
@@ -376,50 +479,50 @@ fn output_formatted(
     item_id: &str,
 ) -> Result<()> {
     // Post header
-    aprintln!("\n{}", "=".repeat(80));
-    aprintln!(
+    println!("\n{}", "=".repeat(80));
+    println!(
         "POST: {}",
         item.title.as_ref().unwrap_or(&"(No title)".to_string())
     );
-    aprintln!("{}", "=".repeat(80));
+    println!("{}", "=".repeat(80));
 
     if let Some(url) = &item.url {
-        aprintln!("URL: {}", url);
+        println!("URL: {}", url);
     }
 
-    aprintln!(
+    println!(
         "Author: {}",
         item.by.as_ref().unwrap_or(&"(unknown)".to_string())
     );
-    aprintln!("Score: {}", item.score.unwrap_or(0));
-    aprintln!(
+    println!("Score: {}", item.score.unwrap_or(0));
+    println!(
         "Time: {}",
         format_timestamp(item.time).unwrap_or("(unknown)".to_string())
     );
-    aprintln!("Comments: {}", item.descendants.unwrap_or(0));
-    aprintln!("ID: {}", item.id);
+    println!("Comments: {}", item.descendants.unwrap_or(0));
+    println!("ID: {}", item.id);
 
     if let Some(text) = &item.text {
-        aprintln!("\n{}", strip_html(text));
+        println!("\n{}", strip_html(text));
     }
 
     // Comments section
-    aprintln!("\n{}", "=".repeat(80));
-    aprintln!("COMMENTS (Page {} of {})", options.page, total_pages);
-    aprintln!("{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80));
+    println!("COMMENTS (Page {} of {})", options.page, total_pages);
+    println!("{}", "=".repeat(80));
 
     if comments.is_empty() {
-        aprintln!("\nNo comments on this page.");
+        println!("\nNo comments on this page.");
     } else {
         for (idx, comment) in comments.iter().enumerate() {
             let comment_num = (options.page - 1) * options.limit + idx + 1;
-            aprintln!(
+            println!(
                 "\n[Comment #{}] by {} (ID: {})",
                 comment_num,
                 comment.by.as_ref().unwrap_or(&"(unknown)".to_string()),
                 comment.id
             );
-            aprintln!(
+            println!(
                 "Time: {}",
                 format_timestamp(comment.time).unwrap_or("(unknown)".to_string())
             );
@@ -427,61 +530,58 @@ fn output_formatted(
             if let Some(text) = &comment.text {
                 let stripped = strip_html(text);
                 let truncated = truncate_text(&stripped, 500);
-                aprintln!("{}", truncated);
+                println!("{}", truncated);
             }
 
             if let Some(kids) = &comment.kids {
-                aprintln!("└─ {} replies", kids.len());
+                println!("└─ {} replies", kids.len());
             }
         }
     }
 
     // Navigation section
-    aprintln!("\n{}", "=".repeat(80));
-    aprintln!("NAVIGATION");
-    aprintln!("{}", "=".repeat(80));
-    aprintln!(
+    println!("\n{}", "=".repeat(80));
+    println!("NAVIGATION");
+    println!("{}", "=".repeat(80));
+    println!(
         "\nShowing page {} of {} ({} total top-level comments)",
-        options.page,
-        total_pages,
-        total_comments
+        options.page, total_pages, total_comments
     );
 
-    aprintln!("\nTo view more comments:");
+    println!("\nTo view more comments:");
     if options.page < total_pages {
-        aprintln!(
+        println!(
             "  Next page: mcptools hn read {} --page {}",
             item_id,
             options.page + 1
         );
     }
     if options.page > 1 {
-        aprintln!(
+        println!(
             "  Previous page: mcptools hn read {} --page {}",
             item_id,
             options.page - 1
         );
     }
     if options.page == total_pages && options.page > 1 {
-        aprintln!("  First page: mcptools hn read {} --page 1", item_id);
+        println!("  First page: mcptools hn read {} --page 1", item_id);
     }
 
-    aprintln!("\nTo read a comment thread:");
-    aprintln!("  mcptools hn read {} --thread <comment_id>", item_id);
+    println!("\nTo read a comment thread:");
+    println!("  mcptools hn read {} --thread <comment_id>", item_id);
     if !comments.is_empty() {
-        aprintln!(
+        println!(
             "  Example: mcptools hn read {} --thread {}",
-            item_id,
-            comments[0].id
+            item_id, comments[0].id
         );
     }
 
-    aprintln!("\nTo change page size:");
-    aprintln!("  mcptools hn read {} --limit <number>", item_id);
+    println!("\nTo change page size:");
+    println!("  mcptools hn read {} --limit <number>", item_id);
 
-    aprintln!("\nTo get JSON output:");
-    aprintln!("  mcptools hn read {} --json", item_id);
-    aprintln!();
+    println!("\nTo get JSON output:");
+    println!("  mcptools hn read {} --json", item_id);
+    println!();
 
     Ok(())
 }
@@ -518,7 +618,7 @@ fn output_thread_json(comment: &HnItem, children: &[HnItem]) -> Result<()> {
     };
 
     let json = serde_json::to_string_pretty(&output)?;
-    aprintln!("{}", json);
+    println!("{}", json);
 
     Ok(())
 }
@@ -529,37 +629,37 @@ fn output_thread_formatted(
     post_id: &str,
     options: &ReadOptions,
 ) -> Result<()> {
-    aprintln!("\n{}", "=".repeat(80));
-    aprintln!("COMMENT THREAD");
-    aprintln!("{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80));
+    println!("COMMENT THREAD");
+    println!("{}", "=".repeat(80));
 
-    aprintln!(
+    println!(
         "\n[Root Comment] by {} (ID: {})",
         comment.by.as_ref().unwrap_or(&"(unknown)".to_string()),
         comment.id
     );
-    aprintln!(
+    println!(
         "Time: {}",
         format_timestamp(comment.time).unwrap_or("(unknown)".to_string())
     );
 
     if let Some(text) = &comment.text {
-        aprintln!("\n{}", strip_html(text));
+        println!("\n{}", strip_html(text));
     }
 
     if !children.is_empty() {
-        aprintln!("\n{}", "-".repeat(80));
-        aprintln!("REPLIES ({} total)", children.len());
-        aprintln!("{}", "-".repeat(80));
+        println!("\n{}", "-".repeat(80));
+        println!("REPLIES ({} total)", children.len());
+        println!("{}", "-".repeat(80));
 
         for (idx, child) in children.iter().enumerate() {
-            aprintln!(
+            println!(
                 "\n  [Reply #{}] by {} (ID: {})",
                 idx + 1,
                 child.by.as_ref().unwrap_or(&"(unknown)".to_string()),
                 child.id
             );
-            aprintln!(
+            println!(
                 "  Time: {}",
                 format_timestamp(child.time).unwrap_or("(unknown)".to_string())
             );
@@ -568,40 +668,39 @@ fn output_thread_formatted(
                 let stripped = strip_html(text);
                 let truncated = truncate_text(&stripped, 500);
                 for line in truncated.lines() {
-                    aprintln!("  {}", line);
+                    println!("  {}", line);
                 }
             }
 
             if let Some(kids) = &child.kids {
                 if !kids.is_empty() {
-                    aprintln!("  └─ {} nested replies", kids.len());
+                    println!("  └─ {} nested replies", kids.len());
                 }
             }
         }
     } else {
-        aprintln!("\nNo replies to this comment.");
+        println!("\nNo replies to this comment.");
     }
 
     // Navigation
-    aprintln!("\n{}", "=".repeat(80));
-    aprintln!("NAVIGATION");
-    aprintln!("{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80));
+    println!("NAVIGATION");
+    println!("{}", "=".repeat(80));
 
-    aprintln!("\nTo go back to the post:");
-    aprintln!("  mcptools hn read {}", post_id);
+    println!("\nTo go back to the post:");
+    println!("  mcptools hn read {}", post_id);
 
     if options.page > 1 {
-        aprintln!("\nTo return to your page:");
-        aprintln!("  mcptools hn read {} --page {}", post_id, options.page);
+        println!("\nTo return to your page:");
+        println!("  mcptools hn read {} --page {}", post_id, options.page);
     }
 
-    aprintln!("\nTo get JSON output:");
-    aprintln!(
+    println!("\nTo get JSON output:");
+    println!(
         "  mcptools hn read {} --thread {} --json",
-        post_id,
-        comment.id
+        post_id, comment.id
     );
-    aprintln!();
+    println!();
 
     Ok(())
 }

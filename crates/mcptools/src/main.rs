@@ -5,6 +5,7 @@ use clap::Parser;
 
 mod error;
 mod hn;
+mod mcp;
 mod prelude;
 
 #[derive(Debug, clap::Parser)]
@@ -22,7 +23,7 @@ pub struct App {
     global: Global,
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Clone, clap::Args)]
 pub struct Global {
     /// AWS Region
     #[clap(long, env = "AWS_REGION", global = true, default_value = "us-east-1")]
@@ -40,6 +41,9 @@ pub struct Global {
 pub enum SubCommands {
     /// HackerNews (news.ycombinator.com) operations
     HN(crate::hn::App),
+
+    /// Model Context Protocol server
+    MCP(crate::mcp::App),
 }
 
 #[tokio::main]
@@ -51,6 +55,7 @@ async fn main() -> Result<()> {
 
     match app.command {
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
+        SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,
     }
     .map_err(|err: color_eyre::eyre::Report| eyre!(err))
 }

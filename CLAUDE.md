@@ -62,6 +62,7 @@ bacon clippy
 ### Bacon Integration
 
 The project uses [bacon](https://github.com/Canop/bacon) for continuous checking. Available bacon jobs:
+
 - `bacon` or `bacon check` - Run cargo check (default)
 - `bacon check-all` - Check all targets
 - `bacon clippy` - Run clippy
@@ -113,11 +114,13 @@ The application uses a modular CLI structure with clap for argument parsing:
 - `kms.rs` - AWS KMS operations (list keys, get policies)
 
 **CLI Structure:**
+
 - Global options: `--region`, `--profile`, `--verbose` (also available as env vars)
 - Subcommands follow pattern: `mcptools <service> <operation>`
 - Example: `mcptools kms list-keys`
 
 **Key patterns:**
+
 - Async runtime: Uses tokio
 - Error handling: color-eyre for rich error reports
 - AWS SDK: Configured via `get_sdk_config_from_global()` helper
@@ -127,6 +130,7 @@ The application uses a modular CLI structure with clap for argument parsing:
 ### xtask (`xtask/`)
 
 Build automation following the cargo-xtask pattern:
+
 - `cli.rs` - Command definitions (install, release, build-docs, deploy-docs, dev-docs)
 - `scripts/` - Implementation modules for each command
 - Uses duct for running child processes
@@ -140,6 +144,7 @@ The root `Cargo.toml` currently has a syntax error - workspace manifests should 
 ### AWS Configuration
 
 The application respects standard AWS configuration:
+
 - Environment variables: `AWS_REGION`, `AWS_PROFILE`
 - CLI flags: `--region`, `--profile`
 - Default region: `us-east-1`
@@ -148,6 +153,7 @@ The application respects standard AWS configuration:
 ### Adding New AWS Services
 
 To add a new AWS service (e.g., S3):
+
 1. Create `src/<service>.rs` with the service module
 2. Add module declaration in `main.rs`
 3. Add variant to `SubCommands` enum
@@ -183,7 +189,8 @@ crates/your-cli/
 #### Async Application (with tokio)
 
 ```rust
-use crate::prelude::*;
+// If eprintln and println are required.
+use crate::prelude::{eprintln, println, *};
 use clap::Parser;
 
 // Module declarations
@@ -277,7 +284,8 @@ fn main() -> Result<()> {
 ### 2. Module Pattern (Feature Modules like `kms.rs`, `s3.rs`)
 
 ```rust
-use crate::prelude::*;
+// If eprintln and println are required.
+use crate::prelude::{eprintln, println, *};
 
 /// Module-level app struct
 #[derive(Debug, clap::Parser)]
@@ -320,7 +328,7 @@ pub struct CommandOptions {
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
     // Access global options if needed
     if global.verbose {
-        aprintln!("Verbose mode enabled");
+        println!("Verbose mode enabled");
     }
 
     // Dispatch to command handlers
@@ -388,8 +396,8 @@ pub struct CommandArgs {
 pub use crate::error::Error;
 
 // Re-export common dependencies
-pub use anstream::eprintln as aeprintln;
-pub use anstream::println as aprintln;
+pub use anstream::eprintln;
+pub use anstream::println;
 pub use color_eyre::eyre::{eyre, Context, OptionExt, Result};
 pub use std::format as f;
 
@@ -443,6 +451,7 @@ config: Option<String>,
 ```
 
 **Usage:**
+
 ```bash
 # Via flag
 your-cli --option value command
@@ -479,6 +488,7 @@ verbose: bool,
 ### 8. Common Patterns Summary
 
 **Option Types:**
+
 - `String` - Required string argument
 - `Option<String>` - Optional string argument
 - `bool` - Boolean flag (presence = true)
@@ -486,6 +496,7 @@ verbose: bool,
 - `PathBuf` - File system paths
 
 **Attributes:**
+
 - `#[arg(short, long)]` - Both short and long forms
 - `#[arg(long, env = "VAR")]` - Environment variable override
 - `#[arg(default_value = "val")]` - Default value
@@ -494,6 +505,7 @@ verbose: bool,
 - `#[command(subcommand)]` - Nest subcommands
 
 **Initialization Pattern:**
+
 ```rust
 #[tokio::main]  // or just fn main() for sync
 async fn main() -> Result<()> {
