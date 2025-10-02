@@ -5,7 +5,8 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "Bash(cargo build:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "Bash(cargo clippy:*)"
     ],
     "deny": [],
     "ask": []
