@@ -1,5 +1,6 @@
 use crate::prelude::{println, *};
 use chrono::{DateTime, Utc};
+use colored::Colorize;
 use futures::future::join_all;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -651,108 +652,164 @@ fn output_formatted(
     item_id: &str,
 ) -> Result<()> {
     // Post header
-    println!("\n{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80).bright_cyan());
     println!(
-        "POST: {}",
-        item.title.as_ref().unwrap_or(&"(No title)".to_string())
+        "{}: {}",
+        "POST".bright_cyan().bold(),
+        item.title
+            .as_ref()
+            .unwrap_or(&"(No title)".to_string())
+            .white()
+            .bold()
     );
-    println!("{}", "=".repeat(80));
+    println!("{}", "=".repeat(80).bright_cyan());
 
     if let Some(url) = &item.url {
-        println!("URL: {}", url);
+        println!("{}: {}", "URL".green(), url.cyan().underline());
     }
 
     println!(
-        "Author: {}",
-        item.by.as_ref().unwrap_or(&"(unknown)".to_string())
+        "{}: {}",
+        "Author".green(),
+        item.by
+            .as_ref()
+            .unwrap_or(&"(unknown)".to_string())
+            .bright_white()
     );
-    println!("Score: {}", item.score.unwrap_or(0));
     println!(
-        "Time: {}",
-        format_timestamp(item.time).unwrap_or("(unknown)".to_string())
+        "{}: {}",
+        "Score".green(),
+        item.score.unwrap_or(0).to_string().bright_yellow()
     );
-    println!("Comments: {}", item.descendants.unwrap_or(0));
-    println!("ID: {}", item.id);
+    println!(
+        "{}: {}",
+        "Time".green(),
+        format_timestamp(item.time)
+            .unwrap_or("(unknown)".to_string())
+            .bright_black()
+    );
+    println!(
+        "{}: {}",
+        "Comments".green(),
+        item.descendants.unwrap_or(0).to_string().bright_magenta()
+    );
+    println!("{}: {}", "ID".green(), item.id.to_string().bright_white());
 
     if let Some(text) = &item.text {
-        println!("\n{}", strip_html(text));
+        println!("\n{}", strip_html(text).bright_white());
     }
 
     // Comments section
-    println!("\n{}", "=".repeat(80));
-    println!("COMMENTS (Page {} of {})", options.page, total_pages);
-    println!("{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80).bright_magenta());
+    println!(
+        "{} ({} {} {} {})",
+        "COMMENTS".bright_magenta().bold(),
+        "Page".bright_white(),
+        options.page.to_string().bright_cyan().bold(),
+        "of".bright_white(),
+        total_pages.to_string().bright_cyan().bold()
+    );
+    println!("{}", "=".repeat(80).bright_magenta());
 
     if comments.is_empty() {
-        println!("\nNo comments on this page.");
+        println!("\n{}", "No comments on this page.".yellow());
     } else {
         for (idx, comment) in comments.iter().enumerate() {
             let comment_num = (options.page - 1) * options.limit + idx + 1;
             println!(
-                "\n[Comment #{}] by {} (ID: {})",
-                comment_num,
-                comment.by.as_ref().unwrap_or(&"(unknown)".to_string()),
-                comment.id
+                "\n{} {} {} ({}: {})",
+                format!("[Comment #{comment_num}]").yellow().bold(),
+                "by".bright_black(),
+                comment
+                    .by
+                    .as_ref()
+                    .unwrap_or(&"(unknown)".to_string())
+                    .bright_white(),
+                "ID".bright_black(),
+                comment.id.to_string().bright_white()
             );
             println!(
-                "Time: {}",
-                format_timestamp(comment.time).unwrap_or("(unknown)".to_string())
+                "{}: {}",
+                "Time".green(),
+                format_timestamp(comment.time)
+                    .unwrap_or("(unknown)".to_string())
+                    .bright_black()
             );
 
             if let Some(text) = &comment.text {
                 let stripped = strip_html(text);
                 let truncated = truncate_text(&stripped, 500);
-                println!("{}", truncated);
+                println!("{}", truncated.white());
             }
 
             if let Some(kids) = &comment.kids {
-                println!("└─ {} replies", kids.len());
+                println!(
+                    "{} {}",
+                    "└─".bright_black(),
+                    format!("{} replies", kids.len()).bright_magenta()
+                );
             }
         }
     }
 
     // Navigation section
-    println!("\n{}", "=".repeat(80));
-    println!("NAVIGATION");
-    println!("{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80).bright_yellow());
+    println!("{}", "NAVIGATION".bright_yellow().bold());
+    println!("{}", "=".repeat(80).bright_yellow());
     println!(
-        "\nShowing page {} of {} ({} total top-level comments)",
-        options.page, total_pages, total_comments
+        "\n{} {} {} {} ({} {})",
+        "Showing page".bright_white(),
+        options.page.to_string().bright_cyan().bold(),
+        "of".bright_white(),
+        total_pages.to_string().bright_cyan().bold(),
+        total_comments.to_string().bright_cyan().bold(),
+        "total top-level comments".bright_white()
     );
 
-    println!("\nTo view more comments:");
+    println!("\n{}:", "To view more comments".bright_white().bold());
     if options.page < total_pages {
         println!(
-            "  Next page: mcptools hn read {} --page {}",
-            item_id,
-            options.page + 1
+            "  {}: {}",
+            "Next page".green(),
+            format!("mcptools hn read {} --page {}", item_id, options.page + 1).cyan()
         );
     }
     if options.page > 1 {
         println!(
-            "  Previous page: mcptools hn read {} --page {}",
-            item_id,
-            options.page - 1
+            "  {}: {}",
+            "Previous page".green(),
+            format!("mcptools hn read {} --page {}", item_id, options.page - 1).cyan()
         );
     }
     if options.page == total_pages && options.page > 1 {
-        println!("  First page: mcptools hn read {} --page 1", item_id);
-    }
-
-    println!("\nTo read a comment thread:");
-    println!("  mcptools hn read {} --thread <comment_id>", item_id);
-    if !comments.is_empty() {
         println!(
-            "  Example: mcptools hn read {} --thread {}",
-            item_id, comments[0].id
+            "  {}: {}",
+            "First page".green(),
+            format!("mcptools hn read {item_id} --page 1").cyan()
         );
     }
 
-    println!("\nTo change page size:");
-    println!("  mcptools hn read {} --limit <number>", item_id);
+    println!("\n{}:", "To read a comment thread".bright_white().bold());
+    println!(
+        "  {}",
+        format!("mcptools hn read {item_id} --thread <comment_id>").cyan()
+    );
+    if !comments.is_empty() {
+        println!(
+            "  {}: {}",
+            "Example".green(),
+            format!("mcptools hn read {} --thread {}", item_id, comments[0].id).cyan()
+        );
+    }
 
-    println!("\nTo get JSON output:");
-    println!("  mcptools hn read {} --json", item_id);
+    println!("\n{}:", "To change page size".bright_white().bold());
+    println!(
+        "  {}",
+        format!("mcptools hn read {item_id} --limit <number>").cyan()
+    );
+
+    println!("\n{}:", "To get JSON output".bright_white().bold());
+    println!("  {}", format!("mcptools hn read {item_id} --json").cyan());
     println!();
 
     Ok(())
@@ -801,76 +858,111 @@ fn output_thread_formatted(
     post_id: &str,
     options: &ReadOptions,
 ) -> Result<()> {
-    println!("\n{}", "=".repeat(80));
-    println!("COMMENT THREAD");
-    println!("{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80).bright_cyan());
+    println!("{}", "COMMENT THREAD".bright_cyan().bold());
+    println!("{}", "=".repeat(80).bright_cyan());
 
     println!(
-        "\n[Root Comment] by {} (ID: {})",
-        comment.by.as_ref().unwrap_or(&"(unknown)".to_string()),
-        comment.id
+        "\n{} {} {} ({}: {})",
+        "[Root Comment]".yellow().bold(),
+        "by".bright_black(),
+        comment
+            .by
+            .as_ref()
+            .unwrap_or(&"(unknown)".to_string())
+            .bright_white(),
+        "ID".bright_black(),
+        comment.id.to_string().bright_white()
     );
     println!(
-        "Time: {}",
-        format_timestamp(comment.time).unwrap_or("(unknown)".to_string())
+        "{}: {}",
+        "Time".green(),
+        format_timestamp(comment.time)
+            .unwrap_or("(unknown)".to_string())
+            .bright_black()
     );
 
     if let Some(text) = &comment.text {
-        println!("\n{}", strip_html(text));
+        println!("\n{}", strip_html(text).bright_white());
     }
 
     if !children.is_empty() {
-        println!("\n{}", "-".repeat(80));
-        println!("REPLIES ({} total)", children.len());
-        println!("{}", "-".repeat(80));
+        println!("\n{}", "-".repeat(80).bright_magenta());
+        println!(
+            "{} ({} {})",
+            "REPLIES".bright_magenta().bold(),
+            children.len().to_string().bright_cyan().bold(),
+            "total".bright_white()
+        );
+        println!("{}", "-".repeat(80).bright_magenta());
 
         for (idx, child) in children.iter().enumerate() {
             println!(
-                "\n  [Reply #{}] by {} (ID: {})",
-                idx + 1,
-                child.by.as_ref().unwrap_or(&"(unknown)".to_string()),
-                child.id
+                "\n  {} {} {} ({}: {})",
+                format!("[Reply #{}]", idx + 1).yellow().bold(),
+                "by".bright_black(),
+                child
+                    .by
+                    .as_ref()
+                    .unwrap_or(&"(unknown)".to_string())
+                    .bright_white(),
+                "ID".bright_black(),
+                child.id.to_string().bright_white()
             );
             println!(
-                "  Time: {}",
-                format_timestamp(child.time).unwrap_or("(unknown)".to_string())
+                "  {}: {}",
+                "Time".green(),
+                format_timestamp(child.time)
+                    .unwrap_or("(unknown)".to_string())
+                    .bright_black()
             );
 
             if let Some(text) = &child.text {
                 let stripped = strip_html(text);
                 let truncated = truncate_text(&stripped, 500);
                 for line in truncated.lines() {
-                    println!("  {}", line);
+                    println!("  {}", line.white());
                 }
             }
 
             if let Some(kids) = &child.kids {
                 if !kids.is_empty() {
-                    println!("  └─ {} nested replies", kids.len());
+                    println!(
+                        "  {} {}",
+                        "└─".bright_black(),
+                        format!("{} nested replies", kids.len()).bright_magenta()
+                    );
                 }
             }
         }
     } else {
-        println!("\nNo replies to this comment.");
+        println!("\n{}", "No replies to this comment.".yellow());
     }
 
     // Navigation
-    println!("\n{}", "=".repeat(80));
-    println!("NAVIGATION");
-    println!("{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80).bright_yellow());
+    println!("{}", "NAVIGATION".bright_yellow().bold());
+    println!("{}", "=".repeat(80).bright_yellow());
 
-    println!("\nTo go back to the post:");
-    println!("  mcptools hn read {}", post_id);
+    println!("\n{}:", "To go back to the post".bright_white().bold());
+    println!("  {}", format!("mcptools hn read {post_id}").cyan());
 
     if options.page > 1 {
-        println!("\nTo return to your page:");
-        println!("  mcptools hn read {} --page {}", post_id, options.page);
+        println!("\n{}:", "To return to your page".bright_white().bold());
+        println!(
+            "  {}",
+            format!("mcptools hn read {} --page {}", post_id, options.page).cyan()
+        );
     }
 
-    println!("\nTo get JSON output:");
+    println!("\n{}:", "To get JSON output".bright_white().bold());
     println!(
-        "  mcptools hn read {} --thread {} --json",
-        post_id, comment.id
+        "  {}",
+        format!(
+            "mcptools hn read {} --thread {} --json",
+            post_id, comment.id
+        )
+        .cyan()
     );
     println!();
 
@@ -935,88 +1027,144 @@ fn output_list_formatted(
     let total_pages = total_items.div_ceil(options.limit);
 
     // Header
-    println!("\n{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80).bright_cyan());
     println!(
-        "HACKERNEWS {} STORIES (Page {} of {})",
-        options.story_type.to_uppercase(),
-        options.page,
-        total_pages
+        "{}",
+        format!(
+            "HACKERNEWS {} STORIES (Page {} of {})",
+            options.story_type.to_uppercase(),
+            options.page,
+            total_pages
+        )
+        .bright_cyan()
+        .bold()
     );
-    println!("{}", "=".repeat(80));
+    println!("{}", "=".repeat(80).bright_cyan());
 
     if items.is_empty() {
-        println!("\nNo stories on this page.");
+        println!("\n{}", "No stories on this page.".yellow());
     } else {
         for (idx, item) in items.iter().enumerate() {
             let story_num = (options.page - 1) * options.limit + idx + 1;
             println!(
-                "\n[{}] {}",
-                story_num,
-                item.title.as_ref().unwrap_or(&"(No title)".to_string())
+                "\n{} {}",
+                format!("[{story_num}]").yellow().bold(),
+                item.title
+                    .as_ref()
+                    .unwrap_or(&"(No title)".to_string())
+                    .white()
+                    .bold()
             );
 
             if let Some(url) = &item.url {
-                println!("    URL: {}", url);
+                println!("    {}: {}", "URL".green(), url.cyan().underline());
             }
 
             println!(
-                "    By: {} | Score: {} | Comments: {} | Time: {}",
-                item.author.as_ref().unwrap_or(&"unknown".to_string()),
-                item.score.unwrap_or(0),
-                item.comments.unwrap_or(0),
-                item.time.as_ref().unwrap_or(&"unknown".to_string())
+                "    {}: {} | {}: {} | {}: {} | {}: {}",
+                "By".green(),
+                item.author
+                    .as_ref()
+                    .unwrap_or(&"unknown".to_string())
+                    .bright_white(),
+                "Score".green(),
+                item.score.unwrap_or(0).to_string().bright_yellow(),
+                "Comments".green(),
+                item.comments.unwrap_or(0).to_string().bright_magenta(),
+                "Time".green(),
+                item.time
+                    .as_ref()
+                    .unwrap_or(&"unknown".to_string())
+                    .bright_black()
             );
 
-            println!("    ID: {} | Read: mcptools hn read {}", item.id, item.id);
+            println!(
+                "    {}: {} | {}: {}",
+                "ID".green(),
+                item.id.to_string().bright_white(),
+                "Read".green(),
+                format!("mcptools hn read {}", item.id).cyan()
+            );
         }
     }
 
     // Navigation section
-    println!("\n{}", "=".repeat(80));
-    println!("NAVIGATION");
-    println!("{}", "=".repeat(80));
+    println!("\n{}", "=".repeat(80).bright_yellow());
+    println!("{}", "NAVIGATION".bright_yellow().bold());
+    println!("{}", "=".repeat(80).bright_yellow());
 
     println!(
-        "\nShowing page {} of {} ({} total {} stories)",
-        options.page, total_pages, total_items, options.story_type
+        "\n{} {} {} {} ({} {} {} {})",
+        "Showing page".bright_white(),
+        options.page.to_string().bright_cyan().bold(),
+        "of".bright_white(),
+        total_pages.to_string().bright_cyan().bold(),
+        total_items.to_string().bright_cyan().bold(),
+        "total".bright_white(),
+        options.story_type.bright_cyan().bold(),
+        "stories".bright_white()
     );
 
-    println!("\nTo navigate:");
+    println!("\n{}:", "To navigate".bright_white().bold());
     if options.page < total_pages {
         println!(
-            "  Next page: mcptools hn list {} --page {}",
-            options.story_type,
-            options.page + 1
+            "  {}: {}",
+            "Next page".green(),
+            format!(
+                "mcptools hn list {} --page {}",
+                options.story_type,
+                options.page + 1
+            )
+            .cyan()
         );
     }
     if options.page > 1 {
         println!(
-            "  Previous page: mcptools hn list {} --page {}",
-            options.story_type,
-            options.page - 1
+            "  {}: {}",
+            "Previous page".green(),
+            format!(
+                "mcptools hn list {} --page {}",
+                options.story_type,
+                options.page - 1
+            )
+            .cyan()
         );
     }
     if options.page == total_pages && options.page > 1 {
         println!(
-            "  First page: mcptools hn list {} --page 1",
-            options.story_type
+            "  {}: {}",
+            "First page".green(),
+            format!("mcptools hn list {} --page 1", options.story_type).cyan()
         );
     }
 
-    println!("\nTo change page size:");
-    println!("  mcptools hn list {} --limit <number>", options.story_type);
+    println!("\n{}:", "To change page size".bright_white().bold());
+    println!(
+        "  {}",
+        format!("mcptools hn list {} --limit <number>", options.story_type).cyan()
+    );
 
-    println!("\nTo list other story types:");
-    println!("  mcptools hn list <type>  (top, new, best, ask, show, job)");
+    println!("\n{}:", "To list other story types".bright_white().bold());
+    println!(
+        "  {}",
+        "mcptools hn list <type>  (top, new, best, ask, show, job)".cyan()
+    );
 
-    println!("\nTo read a story:");
-    println!("  mcptools hn read <id>");
+    println!("\n{}:", "To read a story".bright_white().bold());
+    println!("  {}", "mcptools hn read <id>".cyan());
     if !items.is_empty() {
-        println!("  Example: mcptools hn read {}", items[0].id);
+        println!(
+            "  {}: {}",
+            "Example".green(),
+            format!("mcptools hn read {}", items[0].id).cyan()
+        );
     }
 
-    println!("\nTo get JSON output:");
-    println!("  mcptools hn list {} --json", options.story_type);
+    println!("\n{}:", "To get JSON output".bright_white().bold());
+    println!(
+        "  {}",
+        format!("mcptools hn list {} --json", options.story_type).cyan()
+    );
 
     println!();
 

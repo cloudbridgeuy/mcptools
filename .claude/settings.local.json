@@ -10,7 +10,10 @@
       "Bash(cargo xtask install:*)",
       "Bash(curl -X POST http://127.0.0.1:3000/message -H \"Content-Type: application/json\" -d '{\"\"jsonrpc\"\":\"\"2.0\"\",\"\"id\"\":2,\"\"method\"\":\"\"tools/list\"\",\"\"params\"\":{}}')",
       "Bash(curl -X POST http://127.0.0.1:3000/message -H \"Content-Type: application/json\" -d '{\"\"jsonrpc\"\":\"\"2.0\"\",\"\"id\"\":3,\"\"method\"\":\"\"tools/call\"\",\"\"params\"\":{\"\"name\"\":\"\"hn_read_item\"\",\"\"arguments\"\":{\"\"item\"\":\"\"8863\"\",\"\"limit\"\":2}}}')",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Read(//Users/guzmanmonne/.local/bin/**)",
+      "Bash(xattr:*)",
+      "Bash(~/.local/bin/mcptools:*)"
     ],
     "deny": [],
     "ask": []

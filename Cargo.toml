@@ -33,3 +33,4 @@ regex = "1.11.1"
 chrono = "0.4.39"
 axum = "0.8.6"
 tower-http = { version = "0.6.6", features = ["cors"] }
+colored = "3.0.0"
