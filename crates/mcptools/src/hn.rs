@@ -19,6 +19,10 @@ pub enum Commands {
     /// Read a HackerNews post and its comments
     #[clap(name = "read")]
     Read(ReadOptions),
+
+    /// List HackerNews stories (top, new, best, ask, show, job)
+    #[clap(name = "list")]
+    List(ListOptions),
 }
 
 #[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
@@ -42,6 +46,25 @@ pub struct ReadOptions {
     /// Read comment thread (provide comment ID)
     #[arg(short, long)]
     thread: Option<String>,
+}
+
+#[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
+pub struct ListOptions {
+    /// Story type: top, new, best, ask, show, job
+    #[arg(value_name = "TYPE", default_value = "top")]
+    story_type: String,
+
+    /// Number of stories per page
+    #[arg(short, long, env = "HN_LIMIT", default_value = "30")]
+    limit: usize,
+
+    /// Page number (1-indexed)
+    #[arg(short, long, default_value = "1")]
+    page: usize,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -95,6 +118,34 @@ pub struct PaginationInfo {
     pub prev_page_command: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ListOutput {
+    pub story_type: String,
+    pub items: Vec<ListItem>,
+    pub pagination: ListPaginationInfo,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListItem {
+    pub id: u64,
+    pub title: Option<String>,
+    pub url: Option<String>,
+    pub author: Option<String>,
+    pub score: Option<u64>,
+    pub time: Option<String>,
+    pub comments: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListPaginationInfo {
+    pub current_page: usize,
+    pub total_pages: usize,
+    pub total_items: usize,
+    pub limit: usize,
+    pub next_page_command: Option<String>,
+    pub prev_page_command: Option<String>,
+}
+
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
     if global.verbose {
         println!("HackerNews API Base: {}", HN_API_BASE);
@@ -103,6 +154,7 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
 
     match app.command {
         Commands::Read(options) => read_item(options, global).await,
+        Commands::List(options) => list_items(options, global).await,
     }
 }
 
@@ -331,6 +383,126 @@ fn fetch_comment_tree<'a>(
 
         Ok(all_comments)
     })
+}
+
+/// Fetches HackerNews story list data and returns it as a structured ListOutput
+pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> Result<ListOutput> {
+    // Determine API endpoint based on story type
+    let endpoint = match story_type.as_str() {
+        "top" => "topstories",
+        "new" => "newstories",
+        "best" => "beststories",
+        "ask" => "askstories",
+        "show" => "showstories",
+        "job" => "jobstories",
+        _ => {
+            return Err(eyre!(
+                "Invalid story type: {}. Valid types: top, new, best, ask, show, job",
+                story_type
+            ))
+        }
+    };
+
+    // Fetch story IDs
+    let client = reqwest::Client::new();
+    let url = format!("{HN_API_BASE}/{endpoint}.json");
+    let story_ids: Vec<u64> = client.get(&url).send().await?.json().await?;
+
+    if story_ids.is_empty() {
+        return Err(eyre!("No stories found"));
+    }
+
+    // Calculate pagination
+    let total_items = story_ids.len();
+    let start = (page - 1) * limit;
+
+    if start >= total_items {
+        return Err(eyre!(
+            "Page {} is out of range. Only {} pages available.",
+            page,
+            total_items.div_ceil(limit)
+        ));
+    }
+
+    let paginated_ids: Vec<u64> = story_ids.iter().skip(start).take(limit).copied().collect();
+
+    // Fetch story details in parallel
+    let item_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
+    let items: Vec<HnItem> = join_all(item_futures)
+        .await
+        .into_iter()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let total_pages = total_items.div_ceil(limit);
+
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .map(|item| ListItem {
+            id: item.id,
+            title: item.title.clone(),
+            url: item.url.clone(),
+            author: item.by.clone(),
+            score: item.score,
+            time: format_timestamp(item.time),
+            comments: item.descendants,
+        })
+        .collect();
+
+    let next_page = if page < total_pages {
+        Some(format!(
+            "mcptools hn list {} --page {}",
+            story_type,
+            page + 1
+        ))
+    } else {
+        None
+    };
+
+    let prev_page = if page > 1 {
+        Some(format!(
+            "mcptools hn list {} --page {}",
+            story_type,
+            page - 1
+        ))
+    } else {
+        None
+    };
+
+    Ok(ListOutput {
+        story_type,
+        items: list_items,
+        pagination: ListPaginationInfo {
+            current_page: page,
+            total_pages,
+            total_items,
+            limit,
+            next_page_command: next_page,
+            prev_page_command: prev_page,
+        },
+    })
+}
+
+async fn list_items(options: ListOptions, global: crate::Global) -> Result<()> {
+    if global.verbose {
+        println!("Fetching {} stories...", options.story_type);
+    }
+
+    let list_output =
+        list_items_data(options.story_type.clone(), options.limit, options.page).await?;
+
+    if options.json {
+        let json = serde_json::to_string_pretty(&list_output)?;
+        println!("{}", json);
+    } else {
+        output_list_formatted(
+            &list_output.items,
+            &options,
+            list_output.pagination.total_items,
+        )?;
+    }
+
+    Ok(())
 }
 
 fn extract_item_id(input: &str) -> Result<u64> {
@@ -700,6 +872,152 @@ fn output_thread_formatted(
         "  mcptools hn read {} --thread {} --json",
         post_id, comment.id
     );
+    println!();
+
+    Ok(())
+}
+
+fn output_list_json(items: &[HnItem], options: &ListOptions, total_items: usize) -> Result<()> {
+    let list_output = ListOutput {
+        story_type: options.story_type.clone(),
+        items: items
+            .iter()
+            .map(|item| ListItem {
+                id: item.id,
+                title: item.title.clone(),
+                url: item.url.clone(),
+                author: item.by.clone(),
+                score: item.score,
+                time: format_timestamp(item.time),
+                comments: item.descendants,
+            })
+            .collect(),
+        pagination: {
+            let total_pages = total_items.div_ceil(options.limit);
+            ListPaginationInfo {
+                current_page: options.page,
+                total_pages,
+                total_items,
+                limit: options.limit,
+                next_page_command: if options.page < total_pages {
+                    Some(format!(
+                        "mcptools hn list {} --page {}",
+                        options.story_type,
+                        options.page + 1
+                    ))
+                } else {
+                    None
+                },
+                prev_page_command: if options.page > 1 {
+                    Some(format!(
+                        "mcptools hn list {} --page {}",
+                        options.story_type,
+                        options.page - 1
+                    ))
+                } else {
+                    None
+                },
+            }
+        },
+    };
+
+    let json = serde_json::to_string_pretty(&list_output)?;
+    println!("{}", json);
+
+    Ok(())
+}
+
+fn output_list_formatted(
+    items: &[ListItem],
+    options: &ListOptions,
+    total_items: usize,
+) -> Result<()> {
+    let total_pages = total_items.div_ceil(options.limit);
+
+    // Header
+    println!("\n{}", "=".repeat(80));
+    println!(
+        "HACKERNEWS {} STORIES (Page {} of {})",
+        options.story_type.to_uppercase(),
+        options.page,
+        total_pages
+    );
+    println!("{}", "=".repeat(80));
+
+    if items.is_empty() {
+        println!("\nNo stories on this page.");
+    } else {
+        for (idx, item) in items.iter().enumerate() {
+            let story_num = (options.page - 1) * options.limit + idx + 1;
+            println!(
+                "\n[{}] {}",
+                story_num,
+                item.title.as_ref().unwrap_or(&"(No title)".to_string())
+            );
+
+            if let Some(url) = &item.url {
+                println!("    URL: {}", url);
+            }
+
+            println!(
+                "    By: {} | Score: {} | Comments: {} | Time: {}",
+                item.author.as_ref().unwrap_or(&"unknown".to_string()),
+                item.score.unwrap_or(0),
+                item.comments.unwrap_or(0),
+                item.time.as_ref().unwrap_or(&"unknown".to_string())
+            );
+
+            println!("    ID: {} | Read: mcptools hn read {}", item.id, item.id);
+        }
+    }
+
+    // Navigation section
+    println!("\n{}", "=".repeat(80));
+    println!("NAVIGATION");
+    println!("{}", "=".repeat(80));
+
+    println!(
+        "\nShowing page {} of {} ({} total {} stories)",
+        options.page, total_pages, total_items, options.story_type
+    );
+
+    println!("\nTo navigate:");
+    if options.page < total_pages {
+        println!(
+            "  Next page: mcptools hn list {} --page {}",
+            options.story_type,
+            options.page + 1
+        );
+    }
+    if options.page > 1 {
+        println!(
+            "  Previous page: mcptools hn list {} --page {}",
+            options.story_type,
+            options.page - 1
+        );
+    }
+    if options.page == total_pages && options.page > 1 {
+        println!(
+            "  First page: mcptools hn list {} --page 1",
+            options.story_type
+        );
+    }
+
+    println!("\nTo change page size:");
+    println!("  mcptools hn list {} --limit <number>", options.story_type);
+
+    println!("\nTo list other story types:");
+    println!("  mcptools hn list <type>  (top, new, best, ask, show, job)");
+
+    println!("\nTo read a story:");
+    println!("  mcptools hn read <id>");
+    if !items.is_empty() {
+        println!("  Example: mcptools hn read {}", items[0].id);
+    }
+
+    println!("\nTo get JSON output:");
+    println!("  mcptools hn list {} --json", options.story_type);
+
     println!();
 
     Ok(())

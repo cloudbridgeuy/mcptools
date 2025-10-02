@@ -1,0 +1,158 @@
+mod hn;
+
+use serde::{Deserialize, Serialize};
+
+// Re-export types needed by tool handlers
+pub use super::{JsonRpcError, Tool};
+
+// MCP Protocol types for tools
+#[derive(Debug, Serialize)]
+pub struct ServerInfo {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServerCapabilities {
+    pub tools: Option<ToolsCapability>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ToolsCapability {}
+
+#[derive(Debug, Serialize)]
+pub struct InitializeResult {
+    #[serde(rename = "protocolVersion")]
+    pub protocol_version: String,
+    pub capabilities: ServerCapabilities,
+    #[serde(rename = "serverInfo")]
+    pub server_info: ServerInfo,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ToolsList {
+    pub tools: Vec<Tool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CallToolParams {
+    pub name: String,
+    pub arguments: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CallToolResult {
+    pub content: Vec<Content>,
+    #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
+    pub is_error: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+pub enum Content {
+    #[serde(rename = "text")]
+    Text { text: String },
+}
+
+pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
+    let result = InitializeResult {
+        protocol_version: "2024-11-05".to_string(),
+        capabilities: ServerCapabilities {
+            tools: Some(ToolsCapability {}),
+        },
+        server_info: ServerInfo {
+            name: "mcptools".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
+    let tools = vec![
+        Tool {
+            name: "hn_read_item".to_string(),
+            description: "Read a HackerNews post and its comments. Accepts HackerNews item ID (e.g., '8863') or full URL (e.g., 'https://news.ycombinator.com/item?id=8863'). Returns post details with paginated comments.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "item": {
+                        "type": "string",
+                        "description": "HackerNews item ID or URL"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Number of comments per page (default: 10)"
+                    },
+                    "page": {
+                        "type": "number",
+                        "description": "Page number, 1-indexed (default: 1)"
+                    },
+                    "thread": {
+                        "type": "string",
+                        "description": "Comment thread ID to read (optional)"
+                    }
+                },
+                "required": ["item"]
+            }),
+        },
+        Tool {
+            name: "hn_list_items".to_string(),
+            description: "List HackerNews stories with pagination. Supports different story types: top, new, best, ask, show, job. Returns a paginated list of stories with their details.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "story_type": {
+                        "type": "string",
+                        "description": "Type of stories to list: top, new, best, ask, show, job (default: top)",
+                        "enum": ["top", "new", "best", "ask", "show", "job"]
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Number of stories per page (default: 30)"
+                    },
+                    "page": {
+                        "type": "number",
+                        "description": "Page number, 1-indexed (default: 1)"
+                    }
+                },
+                "required": []
+            }),
+        },
+    ];
+
+    let result = ToolsList { tools };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+pub async fn handle_tools_call(
+    params: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let params: CallToolParams = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
+        .map_err(|e| JsonRpcError {
+            code: -32602,
+            message: format!("Invalid params: {e}"),
+            data: None,
+        })?;
+
+    match params.name.as_str() {
+        "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
+        "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
+        _ => Err(JsonRpcError {
+            code: -32602,
+            message: format!("Unknown tool: {}", params.name),
+            data: None,
+        }),
+    }
+}

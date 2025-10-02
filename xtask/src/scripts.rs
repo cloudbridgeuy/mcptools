@@ -46,6 +46,22 @@ pub fn install(args: &cli::InstallArgs) -> Result<()> {
         std::fs::set_permissions(&dest_path, perms)?;
     }
 
+    // Fix macOS code signing issues
+    #[cfg(target_os = "macos")]
+    {
+        // Remove all extended attributes
+        let _ = cmd!("xattr", "-cr", &dest_path).run();
+
+        // Re-sign with ad-hoc signature to fix "killed" errors
+        if let Err(e) = cmd!("codesign", "--force", "--sign", "-", &dest_path).run() {
+            eprintln!("Warning: Failed to re-sign binary: {e}");
+            eprintln!(
+                "You may need to run: codesign --force --sign - {}",
+                dest_path.display()
+            );
+        }
+    }
+
     println!(
         "✓ Successfully installed {} to {}",
         binary_name,
