@@ -15,7 +15,8 @@
       "Bash(xattr:*)",
       "Bash(~/.local/bin/mcptools:*)",
       "Bash(cat:*)",
-      "Bash(./target/debug/mcptools md fetch https://jobs.ashbyhq.com/Railway)"
+      "Bash(./target/debug/mcptools md fetch https://jobs.ashbyhq.com/Railway)",
+      "Bash(cargo xtask release:*)"
     ],
     "deny": [],
     "ask": []

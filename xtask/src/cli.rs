@@ -12,6 +12,12 @@ pub struct App {
 pub enum Commands {
     /// Builds a binary and installs it at the given path
     Install(InstallArgs),
+    /// Manage git hooks (install, uninstall, status, test)
+    Hooks(HooksArgs),
+    /// Create and manage releases
+    Release(ReleaseArgs),
+    /// Download and install binary from GitHub releases
+    InstallBinary(InstallBinaryArgs),
 }
 
 #[derive(Args, Debug)]
@@ -26,17 +32,48 @@ pub struct InstallArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct HooksArgs {
+    #[command(subcommand)]
+    pub command: HooksCommands,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum HooksCommands {
+    /// Install git hooks
+    Install,
+    /// Uninstall git hooks
+    Uninstall,
+    /// Show git hooks status
+    Status,
+    /// Test git hooks
+    Test,
+}
+
+#[derive(Args, Debug)]
 pub struct ReleaseArgs {
-    /// Binary to build
-    #[arg(short, long, default_value = "mcptools")]
-    pub binary: String,
-    /// Don't build for Apple Silicon
+    /// Version to release (e.g., 1.0.0, 2.1.0-beta.1)
+    pub version: Option<String>,
+
+    /// Clean up a failed release tag
     #[arg(long)]
-    pub no_apple_silicon: bool,
-    /// Don't build for Apple x86_64
+    pub cleanup: Option<String>,
+
+    /// Automatically upgrade local binary after successful release
     #[arg(long)]
-    pub no_apple_x86_64: bool,
-    /// Don't build for linux AAarch64
+    pub auto_upgrade: bool,
+
+    /// Skip workflow monitoring
     #[arg(long)]
-    pub no_linux_aarch64: bool,
+    pub no_monitor: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct InstallBinaryArgs {
+    /// Installation directory (defaults to /usr/local/bin or ~/.local/bin)
+    #[arg(short = 'd', long)]
+    pub install_dir: Option<String>,
+
+    /// Specific version to install (defaults to latest)
+    #[arg(short, long)]
+    pub version: Option<String>,
 }

@@ -11,3 +11,6 @@ clap = { version = "4.5.48", features = [
 ] } # A simple to use, efficient, and full-featured Command Line Argument Parser
 duct = "1.1.0" # A library for running child processes
 color-eyre = "0.6.5"
+chrono = { workspace = true }
+regex = { workspace = true }
+serde_json = { workspace = true }
