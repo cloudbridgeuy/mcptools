@@ -97,6 +97,104 @@ fn check_clean_working_dir() -> Result<()> {
     Ok(())
 }
 
+fn check_ci_status() -> Result<()> {
+    println!(
+        "{}",
+        Colors::info("Checking CI status for current commit...")
+    );
+
+    // Get current commit SHA
+    let commit_sha = cmd!("git", "rev-parse", "HEAD")
+        .read()
+        .context("Failed to get current commit SHA")?
+        .trim()
+        .to_string();
+
+    println!(
+        "{}",
+        Colors::info(&format!("Current commit: {}", &commit_sha[..8]))
+    );
+
+    // Check CI status using GitHub API
+    let output = cmd!(
+        "gh",
+        "api",
+        format!("/repos/{}/commits/{}/check-runs", GITHUB_REPO, commit_sha),
+        "-H",
+        "Accept: application/vnd.github+json"
+    )
+    .read()
+    .context("Failed to fetch CI status from GitHub. Make sure gh CLI is authenticated.")?;
+
+    let json: serde_json::Value =
+        serde_json::from_str(&output).context("Failed to parse GitHub API response")?;
+
+    let check_runs = json["check_runs"]
+        .as_array()
+        .ok_or_else(|| eyre!("Invalid GitHub API response: missing check_runs"))?;
+
+    if check_runs.is_empty() {
+        return Err(eyre!(
+            "No CI checks found for commit {}. Please wait for CI to run or push the commit to trigger CI.",
+            &commit_sha[..8]
+        ));
+    }
+
+    // Filter relevant CI checks (Test Suite and Build Check)
+    let mut relevant_checks = vec![];
+    for check in check_runs {
+        let name = check["name"].as_str().unwrap_or("");
+        if name.starts_with("Test Suite") || name.starts_with("Build Check") {
+            relevant_checks.push(check);
+        }
+    }
+
+    if relevant_checks.is_empty() {
+        return Err(eyre!(
+            "No relevant CI checks (Test Suite, Build Check) found for commit {}",
+            &commit_sha[..8]
+        ));
+    }
+
+    // Check if all relevant checks passed
+    let mut all_passed = true;
+    let mut any_in_progress = false;
+
+    for check in &relevant_checks {
+        let name = check["name"].as_str().unwrap_or("unknown");
+        let status = check["status"].as_str().unwrap_or("unknown");
+        let conclusion = check["conclusion"].as_str();
+
+        if status != "completed" {
+            println!("{}", Colors::warning(&format!("⏳ {name}: {status}")));
+            any_in_progress = true;
+        } else if let Some(conclusion_val) = conclusion {
+            if conclusion_val == "success" {
+                println!("{}", Colors::success(&format!("✅ {name}: passed")));
+            } else {
+                println!("{}", Colors::error(&format!("❌ {name}: {conclusion_val}")));
+                all_passed = false;
+            }
+        }
+    }
+
+    if any_in_progress {
+        return Err(eyre!(
+            "CI checks are still in progress. Please wait for them to complete before creating a release."
+        ));
+    }
+
+    if !all_passed {
+        return Err(eyre!(
+            "CI checks failed for commit {}. Please fix the issues before creating a release.",
+            &commit_sha[..8]
+        ));
+    }
+
+    println!("{}", Colors::info("All CI checks passed ✓"));
+    Ok(())
+}
+
 fn get_current_version(project_root: &Path) -> Result<String> {
     let cargo_toml = project_root.join("crates/mcptools/Cargo.toml");
     let content = fs::read_to_string(&cargo_toml).context("Failed to read Cargo.toml")?;
@@ -477,7 +575,7 @@ fn retry_release(version: &str, monitor: bool, project_root: &Path) -> Result<()
 
             if !confirm("Do you want to retry the release?") {
                 println!("{}", Colors::info("Release cancelled by user."));
-                return Ok(());
+                return Err(eyre!("Release cancelled after failure"));
             }
         }
 
@@ -577,6 +675,7 @@ pub fn release(args: &ReleaseArgs) -> Result<()> {
     check_gh_cli()?;
     check_main_branch()?;
     check_clean_working_dir()?;
+    check_ci_status()?;
     validate_version(version)?;
 
     // Get current version

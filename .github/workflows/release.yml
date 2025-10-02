@@ -14,66 +14,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check-ci:
-    name: Verify CI Passed
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Check CI status
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Get the commit SHA that the tag points to
-          COMMIT_SHA=$(git rev-list -n 1 ${{ github.ref }})
-          echo "Checking CI status for commit: $COMMIT_SHA"
-
-          # Wait for CI workflow to complete (max 10 minutes)
-          max_attempts=60
-          attempt=0
-
-          while [ $attempt -lt $max_attempts ]; do
-            # Get the CI workflow status for this commit
-            STATUS=$(gh api \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" \
-              --jq '.check_runs[] | select(.name | startswith("Test Suite") or startswith("Build Check")) | .conclusion')
-
-            # Check if all CI checks have completed
-            if echo "$STATUS" | grep -q "null"; then
-              echo "CI is still running... waiting (attempt $((attempt + 1))/$max_attempts)"
-              sleep 10
-              ((attempt++))
-              continue
-            fi
-
-            # Check if any CI check failed
-            if echo "$STATUS" | grep -qE "failure|cancelled|timed_out"; then
-              echo "❌ CI checks failed for commit $COMMIT_SHA"
-              echo "CI Status: $STATUS"
-              exit 1
-            fi
-
-            # Check if all checks succeeded
-            if echo "$STATUS" | grep -qv "success"; then
-              echo "❌ CI checks did not all succeed for commit $COMMIT_SHA"
-              echo "CI Status: $STATUS"
-              exit 1
-            fi
-
-            echo "✅ All CI checks passed for commit $COMMIT_SHA"
-            exit 0
-          done
-
-          echo "❌ Timeout waiting for CI to complete"
-          exit 1
-
   build:
-    needs: check-ci
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
