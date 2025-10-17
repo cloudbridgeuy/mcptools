@@ -10,8 +10,10 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # Global variables
 GITHUB_REPO="cloudbridgeuy/mcptools"
 WORKFLOW_FILE="release.yml"
+CI_WORKFLOW_FILE="ci.yml"
 WORKFLOW_CHECK_INTERVAL=30
 WORKFLOW_TIMEOUT=1800 # 30 minutes
+CI_CHECK_TIMEOUT=1800 # 30 minutes
 AUTO_UPGRADE=false
 
 # Colors for output
@@ -132,6 +134,131 @@ check_gh_cli() {
 		exit 1
 	fi
 	log_info "GitHub CLI authenticated successfully"
+}
+
+# Check CI workflow status for current commit
+check_ci_status() {
+	local commit_sha
+	commit_sha=$(git rev-parse HEAD)
+
+	log_step "Checking CI workflow status for commit ${commit_sha:0:7}..."
+
+	# Get the CI workflow runs for the current commit
+	local workflow_runs
+	workflow_runs=$(gh run list \
+		--repo="$GITHUB_REPO" \
+		--workflow="$CI_WORKFLOW_FILE" \
+		--branch=main \
+		--limit=10 \
+		--json=status,conclusion,headSha,databaseId \
+		--jq ".[] | select(.headSha == \"$commit_sha\")")
+
+	if [[ -z "$workflow_runs" ]]; then
+		log_warning "No CI workflow runs found for current commit"
+		log_info "CI checks may not have started yet. Waiting for workflow to appear..."
+		return 2 # Special return code to indicate we should wait
+	fi
+
+	# Parse the workflow status
+	local status conclusion run_id
+	status=$(echo "$workflow_runs" | jq -r '.status // empty' | head -1)
+	conclusion=$(echo "$workflow_runs" | jq -r '.conclusion // empty' | head -1)
+	run_id=$(echo "$workflow_runs" | jq -r '.databaseId // empty' | head -1)
+
+	log_info "CI workflow status: $status"
+	[[ -n "$conclusion" ]] && log_info "CI workflow conclusion: $conclusion"
+
+	case "$status" in
+		"completed")
+			case "$conclusion" in
+				"success")
+					log_success "✅ CI checks passed!"
+					return 0
+					;;
+				"failure"|"cancelled"|"timed_out")
+					log_error "❌ CI checks failed with conclusion: $conclusion"
+					log_error "View details at: https://github.com/$GITHUB_REPO/actions/runs/$run_id"
+					return 1
+					;;
+				*)
+					log_warning "⚠️  CI completed with unknown conclusion: $conclusion"
+					return 1
+					;;
+			esac
+			;;
+		"in_progress"|"queued"|"requested"|"waiting"|"pending")
+			log_info "⏳ CI checks are currently running..."
+			return 2 # Special return code to indicate we should wait
+			;;
+		*)
+			log_warning "Unknown CI workflow status: $status"
+			return 1
+			;;
+	esac
+}
+
+# Wait for CI workflow to complete
+wait_for_ci_checks() {
+	local start_time elapsed_time
+
+	start_time=$(date +%s)
+	log_step "Waiting for CI checks to complete..."
+	log_info "CI check timeout: ${CI_CHECK_TIMEOUT}s ($((CI_CHECK_TIMEOUT / 60)) minutes)"
+
+	while true; do
+		elapsed_time=$(($(date +%s) - start_time))
+
+		# Check timeout
+		if [[ $elapsed_time -gt $CI_CHECK_TIMEOUT ]]; then
+			log_error "CI check timeout after ${CI_CHECK_TIMEOUT}s"
+			return 1
+		fi
+
+		# Check CI status
+		if check_ci_status; then
+			echo # New line after progress indicator
+			return 0
+		else
+			local check_result=$?
+			if [[ $check_result -eq 2 ]]; then
+				# Still running, wait and check again
+				printf "\r${BLUE}INFO:${NC} ⏳ Waiting for CI checks... (%ss elapsed)" ${elapsed_time}
+				sleep $WORKFLOW_CHECK_INTERVAL
+			else
+				# Failed
+				echo # New line after progress indicator
+				return 1
+			fi
+		fi
+	done
+}
+
+# Check and wait for CI to pass
+ensure_ci_passes() {
+	log_step "Validating CI status..."
+
+	# First check current status
+	if check_ci_status; then
+		# CI already passed
+		return 0
+	else
+		local check_result=$?
+		if [[ $check_result -eq 2 ]]; then
+			# CI is running, wait for it
+			if wait_for_ci_checks; then
+				return 0
+			else
+				log_error "CI checks did not pass"
+				log_error "Please fix the failing checks before creating a release"
+				return 1
+			fi
+		else
+			# CI failed
+			log_error "CI checks have failed"
+			log_error "Please fix the failing checks before creating a release"
+			return 1
+		fi
+	fi
 }
 
 # Clean up local and remote tags
@@ -390,6 +517,13 @@ main() {
 	check_clean_working_dir
 	validate_version "$new_version"
 
+	# Check CI status
+	if ! ensure_ci_passes; then
+		log_error "Cannot proceed with release until CI checks pass"
+		exit 1
+	fi
+	echo
+
 	# Get current version
 	local current_version
 	current_version=$(get_current_version)
@@ -402,7 +536,7 @@ main() {
 	echo "  1. Update version in Cargo.toml files"
 	echo "  2. Create git commit and tag v$new_version"
 	echo "  3. Push changes and tag to GitHub"
-	echo "  4. Monitor GitHub Actions workflow"
+	echo "  4. Monitor GitHub Actions release workflow"
 	echo "  5. Verify release creation"
 	echo "  6. If workflow fails: cleanup and offer retry"
 	echo
@@ -491,13 +625,14 @@ usage() {
 	echo
 	echo "This script will:"
 	echo "  1. Validate prerequisites (branch, auth, working dir)"
-	echo "  2. Update version in Cargo.toml files"
-	echo "  3. Create git commit and tag"
-	echo "  4. Push changes to trigger GitHub Actions"
-	echo "  5. Monitor workflow progress and status"
-	echo "  6. On failure: cleanup tags and offer retry (up to 3 attempts)"
-	echo "  7. On success: show release URL and installation instructions"
-	echo "  8. Optionally upgrade local mcptools binary (with prompt or --upgrade flag)"
+	echo "  2. Check CI status and wait for checks to pass"
+	echo "  3. Update version in Cargo.toml files"
+	echo "  4. Create git commit and tag"
+	echo "  5. Push changes to trigger GitHub Actions"
+	echo "  6. Monitor workflow progress and status"
+	echo "  7. On failure: cleanup tags and offer retry (up to 3 attempts)"
+	echo "  8. On success: show release URL and installation instructions"
+	echo "  9. Optionally upgrade local mcptools binary (with prompt or --upgrade flag)"
 }
 
 # Handle cleanup command
