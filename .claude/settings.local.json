@@ -16,7 +16,9 @@
       "Bash(~/.local/bin/mcptools:*)",
       "Bash(cat:*)",
       "Bash(./target/debug/mcptools md fetch https://jobs.ashbyhq.com/Railway)",
-      "Bash(cargo xtask release:*)"
+      "Bash(cargo xtask release:*)",
+      "mcp__mcptools__hn_list_items",
+      "mcp__mcptools__hn_read_item"
     ],
     "deny": [],
     "ask": []
