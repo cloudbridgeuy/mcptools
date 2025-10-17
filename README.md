@@ -586,6 +586,63 @@ mcptools md toc https://docs.example.com --json > toc.json
 mcptools md fetch https://docs.example.com --offset 1234 --limit 580
 ```
 
+## Best Practices for Web Fetching with Claude Code
+
+When using `md_toc` and `md_fetch` with Claude Code or other LLM coding agents, follow this workflow to efficiently extract web content:
+
+### Two-Step Fetching Workflow
+
+**Step 1: Understand page structure with `md_toc`**
+
+Always start by fetching the table of contents to understand the page layout and identify which sections contain the information you need:
+
+```bash
+mcptools md toc https://docs.example.com
+```
+
+This returns a hierarchical list of sections with character offsets and limits, allowing you to precisely target content.
+
+**Step 2: Fetch targeted content with `md_fetch`**
+
+After analyzing the TOC, use character offsets to extract specific sections:
+
+```bash
+# Fetch a specific section using offset and limit from md_toc
+mcptools md fetch https://docs.example.com --offset 1234 --limit 580
+```
+
+Or use CSS selectors to filter content:
+
+```bash
+# Extract main content only
+mcptools md fetch https://docs.example.com --selector "main"
+```
+
+### Best Practices
+
+1. **Always use `md_toc` first** - This helps you understand page structure before fetching, reducing unnecessary content extraction
+2. **Use CSS selectors** - Narrow down to specific page sections (e.g., `main`, `article`, `div.content`) to avoid noise from sidebars and navigation
+3. **Leverage pagination** - For large pages, use the `limit` and `page` parameters or character offsets to fetch content in manageable chunks
+4. **Site-specific selectors**:
+   - **LocalStack Documentation** (`https://docs.localstack.cloud/*`): Use `selector: "main"` to get main content
+5. **Combine tools efficiently** - Use `md_toc` to get metadata, then `md_fetch` with precise offsets for targeted extraction
+
+### Example Workflow
+
+```bash
+# Step 1: Get page structure
+mcptools md toc https://docs.example.com --json
+
+# Step 2: Use the returned metadata to fetch specific sections
+# If the JSON shows an "Installation" section with char_offset: 156, char_limit: 580
+mcptools md fetch https://docs.example.com --offset 156 --limit 580
+
+# Alternative: Use CSS selectors for simpler cases
+mcptools md fetch https://docs.example.com --selector "main" --limit 1000
+```
+
+This approach ensures Claude Code gets focused, relevant content without unnecessary overhead.
+
 ## Development
 
 ```bash
