@@ -1,6 +1,6 @@
 [package]
 name = "mcptools"
-version = "0.1.2"
+version = "0.2.0"
 homepage = "https://github.com/cloudbridgeuy/mcptools"
 description = "Useful MCP Tools to use with LLM Coding Agents"
 autobins = false
