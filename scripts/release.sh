@@ -138,8 +138,16 @@ check_gh_cli() {
 
 # Check CI workflow status for current commit
 check_ci_status() {
-	local commit_sha
+	local commit_sha remote_sha
 	commit_sha=$(git rev-parse HEAD)
+
+	# Check if there are unpushed commits
+	if git log origin/main..HEAD --oneline 2>/dev/null | grep -q .; then
+		log_warning "You have unpushed commits on main branch"
+		log_info "CI checks will be validated against the remote HEAD (origin/main)"
+		remote_sha=$(git rev-parse origin/main)
+		commit_sha="$remote_sha"
+	fi
 
 	log_step "Checking CI workflow status for commit ${commit_sha:0:7}..."
 
