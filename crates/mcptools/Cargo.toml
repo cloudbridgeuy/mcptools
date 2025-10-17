@@ -32,3 +32,4 @@ tower-http = { workspace = true }
 colored = { workspace = true }
 headless_chrome = { workspace = true }
 html2md = { workspace = true }
+scraper = { workspace = true }

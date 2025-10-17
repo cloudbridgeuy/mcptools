@@ -2,6 +2,7 @@ use crate::prelude::{eprintln, println, *};
 use colored::Colorize;
 use headless_chrome::Browser;
 use regex::Regex;
+use scraper::{Html, Selector as CssSelector};
 use serde::{Deserialize, Serialize};
 use std::io::IsTerminal;
 use std::time::Instant;
@@ -19,6 +20,19 @@ pub enum Commands {
     /// Fetch a web page and convert to Markdown
     #[clap(name = "fetch")]
     Fetch(FetchOptions),
+}
+
+#[derive(Debug, Clone, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionStrategy {
+    /// Select the first matching element (default)
+    First,
+    /// Select the last matching element
+    Last,
+    /// Select all matching elements and combine them
+    All,
+    /// Select the nth matching element (0-indexed)
+    N,
 }
 
 #[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
@@ -42,6 +56,18 @@ pub struct FetchOptions {
     /// Include metadata (title, URL, etc)
     #[arg(long)]
     include_metadata: bool,
+
+    /// CSS selector to filter content (optional)
+    #[arg(long, env = "MD_SELECTOR")]
+    selector: Option<String>,
+
+    /// Strategy for selecting elements when multiple match (default: first)
+    #[arg(long, env = "MD_STRATEGY", default_value = "first")]
+    strategy: SelectionStrategy,
+
+    /// Index for 'n' strategy (0-indexed)
+    #[arg(long, env = "MD_INDEX")]
+    index: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +77,12 @@ pub struct FetchOutput {
     pub content: String,
     pub html_length: usize,
     pub fetch_time_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector_used: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elements_found: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_applied: Option<String>,
 }
 
 pub async fn run(app: App, _global: crate::Global) -> Result<()> {
@@ -60,10 +92,26 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
 }
 
 async fn fetch(options: FetchOptions) -> Result<()> {
+    // Validate strategy and index combination
+    if matches!(options.strategy, SelectionStrategy::N) && options.index.is_none() {
+        return Err(eyre!(
+            "Strategy 'n' requires --index parameter to specify which element to select"
+        ));
+    }
+
     // Use spawn_blocking since headless_chrome is synchronous
     let output = tokio::task::spawn_blocking({
         let options = options.clone();
-        move || fetch_and_convert_data(options.url, options.timeout, options.raw_html)
+        move || {
+            fetch_and_convert_data(
+                options.url,
+                options.timeout,
+                options.raw_html,
+                options.selector,
+                options.strategy,
+                options.index,
+            )
+        }
     })
     .await??;
 
@@ -77,7 +125,14 @@ async fn fetch(options: FetchOptions) -> Result<()> {
 }
 
 /// Public function for MCP reuse
-pub fn fetch_and_convert_data(url: String, timeout: u64, raw_html: bool) -> Result<FetchOutput> {
+pub fn fetch_and_convert_data(
+    url: String,
+    timeout: u64,
+    raw_html: bool,
+    selector: Option<String>,
+    strategy: SelectionStrategy,
+    index: Option<usize>,
+) -> Result<FetchOutput> {
     let start = Instant::now();
 
     // Launch headless Chrome
@@ -111,8 +166,22 @@ pub fn fetch_and_convert_data(url: String, timeout: u64, raw_html: bool) -> Resu
 
     let html_length = html.len();
 
+    // Apply CSS selector if provided
+    let (filtered_html, selector_used, elements_found, strategy_applied) = if let Some(ref sel) = selector {
+        let (filtered, count) = apply_selector(&html, sel, &strategy, index)?;
+        let strategy_desc = match strategy {
+            SelectionStrategy::First => "first".to_string(),
+            SelectionStrategy::Last => "last".to_string(),
+            SelectionStrategy::All => "all".to_string(),
+            SelectionStrategy::N => format!("nth (index: {})", index.unwrap_or(0)),
+        };
+        (filtered, Some(sel.clone()), Some(count), Some(strategy_desc))
+    } else {
+        (html, None, None, None)
+    };
+
     // Clean HTML by removing script and style tags
-    let cleaned_html = clean_html(&html);
+    let cleaned_html = clean_html(&filtered_html);
 
     // Convert to markdown if requested
     let content = if raw_html {
@@ -129,7 +198,68 @@ pub fn fetch_and_convert_data(url: String, timeout: u64, raw_html: bool) -> Resu
         content,
         html_length,
         fetch_time_ms,
+        selector_used,
+        elements_found,
+        strategy_applied,
     })
+}
+
+/// Apply CSS selector to HTML and return filtered HTML and count of elements found
+fn apply_selector(
+    html: &str,
+    selector_str: &str,
+    strategy: &SelectionStrategy,
+    index: Option<usize>,
+) -> Result<(String, usize)> {
+    // Parse HTML document
+    let document = Html::parse_document(html);
+
+    // Parse CSS selector
+    let selector = CssSelector::parse(selector_str)
+        .map_err(|e| eyre!("Invalid CSS selector '{}': {:?}", selector_str, e))?;
+
+    // Find all matching elements
+    let elements: Vec<_> = document.select(&selector).collect();
+    let count = elements.len();
+
+    if count == 0 {
+        return Err(eyre!(
+            "No elements found matching selector: '{}'",
+            selector_str
+        ));
+    }
+
+    // Apply strategy to select which element(s) to use
+    let selected_html = match strategy {
+        SelectionStrategy::First => {
+            elements
+                .first()
+                .map(|el| el.html())
+                .ok_or_else(|| eyre!("No first element found"))?
+        }
+        SelectionStrategy::Last => {
+            elements
+                .last()
+                .map(|el| el.html())
+                .ok_or_else(|| eyre!("No last element found"))?
+        }
+        SelectionStrategy::All => {
+            // Combine all matching elements
+            elements.iter().map(|el| el.html()).collect::<Vec<_>>().join("\n")
+        }
+        SelectionStrategy::N => {
+            let idx = index.ok_or_else(|| eyre!("Index required for 'n' strategy"))?;
+            elements.get(idx)
+                .map(|el| el.html())
+                .ok_or_else(|| eyre!(
+                    "Index {} out of bounds (found {} elements)",
+                    idx,
+                    count
+                ))?
+        }
+    };
+
+    Ok((selected_html, count))
 }
 
 /// Remove script and style tags from HTML
@@ -168,6 +298,25 @@ fn output_formatted(output: &FetchOutput, options: &FetchOptions) -> Result<()> 
         // Title
         if let Some(title) = &output.title {
             eprintln!("{}: {}", "Title".green(), title.bright_white().bold());
+        }
+
+        // Selector information (always show if selector was used)
+        if let Some(selector) = &output.selector_used {
+            eprintln!("\n{}: {}", "CSS Selector".green(), selector.bright_white().bold());
+            if let Some(count) = output.elements_found {
+                eprintln!(
+                    "{}: {}",
+                    "Elements Found".green(),
+                    count.to_string().bright_yellow().bold()
+                );
+            }
+            if let Some(strategy) = &output.strategy_applied {
+                eprintln!(
+                    "{}: {}",
+                    "Selection Strategy".green(),
+                    strategy.bright_yellow().bold()
+                );
+            }
         }
 
         // Metadata
@@ -270,6 +419,22 @@ fn output_formatted(output: &FetchOutput, options: &FetchOptions) -> Result<()> 
             "  {}",
             format!("mcptools md fetch {} --timeout <seconds>", output.url).cyan()
         );
+
+        if output.selector_used.is_none() {
+            eprintln!("\n{}:", "To filter with CSS selector".bright_white().bold());
+            eprintln!(
+                "  {}",
+                format!("mcptools md fetch {} --selector \"article\"", output.url).cyan()
+            );
+            eprintln!(
+                "  {}",
+                format!("mcptools md fetch {} --selector \"div.content\" --strategy all", output.url).cyan()
+            );
+            eprintln!(
+                "  {}",
+                format!("mcptools md fetch {} --selector \"p\" --strategy n --index 2", output.url).cyan()
+            );
+        }
 
         eprintln!();
     } else {
