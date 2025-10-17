@@ -200,6 +200,7 @@ check_ci_status() {
 # Wait for CI workflow to complete
 wait_for_ci_checks() {
 	local start_time elapsed_time
+	local no_workflow_wait_time=90 # Wait 90 seconds for workflow to appear
 
 	start_time=$(date +%s)
 	log_step "Waiting for CI checks to complete..."
@@ -221,7 +222,13 @@ wait_for_ci_checks() {
 		else
 			local check_result=$?
 			if [[ $check_result -eq 2 ]]; then
-				# Still running, wait and check again
+				# If no workflow found and we've waited long enough, give up
+				if [[ $elapsed_time -ge $no_workflow_wait_time ]]; then
+					echo # New line after progress indicator
+					log_warning "No CI workflow found after ${no_workflow_wait_time} seconds"
+					return 3 # Special return code for "no workflow found"
+				fi
+				# Still waiting, check again
 				printf "\r${BLUE}INFO:${NC} ⏳ Waiting for CI checks... (%ss elapsed)" ${elapsed_time}
 				sleep $WORKFLOW_CHECK_INTERVAL
 			else
@@ -245,9 +252,32 @@ ensure_ci_passes() {
 		local check_result=$?
 		if [[ $check_result -eq 2 ]]; then
 			# CI is running, wait for it
-			if wait_for_ci_checks; then
+			local wait_result
+			wait_for_ci_checks
+			wait_result=$?
+
+			if [[ $wait_result -eq 0 ]]; then
+				# CI passed
 				return 0
+			elif [[ $wait_result -eq 3 ]]; then
+				# No workflow found after waiting
+				log_warning "No CI workflow runs were found for the current commit"
+				log_info "This may happen if:"
+				log_info "  • CI hasn't been triggered yet for this commit"
+				log_info "  • The commit was made directly without pushing to GitHub"
+				log_info "  • CI workflow is not configured to run on the main branch"
+				echo
+				read -p "Do you want to proceed with the release anyway? (y/N): " -n 1 -r
+				echo
+				if [[ $REPLY =~ ^[Yy]$ ]]; then
+					log_warning "Proceeding without CI validation"
+					return 0
+				else
+					log_info "Release cancelled. Push your changes and wait for CI to run."
+					return 1
+				fi
 			else
+				# CI failed or timed out
 				log_error "CI checks did not pass"
 				log_error "Please fix the failing checks before creating a release"
 				return 1
