@@ -156,13 +156,53 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                         "type": "number",
                         "description": "Index for 'n' strategy (0-indexed). Required when strategy is 'n'. Specifies which matching element to select."
                     },
+                    "offset": {
+                        "type": "number",
+                        "description": "Character offset to start from (default: 0). When provided, takes precedence over page parameter. Use with limit to extract specific sections."
+                    },
                     "limit": {
                         "type": "number",
                         "description": "Number of characters per page (default: 1000). Used for pagination to prevent overwhelming the LLM context."
                     },
                     "page": {
                         "type": "number",
-                        "description": "Page number, 1-indexed (default: 1). Use pagination metadata in response to navigate to other pages."
+                        "description": "Page number, 1-indexed (default: 1). Ignored if offset is provided. Use pagination metadata in response to navigate to other pages."
+                    }
+                },
+                "required": ["url"]
+            }),
+        },
+        Tool {
+            name: "md_toc".to_string(),
+            description: "Extract table of contents from a web page by parsing markdown headings (H1-H6). Fetches the page using headless Chrome, converts to markdown, and extracts all heading levels with their character offsets and limits. Each TOC entry includes char_offset and char_limit values that can be used with md_fetch to extract specific sections. Sections are defined as heading + content until the next same-or-higher-level heading. Supports CSS selector filtering to extract TOC from specific page elements.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "URL of the web page to fetch"
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Timeout in seconds (default: 30)"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to filter page content (e.g., 'article', 'div.content', 'main'). When provided, only content matching this selector will be used for TOC extraction. Returns an error if no elements match."
+                    },
+                    "strategy": {
+                        "type": "string",
+                        "description": "Selection strategy when multiple elements match the selector (default: 'first')",
+                        "enum": ["first", "last", "all", "n"]
+                    },
+                    "index": {
+                        "type": "number",
+                        "description": "Index for 'n' strategy (0-indexed). Required when strategy is 'n'. Specifies which matching element to select."
+                    },
+                    "output": {
+                        "type": "string",
+                        "description": "Output format: 'indented' (2 spaces per level), 'markdown' (nested list), or 'json' (structured data). Default: 'indented'",
+                        "enum": ["indented", "markdown", "json"]
                     }
                 },
                 "required": ["url"]
@@ -194,6 +234,7 @@ pub async fn handle_tools_call(
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
+        "md_toc" => md::handle_md_toc(params.arguments, global).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),

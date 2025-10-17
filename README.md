@@ -7,7 +7,7 @@ Useful MCP Tools to use with LLM Coding Agents
 `mcptools` is a Model Context Protocol (MCP) server that exposes various tools for LLM agents to interact with external services. Currently provides tools for:
 
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
-- **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering and pagination (`md_fetch`)
+- **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
 
 ## Installation
 
@@ -178,7 +178,7 @@ List HackerNews stories with pagination support.
 
 ### md_fetch
 
-Fetch web pages using headless Chrome and convert to Markdown. Supports CSS selector filtering to extract specific page elements and character-based pagination to prevent overwhelming LLM context windows.
+Fetch web pages using headless Chrome and convert to Markdown. Supports CSS selector filtering to extract specific page elements, character-based pagination, and section extraction using offsets from `md_toc`.
 
 **Parameters:**
 
@@ -188,8 +188,9 @@ Fetch web pages using headless Chrome and convert to Markdown. Supports CSS sele
 - `selector` (string, optional) - CSS selector to filter content (e.g., "article", "main", "div.content")
 - `strategy` (string, optional) - Selection strategy when multiple elements match: "first", "last", "all", "n" (default: "first")
 - `index` (number, optional) - Index for "n" strategy (0-indexed)
+- `offset` (number, optional) - Character offset to start from (default: 0). When provided, takes precedence over `page`. Use with values from `md_toc` to extract specific sections
 - `limit` (number, optional) - Characters per page for pagination (default: 1000)
-- `page` (number, optional) - Page number, 1-indexed (default: 1)
+- `page` (number, optional) - Page number, 1-indexed (default: 1). Ignored if `offset` is provided
 
 **Example Usage:**
 
@@ -254,6 +255,93 @@ Fetch web pages using headless Chrome and convert to Markdown. Supports CSS sele
     "has_more": true
   }
 }
+```
+
+### md_toc
+
+Extract table of contents from web pages by parsing markdown headings (H1-H6). Returns character offsets and limits for each section, enabling precise section extraction with `md_fetch`. Sections are defined as: heading + all content until the next same-or-higher-level heading.
+
+**Parameters:**
+
+- `url` (string, required) - URL of the web page to fetch
+- `timeout` (number, optional) - Timeout in seconds (default: 30)
+- `selector` (string, optional) - CSS selector to filter content (e.g., "article", "main")
+- `strategy` (string, optional) - Selection strategy when multiple elements match: "first", "last", "all", "n" (default: "first")
+- `index` (number, optional) - Index for "n" strategy (0-indexed)
+- `output` (string, optional) - Output format: "indented", "markdown", "json" (default: "indented")
+
+**Example Usage:**
+
+```json
+// Get table of contents with section offsets
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "md_toc",
+    "arguments": {
+      "url": "https://docs.example.com/guide"
+    }
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "url": "https://docs.example.com/guide",
+  "title": "User Guide",
+  "entries": [
+    {
+      "level": 2,
+      "text": "Getting Started",
+      "char_offset": 0,
+      "char_limit": 1234
+    },
+    {
+      "level": 3,
+      "text": "Installation",
+      "char_offset": 156,
+      "char_limit": 580
+    },
+    {
+      "level": 2,
+      "text": "Advanced Usage",
+      "char_offset": 1234,
+      "char_limit": 2000
+    }
+  ],
+  "fetch_time_ms": 1523
+}
+```
+
+**Workflow: Extract Specific Sections**
+
+```json
+// Step 1: Get TOC to find sections
+{
+  "method": "tools/call",
+  "params": {
+    "name": "md_toc",
+    "arguments": {"url": "https://docs.example.com"}
+  }
+}
+
+// Step 2: Use char_offset and char_limit to fetch specific section
+{
+  "method": "tools/call",
+  "params": {
+    "name": "md_fetch",
+    "arguments": {
+      "url": "https://docs.example.com",
+      "offset": 156,
+      "limit": 580
+    }
+  }
+}
+// Returns only the "Installation" section
 ```
 
 ## MCP Protocol Implementation
@@ -442,7 +530,9 @@ mcptools hn read "https://news.ycombinator.com/item?id=8863"
 mcptools hn list --story-type top --limit 20
 ```
 
-### Web Scraping (md fetch)
+### Web Scraping (md)
+
+#### md fetch - Fetch and convert web pages
 
 ```bash
 # Basic fetch (converts to Markdown)
@@ -455,6 +545,9 @@ mcptools md fetch https://example.com --selector "article.post"
 # With pagination (1000 characters per page by default)
 mcptools md fetch https://example.com --page 2
 mcptools md fetch https://example.com --limit 500 --page 1
+
+# Extract specific section using offset (from md toc)
+mcptools md fetch https://docs.example.com --offset 1234 --limit 580
 
 # Selection strategies for multiple matches
 mcptools md fetch https://example.com --selector "article" --strategy all
@@ -469,6 +562,28 @@ mcptools md fetch https://example.com --selector "main" --json
 
 # Combine features
 mcptools md fetch https://docs.example.com --selector "main" --limit 1000 --page 1 --json
+```
+
+#### md toc - Extract table of contents
+
+```bash
+# Get TOC with default indented format (shows offset/limit for each section)
+mcptools md toc https://docs.example.com
+
+# Get TOC as markdown list
+mcptools md toc https://example.com --output markdown
+
+# Get TOC as JSON (includes char_offset and char_limit)
+mcptools md toc https://example.com --json
+
+# Extract TOC from specific page section
+mcptools md toc https://docs.example.com --selector "main"
+mcptools md toc https://example.com --selector "article" --strategy first
+
+# Complete workflow: Get TOC, then fetch specific section
+mcptools md toc https://docs.example.com --json > toc.json
+# Use char_offset and char_limit from toc.json
+mcptools md fetch https://docs.example.com --offset 1234 --limit 580
 ```
 
 ## Development
