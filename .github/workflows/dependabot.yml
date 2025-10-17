@@ -41,11 +41,11 @@ jobs:
       - name: Check for unused dependencies
         uses: bnjbvr/cargo-machete@main
 
-      - name: Auto-approve and enable auto-merge
+      - name: Enable auto-merge
         if: success()
         run: |
-          echo "Tests passed! Auto-approving and enabling auto-merge..."
-          gh pr review ${{ github.event.pull_request.number }} --approve
+          echo "Tests passed! Enabling auto-merge..."
+          echo "The PR will automatically merge once it receives an approval."
           gh pr merge ${{ github.event.pull_request.number }} --auto --merge
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
