@@ -167,6 +167,122 @@ To add a new AWS service (e.g., S3):
 - Incremental compilation enabled in release
 - Uses workspace dependencies for consistency
 
+## Web Fetching with MCP Tools
+
+This section provides guidance for Claude Code on how to properly fetch web content using the MCP tools provided by this project.
+
+### Available Tools
+
+- `mcp__mcptools__md_toc` - Fetches the table of contents / structure of a webpage
+- `mcp__mcptools__md_fetch` - Fetches webpage content, optionally filtered by CSS selectors
+
+### Proper Web Fetching Workflow
+
+**IMPORTANT:** Always follow this two-step process when fetching web content:
+
+#### Step 1: Get Page Structure with `md_toc`
+
+Before fetching any content, first use `mcp__mcptools__md_toc` to understand the page structure:
+
+```
+Purpose: Retrieve the table of contents or structural outline of the webpage
+Returns: Hierarchical list of sections, headings, and major content blocks
+Use case: Identify which sections contain the information you need
+```
+
+This step allows you to:
+- Understand the page layout before fetching full content
+- Identify relevant CSS selectors for targeted content extraction
+- Determine which sections are needed for your task
+- Avoid fetching unnecessary content
+
+#### Step 2: Fetch Targeted Content with `md_fetch`
+
+After analyzing the TOC, use `mcp__mcptools__md_fetch` with appropriate selectors:
+
+```
+Purpose: Fetch specific sections of the webpage using CSS selectors
+Parameters:
+  - url: The webpage URL
+  - selector: CSS selector to filter content (e.g., "article", "div.content", "main")
+  - strategy: Selection strategy when multiple elements match (first, last, all, n)
+  - page: Page number for pagination (default: 1)
+  - limit: Characters per page for pagination (default: 1000)
+
+Returns: Markdown-formatted content from the selected elements
+```
+
+**Best Practices:**
+
+1. **Use specific selectors**: Based on the TOC, identify the most specific CSS selector that targets only the content you need
+2. **Prefer narrow selectors over broad ones**: Use `article.blog-post` instead of `body` to reduce noise
+3. **Leverage pagination**: If content is large, use the `page` and `limit` parameters to fetch content in manageable chunks
+4. **Combine selectors**: Use strategy parameter to handle multiple matching elements appropriately
+
+#### Example Workflow
+
+```
+Task: Extract installation instructions from a project's documentation page
+
+Step 1: Fetch TOC
+Call: mcp__mcptools__md_toc("https://example.com/docs")
+Result:
+  - Getting Started
+    - Installation
+    - Configuration
+  - API Reference
+  - Examples
+
+Step 2: Analyze TOC
+Decision: Need the "Installation" section under "Getting Started"
+Selector: Likely "section#installation" or "div.installation"
+
+Step 3: Fetch targeted content
+Call: mcp__mcptools__md_fetch(
+  url: "https://example.com/docs",
+  selector: "section#installation",
+  strategy: "first"
+)
+Result: Markdown content of just the installation section
+```
+
+#### Anti-Patterns to Avoid
+
+**DON'T:**
+- Skip the TOC step and fetch the entire page blindly
+- Use overly broad selectors like `body` or `div` without class/id specificity
+- Fetch the full page when you only need one section
+- Ignore the TOC structure when determining selectors
+
+**DO:**
+- Always call `md_toc` first to understand page structure
+- Use the most specific CSS selector possible
+- Leverage pagination for large content
+- Extract only the sections relevant to your task
+
+### Selector Strategy Guide
+
+When using `md_fetch`, choose the appropriate strategy:
+
+- **`first`** (default): Select the first matching element (most common use case)
+- **`last`**: Select the last matching element
+- **`all`**: Select all matching elements and concatenate them
+- **`n`**: Select the nth matching element (requires `index` parameter)
+
+### Error Handling
+
+If `md_fetch` returns an error about no matching elements:
+1. Review the TOC again to verify the page structure
+2. Try a broader selector (e.g., `article` instead of `article.specific-class`)
+3. Check if the page uses different HTML structure than expected
+4. Consider fetching with a more generic selector, then filtering the markdown content
+
+### Site-Specific Selector Guidelines
+
+**LocalStack Documentation** (`https://docs.localstack.cloud/*`):
+- Always use `selector: "main"` when fetching content from LocalStack docs
+- This ensures you capture the main content area without sidebars or navigation elements
+
 ## CLI Patterns and Templates
 
 This section documents the standard patterns used for building CLI applications with clap in this repository.
