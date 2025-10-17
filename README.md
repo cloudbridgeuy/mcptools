@@ -4,7 +4,10 @@ Useful MCP Tools to use with LLM Coding Agents
 
 ## Overview
 
-`mcptools` is a Model Context Protocol (MCP) server that exposes various tools for LLM agents to interact with external services. Currently, it provides access to HackerNews data through the `hn_read_item` tool.
+`mcptools` is a Model Context Protocol (MCP) server that exposes various tools for LLM agents to interact with external services. Currently provides tools for:
+
+- **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
+- **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering and pagination (`md_fetch`)
 
 ## Installation
 
@@ -85,7 +88,7 @@ Add to your Claude Code config file (`~/Library/Application Support/Claude/claud
 }
 ```
 
-After adding the configuration, restart Claude Code for the changes to take effect. The `hn_read_item` tool will be available for use in your coding sessions.
+After adding the configuration, restart Claude Code for the changes to take effect. The mcptools will be available for use in your coding sessions.
 
 #### Generic MCP Client (stdio)
 
@@ -141,6 +144,114 @@ Read HackerNews posts and comments with pagination support.
         "text": "{\"id\":8863,\"title\":\"My YC app: Dropbox...\",\"comments\":[...],\"pagination\":{...}}"
       }
     ]
+  }
+}
+```
+
+### hn_list_items
+
+List HackerNews stories with pagination support.
+
+**Parameters:**
+
+- `story_type` (string, optional) - Type of stories: "top", "new", "best", "ask", "show", "job" (default: "top")
+- `limit` (number, optional) - Number of stories per page (default: 30)
+- `page` (number, optional) - Page number, 1-indexed (default: 1)
+
+**Example Usage:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "hn_list_items",
+    "arguments": {
+      "story_type": "top",
+      "limit": 10,
+      "page": 1
+    }
+  }
+}
+```
+
+### md_fetch
+
+Fetch web pages using headless Chrome and convert to Markdown. Supports CSS selector filtering to extract specific page elements and character-based pagination to prevent overwhelming LLM context windows.
+
+**Parameters:**
+
+- `url` (string, required) - URL of the web page to fetch
+- `timeout` (number, optional) - Timeout in seconds (default: 30)
+- `raw_html` (boolean, optional) - Return raw HTML instead of Markdown (default: false)
+- `selector` (string, optional) - CSS selector to filter content (e.g., "article", "main", "div.content")
+- `strategy` (string, optional) - Selection strategy when multiple elements match: "first", "last", "all", "n" (default: "first")
+- `index` (number, optional) - Index for "n" strategy (0-indexed)
+- `limit` (number, optional) - Characters per page for pagination (default: 1000)
+- `page` (number, optional) - Page number, 1-indexed (default: 1)
+
+**Example Usage:**
+
+```json
+// Basic fetch with default pagination
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "md_fetch",
+    "arguments": {
+      "url": "https://docs.example.com/guide"
+    }
+  }
+}
+
+// Extract main content only
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "md_fetch",
+    "arguments": {
+      "url": "https://example.com",
+      "selector": "main"
+    }
+  }
+}
+
+// Get all article elements with custom pagination
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "md_fetch",
+    "arguments": {
+      "url": "https://blog.example.com",
+      "selector": "article",
+      "strategy": "all",
+      "limit": 500,
+      "page": 2
+    }
+  }
+}
+```
+
+**Response includes pagination metadata:**
+
+```json
+{
+  "url": "https://example.com",
+  "title": "Page Title",
+  "content": "...(paginated markdown content)...",
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 23,
+    "total_characters": 22161,
+    "limit": 1000,
+    "has_more": true
   }
 }
 ```
@@ -304,7 +415,9 @@ curl -X POST http://127.0.0.1:3000/message \
 
 ## CLI Usage (Non-MCP)
 
-You can also use the HackerNews functionality directly via CLI:
+You can also use the tools directly via CLI without running an MCP server.
+
+### HackerNews (hn)
 
 ```bash
 # Read a post with default settings (10 comments)
@@ -324,6 +437,38 @@ mcptools hn read 8863 --json
 
 # Use full URL instead of ID
 mcptools hn read "https://news.ycombinator.com/item?id=8863"
+
+# List stories
+mcptools hn list --story-type top --limit 20
+```
+
+### Web Scraping (md fetch)
+
+```bash
+# Basic fetch (converts to Markdown)
+mcptools md fetch https://example.com
+
+# With CSS selector to extract specific content
+mcptools md fetch https://docs.example.com --selector "main"
+mcptools md fetch https://example.com --selector "article.post"
+
+# With pagination (1000 characters per page by default)
+mcptools md fetch https://example.com --page 2
+mcptools md fetch https://example.com --limit 500 --page 1
+
+# Selection strategies for multiple matches
+mcptools md fetch https://example.com --selector "article" --strategy all
+mcptools md fetch https://example.com --selector "article" --strategy last
+mcptools md fetch https://example.com --selector "p" --strategy n --index 2
+
+# Get raw HTML instead of Markdown
+mcptools md fetch https://example.com --raw-html
+
+# Output as JSON
+mcptools md fetch https://example.com --selector "main" --json
+
+# Combine features
+mcptools md fetch https://docs.example.com --selector "main" --limit 1000 --page 1 --json
 ```
 
 ## Development
