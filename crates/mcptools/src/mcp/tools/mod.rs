@@ -127,7 +127,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "md_fetch".to_string(),
-            description: "Fetch a web page using headless Chrome, wait for all XHR requests to complete (network idle), and convert the HTML to Markdown. Returns the page title, markdown content, and fetch statistics.".to_string(),
+            description: "Fetch a web page using headless Chrome, wait for all XHR requests to complete (network idle), and convert the HTML to Markdown. Supports CSS selector filtering to extract specific page elements. Returns the page title, markdown content, selector metadata, and fetch statistics.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -142,6 +142,27 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     "raw_html": {
                         "type": "boolean",
                         "description": "Return raw HTML instead of converting to Markdown (default: false)"
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to filter page content (e.g., 'article', 'div.content', 'main'). When provided, only content matching this selector will be converted. Returns an error if no elements match."
+                    },
+                    "strategy": {
+                        "type": "string",
+                        "description": "Selection strategy when multiple elements match the selector (default: 'first')",
+                        "enum": ["first", "last", "all", "n"]
+                    },
+                    "index": {
+                        "type": "number",
+                        "description": "Index for 'n' strategy (0-indexed). Required when strategy is 'n'. Specifies which matching element to select."
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Number of characters per page (default: 1000). Used for pagination to prevent overwhelming the LLM context."
+                    },
+                    "page": {
+                        "type": "number",
+                        "description": "Page number, 1-indexed (default: 1). Use pagination metadata in response to navigate to other pages."
                     }
                 },
                 "required": ["url"]
