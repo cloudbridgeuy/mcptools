@@ -18,6 +18,10 @@ pub async fn handle_md_fetch(
         strategy: Option<crate::md::SelectionStrategy>,
         #[serde(default)]
         index: Option<usize>,
+        #[serde(default)]
+        limit: Option<usize>,
+        #[serde(default)]
+        page: Option<usize>,
     }
 
     let args: MdFetchArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
@@ -45,6 +49,8 @@ pub async fn handle_md_fetch(
             args.selector,
             args.strategy.unwrap_or(crate::md::SelectionStrategy::First),
             args.index,
+            args.limit.unwrap_or(1000),
+            args.page.unwrap_or(1),
         )
     })
     .await

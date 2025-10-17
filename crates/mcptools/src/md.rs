@@ -68,6 +68,23 @@ pub struct FetchOptions {
     /// Index for 'n' strategy (0-indexed)
     #[arg(long, env = "MD_INDEX")]
     index: Option<usize>,
+
+    /// Number of characters per page (default: 1000)
+    #[arg(long, env = "MD_LIMIT", default_value = "1000")]
+    limit: usize,
+
+    /// Page number, 1-indexed (default: 1)
+    #[arg(long, env = "MD_PAGE", default_value = "1")]
+    page: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MdPaginationInfo {
+    pub current_page: usize,
+    pub total_pages: usize,
+    pub total_characters: usize,
+    pub limit: usize,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +100,7 @@ pub struct FetchOutput {
     pub elements_found: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy_applied: Option<String>,
+    pub pagination: MdPaginationInfo,
 }
 
 pub async fn run(app: App, _global: crate::Global) -> Result<()> {
@@ -110,6 +128,8 @@ async fn fetch(options: FetchOptions) -> Result<()> {
                 options.selector,
                 options.strategy,
                 options.index,
+                options.limit,
+                options.page,
             )
         }
     })
@@ -132,6 +152,8 @@ pub fn fetch_and_convert_data(
     selector: Option<String>,
     strategy: SelectionStrategy,
     index: Option<usize>,
+    limit: usize,
+    page: usize,
 ) -> Result<FetchOutput> {
     let start = Instant::now();
 
@@ -184,10 +206,36 @@ pub fn fetch_and_convert_data(
     let cleaned_html = clean_html(&filtered_html);
 
     // Convert to markdown if requested
-    let content = if raw_html {
+    let full_content = if raw_html {
         cleaned_html
     } else {
         html2md::parse_html(&cleaned_html)
+    };
+
+    // Calculate pagination
+    let total_characters = full_content.chars().count();
+    let total_pages = (total_characters + limit - 1) / limit; // Ceiling division
+    let current_page = page.min(total_pages.max(1)); // Ensure page is within bounds
+
+    // Calculate character offsets for current page
+    let start_offset = (current_page - 1) * limit;
+    let end_offset = (start_offset + limit).min(total_characters);
+
+    // Extract the paginated content
+    let content: String = full_content
+        .chars()
+        .skip(start_offset)
+        .take(end_offset - start_offset)
+        .collect();
+
+    let has_more = current_page < total_pages;
+
+    let pagination = MdPaginationInfo {
+        current_page,
+        total_pages,
+        total_characters,
+        limit,
+        has_more,
     };
 
     let fetch_time_ms = start.elapsed().as_millis() as u64;
@@ -201,6 +249,7 @@ pub fn fetch_and_convert_data(
         selector_used,
         elements_found,
         strategy_applied,
+        pagination,
     })
 }
 
