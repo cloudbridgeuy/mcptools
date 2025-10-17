@@ -52,7 +52,7 @@ Add to your Claude Desktop config file (`~/Library/Application Support/Claude/cl
 ```json
 {
   "mcpServers": {
-    "hackernews": {
+    "mcptools": {
       "command": "mcptools",
       "args": ["mcp", "stdio"]
     }
@@ -65,7 +65,7 @@ Add to your Claude Desktop config file (`~/Library/Application Support/Claude/cl
 **Option 1: Using the `claude mcp add` command (recommended)**
 
 ```bash
-claude mcp add hackernews -- mcptools mcp stdio
+claude mcp add mcptools -- mcptools mcp stdio
 ```
 
 This automatically adds the server to your Claude Code configuration.
@@ -77,7 +77,7 @@ Add to your Claude Code config file (`~/Library/Application Support/Claude/claud
 ```json
 {
   "mcpServers": {
-    "hackernews": {
+    "mcptools": {
       "command": "mcptools",
       "args": ["mcp", "stdio"]
     }
