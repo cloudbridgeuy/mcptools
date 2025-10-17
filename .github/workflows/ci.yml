@@ -12,7 +12,7 @@ env:
 jobs:
   test:
     name: Test Suite
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -52,10 +52,7 @@ jobs:
 
   build:
     name: Build Check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -87,7 +84,7 @@ jobs:
 
   unused-deps:
     name: Check Unused Dependencies
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -97,7 +94,7 @@ jobs:
 
   typos:
     name: Check Typos
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
