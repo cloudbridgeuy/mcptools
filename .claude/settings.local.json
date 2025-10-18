@@ -18,7 +18,11 @@
       "Bash(./target/debug/mcptools md fetch https://jobs.ashbyhq.com/Railway)",
       "Bash(cargo xtask release:*)",
       "mcp__mcptools__hn_list_items",
-      "mcp__mcptools__hn_read_item"
+      "mcp__mcptools__hn_read_item",
+      "mcp__mcptools__md_toc",
+      "mcp__mcptools__md_fetch",
+      "Bash(cargo check:*)",
+      "Bash(timeout 10 cargo run:*)"
     ],
     "deny": [],
     "ask": []
