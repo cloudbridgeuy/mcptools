@@ -1,3 +1,4 @@
+mod atlassian;
 mod hn;
 mod md;
 
@@ -76,6 +77,42 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 
 pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
     let tools = vec![
+        Tool {
+            name: "jira_list".to_string(),
+            description: "Search Jira issues using JQL (Jira Query Language). Returns a list of issues matching the query with details like key, summary, status, and assignee. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "JQL query to search issues (e.g., 'project = PROJ AND status = Open')"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of results to return (default: 10)"
+                    }
+                },
+                "required": ["query"]
+            }),
+        },
+        Tool {
+            name: "confluence_search".to_string(),
+            description: "Search Confluence pages using CQL (Confluence Query Language). Returns a list of pages matching the query with title, type, URL, and optionally the plain text content. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "CQL query to search pages (e.g., 'space = SPACE AND text ~ \"keyword\"')"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of results to return (default: 10)"
+                    }
+                },
+                "required": ["query"]
+            }),
+        },
         Tool {
             name: "hn_read_item".to_string(),
             description: "Read a HackerNews post and its comments. Accepts HackerNews item ID (e.g., '8863') or full URL (e.g., 'https://news.ycombinator.com/item?id=8863'). Returns post details with paginated comments.".to_string(),
@@ -231,6 +268,8 @@ pub async fn handle_tools_call(
         })?;
 
     match params.name.as_str() {
+        "jira_list" => atlassian::handle_jira_list(params.arguments, global).await,
+        "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
