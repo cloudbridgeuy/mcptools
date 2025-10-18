@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MCPTOOLS is a Rust workspace providing MCP (Model Context Protocol) exposed tools for LLM Coding Agents. Currently implements AWS shortcuts, with primary focus on KMS (Key Management Service) operations.
+MCPTOOLS is a Rust workspace providing MCP (Model Context Protocol) exposed tools for LLM Coding Agents. Currently implements:
+- AWS shortcuts (KMS operations)
+- Atlassian tools (Jira and Confluence search and management)
+- Web content fetching and parsing
 
 ## Workspace Structure
 
@@ -108,10 +111,14 @@ cargo xtask dev-docs
 
 The application uses a modular CLI structure with clap for argument parsing:
 
-- `main.rs` - Entry point, CLI app structure with global options (AWS region, profile, verbose)
+- `main.rs` - Entry point, CLI app structure with global options (AWS region, profile, verbose, Atlassian credentials)
 - `prelude.rs` - Common imports and utilities (Result type, logging macros, table formatting)
 - `error.rs` - Custom error types using thiserror
-- `kms.rs` - AWS KMS operations (list keys, get policies)
+- `atlassian/` - Atlassian (Jira/Confluence) operations
+  - `mod.rs` - Authentication config and HTTP client setup
+  - `jira/mod.rs` - Jira operations (list/search issues)
+  - `confluence/mod.rs` - Confluence operations (search pages)
+- `mcp/tools/atlassian.rs` - MCP tool handlers for Jira and Confluence
 
 **CLI Structure:**
 
@@ -149,6 +156,16 @@ The application respects standard AWS configuration:
 - CLI flags: `--region`, `--profile`
 - Default region: `us-east-1`
 - Default profile: `default`
+
+### Atlassian Configuration
+
+The Atlassian module requires three environment variables:
+
+- `ATLASSIAN_BASE_URL` (e.g., `https://your-domain.atlassian.net`)
+- `ATLASSIAN_EMAIL` (your Atlassian email)
+- `ATLASSIAN_API_TOKEN` (API token from https://id.atlassian.com/manage-profile/security/api-tokens)
+
+See `ATLASSIAN_SETUP.md` for detailed setup instructions.
 
 ### Adding New AWS Services
 
