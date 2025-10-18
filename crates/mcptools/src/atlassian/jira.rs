@@ -534,7 +534,7 @@ pub async fn read_ticket_data(issue_key: String) -> Result<TicketOutput> {
             .fields
             .assignee
             .as_ref()
-            .map(|a| a.display_name.clone()),
+            .and_then(|a| a.display_name.clone()),
         created: issue.fields.created,
         updated: issue.fields.updated,
         due_date: issue.fields.duedate,
