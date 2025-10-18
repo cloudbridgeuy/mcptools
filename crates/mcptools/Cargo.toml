@@ -37,3 +37,4 @@ base64 = { workspace = true }
 html-escape = { workspace = true }
 md5 = { workspace = true }
 dirs-next = { workspace = true }
+urlencoding = { workspace = true }
