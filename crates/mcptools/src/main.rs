@@ -8,6 +8,7 @@ mod hn;
 mod mcp;
 mod md;
 mod prelude;
+mod upgrade;
 
 #[derive(Debug, clap::Parser)]
 #[command(
@@ -48,6 +49,9 @@ pub enum SubCommands {
 
     /// Convert web pages to Markdown using headless Chrome
     MD(crate::md::App),
+
+    /// Upgrade mcptools to the latest version
+    Upgrade(crate::upgrade::App),
 }
 
 #[tokio::main]
@@ -61,6 +65,7 @@ async fn main() -> Result<()> {
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
         SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,
         SubCommands::MD(sub_app) => crate::md::run(sub_app, app.global).await,
+        SubCommands::Upgrade(sub_app) => crate::upgrade::run(sub_app, app.global).await,
     }
     .map_err(|err: color_eyre::eyre::Report| eyre!(err))
 }
