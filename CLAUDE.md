@@ -5,15 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 MCPTOOLS is a Rust workspace providing MCP (Model Context Protocol) exposed tools for LLM Coding Agents. Currently implements:
-- AWS shortcuts (KMS operations)
 - Atlassian tools (Jira and Confluence search and management)
 - Web content fetching and parsing
+- HackerNews integration
 
 ## Workspace Structure
 
 This is a Cargo workspace with two main components:
 
-- `crates/mcptools/` - Main binary application (AWS CLI shortcuts)
+- `crates/mcptools/` - Main binary application
 - `xtask/` - Build automation and project tasks (cargo-xtask pattern)
 
 The project follows the cargo-xtask pattern for build automation. The `xtask` crate provides custom build commands accessible via `cargo xtask`.
@@ -111,7 +111,7 @@ cargo xtask dev-docs
 
 The application uses a modular CLI structure with clap for argument parsing:
 
-- `main.rs` - Entry point, CLI app structure with global options (AWS region, profile, verbose, Atlassian credentials)
+- `main.rs` - Entry point, CLI app structure with global options (verbose, Atlassian credentials)
 - `prelude.rs` - Common imports and utilities (Result type, logging macros, table formatting)
 - `error.rs` - Custom error types using thiserror
 - `atlassian/` - Atlassian (Jira/Confluence) operations
@@ -122,15 +122,15 @@ The application uses a modular CLI structure with clap for argument parsing:
 
 **CLI Structure:**
 
-- Global options: `--region`, `--profile`, `--verbose` (also available as env vars)
+- Global options: `--verbose` (also available as env vars)
 - Subcommands follow pattern: `mcptools <service> <operation>`
-- Example: `mcptools kms list-keys`
+- Example: `mcptools atlassian jira list-issues`
 
 **Key patterns:**
 
 - Async runtime: Uses tokio
 - Error handling: color-eyre for rich error reports
-- AWS SDK: Configured via `get_sdk_config_from_global()` helper
+- HTTP client: Uses reqwest for API calls
 - Output formatting: prettytable for tabular data, anstream for colored output
 - Logging: env_logger, controlled by `RUST_LOG` environment variable
 
@@ -148,15 +148,6 @@ Build automation following the cargo-xtask pattern:
 
 The root `Cargo.toml` currently has a syntax error - workspace manifests should not have a `[dependencies]` section. Dependencies should only be in `[workspace.dependencies]` for shared dependencies across the workspace.
 
-### AWS Configuration
-
-The application respects standard AWS configuration:
-
-- Environment variables: `AWS_REGION`, `AWS_PROFILE`
-- CLI flags: `--region`, `--profile`
-- Default region: `us-east-1`
-- Default profile: `default`
-
 ### Atlassian Configuration
 
 The Atlassian module requires three environment variables:
@@ -166,16 +157,6 @@ The Atlassian module requires three environment variables:
 - `ATLASSIAN_API_TOKEN` (API token from https://id.atlassian.com/manage-profile/security/api-tokens)
 
 See `ATLASSIAN_SETUP.md` for detailed setup instructions.
-
-### Adding New AWS Services
-
-To add a new AWS service (e.g., S3):
-
-1. Create `src/<service>.rs` with the service module
-2. Add module declaration in `main.rs`
-3. Add variant to `SubCommands` enum
-4. Implement `run()` function following the KMS pattern
-5. Use `get_sdk_config_from_global()` for AWS client configuration
 
 ### Code Style
 
@@ -414,7 +395,7 @@ fn main() -> Result<()> {
 }
 ```
 
-### 2. Module Pattern (Feature Modules like `kms.rs`, `s3.rs`)
+### 2. Module Pattern (Feature Modules)
 
 ```rust
 // If eprintln and println are required.

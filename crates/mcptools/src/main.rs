@@ -16,7 +16,7 @@ mod upgrade;
     author,
     version,
     about,
-    long_about = "Shortcuts for commonly used AWS commands"
+    long_about = "MCP tools for web content, HackerNews, and Atlassian integrations"
 )]
 pub struct App {
     #[command(subcommand)]
@@ -28,13 +28,6 @@ pub struct App {
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct Global {
-    /// AWS Region
-    #[clap(long, env = "AWS_REGION", global = true, default_value = "us-east-1")]
-    region: Option<String>,
-    /// AWS Profile
-    #[clap(long, env = "AWS_PROFILE", global = true, default_value = "default")]
-    profile: Option<String>,
-
     /// Whether to display additional information.
     #[clap(long, env = "YAWNS_VERBOSE", global = true, default_value = "false")]
     verbose: bool,
