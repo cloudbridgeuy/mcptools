@@ -33,3 +33,5 @@ colored = { workspace = true }
 headless_chrome = { workspace = true }
 html2md = { workspace = true }
 scraper = { workspace = true }
+base64 = { workspace = true }
+html-escape = { workspace = true }
