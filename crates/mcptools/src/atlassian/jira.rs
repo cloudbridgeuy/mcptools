@@ -8,6 +8,10 @@ pub enum Commands {
     /// List Jira issues using JQL
     #[clap(name = "list")]
     List(ListOptions),
+
+    /// Get detailed information about a Jira ticket
+    #[clap(name = "read")]
+    Read(ReadOptions),
 }
 
 /// Options for listing Jira issues
@@ -20,6 +24,18 @@ pub struct ListOptions {
     /// Maximum number of results to return
     #[arg(short, long, default_value = "10")]
     limit: usize,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+/// Options for reading a Jira ticket
+#[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
+pub struct ReadOptions {
+    /// Issue key (e.g., "PROJ-123")
+    #[clap(env = "JIRA_ISSUE_KEY")]
+    issue_key: String,
 
     /// Output as JSON
     #[arg(long)]
@@ -55,6 +71,241 @@ struct JiraStatus {
 struct JiraAssignee {
     #[serde(rename = "displayName")]
     display_name: String,
+}
+
+/// Jira custom field option (for select fields)
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct JiraCustomFieldOption {
+    value: String,
+}
+
+/// Extended fields for detailed ticket read
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct JiraExtendedFields {
+    summary: String,
+    #[serde(default)]
+    description: Option<serde_json::Value>, // Can be a string or ADF (Atlassian Document Format)
+    status: JiraStatus,
+    #[serde(default)]
+    assignee: Option<JiraAssignee>,
+    #[serde(default)]
+    priority: Option<JiraPriority>,
+    #[serde(default)]
+    issuetype: Option<JiraIssueType>,
+    #[serde(default)]
+    created: Option<String>,
+    #[serde(default)]
+    updated: Option<String>,
+    #[serde(default)]
+    duedate: Option<String>,
+    #[serde(default)]
+    labels: Vec<String>,
+    #[serde(default)]
+    components: Vec<JiraComponent>,
+    #[serde(default)]
+    customfield_10009: Option<String>, // Epic Link (common custom field ID)
+    #[serde(default)]
+    customfield_10014: Option<f64>, // Story Points (common custom field ID)
+    #[serde(default)]
+    customfield_10010: Option<Vec<JiraSprint>>, // Sprint (common custom field ID)
+    #[serde(default)]
+    customfield_10527: Option<JiraCustomFieldOption>, // Assigned Guild
+    #[serde(default)]
+    customfield_10528: Option<JiraCustomFieldOption>, // Assigned Pod
+}
+
+/// Jira priority field
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct JiraPriority {
+    #[serde(default)]
+    name: String,
+}
+
+/// Jira issue type field
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct JiraIssueType {
+    name: String,
+}
+
+/// Jira component field
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct JiraComponent {
+    name: String,
+}
+
+/// Jira sprint field
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct JiraSprint {
+    name: String,
+}
+
+/// Helper function to convert description (which can be a string or ADF JSON) to a plain string
+fn extract_description(value: Option<serde_json::Value>) -> Option<String> {
+    value.and_then(|v| match &v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Object(_) => {
+            // Check if this is an ADF (Atlassian Document Format) object
+            if v.get("type").and_then(|t| t.as_str()) == Some("doc") {
+                // Extract text from ADF content
+                render_adf(&v)
+            } else {
+                // For other objects, just return empty
+                None
+            }
+        }
+        _ => None,
+    })
+}
+
+/// Render ADF (Atlassian Document Format) to readable text
+fn render_adf(value: &serde_json::Value) -> Option<String> {
+    let mut output = String::new();
+
+    if let Some(content) = value.get("content").and_then(|c| c.as_array()) {
+        for node in content {
+            if let Some(rendered) = render_adf_node(node, 0) {
+                output.push_str(&rendered);
+                if !rendered.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+        }
+    }
+
+    if output.is_empty() {
+        None
+    } else {
+        Some(output.trim().to_string())
+    }
+}
+
+/// Render a single ADF node
+fn render_adf_node(node: &serde_json::Value, depth: usize) -> Option<String> {
+    let node_type = node.get("type")?.as_str()?;
+    let indent = "  ".repeat(depth);
+
+    match node_type {
+        "paragraph" => {
+            let mut text = String::new();
+            if let Some(content) = node.get("content").and_then(|c| c.as_array()) {
+                for child in content {
+                    if let Some(rendered) = render_adf_node(child, depth) {
+                        text.push_str(&rendered);
+                    }
+                }
+            }
+            if text.is_empty() {
+                Some("\n".to_string())
+            } else {
+                Some(format!("{}\n", text))
+            }
+        }
+        "heading" => {
+            let level = node
+                .get("attrs")
+                .and_then(|a| a.get("level"))
+                .and_then(|l| l.as_u64())
+                .unwrap_or(1) as usize;
+            let heading_marker = "#".repeat(level.min(6));
+            let mut text = String::new();
+            if let Some(content) = node.get("content").and_then(|c| c.as_array()) {
+                for child in content {
+                    if let Some(rendered) = render_adf_node(child, 0) {
+                        text.push_str(&rendered);
+                    }
+                }
+            }
+            Some(format!("{}{} {}\n", indent, heading_marker, text.trim()))
+        }
+        "bulletList" => {
+            let mut text = String::new();
+            if let Some(items) = node.get("content").and_then(|c| c.as_array()) {
+                for item in items {
+                    if let Some(rendered) = render_adf_node(item, depth + 1) {
+                        text.push_str(&rendered);
+                    }
+                }
+            }
+            Some(text)
+        }
+        "listItem" => {
+            let mut text = String::new();
+            if let Some(content) = node.get("content").and_then(|c| c.as_array()) {
+                for child in content {
+                    if let Some(rendered) = render_adf_node(child, depth) {
+                        text.push_str(&rendered);
+                    }
+                }
+            }
+            Some(format!("{}• {}\n", indent, text.trim()))
+        }
+        "codeBlock" => {
+            let mut text = String::new();
+            if let Some(content) = node.get("content").and_then(|c| c.as_array()) {
+                for child in content {
+                    if let Some(rendered) = render_adf_node(child, 0) {
+                        text.push_str(&rendered);
+                    }
+                }
+            }
+            Some(format!(
+                "{}```\n{}{}\n{}```\n",
+                indent,
+                indent,
+                text.trim(),
+                indent
+            ))
+        }
+        "text" => node
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(|text| text.to_string()),
+        "hardBreak" => Some("\n".to_string()),
+        _ => {
+            // For unknown node types, try to extract text content
+            if let Some(content) = node.get("content").and_then(|c| c.as_array()) {
+                let mut text = String::new();
+                for child in content {
+                    if let Some(rendered) = render_adf_node(child, depth) {
+                        text.push_str(&rendered);
+                    }
+                }
+                if !text.is_empty() {
+                    return Some(text);
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Extended issue response for detailed read
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct JiraExtendedIssueResponse {
+    key: String,
+    fields: JiraExtendedFields,
+}
+
+/// Output structure for detailed ticket information
+#[derive(Debug, Serialize, Clone)]
+pub struct TicketOutput {
+    pub key: String,
+    pub summary: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub priority: Option<String>,
+    pub issue_type: Option<String>,
+    pub assignee: Option<String>,
+    pub created: Option<String>,
+    pub updated: Option<String>,
+    pub due_date: Option<String>,
+    pub labels: Vec<String>,
+    pub components: Vec<String>,
+    pub epic_link: Option<String>,
+    pub story_points: Option<f64>,
+    pub sprint: Option<String>,
+    pub assigned_guild: Option<String>,
+    pub assigned_pod: Option<String>,
 }
 
 /// Search response from Jira API
@@ -130,6 +381,88 @@ pub async fn list_issues_data(query: String, limit: usize) -> Result<ListOutput>
     })
 }
 
+/// Public data function - read detailed ticket information
+pub async fn read_ticket_data(issue_key: String) -> Result<TicketOutput> {
+    let config = AtlassianConfig::from_env()?;
+    let client = create_authenticated_client(&config)?;
+
+    let url = format!(
+        "{}/rest/api/3/issue/{}",
+        config.base_url,
+        urlencoding::encode(&issue_key)
+    );
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| eyre!("Failed to send request to Jira: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(eyre!("Failed to fetch Jira issue [{}]: {}", status, body));
+    }
+
+    let raw_response = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| eyre!("Failed to parse Jira response: {}", e))?;
+
+    // Parse into the structured response
+    let issue: JiraExtendedIssueResponse = serde_json::from_value(raw_response)
+        .map_err(|e| eyre!("Failed to parse Jira response: {}", e))?;
+
+    let sprint = issue
+        .fields
+        .customfield_10010
+        .as_ref()
+        .and_then(|sprints| sprints.first())
+        .map(|s| s.name.clone());
+
+    Ok(TicketOutput {
+        key: issue.key,
+        summary: issue.fields.summary,
+        description: extract_description(issue.fields.description),
+        status: issue.fields.status.name,
+        priority: issue
+            .fields
+            .priority
+            .as_ref()
+            .map(|p| p.name.clone())
+            .filter(|n| !n.is_empty()),
+        issue_type: issue.fields.issuetype.as_ref().map(|it| it.name.clone()),
+        assignee: issue
+            .fields
+            .assignee
+            .as_ref()
+            .map(|a| a.display_name.clone()),
+        created: issue.fields.created,
+        updated: issue.fields.updated,
+        due_date: issue.fields.duedate,
+        labels: issue.fields.labels,
+        components: issue
+            .fields
+            .components
+            .into_iter()
+            .map(|c| c.name)
+            .collect(),
+        epic_link: issue.fields.customfield_10009,
+        story_points: issue.fields.customfield_10014,
+        sprint,
+        assigned_guild: issue
+            .fields
+            .customfield_10527
+            .as_ref()
+            .map(|g| g.value.clone()),
+        assigned_pod: issue
+            .fields
+            .customfield_10528
+            .as_ref()
+            .map(|p| p.value.clone()),
+    })
+}
+
 /// Handle the list command
 async fn list_handler(options: ListOptions) -> Result<()> {
     let data = list_issues_data(options.query, options.limit).await?;
@@ -164,6 +497,86 @@ async fn list_handler(options: ListOptions) -> Result<()> {
     Ok(())
 }
 
+/// Handle the read command
+async fn read_handler(options: ReadOptions) -> Result<()> {
+    let ticket = read_ticket_data(options.issue_key).await?;
+
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&ticket)?);
+    } else {
+        // Human-readable format
+        println!("\n{} - {}\n", ticket.key, ticket.summary);
+
+        // Core information
+        let mut table = crate::prelude::new_table();
+        table.add_row(prettytable::row!["Status", ticket.status]);
+
+        if let Some(priority) = &ticket.priority {
+            table.add_row(prettytable::row!["Priority", priority]);
+        }
+
+        if let Some(issue_type) = &ticket.issue_type {
+            table.add_row(prettytable::row!["Type", issue_type]);
+        }
+
+        let assignee = ticket.assignee.unwrap_or_else(|| "Unassigned".to_string());
+        table.add_row(prettytable::row!["Assignee", assignee]);
+
+        if let Some(guild) = &ticket.assigned_guild {
+            table.add_row(prettytable::row!["Assigned Guild", guild]);
+        }
+
+        if let Some(pod) = &ticket.assigned_pod {
+            table.add_row(prettytable::row!["Assigned Pod", pod]);
+        }
+
+        if let Some(created) = &ticket.created {
+            table.add_row(prettytable::row!["Created", created]);
+        }
+
+        if let Some(updated) = &ticket.updated {
+            table.add_row(prettytable::row!["Updated", updated]);
+        }
+
+        if let Some(due_date) = &ticket.due_date {
+            table.add_row(prettytable::row!["Due Date", due_date]);
+        }
+
+        table.printstd();
+
+        // Description
+        if let Some(description) = &ticket.description {
+            println!("\nDescription:");
+            println!("{}", description);
+        }
+
+        // Additional metadata
+        if !ticket.labels.is_empty() {
+            println!("\nLabels: {}", ticket.labels.join(", "));
+        }
+
+        if !ticket.components.is_empty() {
+            println!("Components: {}", ticket.components.join(", "));
+        }
+
+        if let Some(epic_link) = &ticket.epic_link {
+            println!("Epic: {}", epic_link);
+        }
+
+        if let Some(story_points) = ticket.story_points {
+            println!("Story Points: {}", story_points);
+        }
+
+        if let Some(sprint) = &ticket.sprint {
+            println!("Sprint: {}", sprint);
+        }
+
+        println!();
+    }
+
+    Ok(())
+}
+
 /// Run Jira commands
 pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
     if global.verbose {
@@ -172,5 +585,6 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
 
     match cmd {
         Commands::List(options) => list_handler(options).await,
+        Commands::Read(options) => read_handler(options).await,
     }
 }
