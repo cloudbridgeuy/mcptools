@@ -41,7 +41,7 @@ pub struct Global {
     pub atlassian_email: Option<String>,
 
     /// Atlassian API token
-    #[clap(long, env = "ATLASSIAN_API_TOKEN", global = true)]
+    #[clap(long, env = "ATLASSIAN_API_TOKEN", global = true, hide = true)]
     pub atlassian_token: Option<String>,
 }
 
