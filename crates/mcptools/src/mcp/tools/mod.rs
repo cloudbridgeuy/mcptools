@@ -272,7 +272,7 @@ pub async fn handle_tools_call(
         })?;
 
     match params.name.as_str() {
-        "jira_search" => atlassian::handle_jira_list(params.arguments, global).await,
+        "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
         "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,

@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use super::{CallToolResult, Content, JsonRpcError};
 
-/// Handle Jira list command via MCP
-pub async fn handle_jira_list(
+/// Handle Jira search command via MCP
+pub async fn handle_jira_search(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
@@ -25,7 +25,7 @@ pub async fn handle_jira_list(
 
     if global.verbose {
         eprintln!(
-            "Calling jira_list: query={}, limit={:?}, nextPageToken={:?}",
+            "Calling jira_search: query={}, limit={:?}, nextPageToken={:?}",
             args.query,
             args.limit,
             args.next_page_token
