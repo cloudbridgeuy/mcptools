@@ -8,9 +8,9 @@ use crate::prelude::{println, *};
 /// Jira commands
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
-    /// List Jira issues using JQL
-    #[clap(name = "list")]
-    List(list::ListOptions),
+    /// Search Jira issues using JQL
+    #[clap(name = "search")]
+    Search(list::ListOptions),
 
     /// Get detailed information about a Jira ticket
     #[clap(name = "read")]
@@ -24,7 +24,7 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
     }
 
     match cmd {
-        Commands::List(options) => list::handler(options).await,
+        Commands::Search(options) => list::handler(options).await,
         Commands::Read(options) => read::handler(options).await,
     }
 }

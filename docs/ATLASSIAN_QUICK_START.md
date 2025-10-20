@@ -16,7 +16,7 @@ export ATLASSIAN_API_TOKEN="your-api-token-here"
 
 ### 3. Test Configuration
 ```bash
-mcptools atlassian jira list "project IS NOT EMPTY" --limit 5
+mcptools atlassian jira search "project IS NOT EMPTY" --limit 5
 ```
 
 ---
@@ -25,32 +25,32 @@ mcptools atlassian jira list "project IS NOT EMPTY" --limit 5
 
 ### View Your Assigned Issues
 ```bash
-mcptools atlassian jira list "assignee = currentUser() AND status != Done"
+mcptools atlassian jira search "assignee = currentUser() AND status != Done"
 ```
 
 ### Find Open Issues in a Project
 ```bash
-mcptools atlassian jira list "project = PROJ AND status = Open"
+mcptools atlassian jira search "project = PROJ AND status = Open"
 ```
 
 ### Search Issues by Text
 ```bash
-mcptools atlassian jira list "text ~ 'database' AND type = Bug"
+mcptools atlassian jira search "text ~ 'database' AND type = Bug"
 ```
 
 ### Recently Updated Issues
 ```bash
-mcptools atlassian jira list "updated >= -7d ORDER BY updated DESC"
+mcptools atlassian jira search "updated >= -7d ORDER BY updated DESC"
 ```
 
 ### High Priority Issues
 ```bash
-mcptools atlassian jira list "priority = High AND status NOT IN (Done, Closed)"
+mcptools atlassian jira search "priority = High AND status NOT IN (Done, Closed)"
 ```
 
 ### Get JSON Output (for scripting)
 ```bash
-mcptools atlassian jira list "project = PROJ" --json | jq '.issues[] | {key, summary, status}'
+mcptools atlassian jira search "project = PROJ" --json | jq '.issues[] | {key, summary, status}'
 ```
 
 ---
@@ -88,39 +88,39 @@ mcptools atlassian confluence search "type = page" --limit 20
 
 ### Save Results to File
 ```bash
-mcptools atlassian jira list "project = PROJ" --json > issues.json
+mcptools atlassian jira search "project = PROJ" --json > issues.json
 ```
 
 ### Filter JSON Results with jq
 ```bash
 # Get only open issues
-mcptools atlassian jira list "project = PROJ" --json | jq '.issues[] | select(.status == "Open")'
+mcptools atlassian jira search "project = PROJ" --json | jq '.issues[] | select(.status == "Open")'
 
 # Count issues by status
-mcptools atlassian jira list "project = PROJ" --json | jq '.issues | group_by(.status) | map({status: .[0].status, count: length})'
+mcptools atlassian jira search "project = PROJ" --json | jq '.issues | group_by(.status) | map({status: .[0].status, count: length})'
 ```
 
 ### Use Verbose Mode for Debugging
 ```bash
-mcptools --verbose atlassian jira list "project = PROJ"
+mcptools --verbose atlassian jira search "project = PROJ"
 ```
 
 ### Combine with Other Tools
 ```bash
 # Search and pipe to grep
-mcptools atlassian jira list "project = PROJ" | grep -i "database"
+mcptools atlassian jira search "project = PROJ" | grep -i "database"
 
 # Count results
-mcptools atlassian jira list "project = PROJ" --json | jq '.issues | length'
+mcptools atlassian jira search "project = PROJ" --json | jq '.issues | length'
 ```
 
 ---
 
 ## CLI Argument Options
 
-### Jira List Command
+### Jira Search Command
 ```
-mcptools atlassian jira list [OPTIONS] <QUERY>
+mcptools atlassian jira search [OPTIONS] <QUERY>
 
 Arguments:
   <QUERY>                    JQL query string

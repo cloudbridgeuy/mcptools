@@ -78,7 +78,7 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
     let tools = vec![
         Tool {
-            name: "jira_list".to_string(),
+            name: "jira_search".to_string(),
             description: "Search Jira issues using JQL (Jira Query Language). Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -272,7 +272,7 @@ pub async fn handle_tools_call(
         })?;
 
     match params.name.as_str() {
-        "jira_list" => atlassian::handle_jira_list(params.arguments, global).await,
+        "jira_search" => atlassian::handle_jira_list(params.arguments, global).await,
         "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
