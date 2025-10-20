@@ -1,5 +1,4 @@
 pub mod adf;
-pub mod cache;
 pub mod list;
 pub mod read;
 pub mod types;

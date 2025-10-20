@@ -1,10 +1,36 @@
-use super::cache::{cache_token, resolve_token};
 use super::types::{IssueOutput, JiraSearchResponse, ListOutput};
 use crate::prelude::{eprintln, println, *};
 use serde::{Deserialize, Serialize};
 
 /// Options for listing Jira issues
 #[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
+#[command(after_help = "EXAMPLES:
+  # Get all tickets assigned to the current user:
+  mcptools atlassian jira list \"assignee = currentUser()\"
+
+  # Get only active tickets (excluding Done/Closed):
+  mcptools atlassian jira list \"assignee = currentUser() AND status NOT IN (Done, Closed)\"
+
+  # Get only completed tickets (Done/Closed):
+  mcptools atlassian jira list \"assignee = currentUser() AND status IN (Done, Closed)\"
+
+  # Find tickets by summary (search by name):
+  mcptools atlassian jira list \"summary ~ \\\"bug fix\\\"\"
+
+  # Combine criteria: active tickets with specific text in summary:
+  mcptools atlassian jira list \"assignee = currentUser() AND status NOT IN (Done, Closed) AND summary ~ \\\"api\\\"\"
+
+  # Fetch next page using pagination token:
+  mcptools atlassian jira list \"assignee = currentUser()\" --limit 50 --next-page <token>
+
+NOTES:
+  - JQL queries use Jira Query Language syntax
+  - Use currentUser() to reference the logged-in user
+  - Status names vary by project (common: Open, In Progress, Done, Closed)
+  - The ~ operator performs text search (case-insensitive substring match)
+  - Results are limited to 10 per page by default; use --limit to change
+  - Use --next-page with the token from the previous response to fetch additional pages
+  - Pagination tokens expire after 7 days")]
 pub struct ListOptions {
     /// JQL query (e.g., "project = PROJ AND status = Open")
     #[clap(env = "JIRA_QUERY")]
@@ -14,9 +40,9 @@ pub struct ListOptions {
     #[arg(short, long, default_value = "10")]
     pub limit: usize,
 
-    /// Pagination token for fetching the next page of results
+    /// Pagination token for fetching the next page (token-based pagination)
     #[arg(long)]
-    pub after: Option<String>,
+    pub next_page: Option<String>,
 
     /// Output as JSON
     #[arg(long)]
@@ -24,36 +50,39 @@ pub struct ListOptions {
 }
 
 /// Public data function - used by both CLI and MCP
-pub async fn list_issues_data(query: String, limit: usize) -> Result<ListOutput> {
-    list_issues_data_internal(query, limit, None).await
-}
-
-/// Internal function that supports pagination via after token
-pub async fn list_issues_data_internal(
+/// Supports pagination with nextPageToken using GET /rest/api/3/search/jql
+/// Note: This endpoint uses token-based pagination, not offset-based
+pub async fn list_issues_data(
     query: String,
     limit: usize,
-    after_token: Option<String>,
+    next_page: Option<String>,
 ) -> Result<ListOutput> {
     use crate::atlassian::{create_authenticated_client, AtlassianConfig};
 
     let config = AtlassianConfig::from_env()?;
     let client = create_authenticated_client(&config)?;
 
-    let url = format!("{}/rest/api/3/search/jql", config.base_url);
-    let limit_str = limit.to_string();
+    // Handle base_url that may or may not have trailing slash
+    let base_url = config.base_url.trim_end_matches('/');
+    let url = format!("{}/rest/api/3/search/jql", base_url);
 
-    let mut query_params: Vec<(&str, &str)> = vec![
+    // Build query parameters for GET request
+    let max_results = std::cmp::min(limit, 100); // Jira API max is 100
+    let max_results_str = max_results.to_string();
+    let fields_str = "key,summary,description,status,assignee";
+
+    let mut query_params = vec![
         ("jql", query.as_str()),
-        ("maxResults", limit_str.as_str()),
-        ("fields", "summary,description,status,assignee"),
+        ("maxResults", &max_results_str),
+        ("fields", fields_str),
+        ("expand", "names"),
     ];
 
-    let after_str;
-    if let Some(ref token) = after_token {
-        // Resolve token from cache if it's a hash, otherwise use as-is
-        let resolved_token = resolve_token(token)?;
-        after_str = resolved_token;
-        query_params.push(("after", after_str.as_str()));
+    // Add nextPageToken if provided
+    let next_page_str_owned;
+    if let Some(ref token) = next_page {
+        next_page_str_owned = token.clone();
+        query_params.push(("nextPageToken", next_page_str_owned.as_str()));
     }
 
     let response = client
@@ -95,11 +124,8 @@ pub async fn list_issues_data_internal(
         })
         .collect();
 
-    // Use total if available (old API), otherwise use length of issues (new API)
-    let total = search_response
-        .total
-        .map(|t| t as usize)
-        .unwrap_or_else(|| issues.len());
+    // GET /rest/api/3/search/jql always returns 'total' field
+    let total = search_response.total.map(|t| t as usize).unwrap_or(0);
 
     Ok(ListOutput {
         issues,
@@ -110,8 +136,7 @@ pub async fn list_issues_data_internal(
 
 /// Handle the list command
 pub async fn handler(options: ListOptions) -> Result<()> {
-    let data =
-        list_issues_data_internal(options.query.clone(), options.limit, options.after).await?;
+    let data = list_issues_data(options.query.clone(), options.limit, options.next_page).await?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&data)?);
@@ -143,15 +168,10 @@ pub async fn handler(options: ListOptions) -> Result<()> {
 
         table.printstd();
 
-        // If we got exactly `limit` results, there might be more pages
-        if data.issues.len() == options.limit {
-            if let Some(next_token) = data.next_page_token {
-                let token_hash = cache_token(&next_token)?;
-                eprintln!(
-                    "\nTo get the next page, run:\nmcptools atlassian jira list '{}' --limit {} --after {}",
-                    options.query, options.limit, token_hash
-                );
-            }
+        // Print pagination info
+        if let Some(next_token) = &data.next_page_token {
+            eprintln!("\nTo fetch the next page, run:\n  mcptools atlassian jira list '{}' --limit {} --next-page {}",
+                options.query, options.limit, next_token);
         }
     }
 

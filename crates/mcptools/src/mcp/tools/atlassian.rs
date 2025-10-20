@@ -12,6 +12,8 @@ pub async fn handle_jira_list(
     struct JiraListArgs {
         query: String,
         limit: Option<usize>,
+        #[serde(rename = "nextPageToken")]
+        next_page_token: Option<String>,
     }
 
     let args: JiraListArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
@@ -23,19 +25,27 @@ pub async fn handle_jira_list(
 
     if global.verbose {
         eprintln!(
-            "Calling jira_list: query={}, limit={:?}",
-            args.query, args.limit
+            "Calling jira_list: query={}, limit={:?}, nextPageToken={:?}",
+            args.query,
+            args.limit,
+            args.next_page_token
+                .as_ref()
+                .map(|t| format!("{}...", &t[..std::cmp::min(20, t.len())]))
         );
     }
 
     // Call the Jira module's data function
-    let list_data = crate::atlassian::jira::list_issues_data(args.query, args.limit.unwrap_or(10))
-        .await
-        .map_err(|e| JsonRpcError {
-            code: -32603,
-            message: format!("Tool execution error: {e}"),
-            data: None,
-        })?;
+    let list_data = crate::atlassian::jira::list_issues_data(
+        args.query,
+        args.limit.unwrap_or(10),
+        args.next_page_token,
+    )
+    .await
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {e}"),
+        data: None,
+    })?;
 
     // Convert to JSON and wrap in MCP result format
     let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {

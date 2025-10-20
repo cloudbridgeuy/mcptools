@@ -1,5 +1,5 @@
 use super::{create_authenticated_client, AtlassianConfig};
-use crate::prelude::{println, *};
+use crate::prelude::{eprintln, println, *};
 use serde::{Deserialize, Serialize};
 
 /// Confluence commands
@@ -15,15 +15,15 @@ pub enum Commands {
 pub struct SearchOptions {
     /// CQL query (e.g., "space = SPACE AND text ~ 'keyword'")
     #[clap(env = "CONFLUENCE_QUERY")]
-    query: String,
+    pub query: String,
 
     /// Maximum number of results to return
     #[arg(short, long, default_value = "10")]
-    limit: usize,
+    pub limit: usize,
 
     /// Output as JSON
     #[arg(long)]
-    json: bool,
+    pub json: bool,
 }
 
 /// Confluence page response from API
@@ -117,18 +117,22 @@ fn html_to_plaintext(html: &str) -> String {
 }
 
 /// Public data function - used by both CLI and MCP
+/// Searches Confluence pages using CQL
 pub async fn search_pages_data(query: String, limit: usize) -> Result<SearchOutput> {
     let config = AtlassianConfig::from_env()?;
     let client = create_authenticated_client(&config)?;
 
-    let url = format!("{}/wiki/api/v2/pages/search", config.base_url);
+    // Handle base_url that may or may not have trailing slash
+    let base_url = config.base_url.trim_end_matches('/');
+    let url = format!("{}/wiki/api/v2/pages/search", base_url);
 
+    let limit_str = limit.to_string();
     let response = client
         .get(&url)
         .query(&[
-            ("cql", query),
-            ("limit", limit.to_string()),
-            ("bodyFormat", "view".to_string()),
+            ("cql", query.as_str()),
+            ("limit", &limit_str),
+            ("bodyFormat", "view"),
         ])
         .send()
         .await
@@ -174,7 +178,7 @@ pub async fn search_pages_data(query: String, limit: usize) -> Result<SearchOutp
 
 /// Handle the search command
 async fn search_handler(options: SearchOptions) -> Result<()> {
-    let data = search_pages_data(options.query, options.limit).await?;
+    let data = search_pages_data(options.query.clone(), options.limit).await?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&data)?);
@@ -190,6 +194,7 @@ async fn search_handler(options: SearchOptions) -> Result<()> {
         let mut table = crate::prelude::new_table();
         table.add_row(prettytable::row!["Title", "Type", "URL"]);
 
+        let num_pages = data.pages.len();
         for page in data.pages {
             let url = page.url.unwrap_or_else(|| "N/A".to_string());
             table.add_row(prettytable::row![page.title, page.page_type, url]);

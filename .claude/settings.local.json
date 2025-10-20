@@ -22,7 +22,11 @@
       "mcp__mcptools__md_toc",
       "mcp__mcptools__md_fetch",
       "Bash(cargo check:*)",
-      "Bash(timeout 10 cargo run:*)"
+      "Bash(timeout 10 cargo run:*)",
+      "Bash(./target/debug/mcptools atlassian jira --help)",
+      "WebFetch(domain:developer.atlassian.com)",
+      "Bash(cargo test:*)",
+      "Bash(target/debug/mcptools atlassian jira list:*)"
     ],
     "deny": [],
     "ask": []

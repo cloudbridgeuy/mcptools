@@ -79,7 +79,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
     let tools = vec![
         Tool {
             name: "jira_list".to_string(),
-            description: "Search Jira issues using JQL (Jira Query Language). Returns a list of issues matching the query with details like key, summary, status, and assignee. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            description: "Search Jira issues using JQL (Jira Query Language). Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -89,7 +89,11 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     },
                     "limit": {
                         "type": "number",
-                        "description": "Maximum number of results to return (default: 10)"
+                        "description": "Maximum number of results to return (default: 10, max: 100)"
+                    },
+                    "nextPageToken": {
+                        "type": "string",
+                        "description": "Pagination token for fetching the next page. Use the nextPageToken from the previous response to get additional results. Tokens expire after 7 days."
                     }
                 },
                 "required": ["query"]

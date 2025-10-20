@@ -130,6 +130,9 @@ pub struct TicketOutput {
 }
 
 /// Search response from Jira API
+/// The GET /rest/api/3/search/jql endpoint returns this structure
+/// Note: The API returns startAt and maxResults to tell you what was returned,
+/// not necessarily what was requested (may differ if fewer results exist)
 #[derive(Debug, Deserialize)]
 pub struct JiraSearchResponse {
     pub issues: Vec<JiraIssueResponse>,
@@ -141,6 +144,21 @@ pub struct JiraSearchResponse {
     #[serde(default)]
     #[serde(rename = "nextPageToken")]
     pub next_page_token: Option<String>,
+    #[serde(default)]
+    #[serde(rename = "startAt")]
+    pub start_at: Option<u64>,
+    #[serde(default)]
+    #[serde(rename = "maxResults")]
+    pub max_results: Option<u64>,
+    // Additional fields that might be in the response
+    #[serde(default)]
+    pub names: Option<serde_json::Value>,
+    #[serde(default)]
+    pub schema: Option<serde_json::Value>,
+    #[serde(default)]
+    pub expand: Option<String>,
+    #[serde(default)]
+    pub changelog: Option<serde_json::Value>,
 }
 
 /// Output structure for a single issue

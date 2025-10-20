@@ -158,6 +158,119 @@ The Atlassian module requires three environment variables:
 
 See `ATLASSIAN_SETUP.md` for detailed setup instructions.
 
+### Jira API Search Endpoints
+
+**IMPORTANT:** Use `GET /rest/api/3/search/jql` endpoint for reliable JQL searching with pagination.
+
+**Endpoint:** `GET /rest/api/3/search/jql`
+- This is the official Jira Cloud REST API v3 endpoint for JQL-based searches
+- Supports token-based pagination with `nextPageToken` query parameter
+- Query parameters: `jql`, `maxResults`, `nextPageToken`, `fields`, `expand`
+
+**Pagination Details:**
+- Use `maxResults` (default: 50, max: 100) to limit results per request
+- Response includes `nextPageToken` for fetching the next page
+- Response includes `isLast` boolean to indicate if this is the final page
+- For next page: use the `nextPageToken` from the previous response
+- Stop pagination when `nextPageToken` is null/missing (indicates last page)
+- Pagination tokens expire after 7 days
+
+**Query Parameters Example:**
+```
+GET /rest/api/3/search/jql?jql=assignee%20%3D%20currentUser()%20AND%20status%20NOT%20IN%20(Done%2C%20Closed)&maxResults=10&fields=key,summary,description,status,assignee&expand=names
+```
+
+**Pagination with Token:**
+```
+GET /rest/api/3/search/jql?jql=assignee%20%3D%20currentUser()&maxResults=10&nextPageToken=<token_from_previous_response>&fields=key,summary,status,assignee
+```
+
+**Why This Endpoint:**
+- Official Jira Cloud REST API v3 endpoint for searching with JQL
+- Token-based pagination is more reliable than offset-based pagination
+- Always returns `total` field in response for accurate issue counts
+- Supports field expansion and selection for flexible response content
+- Better handling of large result sets with consistent pagination tokens
+
+### Data Function Architecture Pattern
+
+**CRITICAL PRINCIPLE**: Never use `_internal` suffix functions or create multiple function variants for the same operation. This indicates architectural dysfunction.
+
+#### Pattern: Data Functions are the Single Source of Truth
+
+All data-retrieval functions (e.g., `list_issues_data()`, `search_pages_data()`, `read_ticket_data()`) must:
+
+1. **Accept ALL parameters** needed for full functionality (including pagination parameters)
+2. **Implement complete logic** with no hidden variants
+3. **Be called by both CLI and MCP handlers** (handlers are thin adapters only)
+4. **Return consistent output structures** (serializable types)
+5. **Have complete, public signatures** with descriptive comments
+
+**Anti-pattern (NEVER DO THIS):**
+```rust
+pub async fn list_issues_data(query: String, limit: usize) -> Result<ListOutput> {
+    list_issues_data_internal(query, limit, 0).await  // ❌ Hardcodes offset!
+}
+
+pub async fn list_issues_data_internal(query: String, limit: usize, offset: usize) -> Result<ListOutput> {
+    // ❌ Real implementation hidden behind _internal suffix
+}
+```
+
+**Correct pattern (DO THIS):**
+```rust
+pub async fn list_issues_data(query: String, limit: usize, offset: usize) -> Result<ListOutput> {
+    // ✅ Complete implementation, all parameters, public API
+}
+
+// CLI handler - thin adapter
+pub async fn handler(options: ListOptions) -> Result<()> {
+    let data = list_issues_data(options.query, options.limit, options.offset).await?;
+    // Format and display
+}
+
+// MCP handler - thin adapter
+pub async fn handle_jira_list(arguments: Option<serde_json::Value>) -> Result<serde_json::Value> {
+    // Parse arguments
+    let data = list_issues_data(args.query, args.limit, args.offset).await?;
+    // Serialize and return
+}
+```
+
+#### Pagination Standard
+
+All list/search operations must use **offset-based pagination**:
+
+- `offset: usize` - Number of results to skip (default: 0)
+- `limit: usize` - Maximum results to return (default: 10-30 depending on operation)
+
+This approach:
+- Matches Jira API conventions (`startAt` parameter)
+- Provides maximum flexibility (can start at any position)
+- Is consistent with REST API best practices
+- Allows simple calculation of next offset: `next_offset = offset + limit`
+
+#### CLI/MCP Consistency Rule
+
+**If a feature exists in the CLI, it MUST exist in MCP (and vice versa).**
+
+Both interfaces should have identical capabilities. The handlers are just adapters for parsing arguments and formatting output. The data layer is the single source of truth.
+
+```
+┌──────────────────────────────────────────────────┐
+│ Data Functions (Single Source of Truth)         │
+├──────────────────────────────────────────────────┤
+│ list_issues_data(query, limit, offset)          │  ← Complete implementation
+│ search_pages_data(query, limit, offset)         │
+│ read_ticket_data(issue_key)                     │
+└──────────────────────────────────────────────────┘
+       ↑                           ↑
+       │                           │
+  CLI Handler            MCP Handler
+  (parse CLI args)       (parse MCP args)
+  (format table)         (format JSON)
+```
+
 ### Code Style
 
 - Edition: Rust 2021
