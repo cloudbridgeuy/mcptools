@@ -20,6 +20,12 @@ jobs:
     strategy:
       matrix:
         include:
+          # Linux x86_64
+          # - target: x86_64-unknown-linux-gnu
+          #   os: ubuntu-latest
+          #   binary_name: vnt
+          #   asset_name: mcptools-Linux-x86_64
+
           # macOS x86_64 (Intel)
           - target: x86_64-apple-darwin
             os: macos-15
@@ -31,6 +37,12 @@ jobs:
             os: macos-15
             binary_name: mcptools
             asset_name: mcptools-Darwin-arm64
+
+          # Windows x86_64
+          # - target: x86_64-pc-windows-msvc
+          #   os: windows-2025
+          #   binary_name: vnt.exe
+          #   asset_name: mcptools-Windows-x86_64.exe
 
     steps:
       - name: Checkout code
@@ -143,8 +155,6 @@ jobs:
 
             ### Method 1: Install via Cargo (Recommended for macOS users with Rust)
 
-            If you have Rust installed on your macOS machine:
-
             ```bash
             cargo install --git https://github.com/cloudbridgeuy/mcptools
             ```
@@ -154,6 +164,7 @@ jobs:
             Download the pre-built binary for your Mac architecture from the assets below:
 
             **For Intel Macs (x86_64):**
+
             ```bash
             # Download and install
             curl -L "https://github.com/cloudbridgeuy/mcptools/releases/download/${{ steps.version.outputs.version }}/mcptools-Darwin-x86_64" -o mcptools
@@ -165,6 +176,7 @@ jobs:
             ```
 
             **For Apple Silicon Macs (ARM64):**
+
             ```bash
             # Download and install
             curl -L "https://github.com/cloudbridgeuy/mcptools/releases/download/${{ steps.version.outputs.version }}/mcptools-Darwin-arm64" -o mcptools
@@ -185,6 +197,7 @@ jobs:
             If you have the GitHub CLI installed:
 
             ```bash
+
             # For Intel Macs
             gh release download ${{ steps.version.outputs.version }} -R cloudbridgeuy/mcptools -p "mcptools-Darwin-x86_64"
 
