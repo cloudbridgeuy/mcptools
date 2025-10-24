@@ -121,3 +121,53 @@ pub async fn handle_confluence_search(
         data: None,
     })
 }
+
+/// Handle Jira get command via MCP
+pub async fn handle_jira_get(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct JiraGetArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+    }
+
+    let args: JiraGetArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
+        .map_err(|e| JsonRpcError {
+            code: -32602,
+            message: format!("Invalid arguments: {e}"),
+            data: None,
+        })?;
+
+    if global.verbose {
+        eprintln!("Calling jira_get: issueKey={}", args.issue_key);
+    }
+
+    // Call the Jira module's data function
+    let ticket_data = crate::atlassian::jira::get_ticket_data(args.issue_key)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    // Convert to JSON and wrap in MCP result format
+    let json_string = serde_json::to_string_pretty(&ticket_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}

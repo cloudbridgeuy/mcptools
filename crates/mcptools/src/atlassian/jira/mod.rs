@@ -1,6 +1,6 @@
 pub mod adf;
+pub mod get;
 pub mod list;
-pub mod read;
 pub mod types;
 
 use crate::prelude::{println, *};
@@ -13,8 +13,8 @@ pub enum Commands {
     Search(list::ListOptions),
 
     /// Get detailed information about a Jira ticket
-    #[clap(name = "read")]
-    Read(read::ReadOptions),
+    #[clap(name = "get")]
+    Get(get::GetOptions),
 }
 
 /// Run Jira commands
@@ -25,10 +25,10 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
 
     match cmd {
         Commands::Search(options) => list::handler(options).await,
-        Commands::Read(options) => read::handler(options).await,
+        Commands::Get(options) => get::handler(options).await,
     }
 }
 
 // Re-export public data functions for external use (e.g., MCP)
+pub use get::get_ticket_data;
 pub use list::list_issues_data;
-pub use read::read_ticket_data;

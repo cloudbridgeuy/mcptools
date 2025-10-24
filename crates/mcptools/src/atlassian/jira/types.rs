@@ -108,7 +108,19 @@ pub struct JiraExtendedIssueResponse {
 }
 
 /// Output structure for detailed ticket information
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Deserialize)]
+/// Comment on a Jira ticket
+pub struct JiraComment {
+    #[serde(rename = "id")]
+    pub comment_id: String,
+    #[serde(rename = "body")]
+    pub body: serde_json::Value,
+    #[serde(rename = "created")]
+    pub created_at: String,
+    pub author: Option<JiraAssignee>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TicketOutput {
     pub key: String,
     pub summary: String,
@@ -127,6 +139,7 @@ pub struct TicketOutput {
     pub sprint: Option<String>,
     pub assigned_guild: Option<String>,
     pub assigned_pod: Option<String>,
+    pub comments: Vec<JiraComment>,
 }
 
 /// Search response from Jira API

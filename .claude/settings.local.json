@@ -26,7 +26,9 @@
       "Bash(./target/debug/mcptools atlassian jira --help)",
       "WebFetch(domain:developer.atlassian.com)",
       "Bash(cargo test:*)",
-      "Bash(target/debug/mcptools atlassian jira list:*)"
+      "Bash(target/debug/mcptools atlassian jira list:*)",
+      "mcp__mcptools__jira_search",
+      "mcp__mcptools__jira_get"
     ],
     "deny": [],
     "ask": []
