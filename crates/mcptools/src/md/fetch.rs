@@ -38,17 +38,21 @@ pub struct FetchOptions {
     #[arg(long, env = "MD_INDEX")]
     pub index: Option<usize>,
 
+    /// Enable pagination (automatically enabled when --offset, --limit, or --page are set)
+    #[arg(long, env = "MD_PAGINATED")]
+    pub paginated: bool,
+
     /// Character offset to start from (default: 0). When provided, takes precedence over --page
-    #[arg(long, env = "MD_OFFSET", default_value = "0")]
-    pub offset: usize,
+    #[arg(long, env = "MD_OFFSET")]
+    pub offset: Option<usize>,
 
     /// Number of characters per page (default: 1000)
-    #[arg(long, env = "MD_LIMIT", default_value = "1000")]
-    pub limit: usize,
+    #[arg(long, env = "MD_LIMIT")]
+    pub limit: Option<usize>,
 
     /// Page number, 1-indexed (default: 1). Ignored if --offset is provided
-    #[arg(long, env = "MD_PAGE", default_value = "1")]
-    pub page: usize,
+    #[arg(long, env = "MD_PAGE")]
+    pub page: Option<usize>,
 }
 
 pub async fn fetch(options: FetchOptions) -> Result<()> {
@@ -58,6 +62,12 @@ pub async fn fetch(options: FetchOptions) -> Result<()> {
             "Strategy 'n' requires --index parameter to specify which element to select"
         ));
     }
+
+    // Auto-enable pagination if any pagination-related flag is set
+    let paginated = options.paginated
+        || options.offset.is_some()
+        || options.limit.is_some()
+        || options.page.is_some();
 
     // Use spawn_blocking since headless_chrome is synchronous
     let output = tokio::task::spawn_blocking({
@@ -70,30 +80,64 @@ pub async fn fetch(options: FetchOptions) -> Result<()> {
                 selector: options.selector,
                 strategy: options.strategy,
                 index: options.index,
-                offset: options.offset,
-                limit: options.limit,
-                page: options.page,
+                offset: options.offset.unwrap_or(0),
+                limit: options.limit.unwrap_or(1000),
+                page: options.page.unwrap_or(1),
+                paginated,
             })
         }
     })
     .await??;
 
     if options.json {
-        output_json(&output)?;
+        output_json(&output, paginated)?;
     } else {
-        output_formatted(&output, &options)?;
+        output_formatted(&output, &options, paginated)?;
     }
 
     Ok(())
 }
 
-fn output_json(output: &FetchOutput) -> Result<()> {
-    let json = serde_json::to_string_pretty(output)?;
-    println!("{}", json);
+fn output_json(output: &FetchOutput, paginated: bool) -> Result<()> {
+    if paginated {
+        // Show full output with pagination metadata
+        let json = serde_json::to_string_pretty(output)?;
+        println!("{}", json);
+    } else {
+        // Show output without pagination metadata
+        #[derive(serde::Serialize)]
+        struct OutputWithoutPagination<'a> {
+            url: &'a str,
+            title: &'a Option<String>,
+            content: &'a str,
+            html_length: usize,
+            fetch_time_ms: u64,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            selector_used: &'a Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            elements_found: &'a Option<usize>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            strategy_applied: &'a Option<String>,
+        }
+
+        let output_without_pagination = OutputWithoutPagination {
+            url: &output.url,
+            title: &output.title,
+            content: &output.content,
+            html_length: output.html_length,
+            fetch_time_ms: output.fetch_time_ms,
+            selector_used: &output.selector_used,
+            elements_found: &output.elements_found,
+            strategy_applied: &output.strategy_applied,
+        };
+
+        let json = serde_json::to_string_pretty(&output_without_pagination)?;
+        println!("{}", json);
+    }
     Ok(())
 }
 
-fn output_formatted(output: &FetchOutput, options: &FetchOptions) -> Result<()> {
+fn output_formatted(output: &FetchOutput, options: &FetchOptions, paginated: bool) -> Result<()> {
     // Check if stdout is a TTY (terminal) or being piped
     let is_tty = std::io::stdout().is_terminal();
 
@@ -257,6 +301,18 @@ fn output_formatted(output: &FetchOutput, options: &FetchOptions) -> Result<()> 
                     output.url
                 )
                 .cyan()
+            );
+        }
+
+        if !paginated {
+            eprintln!("\n{}:", "To enable pagination".bright_white().bold());
+            eprintln!(
+                "  {}",
+                format!("mcptools md fetch {} --limit 1000", output.url).cyan()
+            );
+            eprintln!(
+                "  {}",
+                format!("mcptools md fetch {} --limit 1000 --page 2", output.url).cyan()
             );
         }
 

@@ -64,6 +64,7 @@ pub struct FetchConfig {
     pub offset: usize,
     pub limit: usize,
     pub page: usize,
+    pub paginated: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -157,49 +158,66 @@ pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
     // Calculate pagination
     let total_characters = full_content.chars().count();
 
-    // Determine start position: use offset if provided (non-zero), otherwise use page-based pagination
-    let (total_pages, start_offset, end_offset, current_page) = if config.offset > 0 {
-        // Offset-based: ignore page parameter
-        let start_offset = config.offset.min(total_characters);
-        let end_offset = (start_offset + config.limit).min(total_characters);
-        let total_pages = if config.limit >= total_characters {
-            1
+    // Determine if pagination should be applied
+    let (content, pagination) = if config.paginated {
+        // Pagination enabled - apply offset/limit/page logic
+        // Determine start position: use offset if provided (non-zero), otherwise use page-based pagination
+        let (total_pages, start_offset, end_offset, current_page) = if config.offset > 0 {
+            // Offset-based: ignore page parameter
+            let start_offset = config.offset.min(total_characters);
+            let end_offset = (start_offset + config.limit).min(total_characters);
+            let total_pages = if config.limit >= total_characters {
+                1
+            } else {
+                total_characters.div_ceil(config.limit)
+            };
+            let current_page = if config.limit > 0 {
+                (config.offset / config.limit) + 1
+            } else {
+                1
+            };
+            (total_pages, start_offset, end_offset, current_page)
+        } else if config.limit >= total_characters {
+            // Single page case - all content fits in one page
+            (1, 0, total_characters, 1)
         } else {
-            total_characters.div_ceil(config.limit)
+            // Multi-page case - calculate pagination from page number
+            let total_pages = total_characters.div_ceil(config.limit);
+            let current_page = config.page.min(total_pages.max(1)); // Ensure page is within bounds
+            let start_offset = (current_page - 1) * config.limit;
+            let end_offset = (start_offset + config.limit).min(total_characters);
+            (total_pages, start_offset, end_offset, current_page)
         };
-        let current_page = if config.limit > 0 {
-            (config.offset / config.limit) + 1
-        } else {
-            1
+
+        // Extract the paginated content
+        let content: String = full_content
+            .chars()
+            .skip(start_offset)
+            .take(end_offset - start_offset)
+            .collect();
+
+        let has_more = current_page < total_pages;
+
+        let pagination = MdPaginationInfo {
+            current_page,
+            total_pages,
+            total_characters,
+            limit: config.limit,
+            has_more,
         };
-        (total_pages, start_offset, end_offset, current_page)
-    } else if config.limit >= total_characters {
-        // Single page case - all content fits in one page
-        (1, 0, total_characters, 1)
+
+        (content, pagination)
     } else {
-        // Multi-page case - calculate pagination from page number
-        let total_pages = total_characters.div_ceil(config.limit);
-        let current_page = config.page.min(total_pages.max(1)); // Ensure page is within bounds
-        let start_offset = (current_page - 1) * config.limit;
-        let end_offset = (start_offset + config.limit).min(total_characters);
-        (total_pages, start_offset, end_offset, current_page)
-    };
+        // Pagination disabled - return all content
+        let pagination = MdPaginationInfo {
+            current_page: 1,
+            total_pages: 1,
+            total_characters,
+            limit: total_characters,
+            has_more: false,
+        };
 
-    // Extract the paginated content
-    let content: String = full_content
-        .chars()
-        .skip(start_offset)
-        .take(end_offset - start_offset)
-        .collect();
-
-    let has_more = current_page < total_pages;
-
-    let pagination = MdPaginationInfo {
-        current_page,
-        total_pages,
-        total_characters,
-        limit: config.limit,
-        has_more,
+        (full_content, pagination)
     };
 
     let fetch_time_ms = start.elapsed().as_millis() as u64;

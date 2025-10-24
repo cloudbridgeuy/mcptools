@@ -111,6 +111,7 @@ pub fn extract_toc_data(options: TocOptions) -> Result<TocOutput> {
         offset: 0,         // No offset
         limit: usize::MAX, // Get all content
         page: 1,           // First page
+        paginated: false,  // No pagination for TOC
     })?;
 
     // Extract TOC entries from markdown

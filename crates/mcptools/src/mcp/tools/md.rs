@@ -54,6 +54,7 @@ pub async fn handle_md_fetch(
             offset: args.offset.unwrap_or(0),
             limit: args.limit.unwrap_or(1000),
             page: args.page.unwrap_or(1),
+            paginated: true, // MCP always uses pagination for context safety
         })
     })
     .await
