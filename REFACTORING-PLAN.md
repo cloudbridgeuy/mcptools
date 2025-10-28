@@ -178,14 +178,31 @@ pub struct JiraIssueResponse {
   - All transformation logic testable without browser automation mocking
   - Verified with real web page fetches (example.com)
 
+- **Section 2.1**: Markdown Fetch Output Formatting ✅
+  - Date Completed: 2025-10-28
+  - Files: `crates/mcptools/src/md/fetch.rs` (refactored, added 224 lines of pure functions and tests)
+  - Tests: 11/11 passing
+  - Pure formatting functions: `format_output_json`, `format_output_text`
+  - Refactored wrappers: `output_json` (3 lines), `output_formatted` (15 lines, 92% reduction from 188 lines)
+  - Successfully separated formatting logic from I/O operations (printing)
+  - All formatting logic testable with fixture data (no mocking required)
+  - TTY detection preserved (stderr vs stdout separation)
+  - Verified with real web page fetches (JSON and formatted output)
+  - Pattern established for remaining Phase 2 output refactorings
+
 ### In Progress 🚧
 - None
 
 ### Pending 📋
-- **Phase 2**: Output Functions (4 sections)
+- **Phase 2**: Output Functions (3 remaining sections)
+  - Section 2.2: Markdown TOC Output Formatting
+  - Section 2.3: HackerNews Read Item Output Formatting
+  - Section 2.4: HackerNews List Items Output Formatting
 - **Phase 3**: Supporting Refactorings (2 sections)
 
-**Overall Progress**: 6/6 Phase 1 core refactorings completed (100%)
+**Overall Progress**:
+- Phase 1: 6/6 core refactorings completed (100%)
+- Phase 2: 1/4 output refactorings completed (25%)
 
 ---
 
@@ -1277,15 +1294,61 @@ Phase 2 addresses output formatting functions that currently mix formatting logi
 
 The pattern for all output functions is similar: instead of functions that take data and print it, we create functions that take data and return formatted strings. The handler functions then become responsible for printing.
 
-### 2.1: Markdown Fetch Output Formatting
+### 2.1: Markdown Fetch Output Formatting ✅ **COMPLETED**
 
-**File**: `crates/mcptools/src/md/fetch.rs`
+**Status**: ✅ **COMPLETED** - First Phase 2 refactoring successfully implemented, establishing the output formatting pattern.
 
-**Current Problem**: The `output_formatted` function (lines 140-328) and `output_json` function (lines 101-138) mix formatting logic with `println`/`eprintln` calls. While `output_json` mostly uses `serde_json` serialization, `output_formatted` contains complex logic for building decorative output that's hard to test.
+**Files Modified**:
+- **Shell**: `crates/mcptools/src/md/fetch.rs` (refactored, added 224 lines of pure functions and tests)
 
-**What Needs to Change**:
+**Original Problem**: The `output_formatted` function (lines 140-328) and `output_json` function (lines 101-138) mixed formatting logic with `println`/`eprintln` calls. While `output_json` mostly used `serde_json` serialization, `output_formatted` contained complex logic for building decorative output that was hard to test.
 
-We should extract the formatting logic into pure functions that return strings, then have thin wrapper functions that handle the actual printing.
+**Solution Implemented**:
+
+Created pure formatting functions that return strings, separated from I/O operations (printing).
+
+**What Was Created**:
+
+1. **Pure JSON Formatter**:
+   ```rust
+   fn format_output_json(output: &FetchOutput, paginated: bool) -> Result<String>
+   ```
+   - Returns JSON string with conditional pagination field inclusion
+   - Fully testable without I/O
+
+2. **Pure Text Formatter**:
+   ```rust
+   fn format_output_text(output: &FetchOutput, options: &FetchOptions, paginated: bool) -> String
+   ```
+   - Builds complete formatted string with all sections (header, metadata, statistics, usage help)
+   - Fully testable without I/O
+
+**What Was Refactored**:
+
+1. **`output_json`** - Thin wrapper (3 lines):
+   - Calls `format_output_json` and prints result
+
+2. **`output_formatted`** - Thin wrapper (15 lines, 92% reduction from 188 lines):
+   - Handles TTY detection
+   - Calls `format_output_text` for metadata (stderr)
+   - Prints content to stdout
+   - Preserves piping behavior
+
+**Comprehensive Tests Added (11 tests, all passing)**:
+- **JSON Formatter** (3 tests): with/without pagination, selector fields
+- **Text Formatter** (8 tests): basic structure, metadata, selector info, HTML/Markdown modes, usage hints
+
+**Verification**:
+- ✅ All 11 tests pass without mocking
+- ✅ Builds successfully (debug and release)
+- ✅ CLI functionality unchanged (backward compatible)
+- ✅ JSON output works correctly
+- ✅ Pagination works correctly
+- ✅ TTY detection preserved
+
+**Key Achievement**: Successfully established the output formatting pattern for Phase 2. Pure functions handle formatting, thin wrappers handle I/O.
+
+**Original Implementation Details** (for reference - see below for detailed steps):
 
 **Step 1: Create Pure JSON Formatter**
 
@@ -1705,7 +1768,9 @@ This assumes one person working sequentially. With multiple developers, Stages 1
 
 This refactoring plan provides a clear path from the current mixed architecture to a clean Functional Core - Imperative Shell implementation using a **two-crate architecture** (`mcptools_core` for pure functions, `mcptools` for I/O).
 
-**Progress Update**: **Phase 1 is 100% COMPLETE!** All six core refactorings have been successfully completed:
+**Progress Update**: **Phase 1 is 100% COMPLETE! Phase 2 has begun!**
+
+**Phase 1 - Core Data Functions** (All six refactorings completed):
 
 1. **Section 1.3: Atlassian Confluence** (2025-10-28) - Established the architectural pattern
 2. **Section 1.1: Atlassian Jira - Issue List** (2025-10-28) - Validated pattern consistency
@@ -1714,24 +1779,36 @@ This refactoring plan provides a clear path from the current mixed architecture 
 5. **Section 1.5: HackerNews - Item Read** (2025-10-28) - Comment transformation and post output building
 6. **Section 1.6: Markdown Converter** (2025-10-28) - Most complex refactoring with browser automation
 
+**Phase 2 - Output Functions** (Started, 1 of 4 completed):
+
+1. **Section 2.1: Markdown Fetch Output Formatting** (2025-10-28) - Established output formatting pattern
+
 These implementations demonstrate:
 - ✅ Complete separation of concerns between pure functions and I/O
-- ✅ Comprehensive testing without mocking (89 tests total, all passing)
+- ✅ Comprehensive testing without mocking (100 tests total - 89 core + 11 output - all passing)
 - ✅ Maintainable code structure that's easy to reason about
 - ✅ Proven template pattern successfully applied across all modules
 - ✅ Backward compatibility maintained (CLI and MCP handlers unchanged)
 - ✅ Successful dependency management (regex, chrono, serde_json, html2md, scraper added to core as needed)
-- ✅ Even complex browser automation can be cleanly separated
+- ✅ Even complex browser automation and output formatting can be cleanly separated
 
 By following the execution order and applying the established pattern consistently across all modules, we'll achieve a more testable, maintainable, and robust codebase. The investment in this refactoring will pay dividends in reduced debugging time, easier feature additions, and greater confidence in code correctness.
 
 The key principle throughout is: **data transformation logic should be pure and ignorant of where data comes from or where it goes**. By adhering to this principle and enforcing it through crate boundaries, we create a codebase that's easier to reason about, test, and extend.
 
-**Phase 1 Achievement Summary**:
-- **6/6 refactorings completed** (100%)
-- **89 tests** added to core crate (all passing, no mocking required)
-- **Average code reduction**: ~45% in refactored shell functions
+**Overall Achievement Summary**:
+- **Phase 1**: 6/6 refactorings completed (100%)
+  - 89 tests added to core crate (all passing, no mocking required)
+  - Average code reduction: ~45% in refactored shell functions
+- **Phase 2**: 1/4 refactorings completed (25%)
+  - 11 tests added to shell crate (all passing, no mocking required)
+  - 92% code reduction in wrapper functions (output formatting)
 - **Zero regressions**: All CLI and MCP functionality works identically
-- **Pattern established**: Clear template for future work (Phases 2-3)
+- **Pattern established**: Clear template for both core transformations and output formatting
 
-**Next Steps**: Phase 1 is complete! The codebase now has a solid foundation of pure transformation functions. Phase 2 (Output Functions) and Phase 3 (Supporting Refactorings) can be tackled when needed, but the critical business logic separation is done.
+**Next Steps**: Phase 2 (Output Functions) is in progress. Three remaining sections:
+- Section 2.2: Markdown TOC Output Formatting
+- Section 2.3: HackerNews Read Item Output Formatting
+- Section 2.4: HackerNews List Items Output Formatting
+
+After Phase 2, Phase 3 (Supporting Refactorings) can be tackled when needed.
