@@ -1504,12 +1504,10 @@ dependencies = [
  "env_logger",
  "futures",
  "headless_chrome",
- "html2md",
  "mcptools_core",
  "prettytable",
  "regex",
  "reqwest",
- "scraper",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -1524,7 +1522,9 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "html-escape",
+ "html2md",
  "regex",
+ "scraper",
  "serde",
  "serde_json",
 ]

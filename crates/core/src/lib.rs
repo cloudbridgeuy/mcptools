@@ -34,6 +34,7 @@
 //!
 //! - [`atlassian`]: Transformations for Atlassian services (Jira, Confluence)
 //! - [`hn`]: Transformations for HackerNews API data
+//! - [`md`]: Transformations for web page to Markdown conversion
 //!
 //! Each module contains:
 //!
@@ -73,3 +74,4 @@
 
 pub mod atlassian;
 pub mod hn;
+pub mod md;
