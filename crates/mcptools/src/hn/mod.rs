@@ -9,6 +9,9 @@ pub mod read_item;
 pub use list_items::list_items_data;
 pub use read_item::read_item_data;
 
+// Re-export domain types from core
+pub use mcptools_core::hn::{strip_html, CommentOutput, PaginationInfo, PostOutput};
+
 const HN_API_BASE: &str = "https://hacker-news.firebaseio.com/v0";
 
 #[derive(Debug, clap::Parser)]
@@ -28,42 +31,6 @@ pub enum Commands {
     /// List HackerNews stories (top, new, best, ask, show, job)
     #[clap(name = "list")]
     List(list_items::ListOptions),
-}
-
-// Types for read_item (not yet refactored)
-use serde::Serialize;
-
-#[derive(Debug, Serialize)]
-pub struct PostOutput {
-    pub id: u64,
-    pub title: Option<String>,
-    pub url: Option<String>,
-    pub author: Option<String>,
-    pub score: Option<u64>,
-    pub time: Option<String>,
-    pub text: Option<String>,
-    pub total_comments: Option<u64>,
-    pub comments: Vec<CommentOutput>,
-    pub pagination: PaginationInfo,
-}
-
-#[derive(Debug, Serialize)]
-pub struct CommentOutput {
-    pub id: u64,
-    pub author: Option<String>,
-    pub time: Option<String>,
-    pub text: Option<String>,
-    pub replies_count: usize,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PaginationInfo {
-    pub current_page: usize,
-    pub total_pages: usize,
-    pub total_comments: usize,
-    pub limit: usize,
-    pub next_page_command: Option<String>,
-    pub prev_page_command: Option<String>,
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
@@ -125,20 +92,6 @@ pub async fn fetch_item(client: &reqwest::Client, id: u64) -> Result<HnItem> {
         .map_err(|e| eyre!("Failed to parse item {}: {}", id, e))?;
 
     Ok(item)
-}
-
-pub fn strip_html(text: &str) -> String {
-    // Simple HTML stripping - remove tags and decode common entities
-    let re = Regex::new(r"<[^>]*>").unwrap();
-    let stripped = re.replace_all(text, "");
-    stripped
-        .replace("&gt;", ">")
-        .replace("&lt;", "<")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&#x2F;", "/")
-        .replace("<p>", "\n")
 }
 
 pub fn truncate_text(text: &str, max_len: usize) -> String {

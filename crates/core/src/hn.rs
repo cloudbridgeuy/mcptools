@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 /// HackerNews item from API
@@ -49,6 +50,42 @@ pub struct ListOutput {
     pub story_type: String,
     pub items: Vec<ListItem>,
     pub pagination: ListPaginationInfo,
+}
+
+/// Post output with comments and pagination
+#[derive(Debug, Serialize, Clone)]
+pub struct PostOutput {
+    pub id: u64,
+    pub title: Option<String>,
+    pub url: Option<String>,
+    pub author: Option<String>,
+    pub score: Option<u64>,
+    pub time: Option<String>,
+    pub text: Option<String>,
+    pub total_comments: Option<u64>,
+    pub comments: Vec<CommentOutput>,
+    pub pagination: PaginationInfo,
+}
+
+/// Individual comment output
+#[derive(Debug, Serialize, Clone)]
+pub struct CommentOutput {
+    pub id: u64,
+    pub author: Option<String>,
+    pub time: Option<String>,
+    pub text: Option<String>,
+    pub replies_count: usize,
+}
+
+/// Pagination metadata for post reading
+#[derive(Debug, Serialize, Clone)]
+pub struct PaginationInfo {
+    pub current_page: usize,
+    pub total_pages: usize,
+    pub total_comments: usize,
+    pub limit: usize,
+    pub next_page_command: Option<String>,
+    pub prev_page_command: Option<String>,
 }
 
 /// Convert Unix timestamp to formatted string
@@ -140,6 +177,86 @@ pub fn transform_hn_items(
             current_page: page,
             total_pages,
             total_items,
+            limit,
+            next_page_command: next_page,
+            prev_page_command: prev_page,
+        },
+    }
+}
+
+/// Strip HTML tags and decode HTML entities from text
+///
+/// Removes all HTML tags and decodes common HTML entities to their
+/// plain text equivalents.
+pub fn strip_html(text: &str) -> String {
+    let re = Regex::new(r"<[^>]*>").unwrap();
+    let stripped = re.replace_all(text, "");
+    stripped
+        .replace("&gt;", ">")
+        .replace("&lt;", "<")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#x2F;", "/")
+        .replace("<p>", "\n")
+}
+
+/// Transform HN items to comment outputs
+///
+/// Converts raw HN API items into structured comment outputs with
+/// formatted timestamps and cleaned text.
+pub fn transform_comments(comments: Vec<HnItem>) -> Vec<CommentOutput> {
+    comments
+        .iter()
+        .map(|c| CommentOutput {
+            id: c.id,
+            author: c.by.clone(),
+            time: format_timestamp(c.time),
+            text: c.text.as_ref().map(|t| strip_html(t)),
+            replies_count: c.kids.as_ref().map(|k| k.len()).unwrap_or(0),
+        })
+        .collect()
+}
+
+/// Build post output with pagination metadata
+///
+/// Constructs a complete post output including the post details,
+/// comments, and pagination information with navigation commands.
+pub fn build_post_output(
+    item: HnItem,
+    comments: Vec<CommentOutput>,
+    page: usize,
+    limit: usize,
+    total_comments: usize,
+) -> PostOutput {
+    let total_pages = total_comments.div_ceil(limit);
+
+    let next_page = if page < total_pages {
+        Some(format!("mcptools hn read {} --page {}", item.id, page + 1))
+    } else {
+        None
+    };
+
+    let prev_page = if page > 1 {
+        Some(format!("mcptools hn read {} --page {}", item.id, page - 1))
+    } else {
+        None
+    };
+
+    PostOutput {
+        id: item.id,
+        title: item.title.clone(),
+        url: item.url.clone(),
+        author: item.by.clone(),
+        score: item.score,
+        time: format_timestamp(item.time),
+        text: item.text.as_ref().map(|t| strip_html(t)),
+        total_comments: item.descendants,
+        comments,
+        pagination: PaginationInfo {
+            current_page: page,
+            total_pages,
+            total_comments,
             limit,
             next_page_command: next_page,
             prev_page_command: prev_page,
@@ -444,5 +561,361 @@ mod tests {
             let output = transform_hn_items(items.clone(), story_type.to_string(), 1, 10, 1);
             assert_eq!(output.story_type, story_type);
         }
+    }
+
+    #[test]
+    fn test_strip_html_tags() {
+        let html = "<p>Hello <strong>world</strong></p>";
+        let stripped = strip_html(html);
+        assert_eq!(stripped, "Hello world");
+    }
+
+    #[test]
+    fn test_strip_html_entities() {
+        let html = "1 &lt; 2 &amp; 3 &gt; 0 &quot;test&quot; &#x27;yes&#x27; &#x2F;path";
+        let stripped = strip_html(html);
+        assert_eq!(stripped, "1 < 2 & 3 > 0 \"test\" 'yes' /path");
+    }
+
+    #[test]
+    fn test_strip_html_complex() {
+        let html = "<p>First paragraph &amp; some <em>emphasis</em></p><p>Second paragraph with &lt;code&gt;</p>";
+        let stripped = strip_html(html);
+        assert_eq!(
+            stripped,
+            "First paragraph & some emphasisSecond paragraph with <code>"
+        );
+    }
+
+    #[test]
+    fn test_transform_comments_single() {
+        let comments = vec![HnItem {
+            id: 100,
+            item_type: "comment".to_string(),
+            by: Some("commenter".to_string()),
+            time: Some(1609459200),
+            text: Some("<p>Great post!</p>".to_string()),
+            dead: None,
+            deleted: None,
+            parent: Some(99),
+            kids: Some(vec![101, 102]),
+            url: None,
+            score: None,
+            title: None,
+            descendants: None,
+        }];
+
+        let outputs = transform_comments(comments);
+
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].id, 100);
+        assert_eq!(outputs[0].author, Some("commenter".to_string()));
+        assert_eq!(outputs[0].time, Some("2021-01-01 00:00:00 UTC".to_string()));
+        assert_eq!(outputs[0].text, Some("Great post!".to_string()));
+        assert_eq!(outputs[0].replies_count, 2);
+    }
+
+    #[test]
+    fn test_transform_comments_multiple() {
+        let comments = vec![
+            HnItem {
+                id: 100,
+                item_type: "comment".to_string(),
+                by: Some("user1".to_string()),
+                time: Some(1609459200),
+                text: Some("First comment".to_string()),
+                dead: None,
+                deleted: None,
+                parent: Some(99),
+                kids: Some(vec![101]),
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+            HnItem {
+                id: 102,
+                item_type: "comment".to_string(),
+                by: Some("user2".to_string()),
+                time: Some(1609459300),
+                text: Some("Second comment".to_string()),
+                dead: None,
+                deleted: None,
+                parent: Some(99),
+                kids: None,
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+        ];
+
+        let outputs = transform_comments(comments);
+
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].id, 100);
+        assert_eq!(outputs[0].replies_count, 1);
+        assert_eq!(outputs[1].id, 102);
+        assert_eq!(outputs[1].replies_count, 0);
+    }
+
+    #[test]
+    fn test_transform_comments_missing_fields() {
+        let comments = vec![HnItem {
+            id: 100,
+            item_type: "comment".to_string(),
+            by: None,
+            time: None,
+            text: None,
+            dead: None,
+            deleted: None,
+            parent: Some(99),
+            kids: None,
+            url: None,
+            score: None,
+            title: None,
+            descendants: None,
+        }];
+
+        let outputs = transform_comments(comments);
+
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].id, 100);
+        assert_eq!(outputs[0].author, None);
+        assert_eq!(outputs[0].time, None);
+        assert_eq!(outputs[0].text, None);
+        assert_eq!(outputs[0].replies_count, 0);
+    }
+
+    #[test]
+    fn test_build_post_output_full() {
+        let item = HnItem {
+            id: 12345,
+            item_type: "story".to_string(),
+            by: Some("author".to_string()),
+            time: Some(1609459200),
+            text: Some("<p>Story text</p>".to_string()),
+            dead: None,
+            deleted: None,
+            parent: None,
+            kids: Some(vec![100, 101, 102]),
+            url: Some("https://example.com".to_string()),
+            score: Some(250),
+            title: Some("Test Story".to_string()),
+            descendants: Some(50),
+        };
+
+        let comments = vec![
+            CommentOutput {
+                id: 100,
+                author: Some("user1".to_string()),
+                time: Some("2021-01-01 00:10:00 UTC".to_string()),
+                text: Some("First comment".to_string()),
+                replies_count: 2,
+            },
+            CommentOutput {
+                id: 101,
+                author: Some("user2".to_string()),
+                time: Some("2021-01-01 00:20:00 UTC".to_string()),
+                text: Some("Second comment".to_string()),
+                replies_count: 0,
+            },
+        ];
+
+        let output = build_post_output(item, comments, 1, 10, 50);
+
+        assert_eq!(output.id, 12345);
+        assert_eq!(output.title, Some("Test Story".to_string()));
+        assert_eq!(output.url, Some("https://example.com".to_string()));
+        assert_eq!(output.author, Some("author".to_string()));
+        assert_eq!(output.score, Some(250));
+        assert_eq!(output.time, Some("2021-01-01 00:00:00 UTC".to_string()));
+        assert_eq!(output.text, Some("Story text".to_string()));
+        assert_eq!(output.total_comments, Some(50));
+        assert_eq!(output.comments.len(), 2);
+        assert_eq!(output.pagination.current_page, 1);
+        assert_eq!(output.pagination.total_pages, 5);
+        assert_eq!(output.pagination.total_comments, 50);
+        assert_eq!(output.pagination.limit, 10);
+    }
+
+    #[test]
+    fn test_build_post_output_minimal() {
+        let item = HnItem {
+            id: 999,
+            item_type: "story".to_string(),
+            by: None,
+            time: None,
+            text: None,
+            dead: None,
+            deleted: None,
+            parent: None,
+            kids: None,
+            url: None,
+            score: None,
+            title: None,
+            descendants: None,
+        };
+
+        let output = build_post_output(item, vec![], 1, 10, 0);
+
+        assert_eq!(output.id, 999);
+        assert_eq!(output.title, None);
+        assert_eq!(output.url, None);
+        assert_eq!(output.author, None);
+        assert_eq!(output.score, None);
+        assert_eq!(output.time, None);
+        assert_eq!(output.text, None);
+        assert_eq!(output.total_comments, None);
+        assert_eq!(output.comments.len(), 0);
+        assert_eq!(output.pagination.total_comments, 0);
+        assert_eq!(output.pagination.total_pages, 0);
+    }
+
+    #[test]
+    fn test_build_post_output_first_page() {
+        let item = HnItem {
+            id: 12345,
+            item_type: "story".to_string(),
+            by: Some("author".to_string()),
+            time: Some(1609459200),
+            text: None,
+            dead: None,
+            deleted: None,
+            parent: None,
+            kids: Some(vec![100, 101]),
+            url: None,
+            score: Some(100),
+            title: Some("Test".to_string()),
+            descendants: Some(50),
+        };
+
+        let output = build_post_output(item, vec![], 1, 10, 50);
+
+        assert_eq!(output.pagination.current_page, 1);
+        assert_eq!(output.pagination.total_pages, 5);
+        assert!(output.pagination.prev_page_command.is_none());
+        assert!(output.pagination.next_page_command.is_some());
+        assert_eq!(
+            output.pagination.next_page_command.unwrap(),
+            "mcptools hn read 12345 --page 2"
+        );
+    }
+
+    #[test]
+    fn test_build_post_output_last_page() {
+        let item = HnItem {
+            id: 12345,
+            item_type: "story".to_string(),
+            by: Some("author".to_string()),
+            time: Some(1609459200),
+            text: None,
+            dead: None,
+            deleted: None,
+            parent: None,
+            kids: None,
+            url: None,
+            score: Some(100),
+            title: Some("Test".to_string()),
+            descendants: Some(50),
+        };
+
+        let output = build_post_output(item, vec![], 5, 10, 50);
+
+        assert_eq!(output.pagination.current_page, 5);
+        assert_eq!(output.pagination.total_pages, 5);
+        assert!(output.pagination.next_page_command.is_none());
+        assert!(output.pagination.prev_page_command.is_some());
+        assert_eq!(
+            output.pagination.prev_page_command.unwrap(),
+            "mcptools hn read 12345 --page 4"
+        );
+    }
+
+    #[test]
+    fn test_build_post_output_middle_page() {
+        let item = HnItem {
+            id: 12345,
+            item_type: "story".to_string(),
+            by: Some("author".to_string()),
+            time: Some(1609459200),
+            text: None,
+            dead: None,
+            deleted: None,
+            parent: None,
+            kids: None,
+            url: None,
+            score: Some(100),
+            title: Some("Test".to_string()),
+            descendants: Some(50),
+        };
+
+        let output = build_post_output(item, vec![], 3, 10, 50);
+
+        assert_eq!(output.pagination.current_page, 3);
+        assert_eq!(output.pagination.total_pages, 5);
+        assert!(output.pagination.next_page_command.is_some());
+        assert!(output.pagination.prev_page_command.is_some());
+        assert_eq!(
+            output.pagination.next_page_command.unwrap(),
+            "mcptools hn read 12345 --page 4"
+        );
+        assert_eq!(
+            output.pagination.prev_page_command.unwrap(),
+            "mcptools hn read 12345 --page 2"
+        );
+    }
+
+    #[test]
+    fn test_build_post_output_single_page() {
+        let item = HnItem {
+            id: 12345,
+            item_type: "story".to_string(),
+            by: Some("author".to_string()),
+            time: Some(1609459200),
+            text: None,
+            dead: None,
+            deleted: None,
+            parent: None,
+            kids: None,
+            url: None,
+            score: Some(100),
+            title: Some("Test".to_string()),
+            descendants: Some(5),
+        };
+
+        let output = build_post_output(item, vec![], 1, 10, 5);
+
+        assert_eq!(output.pagination.current_page, 1);
+        assert_eq!(output.pagination.total_pages, 1);
+        assert!(output.pagination.next_page_command.is_none());
+        assert!(output.pagination.prev_page_command.is_none());
+    }
+
+    #[test]
+    fn test_build_post_output_empty_comments() {
+        let item = HnItem {
+            id: 12345,
+            item_type: "story".to_string(),
+            by: Some("author".to_string()),
+            time: Some(1609459200),
+            text: None,
+            dead: None,
+            deleted: None,
+            parent: None,
+            kids: None,
+            url: None,
+            score: Some(100),
+            title: Some("Test".to_string()),
+            descendants: Some(0),
+        };
+
+        let output = build_post_output(item, vec![], 1, 10, 0);
+
+        assert_eq!(output.comments.len(), 0);
+        assert_eq!(output.pagination.total_comments, 0);
+        assert_eq!(output.pagination.total_pages, 0);
+        assert!(output.pagination.next_page_command.is_none());
+        assert!(output.pagination.prev_page_command.is_none());
     }
 }

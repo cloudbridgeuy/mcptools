@@ -158,16 +158,24 @@ pub struct JiraIssueResponse {
   - All domain models (HnItem, ListItem, ListOutput, ListPaginationInfo) now in core
   - Verified with real API call - fully functional
 
+- **Section 1.5**: HackerNews - Item Read Transformation ✅
+  - Date Completed: 2025-10-28
+  - Files: `crates/core/src/hn.rs` (extended to 927 lines, +13 tests), `crates/mcptools/src/hn/read_item.rs` (refactored from 101 lines to 54 lines, 47% reduction), `crates/mcptools/src/hn/mod.rs` (removed domain models and strip_html, added re-exports)
+  - Tests: 13/13 passing (total: 61 tests across core crate - 10 Confluence + 21 Jira + 30 HN)
+  - Pure transformation functions: `strip_html`, `transform_comments`, `build_post_output`
+  - Successfully moved domain models (PostOutput, CommentOutput, PaginationInfo) to core
+  - Clean separation: data function reduced from 101 lines to 54 lines (47% reduction)
+  - All transformation logic testable without HTTP mocking
+
 ### In Progress 🚧
 - None
 
 ### Pending 📋
-- **Section 1.5**: HackerNews - Item Read Transformation
 - **Section 1.6**: Markdown Converter - Fetch and Transform
 - **Phase 2**: Output Functions (4 sections)
 - **Phase 3**: Supporting Refactorings (2 sections)
 
-**Overall Progress**: 4/11 core refactorings completed (36%)
+**Overall Progress**: 5/11 core refactorings completed (45%)
 
 ---
 
@@ -1644,21 +1652,24 @@ This assumes one person working sequentially. With multiple developers, Stages 1
 
 This refactoring plan provides a clear path from the current mixed architecture to a clean Functional Core - Imperative Shell implementation using a **two-crate architecture** (`mcptools_core` for pure functions, `mcptools` for I/O).
 
-**Progress Update**: Two refactorings have been successfully completed:
+**Progress Update**: Five refactorings have been successfully completed:
 
 1. **Section 1.3: Atlassian Confluence** (2025-10-28) - Established the architectural pattern
 2. **Section 1.1: Atlassian Jira - Issue List** (2025-10-28) - Validated pattern consistency
+3. **Section 1.2: Atlassian Jira - Ticket Detail** (2025-10-28) - Complex transformation with ADF extraction
+4. **Section 1.4: HackerNews - Story List** (2025-10-28) - First HN module with pagination
+5. **Section 1.5: HackerNews - Item Read** (2025-10-28) - Comment transformation and post output building
 
 These implementations demonstrate:
 - ✅ Complete separation of concerns between pure functions and I/O
-- ✅ Comprehensive testing without mocking (18 tests total, all passing)
+- ✅ Comprehensive testing without mocking (61 tests total, all passing)
 - ✅ Maintainable code structure that's easy to reason about
 - ✅ Proven template pattern ready for replication across remaining modules
 - ✅ Backward compatibility maintained (CLI and MCP handlers unchanged)
-- ✅ Successful dependency management (serde_json added to core as needed)
+- ✅ Successful dependency management (regex, chrono, serde_json added to core as needed)
 
 By following the execution order and applying the established pattern consistently across all modules, we'll achieve a more testable, maintainable, and robust codebase. The investment in this refactoring will pay dividends in reduced debugging time, easier feature additions, and greater confidence in code correctness.
 
 The key principle throughout is: **data transformation logic should be pure and ignorant of where data comes from or where it goes**. By adhering to this principle and enforcing it through crate boundaries, we create a codebase that's easier to reason about, test, and extend.
 
-**Next Steps**: Continue with Section 1.2 (Atlassian Jira - Ticket Detail Transformation), which will be more complex with multiple transformation functions for tickets, comments, and ADF extraction.
+**Next Steps**: Continue with Section 1.6 (Markdown Converter - Fetch and Transform), the most complex refactoring involving browser automation and HTML processing.

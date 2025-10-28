@@ -1,13 +1,13 @@
 use crate::prelude::{println, *};
 use colored::Colorize;
 use futures::future::join_all;
-use mcptools_core::hn::{format_timestamp, HnItem};
+use mcptools_core::hn::{
+    build_post_output, format_timestamp, strip_html, transform_comments, CommentOutput, HnItem,
+    PaginationInfo, PostOutput,
+};
 use serde::Serialize;
 
-use super::{
-    extract_item_id, fetch_item, strip_html, truncate_text, CommentOutput, PaginationInfo,
-    PostOutput,
-};
+use super::{extract_item_id, fetch_item, truncate_text};
 
 #[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ReadOptions {
@@ -555,12 +555,11 @@ pub async fn read_item_data(
 ) -> Result<PostOutput> {
     let item_id = extract_item_id(&item)?;
 
-    // If thread option is provided, read the comment thread instead
     if thread.is_some() {
         return Err(eyre!("Thread reading not supported in data mode yet"));
     }
 
-    // Fetch the main item
+    // Fetch the main item (I/O)
     let client = reqwest::Client::new();
     let hn_item = fetch_item(&client, item_id).await?;
 
@@ -573,11 +572,9 @@ pub async fn read_item_data(
         ));
     }
 
-    // Get top-level comment IDs
+    // Get top-level comment IDs and calculate pagination bounds
     let comment_ids = hn_item.kids.clone().unwrap_or_default();
     let total_comments = comment_ids.len();
-
-    // Calculate pagination
     let start = (page - 1) * limit;
     let paginated_ids: Vec<u64> = comment_ids
         .iter()
@@ -586,7 +583,7 @@ pub async fn read_item_data(
         .copied()
         .collect();
 
-    // Fetch comments for this page
+    // Fetch comments for this page (I/O)
     let comment_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
     let comments: Vec<HnItem> = join_all(comment_futures)
         .await
@@ -594,57 +591,13 @@ pub async fn read_item_data(
         .filter_map(|r| r.ok())
         .collect();
 
-    let total_pages = total_comments.div_ceil(limit);
-
-    // Build comment outputs
-    let comment_outputs: Vec<CommentOutput> = comments
-        .iter()
-        .map(|c| CommentOutput {
-            id: c.id,
-            author: c.by.clone(),
-            time: format_timestamp(c.time),
-            text: c.text.as_ref().map(|t| strip_html(t)),
-            replies_count: c.kids.as_ref().map(|k| k.len()).unwrap_or(0),
-        })
-        .collect();
-
-    let next_page = if page < total_pages {
-        Some(format!(
-            "mcptools hn read {} --page {}",
-            hn_item.id,
-            page + 1
-        ))
-    } else {
-        None
-    };
-
-    let prev_page = if page > 1 {
-        Some(format!(
-            "mcptools hn read {} --page {}",
-            hn_item.id,
-            page - 1
-        ))
-    } else {
-        None
-    };
-
-    Ok(PostOutput {
-        id: hn_item.id,
-        title: hn_item.title.clone(),
-        url: hn_item.url.clone(),
-        author: hn_item.by.clone(),
-        score: hn_item.score,
-        time: format_timestamp(hn_item.time),
-        text: hn_item.text.as_ref().map(|t| strip_html(t)),
-        total_comments: hn_item.descendants,
-        comments: comment_outputs,
-        pagination: PaginationInfo {
-            current_page: page,
-            total_pages,
-            total_comments,
-            limit,
-            next_page_command: next_page,
-            prev_page_command: prev_page,
-        },
-    })
+    // Transform comments and build output using core functions
+    let comment_outputs = transform_comments(comments);
+    Ok(build_post_output(
+        hn_item,
+        comment_outputs,
+        page,
+        limit,
+        total_comments,
+    ))
 }
