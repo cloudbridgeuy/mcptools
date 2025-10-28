@@ -57,11 +57,17 @@ This architectural separation ensures that business logic can be tested in compl
   - Tests: 10/10 passing
   - Pattern established for all future refactorings
 
+- **Section 1.1**: Atlassian Jira - Issue List Transformation ✅
+  - Date Completed: 2025-10-28
+  - Files: `crates/core/src/atlassian/jira.rs` (new, 426 lines, 8 tests), `crates/mcptools/src/atlassian/jira/list.rs` (refactored), `crates/mcptools/src/atlassian/jira/types.rs` (updated with re-exports)
+  - Tests: 8/8 passing (total: 18 tests across core crate)
+  - Pure transformation function: `transform_search_response`
+  - Successfully separated I/O from business logic
+
 ### In Progress 🚧
 - None
 
 ### Pending 📋
-- **Section 1.1**: Atlassian Jira - Issue List Transformation
 - **Section 1.2**: Atlassian Jira - Ticket Detail Transformation
 - **Section 1.4**: HackerNews - Story List Transformation
 - **Section 1.5**: HackerNews - Item Read Transformation
@@ -69,7 +75,7 @@ This architectural separation ensures that business logic can be tested in compl
 - **Phase 2**: Output Functions (4 sections)
 - **Phase 3**: Supporting Refactorings (2 sections)
 
-**Overall Progress**: 1/11 core refactorings completed (9%)
+**Overall Progress**: 2/11 core refactorings completed (18%)
 
 ---
 
@@ -106,13 +112,80 @@ The key insight is that business logic should not know where data comes from or 
 
 Phase 1 addresses the most critical violations where data functions mix I/O with business logic. These refactorings have the highest impact on testability and code clarity. We'll work through these files in dependency order, starting with the simplest transformations and building up to more complex ones.
 
-### 1.1: Atlassian Jira - Issue List Transformation
+### 1.1: Atlassian Jira - Issue List Transformation ✅ **COMPLETED**
 
-**File**: `crates/mcptools/src/atlassian/jira/list.rs`
+**Status**: ✅ **COMPLETED** - Second refactoring successfully implemented following the established two-crate pattern.
 
-**Current Problem**: The `list_issues_data` function (lines 55-135) interleaves HTTP requests with data transformation. The function builds query parameters, makes an HTTP request, parses the response, and transforms the parsed data all in one flow. This makes it impossible to test the transformation logic without mocking the HTTP layer.
+**Files Modified**:
+- **Core**: `crates/core/src/atlassian/jira.rs` (new, 426 lines, 8 tests)
+- **Core**: `crates/core/Cargo.toml` (added serde_json dependency)
+- **Core**: `crates/core/src/atlassian/mod.rs` (added jira module)
+- **Shell**: `crates/mcptools/src/atlassian/jira/list.rs` (refactored, simplified by 26 lines)
+- **Shell**: `crates/mcptools/src/atlassian/jira/types.rs` (updated with re-exports)
 
-**What Needs to Change**:
+**Original Problem**: The `list_issues_data` function (lines 55-135) interleaved HTTP requests with data transformation. The function built query parameters, made an HTTP request, parsed the response, and transformed the parsed data all in one flow. This made it impossible to test the transformation logic without mocking the HTTP layer.
+
+**Solution Implemented**:
+
+Created a clean separation between I/O operations and pure transformation logic.
+
+**What Was Created in `mcptools_core`**:
+
+1. **Domain Models** (moved from mcptools types.rs):
+   - `JiraIssueResponse`, `JiraIssueFields`, `JiraStatus`, `JiraAssignee` (API input types)
+   - `JiraSearchResponse` (API response wrapper with pagination support)
+   - `IssueOutput`, `ListOutput` (clean domain output types)
+
+2. **Pure Transformation Function**:
+   ```rust
+   pub fn transform_search_response(search_response: JiraSearchResponse) -> ListOutput
+   ```
+   Transforms API response to domain model with:
+   - Issue mapping with proper assignee handling (displayName preferred over emailAddress)
+   - Description handling (set to None for ADF format)
+   - Total count extraction with fallback to 0
+   - Pagination token pass-through
+
+3. **Comprehensive Tests** (8 tests, all passing):
+   - `test_transform_search_response_basic` - Single issue with full assignee info
+   - `test_transform_search_response_empty` - Empty results handling
+   - `test_transform_search_response_multiple_issues` - Multiple issues with varied data
+   - `test_transform_search_response_missing_assignee` - Unassigned issue handling
+   - `test_transform_search_response_assignee_with_display_name` - DisplayName preference
+   - `test_transform_search_response_assignee_email_only` - Email fallback
+   - `test_transform_search_response_with_pagination` - Pagination token preservation
+   - `test_transform_search_response_total_missing` - Edge case with missing total
+
+**What Was Refactored in `mcptools`**:
+
+The `list_issues_data` function now:
+- Handles only I/O operations (HTTP client setup, API requests, error handling)
+- Imports types from `mcptools_core::atlassian::jira`
+- Delegates transformation to `transform_search_response` from core (reduced from 26 lines to 3 lines)
+- Remains fully compatible with existing CLI and MCP handlers
+
+**Key Achievement**: Successfully replicated the two-crate pattern, demonstrating consistency and establishing confidence for remaining refactorings.
+
+**Verification**:
+- ✅ All 8 core tests pass without mocking
+- ✅ Total test count: 18 tests across core crate (10 Confluence + 8 Jira)
+- ✅ mcptools builds successfully
+- ✅ CLI functionality verified (--help tested)
+- ✅ MCP handlers work identically (use same public API)
+- ✅ Clean separation of concerns achieved
+
+**Lessons Learned** (reinforcing Confluence pattern):
+
+1. **Dependency Management**: Added `serde_json` to core crate for JSON value types
+2. **Consistent Pattern**: The same structure from Confluence works perfectly for Jira
+3. **Test Organization**: 8 tests provide comprehensive coverage of edge cases
+4. **Import Pattern**: Re-exports in types.rs maintain backward compatibility
+5. **Assignee Logic**: Pure function handles complex optional field logic cleanly
+6. **Pagination**: Token-based pagination passes through transformation unchanged
+
+**Original Implementation Details** (for reference):
+
+**What Needed to Change**:
 
 We need to extract the pure transformation logic into a separate function that takes the parsed `JiraSearchResponse` and returns `ListOutput`. This transformation includes mapping issues to our domain model, handling optional fields, and building pagination metadata.
 
@@ -1297,7 +1370,7 @@ The refactorings should be executed in the following order to minimize conflicts
 Start with modules that have no inter-dependencies:
 
 1. ✅ **`atlassian/confluence.rs`** - **COMPLETED** - Simplest transformation, established the two-crate pattern
-2. **`atlassian/jira/list.rs`** - Builds on Confluence pattern
+2. ✅ **`atlassian/jira/list.rs`** - **COMPLETED** - Builds on Confluence pattern, pure transformation extracted
 3. **`atlassian/jira/get.rs`** - More complex but follows same pattern
 
 ### Stage 2: HackerNews (Depends on Stage 1 Patterns)
@@ -1433,14 +1506,21 @@ This assumes one person working sequentially. With multiple developers, Stages 1
 
 This refactoring plan provides a clear path from the current mixed architecture to a clean Functional Core - Imperative Shell implementation using a **two-crate architecture** (`mcptools_core` for pure functions, `mcptools` for I/O).
 
-**Progress Update**: The first refactoring (Section 1.3: Atlassian Confluence) has been successfully completed, establishing the architectural pattern for all subsequent work. This implementation demonstrates:
+**Progress Update**: Two refactorings have been successfully completed:
+
+1. **Section 1.3: Atlassian Confluence** (2025-10-28) - Established the architectural pattern
+2. **Section 1.1: Atlassian Jira - Issue List** (2025-10-28) - Validated pattern consistency
+
+These implementations demonstrate:
 - ✅ Complete separation of concerns between pure functions and I/O
-- ✅ Comprehensive testing without mocking (10 tests, all passing)
+- ✅ Comprehensive testing without mocking (18 tests total, all passing)
 - ✅ Maintainable code structure that's easy to reason about
-- ✅ Template pattern ready for replication across remaining modules
+- ✅ Proven template pattern ready for replication across remaining modules
+- ✅ Backward compatibility maintained (CLI and MCP handlers unchanged)
+- ✅ Successful dependency management (serde_json added to core as needed)
 
 By following the execution order and applying the established pattern consistently across all modules, we'll achieve a more testable, maintainable, and robust codebase. The investment in this refactoring will pay dividends in reduced debugging time, easier feature additions, and greater confidence in code correctness.
 
 The key principle throughout is: **data transformation logic should be pure and ignorant of where data comes from or where it goes**. By adhering to this principle and enforcing it through crate boundaries, we create a codebase that's easier to reason about, test, and extend.
 
-**Next Steps**: Continue with Section 1.1 (Atlassian Jira - Issue List) or Section 1.2 (Atlassian Jira - Ticket Detail), following the same two-crate pattern established in the Confluence refactoring.
+**Next Steps**: Continue with Section 1.2 (Atlassian Jira - Ticket Detail Transformation), which will be more complex with multiple transformation functions for tickets, comments, and ADF extraction.

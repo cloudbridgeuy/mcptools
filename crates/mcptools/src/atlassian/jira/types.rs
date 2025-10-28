@@ -1,38 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-/// Jira issue response from API
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct JiraIssueResponse {
-    pub key: String,
-    pub fields: JiraIssueFields,
-}
-
-/// Fields from Jira issue
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct JiraIssueFields {
-    pub summary: String,
-    #[serde(default)]
-    pub description: Option<serde_json::Value>,
-    pub status: JiraStatus,
-    #[serde(default)]
-    pub assignee: Option<JiraAssignee>,
-}
-
-/// Jira status field
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct JiraStatus {
-    pub name: String,
-}
-
-/// Jira assignee field
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct JiraAssignee {
-    #[serde(rename = "displayName", default)]
-    pub display_name: Option<String>,
-    #[serde(default)]
-    #[serde(rename = "emailAddress")]
-    pub email_address: Option<String>,
-}
+// Re-export types from core crate for backward compatibility
+pub use mcptools_core::atlassian::jira::{
+    IssueOutput, JiraAssignee, JiraIssueFields, JiraIssueResponse, JiraSearchResponse, JiraStatus,
+    ListOutput,
+};
 
 /// Jira custom field option (for select fields)
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -140,55 +112,4 @@ pub struct TicketOutput {
     pub assigned_guild: Option<String>,
     pub assigned_pod: Option<String>,
     pub comments: Vec<JiraComment>,
-}
-
-/// Search response from Jira API
-/// The GET /rest/api/3/search/jql endpoint returns this structure
-/// Note: The API returns startAt and maxResults to tell you what was returned,
-/// not necessarily what was requested (may differ if fewer results exist)
-#[derive(Debug, Deserialize)]
-pub struct JiraSearchResponse {
-    pub issues: Vec<JiraIssueResponse>,
-    #[serde(default)]
-    pub total: Option<u64>,
-    #[serde(default)]
-    #[serde(rename = "isLast")]
-    pub is_last: Option<bool>,
-    #[serde(default)]
-    #[serde(rename = "nextPageToken")]
-    pub next_page_token: Option<String>,
-    #[serde(default)]
-    #[serde(rename = "startAt")]
-    pub start_at: Option<u64>,
-    #[serde(default)]
-    #[serde(rename = "maxResults")]
-    pub max_results: Option<u64>,
-    // Additional fields that might be in the response
-    #[serde(default)]
-    pub names: Option<serde_json::Value>,
-    #[serde(default)]
-    pub schema: Option<serde_json::Value>,
-    #[serde(default)]
-    pub expand: Option<String>,
-    #[serde(default)]
-    pub changelog: Option<serde_json::Value>,
-}
-
-/// Output structure for a single issue
-#[derive(Debug, Serialize, Clone)]
-pub struct IssueOutput {
-    pub key: String,
-    pub summary: String,
-    pub description: Option<String>,
-    pub status: String,
-    pub assignee: Option<String>,
-}
-
-/// Output structure for list command
-#[derive(Debug, Serialize)]
-pub struct ListOutput {
-    pub issues: Vec<IssueOutput>,
-    pub total: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_page_token: Option<String>,
 }

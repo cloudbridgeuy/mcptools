@@ -1,6 +1,9 @@
-use super::types::{IssueOutput, JiraSearchResponse, ListOutput};
 use crate::prelude::{eprintln, println, *};
 use serde::{Deserialize, Serialize};
+
+// Import domain models and pure functions from core crate
+use mcptools_core::atlassian::jira::transform_search_response;
+pub use mcptools_core::atlassian::jira::{IssueOutput, JiraSearchResponse, ListOutput};
 
 /// Options for listing Jira issues
 #[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
@@ -106,32 +109,8 @@ pub async fn list_issues_data(
     let search_response: JiraSearchResponse = serde_json::from_str(&body_text)
         .map_err(|e| eyre!("Failed to parse Jira response: {}", e))?;
 
-    let issues: Vec<IssueOutput> = search_response
-        .issues
-        .into_iter()
-        .map(|issue| {
-            let assignee = issue
-                .fields
-                .assignee
-                .and_then(|a| a.display_name.or(a.email_address));
-            IssueOutput {
-                key: issue.key,
-                summary: issue.fields.summary,
-                description: None, // Description is now ADF format, skip for now
-                status: issue.fields.status.name,
-                assignee,
-            }
-        })
-        .collect();
-
-    // GET /rest/api/3/search/jql always returns 'total' field
-    let total = search_response.total.map(|t| t as usize).unwrap_or(0);
-
-    Ok(ListOutput {
-        issues,
-        total,
-        next_page_token: search_response.next_page_token,
-    })
+    // Delegate to pure transformation function
+    Ok(transform_search_response(search_response))
 }
 
 /// Handle the list command
