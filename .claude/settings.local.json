@@ -29,7 +29,8 @@
       "Bash(target/debug/mcptools atlassian jira list:*)",
       "mcp__mcptools__jira_search",
       "mcp__mcptools__jira_get",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(cargo doc:*)"
     ],
     "deny": [],
     "ask": []

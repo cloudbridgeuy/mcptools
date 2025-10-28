@@ -1,7 +1,6 @@
 use crate::prelude::{println, *};
-use chrono::{DateTime, Utc};
+use mcptools_core::hn::HnItem;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
 
 pub mod list_items;
 pub mod read_item;
@@ -31,23 +30,8 @@ pub enum Commands {
     List(list_items::ListOptions),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct HnItem {
-    pub id: u64,
-    #[serde(rename = "type")]
-    pub item_type: String,
-    pub by: Option<String>,
-    pub time: Option<u64>,
-    pub text: Option<String>,
-    pub dead: Option<bool>,
-    pub deleted: Option<bool>,
-    pub parent: Option<u64>,
-    pub kids: Option<Vec<u64>>,
-    pub url: Option<String>,
-    pub score: Option<u64>,
-    pub title: Option<String>,
-    pub descendants: Option<u64>,
-}
+// Types for read_item (not yet refactored)
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct PostOutput {
@@ -77,34 +61,6 @@ pub struct PaginationInfo {
     pub current_page: usize,
     pub total_pages: usize,
     pub total_comments: usize,
-    pub limit: usize,
-    pub next_page_command: Option<String>,
-    pub prev_page_command: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ListOutput {
-    pub story_type: String,
-    pub items: Vec<ListItem>,
-    pub pagination: ListPaginationInfo,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ListItem {
-    pub id: u64,
-    pub title: Option<String>,
-    pub url: Option<String>,
-    pub author: Option<String>,
-    pub score: Option<u64>,
-    pub time: Option<String>,
-    pub comments: Option<u64>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ListPaginationInfo {
-    pub current_page: usize,
-    pub total_pages: usize,
-    pub total_items: usize,
     pub limit: usize,
     pub next_page_command: Option<String>,
     pub prev_page_command: Option<String>,
@@ -169,13 +125,6 @@ pub async fn fetch_item(client: &reqwest::Client, id: u64) -> Result<HnItem> {
         .map_err(|e| eyre!("Failed to parse item {}: {}", id, e))?;
 
     Ok(item)
-}
-
-pub fn format_timestamp(timestamp: Option<u64>) -> Option<String> {
-    timestamp.and_then(|ts| {
-        let dt = DateTime::<Utc>::from_timestamp(ts as i64, 0)?;
-        Some(dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-    })
 }
 
 pub fn strip_html(text: &str) -> String {

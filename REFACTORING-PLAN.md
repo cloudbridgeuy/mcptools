@@ -148,17 +148,26 @@ pub struct JiraIssueResponse {
   - Clean separation: data function reduced from 110 lines to 68 lines
   - All extended types (JiraExtendedIssueResponse, JiraComment, etc.) now in core
 
+- **Section 1.4**: HackerNews - Story List Transformation ✅
+  - Date Completed: 2025-10-28
+  - Files: `crates/core/src/hn.rs` (new, 424 lines, 17 tests), `crates/mcptools/src/hn/list_items.rs` (refactored from 146 to 93 lines, 36% reduction), `crates/mcptools/src/hn/mod.rs` (updated with re-exports)
+  - Tests: 17/17 passing (total: 48 tests across core crate - 10 Confluence + 21 Jira + 17 HN List)
+  - Pure transformation functions: `calculate_pagination`, `transform_hn_items`, `format_timestamp`
+  - Successfully created first HN module in core
+  - Clean separation: data function reduced from 95 lines to 43 lines (55% reduction)
+  - All domain models (HnItem, ListItem, ListOutput, ListPaginationInfo) now in core
+  - Verified with real API call - fully functional
+
 ### In Progress 🚧
 - None
 
 ### Pending 📋
-- **Section 1.4**: HackerNews - Story List Transformation
 - **Section 1.5**: HackerNews - Item Read Transformation
 - **Section 1.6**: Markdown Converter - Fetch and Transform
 - **Phase 2**: Output Functions (4 sections)
 - **Phase 3**: Supporting Refactorings (2 sections)
 
-**Overall Progress**: 3/11 core refactorings completed (27%)
+**Overall Progress**: 4/11 core refactorings completed (36%)
 
 ---
 
@@ -389,9 +398,12 @@ pub async fn list_issues_data(
 
 **Files Modified**:
 - **Core**: `crates/core/src/atlassian/jira.rs` (extended to 1203 lines, +14 tests)
-- **Shell**: `crates/mcptools/src/atlassian/jira/get.rs` (refactored from 110 lines to 68 lines)
-- **Shell**: `crates/mcptools/src/atlassian/jira/types.rs` (updated with extended type re-exports)
-- **Shell**: `crates/mcptools/src/atlassian/jira/adf.rs` (simplified to re-exports only, from 140 lines to 3 lines)
+- **Core**: `crates/core/src/atlassian/confluence.rs` (cleanup: removed 4 decorative separators)
+- **Shell**: `crates/mcptools/src/atlassian/jira/get.rs` (refactored from 110 lines to 79 lines)
+- **Shell**: `crates/mcptools/src/atlassian/jira/types.rs` (deleted - was only re-exporting from core)
+- **Shell**: `crates/mcptools/src/atlassian/jira/adf.rs` (deleted - was only re-exporting from core)
+- **Shell**: `crates/mcptools/src/atlassian/jira/mod.rs` (removed deleted module declarations)
+- **Docs**: `REFACTORING-PLAN.md` (added documentation patterns for imports and decorative headers)
 
 **Original Problem**: The `get_ticket_data` function (lines 20-130) was even more complex than the list function. It made two HTTP requests (one for ticket details, one for comments), parsed both responses, and then performed substantial data transformation including ADF extraction, custom field mapping, and comment formatting.
 
@@ -465,7 +477,9 @@ The `get_ticket_data` function now:
 - ✅ CLI functionality verified (--help tested)
 - ✅ MCP handlers work identically (use same public API)
 - ✅ Clean separation of concerns achieved
-- ✅ adf.rs deleted entirely (shell modules import directly from core)
+- ✅ adf.rs and types.rs deleted entirely (shell modules import directly from core)
+- ✅ Decorative header separators removed from core crate (12 separators removed across jira.rs and confluence.rs)
+- ✅ Documentation patterns established in REFACTORING-PLAN.md
 
 **Lessons Learned**:
 
@@ -475,8 +489,9 @@ The `get_ticket_data` function now:
 4. **Comment Pattern**: Comments passed through unchanged (no transformation needed).
 5. **Custom Fields**: Many custom fields (guild, pod, story points) but same extraction pattern.
 6. **Line Reduction**: Shell function -38% lines, core function handles complexity.
-7. **Import Pattern**: Shell modules MUST import directly from `mcptools_core`. Do NOT create re-export wrapper modules (e.g., the original `adf.rs` was deleted because it only re-exported functions from core, adding unnecessary indirection).
-8. **Documentation Pattern**: Do NOT use "pure function", "no side effects", "no I/O" terminology in `mcptools_core` comments. All functions in the core crate are pure by definition - focus on *what* they do, not restating architectural constraints.
+7. **Import Pattern**: Shell modules MUST import directly from `mcptools_core`. Do NOT create re-export wrapper modules (e.g., the original `adf.rs` and `types.rs` were deleted because they only re-exported from core, adding unnecessary indirection).
+8. **Documentation Pattern - Pure Functions**: Do NOT use "pure function", "no side effects", "no I/O" terminology in `mcptools_core` comments. All functions in the core crate are pure by definition - focus on *what* they do, not restating architectural constraints.
+9. **Documentation Pattern - Decorative Headers**: Do NOT use decorative header separators (lines of `=`, `-`, etc.) to section code. Rust's module system, doc comments, and type declarations already provide clear structure. Modern IDEs and code folding make artificial section markers unnecessary visual noise.
 
 **Original Implementation Details** (for reference - see below for detailed steps):
 
@@ -721,159 +736,108 @@ The `search_pages_data` function now:
 
 ---
 
-### 1.4: HackerNews - Story List Transformation
+### 1.4: HackerNews - Story List Transformation ✅ **COMPLETED**
 
-**File**: `crates/mcptools/src/hn/list_items.rs`
+**Status**: ✅ **COMPLETED** - Fourth refactoring successfully implemented, establishing HackerNews module in core.
 
-**Current Problem**: The `list_items_data` function (lines 51-146) mixes HTTP fetching of story IDs and details with pagination calculation and item transformation.
+**Files Modified**:
+- **Core**: `crates/core/src/hn.rs` (new, 424 lines, 17 tests)
+- **Core**: `crates/core/Cargo.toml` (added chrono dependency)
+- **Core**: `crates/core/src/lib.rs` (added hn module with comprehensive documentation)
+- **Shell**: `crates/mcptools/src/hn/list_items.rs` (refactored from 146 to 93 lines, 36% reduction)
+- **Shell**: `crates/mcptools/src/hn/mod.rs` (removed re-exports, added direct imports)
+- **Shell**: `crates/mcptools/src/hn/read_item.rs` (updated to use direct imports from core)
 
-**What Needs to Change**:
+**Original Problem**: The `list_items_data` function (lines 51-146) mixed HTTP fetching of story IDs and details with pagination calculation and item transformation.
 
-We need to extract the pure pagination logic and the item transformation logic. The pagination calculation (determining which IDs to fetch based on page/limit) is pure business logic that shouldn't be mixed with HTTP requests.
+**Solution Implemented**:
 
-**Step 1: Create Pure Pagination Function**
+Created a clean separation between I/O operations and pure transformation logic, establishing the first HackerNews module in core.
 
-```rust
-/// Pure transformation: Calculate pagination parameters
-fn calculate_pagination(
-    total_items: usize,
-    page: usize,
-    limit: usize,
-) -> Result<(usize, usize)> {
-    if total_items == 0 {
-        return Err(eyre!("No items available for pagination"));
-    }
+**What Was Created in `mcptools_core`**:
 
-    let start = (page - 1) * limit;
+1. **Domain Models** (moved from mcptools mod.rs):
+   - `HnItem` (API input type)
+   - `ListItem` (output type)
+   - `ListOutput` (complete output with pagination)
+   - `ListPaginationInfo` (pagination metadata)
 
-    if start >= total_items {
-        let total_pages = total_items.div_ceil(limit);
-        return Err(eyre!(
-            "Page {} is out of range. Only {} pages available.",
-            page,
-            total_pages
-        ));
-    }
+2. **Pure Helper Function**:
+   ```rust
+   pub fn format_timestamp(timestamp: Option<u64>) -> Option<String>
+   ```
+   Converts Unix timestamp to formatted string (moved from shell).
 
-    let end = (start + limit).min(total_items);
-    Ok((start, end))
-}
-```
+3. **Pure Pagination Function**:
+   ```rust
+   pub fn calculate_pagination(
+       total_items: usize,
+       page: usize,
+       limit: usize,
+   ) -> Result<(usize, usize), String>
+   ```
+   Calculates pagination bounds with validation.
 
-**Step 2: Create Pure Item Transformation Function**
+4. **Pure Transformation Function**:
+   ```rust
+   pub fn transform_hn_items(
+       items: Vec<HnItem>,
+       story_type: String,
+       page: usize,
+       limit: usize,
+       total_items: usize,
+   ) -> ListOutput
+   ```
+   Transforms API items to domain output with:
+   - Item mapping with formatted timestamps
+   - Pagination metadata calculation
+   - Navigation command generation
 
-```rust
-/// Pure transformation: Convert HN items to list items
-fn transform_hn_items(
-    items: Vec<HnItem>,
-    story_type: String,
-    page: usize,
-    limit: usize,
-    total_items: usize,
-) -> ListOutput {
-    use super::format_timestamp;
+5. **Comprehensive Tests** (17 tests, all passing):
+   - **format_timestamp** (2 tests): Valid timestamp, None handling
+   - **calculate_pagination** (7 tests):
+     - Basic pagination (middle page)
+     - First page, last page, exact boundary
+     - Out of bounds, empty list, single page
+   - **transform_hn_items** (8 tests):
+     - Single item, multiple items, empty list
+     - Missing optional fields
+     - First page (no prev), last page (no next), middle page (both)
+     - Different story types
 
-    let list_items: Vec<ListItem> = items
-        .iter()
-        .map(|item| ListItem {
-            id: item.id,
-            title: item.title.clone(),
-            url: item.url.clone(),
-            author: item.by.clone(),
-            score: item.score,
-            time: format_timestamp(item.time),
-            comments: item.descendants,
-        })
-        .collect();
+**What Was Refactored in `mcptools`**:
 
-    let total_pages = total_items.div_ceil(limit);
+The `list_items_data` function now:
+- Handles only I/O operations (HTTP client, API requests, error handling)
+- Imports types from `mcptools_core::hn` (direct imports, no re-exports)
+- Delegates pagination to `calculate_pagination` from core
+- Delegates transformation to `transform_hn_items` from core
+- Reduced from 95 lines to 43 lines (55% reduction)
+- Remains fully compatible with existing CLI and MCP handlers
 
-    let next_page = if page < total_pages {
-        Some(format!(
-            "mcptools hn list {} --page {}",
-            story_type,
-            page + 1
-        ))
-    } else {
-        None
-    };
+**Key Achievements**:
+- Successfully created first HackerNews module in core
+- 55% code reduction in shell function
+- All transformation logic testable without HTTP mocking
+- Pattern consistency maintained across all refactorings
 
-    let prev_page = if page > 1 {
-        Some(format!(
-            "mcptools hn list {} --page {}",
-            story_type,
-            page - 1
-        ))
-    } else {
-        None
-    };
+**Verification**:
+- ✅ All 17 core tests pass without mocking
+- ✅ Total test count: 48 tests across core crate (10 Confluence + 21 Jira + 17 HN)
+- ✅ mcptools builds successfully
+- ✅ CLI functionality verified with real API calls
+- ✅ MCP handlers work identically (use same public API)
+- ✅ Clean separation of concerns achieved
+- ✅ Direct imports pattern followed (no re-export wrappers)
 
-    ListOutput {
-        story_type,
-        items: list_items,
-        pagination: ListPaginationInfo {
-            current_page: page,
-            total_pages,
-            total_items,
-            limit,
-            next_page_command: next_page,
-            prev_page_command: prev_page,
-        },
-    }
-}
-```
+**Lessons Learned**:
 
-**Step 3: Refactor Data Function**
-
-```rust
-pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> Result<ListOutput> {
-    // Determine API endpoint based on story type (this is configuration, not transformation)
-    let endpoint = match story_type.as_str() {
-        "top" => "topstories",
-        "new" => "newstories",
-        "best" => "beststories",
-        "ask" => "askstories",
-        "show" => "showstories",
-        "job" => "jobstories",
-        _ => {
-            return Err(eyre!(
-                "Invalid story type: {}. Valid types: top, new, best, ask, show, job",
-                story_type
-            ))
-        }
-    };
-
-    // Fetch story IDs (I/O operation)
-    let client = reqwest::Client::new();
-    let url = format!("{}/{endpoint}.json", get_api_base());
-    let story_ids: Vec<u64> = client.get(&url).send().await?.json().await?;
-
-    if story_ids.is_empty() {
-        return Err(eyre!("No stories found"));
-    }
-
-    // Calculate pagination (now using pure function)
-    let total_items = story_ids.len();
-    let (start, end) = calculate_pagination(total_items, page, limit)?;
-
-    let paginated_ids: Vec<u64> = story_ids[start..end].to_vec();
-
-    // Fetch story details in parallel (I/O operation)
-    let item_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
-    let items: Vec<HnItem> = join_all(item_futures)
-        .await
-        .into_iter()
-        .filter_map(|r| r.ok())
-        .collect();
-
-    // Delegate to pure transformation function
-    Ok(transform_hn_items(items, story_type, page, limit, total_items))
-}
-```
-
-**Why This Works**: Pagination calculation is now a pure function that can be tested independently. Item transformation is separated from I/O. The data function orchestrates the I/O operations but doesn't mix transformation logic.
-
-**Testing Strategy**: Test `calculate_pagination` with various edge cases (page out of range, empty lists, boundary conditions). Test `transform_hn_items` with different item configurations and pagination scenarios.
+1. **Helper Functions**: `format_timestamp` was already pure, just needed to move to core
+2. **Pagination Logic**: Complex validation logic (bounds checking, error messages) belongs in core
+3. **Direct Imports**: Removed re-export anti-pattern - shell modules import directly from core
+4. **Documentation**: Expanded core lib.rs with comprehensive Rust doc strings
+5. **Pattern Compliance**: Removed "using pure function" labels from comments
+6. **Test Coverage**: 17 tests provide excellent coverage of edge cases and error conditions
 
 ---
 

@@ -1498,7 +1498,6 @@ dependencies = [
  "anstream",
  "axum",
  "base64",
- "chrono",
  "clap",
  "color-eyre",
  "colored",
@@ -1523,6 +1522,7 @@ dependencies = [
 name = "mcptools_core"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "html-escape",
  "regex",
  "serde",

@@ -1,10 +1,11 @@
 use crate::prelude::{println, *};
 use colored::Colorize;
 use futures::future::join_all;
-
-use super::{
-    fetch_item, format_timestamp, get_api_base, HnItem, ListItem, ListOutput, ListPaginationInfo,
+use mcptools_core::hn::{
+    calculate_pagination, transform_hn_items, HnItem, ListItem, ListOutput, ListPaginationInfo,
 };
+
+use super::{fetch_item, get_api_base};
 
 #[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ListOptions {
@@ -76,17 +77,10 @@ pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> R
 
     // Calculate pagination
     let total_items = story_ids.len();
-    let start = (page - 1) * limit;
+    let (start, end) =
+        calculate_pagination(total_items, page, limit).map_err(|e| eyre!("{}", e))?;
 
-    if start >= total_items {
-        return Err(eyre!(
-            "Page {} is out of range. Only {} pages available.",
-            page,
-            total_items.div_ceil(limit)
-        ));
-    }
-
-    let paginated_ids: Vec<u64> = story_ids.iter().skip(start).take(limit).copied().collect();
+    let paginated_ids: Vec<u64> = story_ids[start..end].to_vec();
 
     // Fetch story details in parallel
     let item_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
@@ -96,53 +90,14 @@ pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> R
         .filter_map(|r| r.ok())
         .collect();
 
-    let total_pages = total_items.div_ceil(limit);
-
-    let list_items: Vec<ListItem> = items
-        .iter()
-        .map(|item| ListItem {
-            id: item.id,
-            title: item.title.clone(),
-            url: item.url.clone(),
-            author: item.by.clone(),
-            score: item.score,
-            time: format_timestamp(item.time),
-            comments: item.descendants,
-        })
-        .collect();
-
-    let next_page = if page < total_pages {
-        Some(format!(
-            "mcptools hn list {} --page {}",
-            story_type,
-            page + 1
-        ))
-    } else {
-        None
-    };
-
-    let prev_page = if page > 1 {
-        Some(format!(
-            "mcptools hn list {} --page {}",
-            story_type,
-            page - 1
-        ))
-    } else {
-        None
-    };
-
-    Ok(ListOutput {
+    // Transform to output format
+    Ok(transform_hn_items(
+        items,
         story_type,
-        items: list_items,
-        pagination: ListPaginationInfo {
-            current_page: page,
-            total_pages,
-            total_items,
-            limit,
-            next_page_command: next_page,
-            prev_page_command: prev_page,
-        },
-    })
+        page,
+        limit,
+        total_items,
+    ))
 }
 
 fn output_list_formatted(

@@ -1,11 +1,12 @@
 use crate::prelude::{println, *};
 use colored::Colorize;
 use futures::future::join_all;
+use mcptools_core::hn::{format_timestamp, HnItem};
 use serde::Serialize;
 
 use super::{
-    extract_item_id, fetch_item, format_timestamp, strip_html, truncate_text, CommentOutput,
-    HnItem, PaginationInfo, PostOutput,
+    extract_item_id, fetch_item, strip_html, truncate_text, CommentOutput, PaginationInfo,
+    PostOutput,
 };
 
 #[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
