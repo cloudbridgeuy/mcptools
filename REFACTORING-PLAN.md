@@ -1,0 +1,1446 @@
+# Comprehensive Refactoring Plan: Implementing Functional Core - Imperative Shell Pattern
+
+## Introduction
+
+The mcptools codebase currently exhibits a mixed architectural pattern where business logic and I/O operations are intertwined throughout the data layer functions. While the codebase shows good intentions with its separation of "handler" functions (CLI) and "data" functions (business logic), the data functions themselves violate the Functional Core - Imperative Shell pattern by mixing HTTP requests, browser automation, and other I/O operations directly with data transformation logic.
+
+This document outlines a comprehensive, step-by-step plan to refactor the codebase to achieve a clean separation between pure, testable business logic (the Functional Core) and side-effect-producing operations (the Imperative Shell). The refactoring is organized into three phases, with clear dependencies and execution order to minimize disruption and ensure each change builds upon previous work.
+
+## Two-Crate Architecture
+
+**IMPORTANT UPDATE**: The refactoring uses a two-crate architecture to enforce separation of concerns:
+
+### `mcptools_core` Crate (`crates/core/`)
+- **Purpose**: Contains all pure transformation functions (Functional Core)
+- **Characteristics**:
+  - Zero I/O operations
+  - Pure functions only (deterministic, no side effects)
+  - Fully testable with fixture data (no mocking required)
+  - Domain models and output structures
+- **Location**: `crates/core/src/`
+- **Note**: Originally named `core`, renamed to `mcptools_core` to avoid conflict with Rust's built-in `core` crate
+
+### `mcptools` Crate (`crates/mcptools/`)
+- **Purpose**: Contains I/O operations and orchestration (Imperative Shell)
+- **Characteristics**:
+  - HTTP requests, browser automation, file system access
+  - Configuration and client setup
+  - Error handling at I/O boundaries
+  - CLI handlers and MCP handlers
+  - Delegates transformation to `mcptools_core`
+- **Location**: `crates/mcptools/src/`
+
+### Module Structure Example
+```
+crates/
+├── mcptools_core/              # Functional Core
+│   └── src/
+│       ├── lib.rs
+│       └── atlassian/
+│           ├── mod.rs
+│           └── confluence.rs    # Pure functions + tests
+│
+└── mcptools/                   # Imperative Shell
+    └── src/
+        └── atlassian/
+            └── confluence.rs    # I/O + handlers, imports from mcptools_core
+```
+
+This architectural separation ensures that business logic can be tested in complete isolation from I/O concerns.
+
+## Progress Tracker
+
+### Completed ✅
+- **Section 1.3**: Atlassian Confluence - Page Search Transformation
+  - Date Completed: 2025-10-28
+  - Files: `mcptools_core/src/atlassian/confluence.rs` (new), `mcptools/src/atlassian/confluence.rs` (refactored)
+  - Tests: 10/10 passing
+  - Pattern established for all future refactorings
+
+### In Progress 🚧
+- None
+
+### Pending 📋
+- **Section 1.1**: Atlassian Jira - Issue List Transformation
+- **Section 1.2**: Atlassian Jira - Ticket Detail Transformation
+- **Section 1.4**: HackerNews - Story List Transformation
+- **Section 1.5**: HackerNews - Item Read Transformation
+- **Section 1.6**: Markdown Converter - Fetch and Transform
+- **Phase 2**: Output Functions (4 sections)
+- **Phase 3**: Supporting Refactorings (2 sections)
+
+**Overall Progress**: 1/11 core refactorings completed (9%)
+
+---
+
+## Why This Matters
+
+The current architecture makes the code difficult to test, as unit tests must mock HTTP clients, browser instances, and other external dependencies just to verify data transformation logic. By extracting pure transformation functions, we gain:
+
+1. **Testability**: Pure functions can be tested with simple input/output assertions, no mocking required
+2. **Reusability**: Transformation logic can be reused across CLI, MCP, and future contexts without carrying I/O baggage
+3. **Maintainability**: Changes to API response formats or business logic are isolated from I/O concerns
+4. **Composability**: Pure functions can be easily combined and reasoned about in isolation
+
+The Functional Core - Imperative Shell pattern, as described in Gary Bernhardt's influential talk, provides a clear mental model: keep the complex business logic pure and push all side effects to the edges of the system. Our handlers (CLI and MCP) should act as thin imperative shells that orchestrate I/O operations and delegate to pure transformation functions.
+
+## Understanding the Pattern
+
+Before diving into specific refactorings, it's important to understand what we're aiming for:
+
+**Functional Core** consists of pure functions that:
+- Take data as input and return transformed data as output
+- Have no side effects (no I/O, no mutations of external state)
+- Are deterministic (same input always produces same output)
+- Can be tested without mocks or stubs
+
+**Imperative Shell** consists of functions that:
+- Perform I/O operations (HTTP requests, file system access, browser automation)
+- Call pure functions to transform data
+- Handle errors and edge cases at the system boundary
+- Coordinate the flow of data through the application
+
+The key insight is that business logic should not know where data comes from or where it goes. A function that transforms a Jira API response into a ticket output structure should not also be responsible for making the HTTP request.
+
+## Phase 1: Core Data Functions (High Priority)
+
+Phase 1 addresses the most critical violations where data functions mix I/O with business logic. These refactorings have the highest impact on testability and code clarity. We'll work through these files in dependency order, starting with the simplest transformations and building up to more complex ones.
+
+### 1.1: Atlassian Jira - Issue List Transformation
+
+**File**: `crates/mcptools/src/atlassian/jira/list.rs`
+
+**Current Problem**: The `list_issues_data` function (lines 55-135) interleaves HTTP requests with data transformation. The function builds query parameters, makes an HTTP request, parses the response, and transforms the parsed data all in one flow. This makes it impossible to test the transformation logic without mocking the HTTP layer.
+
+**What Needs to Change**:
+
+We need to extract the pure transformation logic into a separate function that takes the parsed `JiraSearchResponse` and returns `ListOutput`. This transformation includes mapping issues to our domain model, handling optional fields, and building pagination metadata.
+
+**Step 1: Create Pure Transformation Function**
+
+Add a new pure function before the existing `list_issues_data`:
+
+```rust
+/// Pure transformation: Convert Jira API response to domain model
+/// This function has no side effects and can be tested without mocking HTTP
+fn transform_search_response(
+    search_response: JiraSearchResponse,
+    query: String,
+    limit: usize,
+    next_page: Option<String>,
+) -> ListOutput {
+    let issues: Vec<IssueOutput> = search_response
+        .issues
+        .into_iter()
+        .map(|issue| {
+            let assignee = issue
+                .fields
+                .assignee
+                .and_then(|a| a.display_name.or(a.email_address));
+            IssueOutput {
+                key: issue.key,
+                summary: issue.fields.summary,
+                description: None, // Description is now ADF format, skip for now
+                status: issue.fields.status.name,
+                assignee,
+            }
+        })
+        .collect();
+
+    // GET /rest/api/3/search/jql always returns 'total' field
+    let total = search_response.total.map(|t| t as usize).unwrap_or(0);
+
+    ListOutput {
+        issues,
+        total,
+        next_page_token: search_response.next_page_token,
+    }
+}
+```
+
+**Step 2: Refactor Data Function**
+
+Simplify `list_issues_data` to focus only on I/O operations:
+
+```rust
+pub async fn list_issues_data(
+    query: String,
+    limit: usize,
+    next_page: Option<String>,
+) -> Result<ListOutput> {
+    use crate::atlassian::{create_authenticated_client, AtlassianConfig};
+
+    let config = AtlassianConfig::from_env()?;
+    let client = create_authenticated_client(&config)?;
+
+    // Build query parameters (this is I/O configuration, not transformation)
+    let base_url = config.base_url.trim_end_matches('/');
+    let url = format!("{}/rest/api/3/search/jql", base_url);
+
+    let max_results = std::cmp::min(limit, 100); // Jira API max is 100
+    let max_results_str = max_results.to_string();
+    let fields_str = "key,summary,description,status,assignee";
+
+    let mut query_params = vec![
+        ("jql", query.as_str()),
+        ("maxResults", &max_results_str),
+        ("fields", fields_str),
+        ("expand", "names"),
+    ];
+
+    let next_page_str_owned;
+    if let Some(ref token) = next_page {
+        next_page_str_owned = token.clone();
+        query_params.push(("nextPageToken", next_page_str_owned.as_str()));
+    }
+
+    // Perform HTTP request
+    let response = client
+        .get(&url)
+        .query(&query_params)
+        .send()
+        .await
+        .map_err(|e| eyre!("Failed to send request to Jira: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(eyre!("Jira API error [{}]: {}", status, body));
+    }
+
+    let body_text = response
+        .text()
+        .await
+        .map_err(|e| eyre!("Failed to read response body: {}", e))?;
+
+    let search_response: JiraSearchResponse = serde_json::from_str(&body_text)
+        .map_err(|e| eyre!("Failed to parse Jira response: {}", e))?;
+
+    // Delegate to pure transformation function
+    Ok(transform_search_response(search_response, query, limit, next_page))
+}
+```
+
+**Why This Works**: Now the data function is solely responsible for I/O: configuring the HTTP request, making the call, and handling errors. The transformation logic is isolated in a pure function that can be tested by constructing sample `JiraSearchResponse` objects without any HTTP mocking.
+
+**Testing Strategy**: Create unit tests for `transform_search_response` using fixture data. Test edge cases like empty issue lists, missing assignees, and various pagination scenarios without ever touching the network.
+
+---
+
+### 1.2: Atlassian Jira - Ticket Detail Transformation
+
+**File**: `crates/mcptools/src/atlassian/jira/get.rs`
+
+**Current Problem**: The `get_ticket_data` function (lines 20-130) is even more complex than the list function. It makes two HTTP requests (one for ticket details, one for comments), parses both responses, and then performs substantial data transformation including ADF extraction, custom field mapping, and comment formatting.
+
+**What Needs to Change**:
+
+We need to extract multiple pure transformation functions. The complexity here warrants breaking the transformation into logical steps: transforming the ticket response, transforming comments, and combining them into the final output.
+
+**Step 1: Create Pure Transformation for Comments**
+
+```rust
+/// Pure transformation: Convert raw Jira comments to domain model
+fn transform_comments(comments_json: Vec<serde_json::Value>) -> Vec<JiraComment> {
+    comments_json
+        .into_iter()
+        .filter_map(|comment| serde_json::from_value(comment).ok())
+        .collect()
+}
+```
+
+**Step 2: Create Pure Transformation for Ticket Details**
+
+```rust
+/// Pure transformation: Convert Jira extended issue response to ticket output
+fn transform_ticket_response(
+    issue: JiraExtendedIssueResponse,
+    comments: Vec<JiraComment>,
+) -> TicketOutput {
+    use super::adf::extract_description;
+
+    let sprint = issue
+        .fields
+        .customfield_10010
+        .as_ref()
+        .and_then(|sprints| sprints.first())
+        .map(|s| s.name.clone());
+
+    TicketOutput {
+        key: issue.key,
+        summary: issue.fields.summary,
+        description: extract_description(issue.fields.description),
+        status: issue.fields.status.name,
+        priority: issue
+            .fields
+            .priority
+            .as_ref()
+            .map(|p| p.name.clone())
+            .filter(|n| !n.is_empty()),
+        issue_type: issue.fields.issuetype.as_ref().map(|it| it.name.clone()),
+        assignee: issue
+            .fields
+            .assignee
+            .as_ref()
+            .and_then(|a| a.display_name.clone()),
+        created: issue.fields.created,
+        updated: issue.fields.updated,
+        due_date: issue.fields.duedate,
+        labels: issue.fields.labels,
+        components: issue
+            .fields
+            .components
+            .into_iter()
+            .map(|c| c.name)
+            .collect(),
+        epic_link: issue.fields.customfield_10009,
+        story_points: issue.fields.customfield_10014,
+        sprint,
+        assigned_guild: issue
+            .fields
+            .customfield_10527
+            .as_ref()
+            .map(|g| g.value.clone()),
+        assigned_pod: issue
+            .fields
+            .customfield_10528
+            .as_ref()
+            .map(|p| p.value.clone()),
+        comments,
+    }
+}
+```
+
+**Step 3: Refactor Data Function**
+
+Simplify `get_ticket_data` to handle only I/O operations:
+
+```rust
+pub async fn get_ticket_data(issue_key: String) -> Result<TicketOutput> {
+    use crate::atlassian::{create_authenticated_client, AtlassianConfig};
+
+    let config = AtlassianConfig::from_env()?;
+    let client = create_authenticated_client(&config)?;
+
+    // Fetch ticket details (I/O operation)
+    let ticket_url = format!(
+        "{}/rest/api/3/issue/{}?expand=changelog",
+        config.base_url,
+        urlencoding::encode(&issue_key)
+    );
+
+    let ticket_response = client
+        .get(&ticket_url)
+        .send()
+        .await
+        .map_err(|e| eyre!("Failed to send request to Jira: {}", e))?;
+
+    if !ticket_response.status().is_success() {
+        let status = ticket_response.status();
+        let body = ticket_response.text().await.unwrap_or_default();
+        return Err(eyre!("Failed to fetch Jira issue [{}]: {}", status, body));
+    }
+
+    let raw_ticket_response = ticket_response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| eyre!("Failed to parse Jira ticket response: {}", e))?;
+
+    // Parse into the structured response
+    let issue: JiraExtendedIssueResponse = serde_json::from_value(raw_ticket_response.clone())
+        .map_err(|e| eyre!("Failed to parse Jira response: {}", e))?;
+
+    // Fetch comments (I/O operation)
+    let comments_url = format!(
+        "{}/rest/api/3/issue/{}/comment",
+        config.base_url,
+        urlencoding::encode(&issue_key)
+    );
+
+    let comments_response = client
+        .get(&comments_url)
+        .send()
+        .await
+        .map_err(|e| eyre!("Failed to send request for Jira comments: {}", e))?;
+
+    let comments = if comments_response.status().is_success() {
+        let comments_json = comments_response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| eyre!("Failed to parse Jira comments: {}", e))?;
+
+        let comments_array: Vec<serde_json::Value> = comments_json
+            .get("comments")
+            .and_then(|c| c.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        transform_comments(comments_array)
+    } else {
+        Vec::new()
+    };
+
+    // Delegate to pure transformation function
+    Ok(transform_ticket_response(issue, comments))
+}
+```
+
+**Why This Works**: The I/O complexity (two HTTP requests, error handling) is kept in the data function, while all the business logic of transforming Jira's API response format into our domain model is extracted into pure, testable functions.
+
+**Testing Strategy**: Test `transform_ticket_response` with various ticket configurations (with/without sprint, guild, pod, story points, etc.). Test `transform_comments` with different comment structures. All tests use fixture data, no HTTP mocking needed.
+
+---
+
+### 1.3: Atlassian Confluence - Page Search Transformation ✅ **COMPLETED**
+
+**Status**: ✅ **COMPLETED** - First refactoring successfully implemented, establishing the pattern for all subsequent work.
+
+**Files Modified**:
+- **Core**: `crates/core/src/atlassian/confluence.rs` (new, 168 lines, 10 tests)
+- **Shell**: `crates/mcptools/src/atlassian/confluence.rs` (refactored, 120 lines)
+
+**Original Problem**: The `search_pages_data` function (lines 121-177) mixed HTTP operations with the logic of transforming Confluence page responses and converting HTML content to plain text.
+
+**Solution Implemented**:
+
+Created a two-crate architecture separating pure transformation logic from I/O operations.
+
+**What Was Created in `mcptools_core`**:
+
+1. **Domain Models** (moved from mcptools):
+   - `ConfluencePageResponse`, `PageBody`, `ViewContent`, `PageLinks` (API input types)
+   - `ConfluenceSearchResponse` (API response wrapper)
+   - `PageOutput`, `SearchOutput` (clean domain output types)
+
+2. **Pure Helper Function**:
+   ```rust
+   pub fn html_to_plaintext(html: &str) -> String
+   ```
+   Converts HTML to plain text with no side effects.
+
+3. **Pure Transformation Function**:
+   ```rust
+   pub fn transform_search_results(search_response: ConfluenceSearchResponse) -> SearchOutput
+   ```
+   Maps API response to domain model with zero I/O.
+
+4. **Comprehensive Tests** (10 tests, all passing):
+   - `test_html_to_plaintext_basic`
+   - `test_html_to_plaintext_with_breaks`
+   - `test_html_to_plaintext_with_entities`
+   - `test_html_to_plaintext_removes_excess_whitespace`
+   - `test_transform_search_results_basic`
+   - `test_transform_search_results_empty`
+   - `test_transform_search_results_missing_content`
+   - `test_transform_search_results_missing_webui`
+   - `test_transform_search_results_multiple_pages`
+   - `test_transform_search_results_complex_html`
+
+**What Was Refactored in `mcptools`**:
+
+The `search_pages_data` function now:
+- Handles only I/O operations (HTTP client setup, API requests, error handling)
+- Imports types from `mcptools_core::atlassian::confluence`
+- Delegates transformation to `transform_search_results` from core
+- Remains compatible with existing CLI and MCP handlers
+
+**Key Achievement**: This establishes the two-crate pattern that all subsequent refactorings will follow.
+
+**Verification**:
+- ✅ All 10 core tests pass without mocking
+- ✅ mcptools builds successfully
+- ✅ Existing functionality unchanged
+- ✅ Clean separation of concerns achieved
+
+**Lessons Learned for Future Refactorings**:
+
+1. **Crate Naming**: The core crate is named `mcptools_core` (not `core`) to avoid conflicts with Rust's built-in `core` crate.
+
+2. **Import Pattern**: In mcptools files, use:
+   ```rust
+   pub use mcptools_core::module::path::{Types, ToExport};
+   use mcptools_core::module::path::function_to_use;
+   ```
+
+3. **Test Organization**: Tests live in the same file as the pure functions using `#[cfg(test)]` modules. This keeps tests close to the code they verify.
+
+4. **Public API**: Make transformation functions and types `pub` in mcptools_core so they can be imported by mcptools.
+
+5. **Helper Functions**: Pure helper functions (like `html_to_plaintext`) belong in mcptools_core, not mcptools.
+
+6. **Incremental Testing**: Test the core crate first (`cargo test -p mcptools_core`), then build mcptools (`cargo build -p mcptools`), then run full tests.
+
+7. **Pattern Template**: This refactoring serves as the template for all remaining transformations. The same structure should be replicated for Jira, HackerNews, and Markdown modules.
+
+---
+
+### 1.4: HackerNews - Story List Transformation
+
+**File**: `crates/mcptools/src/hn/list_items.rs`
+
+**Current Problem**: The `list_items_data` function (lines 51-146) mixes HTTP fetching of story IDs and details with pagination calculation and item transformation.
+
+**What Needs to Change**:
+
+We need to extract the pure pagination logic and the item transformation logic. The pagination calculation (determining which IDs to fetch based on page/limit) is pure business logic that shouldn't be mixed with HTTP requests.
+
+**Step 1: Create Pure Pagination Function**
+
+```rust
+/// Pure transformation: Calculate pagination parameters
+fn calculate_pagination(
+    total_items: usize,
+    page: usize,
+    limit: usize,
+) -> Result<(usize, usize)> {
+    if total_items == 0 {
+        return Err(eyre!("No items available for pagination"));
+    }
+
+    let start = (page - 1) * limit;
+
+    if start >= total_items {
+        let total_pages = total_items.div_ceil(limit);
+        return Err(eyre!(
+            "Page {} is out of range. Only {} pages available.",
+            page,
+            total_pages
+        ));
+    }
+
+    let end = (start + limit).min(total_items);
+    Ok((start, end))
+}
+```
+
+**Step 2: Create Pure Item Transformation Function**
+
+```rust
+/// Pure transformation: Convert HN items to list items
+fn transform_hn_items(
+    items: Vec<HnItem>,
+    story_type: String,
+    page: usize,
+    limit: usize,
+    total_items: usize,
+) -> ListOutput {
+    use super::format_timestamp;
+
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .map(|item| ListItem {
+            id: item.id,
+            title: item.title.clone(),
+            url: item.url.clone(),
+            author: item.by.clone(),
+            score: item.score,
+            time: format_timestamp(item.time),
+            comments: item.descendants,
+        })
+        .collect();
+
+    let total_pages = total_items.div_ceil(limit);
+
+    let next_page = if page < total_pages {
+        Some(format!(
+            "mcptools hn list {} --page {}",
+            story_type,
+            page + 1
+        ))
+    } else {
+        None
+    };
+
+    let prev_page = if page > 1 {
+        Some(format!(
+            "mcptools hn list {} --page {}",
+            story_type,
+            page - 1
+        ))
+    } else {
+        None
+    };
+
+    ListOutput {
+        story_type,
+        items: list_items,
+        pagination: ListPaginationInfo {
+            current_page: page,
+            total_pages,
+            total_items,
+            limit,
+            next_page_command: next_page,
+            prev_page_command: prev_page,
+        },
+    }
+}
+```
+
+**Step 3: Refactor Data Function**
+
+```rust
+pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> Result<ListOutput> {
+    // Determine API endpoint based on story type (this is configuration, not transformation)
+    let endpoint = match story_type.as_str() {
+        "top" => "topstories",
+        "new" => "newstories",
+        "best" => "beststories",
+        "ask" => "askstories",
+        "show" => "showstories",
+        "job" => "jobstories",
+        _ => {
+            return Err(eyre!(
+                "Invalid story type: {}. Valid types: top, new, best, ask, show, job",
+                story_type
+            ))
+        }
+    };
+
+    // Fetch story IDs (I/O operation)
+    let client = reqwest::Client::new();
+    let url = format!("{}/{endpoint}.json", get_api_base());
+    let story_ids: Vec<u64> = client.get(&url).send().await?.json().await?;
+
+    if story_ids.is_empty() {
+        return Err(eyre!("No stories found"));
+    }
+
+    // Calculate pagination (now using pure function)
+    let total_items = story_ids.len();
+    let (start, end) = calculate_pagination(total_items, page, limit)?;
+
+    let paginated_ids: Vec<u64> = story_ids[start..end].to_vec();
+
+    // Fetch story details in parallel (I/O operation)
+    let item_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
+    let items: Vec<HnItem> = join_all(item_futures)
+        .await
+        .into_iter()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Delegate to pure transformation function
+    Ok(transform_hn_items(items, story_type, page, limit, total_items))
+}
+```
+
+**Why This Works**: Pagination calculation is now a pure function that can be tested independently. Item transformation is separated from I/O. The data function orchestrates the I/O operations but doesn't mix transformation logic.
+
+**Testing Strategy**: Test `calculate_pagination` with various edge cases (page out of range, empty lists, boundary conditions). Test `transform_hn_items` with different item configurations and pagination scenarios.
+
+---
+
+### 1.5: HackerNews - Item Read Transformation
+
+**File**: `crates/mcptools/src/hn/read_item.rs`
+
+**Current Problem**: The `read_item_data` function (lines 549-649) mixes HTTP fetching with comment processing and pagination calculation. This is similar to the list function but more complex due to nested comment structures.
+
+**What Needs to Change**:
+
+We need to extract the pagination calculation (similar to list) and the comment transformation logic.
+
+**Step 1: Create Pure Comment Transformation Function**
+
+```rust
+/// Pure transformation: Convert HN items to comment outputs
+fn transform_comments(comments: Vec<HnItem>) -> Vec<CommentOutput> {
+    use super::{format_timestamp, strip_html};
+
+    comments
+        .iter()
+        .map(|c| CommentOutput {
+            id: c.id,
+            author: c.by.clone(),
+            time: format_timestamp(c.time),
+            text: c.text.as_ref().map(|t| strip_html(t)),
+            replies_count: c.kids.as_ref().map(|k| k.len()).unwrap_or(0),
+        })
+        .collect()
+}
+```
+
+**Step 2: Create Pure Post Output Builder**
+
+```rust
+/// Pure transformation: Build post output with pagination
+fn build_post_output(
+    item: HnItem,
+    comments: Vec<CommentOutput>,
+    page: usize,
+    limit: usize,
+    total_comments: usize,
+) -> PostOutput {
+    use super::format_timestamp;
+
+    let total_pages = total_comments.div_ceil(limit);
+
+    let next_page = if page < total_pages {
+        Some(format!(
+            "mcptools hn read {} --page {}",
+            item.id,
+            page + 1
+        ))
+    } else {
+        None
+    };
+
+    let prev_page = if page > 1 {
+        Some(format!(
+            "mcptools hn read {} --page {}",
+            item.id,
+            page - 1
+        ))
+    } else {
+        None
+    };
+
+    PostOutput {
+        id: item.id,
+        title: item.title.clone(),
+        url: item.url.clone(),
+        author: item.by.clone(),
+        score: item.score,
+        time: format_timestamp(item.time),
+        text: item.text.as_ref().map(|t| super::strip_html(t)),
+        total_comments: item.descendants,
+        comments,
+        pagination: PaginationInfo {
+            current_page: page,
+            total_pages,
+            total_comments,
+            limit,
+            next_page_command: next_page,
+            prev_page_command: prev_page,
+        },
+    }
+}
+```
+
+**Step 3: Refactor Data Function**
+
+```rust
+pub async fn read_item_data(
+    item: String,
+    limit: usize,
+    page: usize,
+    thread: Option<String>,
+) -> Result<PostOutput> {
+    let item_id = extract_item_id(&item)?;
+
+    if thread.is_some() {
+        return Err(eyre!("Thread reading not supported in data mode yet"));
+    }
+
+    // Fetch the main item (I/O operation)
+    let client = reqwest::Client::new();
+    let hn_item = fetch_item(&client, item_id).await?;
+
+    // Validate it's a story
+    if hn_item.item_type != "story" {
+        return Err(eyre!(
+            "Item {} is not a story (type: {})",
+            item_id,
+            hn_item.item_type
+        ));
+    }
+
+    // Get top-level comment IDs
+    let comment_ids = hn_item.kids.clone().unwrap_or_default();
+    let total_comments = comment_ids.len();
+
+    // Calculate pagination (pure logic)
+    let start = (page - 1) * limit;
+    let paginated_ids: Vec<u64> = comment_ids
+        .iter()
+        .skip(start)
+        .take(limit)
+        .copied()
+        .collect();
+
+    // Fetch comments for this page (I/O operation)
+    let comment_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
+    let comment_items: Vec<HnItem> = join_all(comment_futures)
+        .await
+        .into_iter()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Transform comments (pure function)
+    let comments = transform_comments(comment_items);
+
+    // Build output (pure function)
+    Ok(build_post_output(hn_item, comments, page, limit, total_comments))
+}
+```
+
+**Why This Works**: Comment transformation and output building are now pure functions. The data function handles I/O and validation but delegates all transformation logic.
+
+**Testing Strategy**: Test `transform_comments` with various comment structures. Test `build_post_output` with different pagination scenarios and edge cases.
+
+---
+
+### 1.6: Markdown Converter - Fetch and Transform
+
+**File**: `crates/mcptools/src/md/mod.rs`
+
+**Current Problem**: The `fetch_and_convert_data` function (lines 94-236) is the most complex violation. It mixes browser automation (I/O) with HTML processing, selector application, content conversion, and pagination calculation. This 142-line function does everything from launching Chrome to calculating character offsets.
+
+**What Needs to Change**:
+
+This function needs to be broken into multiple pure functions that handle different aspects of the transformation. The browser operations stay in the I/O layer, while HTML processing and pagination become pure functions.
+
+**Step 1: Create Pure HTML Processing Function**
+
+```rust
+/// Pure transformation: Process raw HTML into content
+fn process_html_content(
+    html: String,
+    selector: Option<String>,
+    strategy: SelectionStrategy,
+    index: Option<usize>,
+    raw_html: bool,
+) -> Result<(String, Option<String>, Option<usize>, Option<String>)> {
+    // Apply CSS selector if provided
+    let (filtered_html, selector_used, elements_found, strategy_applied) =
+        if let Some(ref sel) = selector {
+            let (filtered, count) = apply_selector(&html, sel, &strategy, index)?;
+            let strategy_desc = match strategy {
+                SelectionStrategy::First => "first".to_string(),
+                SelectionStrategy::Last => "last".to_string(),
+                SelectionStrategy::All => "all".to_string(),
+                SelectionStrategy::N => format!("nth (index: {})", index.unwrap_or(0)),
+            };
+            (
+                filtered,
+                Some(sel.clone()),
+                Some(count),
+                Some(strategy_desc),
+            )
+        } else {
+            (html, None, None, None)
+        };
+
+    // Clean HTML by removing script and style tags
+    let cleaned_html = clean_html(&filtered_html);
+
+    // Convert to markdown if requested
+    let content = if raw_html {
+        cleaned_html
+    } else {
+        html2md::parse_html(&cleaned_html)
+    };
+
+    Ok((content, selector_used, elements_found, strategy_applied))
+}
+```
+
+**Step 2: Create Pure Pagination Calculator**
+
+```rust
+/// Pure transformation: Calculate pagination for content
+fn calculate_content_pagination(
+    total_characters: usize,
+    offset: usize,
+    limit: usize,
+    page: usize,
+    paginated: bool,
+) -> (usize, usize, usize, MdPaginationInfo) {
+    if !paginated {
+        // No pagination - return all content
+        let pagination = MdPaginationInfo {
+            current_page: 1,
+            total_pages: 1,
+            total_characters,
+            limit: total_characters,
+            has_more: false,
+        };
+        return (0, total_characters, 1, pagination);
+    }
+
+    // Pagination enabled - calculate bounds
+    let (total_pages, start_offset, end_offset, current_page) = if offset > 0 {
+        // Offset-based: ignore page parameter
+        let start_offset = offset.min(total_characters);
+        let end_offset = (start_offset + limit).min(total_characters);
+        let total_pages = if limit >= total_characters {
+            1
+        } else {
+            total_characters.div_ceil(limit)
+        };
+        let current_page = if limit > 0 {
+            (offset / limit) + 1
+        } else {
+            1
+        };
+        (total_pages, start_offset, end_offset, current_page)
+    } else if limit >= total_characters {
+        // Single page case
+        (1, 0, total_characters, 1)
+    } else {
+        // Multi-page case
+        let total_pages = total_characters.div_ceil(limit);
+        let current_page = page.min(total_pages.max(1));
+        let start_offset = (current_page - 1) * limit;
+        let end_offset = (start_offset + limit).min(total_characters);
+        (total_pages, start_offset, end_offset, current_page)
+    };
+
+    let has_more = current_page < total_pages;
+
+    let pagination = MdPaginationInfo {
+        current_page,
+        total_pages,
+        total_characters,
+        limit,
+        has_more,
+    };
+
+    (start_offset, end_offset, current_page, pagination)
+}
+```
+
+**Step 3: Create Pure Content Slicer**
+
+```rust
+/// Pure transformation: Extract paginated content from full content
+fn slice_content(content: String, start_offset: usize, end_offset: usize) -> String {
+    content
+        .chars()
+        .skip(start_offset)
+        .take(end_offset - start_offset)
+        .collect()
+}
+```
+
+**Step 4: Refactor Main Function**
+
+```rust
+pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
+    let start = Instant::now();
+
+    // Launch headless Chrome (I/O operation)
+    let browser = Browser::default().map_err(|e| {
+        eyre!(
+            "Failed to launch browser: {}. Make sure Chrome or Chromium is installed.",
+            e
+        )
+    })?;
+
+    let tab = browser
+        .new_tab()
+        .map_err(|e| eyre!("Failed to create new tab: {}", e))?;
+
+    // Set timeout (I/O configuration)
+    tab.set_default_timeout(std::time::Duration::from_secs(config.timeout));
+
+    // Navigate to URL and wait for network idle (I/O operation)
+    tab.navigate_to(&config.url)
+        .map_err(|e| eyre!("Failed to navigate to {}: {}", config.url, e))?
+        .wait_until_navigated()
+        .map_err(|e| eyre!("Failed to wait for navigation: {}", e))?;
+
+    // Get page title (I/O operation)
+    let title = tab.get_title().ok().filter(|t| !t.is_empty());
+
+    // Get HTML content (I/O operation)
+    let html = tab
+        .get_content()
+        .map_err(|e| eyre!("Failed to get page content: {}", e))?;
+
+    let html_length = html.len();
+
+    // Process HTML (pure transformation)
+    let (full_content, selector_used, elements_found, strategy_applied) =
+        process_html_content(
+            html,
+            config.selector,
+            config.strategy,
+            config.index,
+            config.raw_html,
+        )?;
+
+    let total_characters = full_content.chars().count();
+
+    // Calculate pagination (pure transformation)
+    let (start_offset, end_offset, current_page, pagination) = calculate_content_pagination(
+        total_characters,
+        config.offset,
+        config.limit,
+        config.page,
+        config.paginated,
+    );
+
+    // Extract paginated content (pure transformation)
+    let content = slice_content(full_content, start_offset, end_offset);
+
+    let fetch_time_ms = start.elapsed().as_millis() as u64;
+
+    Ok(FetchOutput {
+        url: config.url,
+        title,
+        content,
+        html_length,
+        fetch_time_ms,
+        selector_used,
+        elements_found,
+        strategy_applied,
+        pagination,
+    })
+}
+```
+
+**Why This Works**: The browser automation (I/O) is kept in the main function, while all the transformation logic (HTML processing, pagination calculation, content slicing) is extracted into pure functions. Each pure function has a single, clear responsibility and can be tested independently.
+
+**Testing Strategy**:
+- Test `process_html_content` with various HTML structures and selector configurations
+- Test `calculate_content_pagination` with extensive edge cases (empty content, single page, multi-page, offset-based, page-based)
+- Test `slice_content` with various character ranges including Unicode characters
+
+---
+
+## Phase 2: Output Functions (Medium Priority)
+
+Phase 2 addresses output formatting functions that currently mix formatting logic with I/O operations (printing to stdout/stderr). While these violations are less critical than Phase 1 (the logic still works, it's just harder to test), extracting these functions improves testability and allows for future output formats.
+
+The pattern for all output functions is similar: instead of functions that take data and print it, we create functions that take data and return formatted strings. The handler functions then become responsible for printing.
+
+### 2.1: Markdown Fetch Output Formatting
+
+**File**: `crates/mcptools/src/md/fetch.rs`
+
+**Current Problem**: The `output_formatted` function (lines 140-328) and `output_json` function (lines 101-138) mix formatting logic with `println`/`eprintln` calls. While `output_json` mostly uses `serde_json` serialization, `output_formatted` contains complex logic for building decorative output that's hard to test.
+
+**What Needs to Change**:
+
+We should extract the formatting logic into pure functions that return strings, then have thin wrapper functions that handle the actual printing.
+
+**Step 1: Create Pure JSON Formatter**
+
+```rust
+/// Pure transformation: Build JSON string from output
+fn format_output_json(output: &FetchOutput, paginated: bool) -> Result<String> {
+    if paginated {
+        serde_json::to_string_pretty(output)
+            .map_err(|e| eyre!("JSON serialization failed: {}", e))
+    } else {
+        #[derive(serde::Serialize)]
+        struct OutputWithoutPagination<'a> {
+            url: &'a str,
+            title: &'a Option<String>,
+            content: &'a str,
+            html_length: usize,
+            fetch_time_ms: u64,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            selector_used: &'a Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            elements_found: &'a Option<usize>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            strategy_applied: &'a Option<String>,
+        }
+
+        let output_without_pagination = OutputWithoutPagination {
+            url: &output.url,
+            title: &output.title,
+            content: &output.content,
+            html_length: output.html_length,
+            fetch_time_ms: output.fetch_time_ms,
+            selector_used: &output.selector_used,
+            elements_found: &output.elements_found,
+            strategy_applied: &output.strategy_applied,
+        };
+
+        serde_json::to_string_pretty(&output_without_pagination)
+            .map_err(|e| eyre!("JSON serialization failed: {}", e))
+    }
+}
+```
+
+**Step 2: Create Pure Formatted Output Builder**
+
+```rust
+/// Pure transformation: Build formatted output string
+fn format_output_text(output: &FetchOutput, options: &FetchOptions, paginated: bool) -> String {
+    use colored::Colorize;
+
+    let mut result = String::new();
+
+    // Header
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_cyan()));
+    result.push_str(&format!("{}\n", "WEB PAGE TO MARKDOWN".bright_cyan().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_cyan()));
+
+    // URL and title
+    result.push_str(&format!("\n{}: {}\n", "URL".green(), output.url.cyan().underline()));
+
+    if let Some(title) = &output.title {
+        result.push_str(&format!("{}: {}\n", "Title".green(), title.bright_white().bold()));
+    }
+
+    // Selector information
+    if let Some(selector) = &output.selector_used {
+        result.push_str(&format!(
+            "\n{}: {}\n",
+            "CSS Selector".green(),
+            selector.bright_white().bold()
+        ));
+        if let Some(count) = output.elements_found {
+            result.push_str(&format!(
+                "{}: {}\n",
+                "Elements Found".green(),
+                count.to_string().bright_yellow().bold()
+            ));
+        }
+        if let Some(strategy) = &output.strategy_applied {
+            result.push_str(&format!(
+                "{}: {}\n",
+                "Selection Strategy".green(),
+                strategy.bright_yellow().bold()
+            ));
+        }
+    }
+
+    // Metadata if requested
+    if options.include_metadata {
+        result.push_str(&format!(
+            "{}: {}\n",
+            "HTML Size".green(),
+            format!("{} bytes", output.html_length).bright_yellow()
+        ));
+        result.push_str(&format!(
+            "{}: {}\n",
+            "Fetch Time".green(),
+            format!("{} ms", output.fetch_time_ms).bright_yellow()
+        ));
+        result.push_str(&format!(
+            "{}: {}\n",
+            "Content Type".green(),
+            if options.raw_html {
+                "HTML".bright_magenta()
+            } else {
+                "Markdown".bright_magenta()
+            }
+        ));
+    }
+
+    // Content section header
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_magenta()));
+    result.push_str(&format!(
+        "{}\n",
+        if options.raw_html {
+            "HTML CONTENT".bright_magenta().bold()
+        } else {
+            "MARKDOWN CONTENT".bright_magenta().bold()
+        }
+    ));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_magenta()));
+
+    // Content
+    for line in output.content.lines() {
+        result.push_str(&format!("{}\n", line.white()));
+    }
+
+    // Statistics
+    let total_lines = output.content.lines().count();
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_yellow()));
+    result.push_str(&format!("{}\n", "STATISTICS".bright_yellow().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_yellow()));
+
+    result.push_str(&format!(
+        "\n{}: {}\n",
+        "Total Lines".green(),
+        total_lines.to_string().bright_cyan().bold()
+    ));
+    result.push_str(&format!(
+        "{}: {}\n",
+        "Total Characters".green(),
+        output.content.len().to_string().bright_cyan().bold()
+    ));
+    result.push_str(&format!(
+        "{}: {}\n",
+        "Fetch Time".green(),
+        format!("{} ms", output.fetch_time_ms).bright_cyan().bold()
+    ));
+
+    // Usage help section
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_yellow()));
+    result.push_str(&format!("{}\n", "USAGE".bright_yellow().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_yellow()));
+
+    result.push_str(&format!("\n{}:\n", "To get JSON output".bright_white().bold()));
+    result.push_str(&format!(
+        "  {}\n",
+        format!("mcptools md fetch {} --json", output.url).cyan()
+    ));
+
+    if !options.raw_html {
+        result.push_str(&format!("\n{}:\n", "To get raw HTML".bright_white().bold()));
+        result.push_str(&format!(
+            "  {}\n",
+            format!("mcptools md fetch {} --raw-html", output.url).cyan()
+        ));
+    }
+
+    if !options.include_metadata {
+        result.push_str(&format!("\n{}:\n", "To include metadata".bright_white().bold()));
+        result.push_str(&format!(
+            "  {}\n",
+            format!("mcptools md fetch {} --include-metadata", output.url).cyan()
+        ));
+    }
+
+    result.push_str(&format!("\n{}:\n", "To adjust timeout".bright_white().bold()));
+    result.push_str(&format!(
+        "  {}\n",
+        format!("mcptools md fetch {} --timeout <seconds>", output.url).cyan()
+    ));
+
+    if output.selector_used.is_none() {
+        result.push_str(&format!("\n{}:\n", "To filter with CSS selector".bright_white().bold()));
+        result.push_str(&format!(
+            "  {}\n",
+            format!("mcptools md fetch {} --selector \"article\"", output.url).cyan()
+        ));
+    }
+
+    if !paginated {
+        result.push_str(&format!("\n{}:\n", "To enable pagination".bright_white().bold()));
+        result.push_str(&format!(
+            "  {}\n",
+            format!("mcptools md fetch {} --limit 1000", output.url).cyan()
+        ));
+    }
+
+    result.push('\n');
+    result
+}
+```
+
+**Step 3: Refactor Output Functions to Use Pure Formatters**
+
+```rust
+fn output_json(output: &FetchOutput, paginated: bool) -> Result<()> {
+    let json = format_output_json(output, paginated)?;
+    println!("{}", json);
+    Ok(())
+}
+
+fn output_formatted(output: &FetchOutput, options: &FetchOptions, paginated: bool) -> Result<()> {
+    let is_tty = std::io::stdout().is_terminal();
+
+    if is_tty {
+        // Terminal output with colors
+        let formatted = format_output_text(output, options, paginated);
+        eprint!("{}", formatted); // Metadata goes to stderr
+
+        // Content goes to stdout for piping
+        for line in output.content.lines() {
+            println!("{}", line);
+        }
+    } else {
+        // Piped output - just content without colors
+        for line in output.content.lines() {
+            println!("{}", line);
+        }
+    }
+
+    Ok(())
+}
+```
+
+**Why This Works**: The formatting logic is now testable - you can call `format_output_text` and verify the structure of the returned string. The I/O functions are now thin wrappers that just handle printing.
+
+**Testing Strategy**: Test `format_output_json` and `format_output_text` with various output configurations. Verify the structure and content of formatted strings without needing to capture stdout.
+
+### 2.2-2.4: Similar Pattern for Other Output Functions
+
+The same refactoring pattern applies to:
+
+- **`md/toc.rs`**: Extract `format_toc_json`, `format_toc_text` (lines 217-324)
+- **`hn/read_item.rs`**: Extract `format_post_json`, `format_post_text`, `format_thread_json`, `format_thread_text` (lines 158-546)
+- **`hn/list_items.rs`**: Extract `format_list_json`, `format_list_text` (lines 148-298)
+
+In each case:
+1. Create pure functions that return formatted strings
+2. Modify output functions to call formatters then print
+3. Ensure formatters are testable with fixture data
+
+---
+
+## Phase 3: Supporting Refactorings (Low Priority)
+
+Phase 3 includes minor improvements and cleanup that don't directly violate the pattern but could be improved for consistency.
+
+### 3.1: Table of Contents Extraction
+
+**File**: `crates/mcptools/src/md/toc.rs`
+
+**Current Issue**: The `extract_toc_data` function (lines 102-128) is mostly well-structured but calls `fetch_and_convert_data` which mixes I/O. After Phase 1 refactoring of `fetch_and_convert_data`, this function will automatically benefit.
+
+**Minor Improvement**: The `extract_toc` function (lines 131-185) is already pure and well-structured. No changes needed, but we should add comprehensive tests.
+
+### 3.2: Upgrade Module
+
+**File**: `crates/mcptools/src/upgrade.rs`
+
+**Current Issue**: This module has several functions that mix I/O with logic, but it's a standalone feature with less critical importance. Functions like `is_version_up_to_date` (line 91) and pagination helpers are already pure, which is good.
+
+**Recommended Approach**: Leave this module as-is for now. It's a self-contained feature, and refactoring it provides less value than the core data functions. If time permits after Phases 1-2, we can apply similar patterns here.
+
+---
+
+## Execution Order and Dependencies
+
+The refactorings should be executed in the following order to minimize conflicts and build incrementally:
+
+### Stage 1: Foundation (No Dependencies)
+Start with modules that have no inter-dependencies:
+
+1. ✅ **`atlassian/confluence.rs`** - **COMPLETED** - Simplest transformation, established the two-crate pattern
+2. **`atlassian/jira/list.rs`** - Builds on Confluence pattern
+3. **`atlassian/jira/get.rs`** - More complex but follows same pattern
+
+### Stage 2: HackerNews (Depends on Stage 1 Patterns)
+Apply learned patterns to HN modules:
+
+4. **`hn/list_items.rs`** - Similar to Jira list, introduces pagination
+5. **`hn/read_item.rs`** - More complex, uses pagination from list
+
+### Stage 3: Markdown (Most Complex)
+Tackle the most complex refactoring after establishing patterns:
+
+6. **`md/mod.rs`** - Most complex, benefits from all previous learnings
+
+### Stage 4: Output Functions (After Core Logic)
+Refactor output functions once core data flow is stable:
+
+7. **`md/fetch.rs`** output functions
+8. **`md/toc.rs`** output functions
+9. **`hn/list_items.rs`** output functions
+10. **`hn/read_item.rs`** output functions
+
+### Stage 5: Verification
+After all refactorings:
+
+11. Run full test suite
+12. Manual testing of all CLI commands
+13. MCP integration testing
+14. Performance verification (ensure no regressions)
+
+---
+
+## Testing Strategy
+
+Each refactored module should have a corresponding test module that exercises the pure functions without any mocking:
+
+### Unit Tests for Pure Functions
+
+Create test files following Rust conventions:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transform_search_response_basic() {
+        // Arrange: Create fixture data
+        let response = JiraSearchResponse {
+            issues: vec![/* fixture data */],
+            total: Some(1),
+            next_page_token: None,
+            // ... other fields
+        };
+
+        // Act: Call pure function
+        let output = transform_search_response(
+            response,
+            "test query".to_string(),
+            10,
+            None,
+        );
+
+        // Assert: Verify output
+        assert_eq!(output.issues.len(), 1);
+        assert_eq!(output.total, 1);
+        assert!(output.next_page_token.is_none());
+    }
+
+    #[test]
+    fn test_transform_search_response_with_pagination() {
+        // Test pagination token handling
+    }
+
+    #[test]
+    fn test_transform_search_response_empty() {
+        // Test edge case: empty results
+    }
+}
+```
+
+### Integration Tests
+
+After refactoring, the existing integration tests (if any) should continue to work without changes, as the public API of data functions remains the same. However, the refactoring enables new integration tests that can test data transformation separately from I/O.
+
+### Test Coverage Goals
+
+Aim for:
+- **100% coverage of pure transformation functions** - These should be easy to test comprehensively
+- **80%+ coverage of data functions** - I/O error paths may require more complex setup
+- **Edge case coverage** - Empty responses, missing fields, boundary conditions
+
+---
+
+## Measuring Success
+
+We'll know the refactoring is successful when:
+
+1. **Pure functions are testable**: Each transformation function has comprehensive unit tests with no mocking
+2. **Code is more readable**: Functions have single, clear responsibilities
+3. **Tests run faster**: Pure function tests execute in microseconds
+4. **Functionality is unchanged**: All existing CLI and MCP operations work identically
+5. **Future changes are easier**: Adding new output formats or API integrations is straightforward
+
+---
+
+## Rollback Plan
+
+If any refactoring introduces bugs or issues:
+
+1. Each refactoring should be a separate commit
+2. Use `git revert` to rollback individual changes
+3. The modular nature (separate files) means issues are isolated
+4. Each stage can be tested independently before moving to the next
+
+---
+
+## Timeline Estimate
+
+Based on complexity and dependencies:
+
+- **Stage 1 (Atlassian)**: 4-6 hours (including tests)
+- **Stage 2 (HackerNews)**: 4-6 hours (including tests)
+- **Stage 3 (Markdown)**: 6-8 hours (most complex)
+- **Stage 4 (Output)**: 4-6 hours
+- **Stage 5 (Verification)**: 2-3 hours
+- **Total**: ~20-29 hours of focused work
+
+This assumes one person working sequentially. With multiple developers, Stages 1-2 could be parallelized.
+
+---
+
+## Conclusion
+
+This refactoring plan provides a clear path from the current mixed architecture to a clean Functional Core - Imperative Shell implementation using a **two-crate architecture** (`mcptools_core` for pure functions, `mcptools` for I/O).
+
+**Progress Update**: The first refactoring (Section 1.3: Atlassian Confluence) has been successfully completed, establishing the architectural pattern for all subsequent work. This implementation demonstrates:
+- ✅ Complete separation of concerns between pure functions and I/O
+- ✅ Comprehensive testing without mocking (10 tests, all passing)
+- ✅ Maintainable code structure that's easy to reason about
+- ✅ Template pattern ready for replication across remaining modules
+
+By following the execution order and applying the established pattern consistently across all modules, we'll achieve a more testable, maintainable, and robust codebase. The investment in this refactoring will pay dividends in reduced debugging time, easier feature additions, and greater confidence in code correctness.
+
+The key principle throughout is: **data transformation logic should be pure and ignorant of where data comes from or where it goes**. By adhering to this principle and enforcing it through crate boundaries, we create a codebase that's easier to reason about, test, and extend.
+
+**Next Steps**: Continue with Section 1.1 (Atlassian Jira - Issue List) or Section 1.2 (Atlassian Jira - Ticket Detail), following the same two-crate pattern established in the Confluence refactoring.

@@ -64,7 +64,7 @@ pub async fn list_issues_data(
 
     // Handle base_url that may or may not have trailing slash
     let base_url = config.base_url.trim_end_matches('/');
-    let url = format!("{}/rest/api/3/search/jql", base_url);
+    let url = format!("{base_url}/rest/api/3/search/jql");
 
     // Build query parameters for GET request
     let max_results = std::cmp::min(limit, 100); // Jira API max is 100

@@ -1,0 +1,20 @@
+[package]
+name = "mcptools_core"
+version = "0.0.0"
+homepage = "https://github.com/cloudbridgeuy/mcptools"
+description = "Core for the mcptools project"
+autobins = false
+
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "mcptools_core"
+path = "src/lib.rs"
+
+[dependencies]
+# Core dependencies for pure transformation functions
+serde = { workspace = true }
+regex = { workspace = true }
+html-escape = { workspace = true }

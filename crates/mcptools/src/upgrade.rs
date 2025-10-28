@@ -113,7 +113,7 @@ fn is_version_up_to_date(current: &str, latest: &str) -> Result<bool> {
 fn find_matching_asset(release: &GitHubRelease) -> Result<&GitHubAsset> {
     let os = get_github_os()?;
     let arch = get_github_arch()?;
-    let target_name = format!("mcptools-{}-{}", os, arch);
+    let target_name = format!("mcptools-{os}-{arch}");
 
     release
         .assets

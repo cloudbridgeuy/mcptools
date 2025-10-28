@@ -131,8 +131,7 @@ pub async fn handle_md_toc(
             return Err(JsonRpcError {
                 code: -32602,
                 message: format!(
-                    "Invalid output format: '{}'. Must be 'indented', 'markdown', or 'json'",
-                    other
+                    "Invalid output format: '{other}'. Must be 'indented', 'markdown', or 'json'"
                 ),
                 data: None,
             });

@@ -233,7 +233,7 @@ pub async fn handler(options: GetOptions) -> Result<()> {
                                             .and_then(|attrs| attrs.get("text"))
                                             .and_then(|t| t.as_str())
                                         {
-                                            full_text.push_str(&format!("@{} ", mention_text));
+                                            full_text.push_str(&format!("@{mention_text} "));
                                         }
                                     }
                                 }
@@ -261,7 +261,7 @@ pub async fn handler(options: GetOptions) -> Result<()> {
                     .split_whitespace()
                     .map(|word| {
                         if let Some(stripped) = word.strip_prefix("@@") {
-                            format!("@{}", stripped).yellow().to_string()
+                            format!("@{stripped}").yellow().to_string()
                         } else if word.starts_with('@') {
                             word.to_owned().yellow().to_string()
                         } else {

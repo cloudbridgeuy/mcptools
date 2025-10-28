@@ -57,7 +57,7 @@ pub fn create_authenticated_client(config: &AtlassianConfig) -> Result<reqwest::
     let mut headers = HeaderMap::new();
     headers.insert(
         AUTHORIZATION,
-        HeaderValue::from_str(&format!("Basic {}", auth_encoded))
+        HeaderValue::from_str(&format!("Basic {auth_encoded}"))
             .map_err(|e| eyre!("Invalid header value: {}", e))?,
     );
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));

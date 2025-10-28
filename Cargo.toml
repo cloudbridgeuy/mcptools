@@ -17,6 +17,7 @@ incremental = true
 debug = 0
 
 [workspace.dependencies]
+mcptools_core = { version = "0.0.0", path = "crates/core" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 clap = { version = "4.5.48", features = ["derive", "string", "env"] }
@@ -24,7 +25,7 @@ color-eyre = "0.6.5"
 env_logger = "0.11.8"
 thiserror = "2.0.17"
 tokio = { version = "1.47.1", features = ["full"] }
-anstream = "0.6.21"
+anstream = "0.6.20"
 prettytable = "0.10.0"
 futures = "0.3.31"
 reqwest = { version = "0.12.23", features = ["json"] }
@@ -35,9 +36,9 @@ tower-http = { version = "0.6.6", features = ["cors"] }
 colored = "3.0.0"
 headless_chrome = "1.0.18"
 html2md = "0.2.15"
-scraper = "0.20"
-base64 = "0.21.7"
+scraper = "0.24.0"
+base64 = "0.22.1"
 html-escape = "0.2.13"
-md5 = "0.7.0"
+md5 = "0.8.0"
 dirs-next = "2.0.0"
 urlencoding = "2.1.1"

@@ -56,7 +56,7 @@ fn render_adf_node(node: &serde_json::Value, depth: usize) -> Option<String> {
             if text.is_empty() {
                 Some("\n".to_string())
             } else {
-                Some(format!("{}\n", text))
+                Some(format!("{text}\n"))
             }
         }
         "heading" => {
