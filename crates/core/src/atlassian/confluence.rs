@@ -1,12 +1,6 @@
-//! Pure transformation functions for Confluence API responses
-//!
-//! This module contains zero I/O operations and is fully testable with fixture data.
+//! Transformation functions for Confluence API responses
 
 use serde::{Deserialize, Serialize};
-
-// ============================================================================
-// Domain Models (Input from API)
-// ============================================================================
 
 /// Confluence page response from API
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -54,10 +48,6 @@ pub struct ConfluenceSearchResponse {
     pub total_size: usize,
 }
 
-// ============================================================================
-// Output Models (Domain Model)
-// ============================================================================
-
 /// Output structure for a single page
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct PageOutput {
@@ -75,14 +65,9 @@ pub struct SearchOutput {
     pub total: usize,
 }
 
-// ============================================================================
-// Pure Helper Functions
-// ============================================================================
-
 /// Convert HTML content to plain text (simple conversion)
 ///
-/// This is a pure function with no side effects. It transforms HTML strings
-/// into readable plain text by removing tags and decoding entities.
+/// Transforms HTML strings into readable plain text by removing tags and decoding entities.
 pub fn html_to_plaintext(html: &str) -> String {
     // Simple HTML to text conversion - remove tags and decode entities
     let text = html
@@ -110,14 +95,9 @@ pub fn html_to_plaintext(html: &str) -> String {
         .join("\n")
 }
 
-// ============================================================================
-// Pure Transformation Functions
-// ============================================================================
-
-/// Pure transformation: Convert Confluence API response to domain model
+/// Convert Confluence API response to domain model
 ///
-/// This function has no side effects and can be tested without mocking HTTP.
-/// It transforms the raw API response into our clean domain model.
+/// Transforms the raw API response into our clean domain model.
 ///
 /// # Arguments
 /// * `search_response` - The raw response from Confluence search API
@@ -151,10 +131,6 @@ pub fn transform_search_results(search_response: ConfluenceSearchResponse) -> Se
         total: search_response.total_size,
     }
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
