@@ -849,153 +849,102 @@ The `list_items_data` function now:
 
 ---
 
-### 1.5: HackerNews - Item Read Transformation
+### 1.5: HackerNews - Item Read Transformation ✅ **COMPLETED**
 
-**File**: `crates/mcptools/src/hn/read_item.rs`
+**Status**: ✅ **COMPLETED** - Fifth refactoring successfully implemented following the established two-crate pattern.
 
-**Current Problem**: The `read_item_data` function (lines 549-649) mixes HTTP fetching with comment processing and pagination calculation. This is similar to the list function but more complex due to nested comment structures.
+**Files Modified**:
+- **Core**: `crates/core/src/hn.rs` (extended to 927 lines, +13 tests)
+- **Shell**: `crates/mcptools/src/hn/read_item.rs` (refactored from 101 lines to 54 lines, 47% reduction)
+- **Shell**: `crates/mcptools/src/hn/mod.rs` (removed domain models and strip_html, added re-exports)
 
-**What Needs to Change**:
+**Original Problem**: The `read_item_data` function (lines 549-650) mixed HTTP fetching with comment processing and pagination calculation. The function handled I/O operations (fetching item and comments), data transformation (building comment outputs), and pagination metadata construction all in one flow.
 
-We need to extract the pagination calculation (similar to list) and the comment transformation logic.
+**Solution Implemented**:
 
-**Step 1: Create Pure Comment Transformation Function**
+Created a clean separation between I/O operations and pure transformation logic.
 
-```rust
-/// Pure transformation: Convert HN items to comment outputs
-fn transform_comments(comments: Vec<HnItem>) -> Vec<CommentOutput> {
-    use super::{format_timestamp, strip_html};
+**What Was Created in `mcptools_core`**:
 
-    comments
-        .iter()
-        .map(|c| CommentOutput {
-            id: c.id,
-            author: c.by.clone(),
-            time: format_timestamp(c.time),
-            text: c.text.as_ref().map(|t| strip_html(t)),
-            replies_count: c.kids.as_ref().map(|k| k.len()).unwrap_or(0),
-        })
-        .collect()
-}
-```
+1. **Domain Models** (moved from mcptools mod.rs):
+   - `PostOutput` (post with comments and pagination)
+   - `CommentOutput` (individual comment structure)
+   - `PaginationInfo` (pagination metadata for read items)
 
-**Step 2: Create Pure Post Output Builder**
+2. **Pure Helper Function** (moved from mcptools mod.rs):
+   ```rust
+   pub fn strip_html(text: &str) -> String
+   ```
+   Strips HTML tags and decodes entities. Was already pure in shell, just needed to move!
 
-```rust
-/// Pure transformation: Build post output with pagination
-fn build_post_output(
-    item: HnItem,
-    comments: Vec<CommentOutput>,
-    page: usize,
-    limit: usize,
-    total_comments: usize,
-) -> PostOutput {
-    use super::format_timestamp;
+3. **Pure Transformation Functions**:
+   ```rust
+   pub fn transform_comments(comments: Vec<HnItem>) -> Vec<CommentOutput>
+   ```
+   Transforms HN items to comment outputs with:
+   - Formatted timestamps via `format_timestamp`
+   - Cleaned text via `strip_html`
+   - Reply count from kids field
 
-    let total_pages = total_comments.div_ceil(limit);
+   ```rust
+   pub fn build_post_output(
+       item: HnItem,
+       comments: Vec<CommentOutput>,
+       page: usize,
+       limit: usize,
+       total_comments: usize,
+   ) -> PostOutput
+   ```
+   Builds complete post output with:
+   - Pagination metadata calculation
+   - Navigation command generation
+   - Timestamp formatting and text cleaning
 
-    let next_page = if page < total_pages {
-        Some(format!(
-            "mcptools hn read {} --page {}",
-            item.id,
-            page + 1
-        ))
-    } else {
-        None
-    };
+4. **Comprehensive Tests** (13 tests, all passing):
+   - `test_strip_html_tags` - Remove HTML tags
+   - `test_strip_html_entities` - Decode HTML entities
+   - `test_strip_html_complex` - Tags + entities combination
+   - `test_transform_comments_single` - Single comment with all fields
+   - `test_transform_comments_multiple` - Multiple comments
+   - `test_transform_comments_missing_fields` - Comments with None values
+   - `test_build_post_output_full` - Complete post with all fields
+   - `test_build_post_output_minimal` - Post with minimal fields
+   - `test_build_post_output_first_page` - Page 1, has next, no prev
+   - `test_build_post_output_last_page` - Last page, has prev, no next
+   - `test_build_post_output_middle_page` - Middle page, has both
+   - `test_build_post_output_single_page` - Only 1 page, no navigation
+   - `test_build_post_output_empty_comments` - Post with no comments
 
-    let prev_page = if page > 1 {
-        Some(format!(
-            "mcptools hn read {} --page {}",
-            item.id,
-            page - 1
-        ))
-    } else {
-        None
-    };
+**What Was Refactored in `mcptools`**:
 
-    PostOutput {
-        id: item.id,
-        title: item.title.clone(),
-        url: item.url.clone(),
-        author: item.by.clone(),
-        score: item.score,
-        time: format_timestamp(item.time),
-        text: item.text.as_ref().map(|t| super::strip_html(t)),
-        total_comments: item.descendants,
-        comments,
-        pagination: PaginationInfo {
-            current_page: page,
-            total_pages,
-            total_comments,
-            limit,
-            next_page_command: next_page,
-            prev_page_command: prev_page,
-        },
-    }
-}
-```
+The `read_item_data` function now:
+- Handles only I/O operations (HTTP client setup, item fetch, comment fetches, error handling)
+- Reduced from 101 lines to 54 lines (47% reduction)
+- Clear 4-step structure: Extract ID → Fetch Item → Fetch Comments → Transform
+- Imports types and functions from `mcptools_core::hn`
+- Delegates comment transformation to `transform_comments` from core
+- Delegates output building to `build_post_output` from core
+- Remains fully compatible with existing CLI and MCP handlers
 
-**Step 3: Refactor Data Function**
+**Key Achievement**: Successfully demonstrated that helper functions like `strip_html` were already pure in the shell and just needed to be moved. The function reduction (47%) shows significant simplification.
 
-```rust
-pub async fn read_item_data(
-    item: String,
-    limit: usize,
-    page: usize,
-    thread: Option<String>,
-) -> Result<PostOutput> {
-    let item_id = extract_item_id(&item)?;
+**Verification**:
+- ✅ All 13 core tests pass without mocking
+- ✅ Total test count: 61 tests across core crate (10 Confluence + 21 Jira + 30 HN)
+- ✅ mcptools builds successfully
+- ✅ CLI functionality verified with real API call to HN item 8863
+- ✅ MCP handlers work identically (use same public API)
+- ✅ Clean separation of concerns achieved
+- ✅ strip_html now available for reuse across all modules
 
-    if thread.is_some() {
-        return Err(eyre!("Thread reading not supported in data mode yet"));
-    }
+**Lessons Learned**:
 
-    // Fetch the main item (I/O operation)
-    let client = reqwest::Client::new();
-    let hn_item = fetch_item(&client, item_id).await?;
-
-    // Validate it's a story
-    if hn_item.item_type != "story" {
-        return Err(eyre!(
-            "Item {} is not a story (type: {})",
-            item_id,
-            hn_item.item_type
-        ));
-    }
-
-    // Get top-level comment IDs
-    let comment_ids = hn_item.kids.clone().unwrap_or_default();
-    let total_comments = comment_ids.len();
-
-    // Calculate pagination (pure logic)
-    let start = (page - 1) * limit;
-    let paginated_ids: Vec<u64> = comment_ids
-        .iter()
-        .skip(start)
-        .take(limit)
-        .copied()
-        .collect();
-
-    // Fetch comments for this page (I/O operation)
-    let comment_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
-    let comment_items: Vec<HnItem> = join_all(comment_futures)
-        .await
-        .into_iter()
-        .filter_map(|r| r.ok())
-        .collect();
-
-    // Transform comments (pure function)
-    let comments = transform_comments(comment_items);
-
-    // Build output (pure function)
-    Ok(build_post_output(hn_item, comments, page, limit, total_comments))
-}
-```
-
-**Why This Works**: Comment transformation and output building are now pure functions. The data function handles I/O and validation but delegates all transformation logic.
-
-**Testing Strategy**: Test `transform_comments` with various comment structures. Test `build_post_output` with different pagination scenarios and edge cases.
+1. **Already Pure Code**: `strip_html` was already pure in shell - just regex and string operations, no I/O
+2. **Function Reduction**: 47% reduction demonstrates the value of separating concerns
+3. **Test Behavior**: Initial tests needed adjustment to match actual `strip_html` behavior (regex removes tags before entity replacement)
+4. **Import Pattern**: Direct imports from core work best (avoided duplicate import issues by using re-exports correctly)
+5. **Pattern Consistency**: Fifth successful implementation proves the pattern is well-established
+6. **Helper Reusability**: Moving `strip_html` to core makes it available for all modules
 
 ---
 
