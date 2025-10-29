@@ -157,13 +157,14 @@ fn fetch_comment_tree<'a>(
     })
 }
 
-fn output_json(
+/// Build JSON string for post with comments
+fn format_post_json(
     item: &HnItem,
     comments: &[HnItem],
     options: &ReadOptions,
     total_comments: usize,
     total_pages: usize,
-) -> Result<()> {
+) -> Result<String> {
     let comment_outputs: Vec<CommentOutput> = comments
         .iter()
         .map(|c| CommentOutput {
@@ -215,10 +216,213 @@ fn output_json(
         },
     };
 
-    let json = serde_json::to_string_pretty(&output)?;
-    println!("{}", json);
+    serde_json::to_string_pretty(&output).map_err(|e| eyre!("JSON serialization failed: {}", e))
+}
 
+fn output_json(
+    item: &HnItem,
+    comments: &[HnItem],
+    options: &ReadOptions,
+    total_comments: usize,
+    total_pages: usize,
+) -> Result<()> {
+    let json = format_post_json(item, comments, options, total_comments, total_pages)?;
+    println!("{}", json);
     Ok(())
+}
+
+/// Build formatted text output for post with comments
+fn format_post_text(
+    item: &HnItem,
+    comments: &[HnItem],
+    options: &ReadOptions,
+    total_comments: usize,
+    total_pages: usize,
+    item_id: &str,
+) -> String {
+    let mut result = String::new();
+
+    // Post header
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_cyan()));
+    result.push_str(&format!(
+        "{}: {}\n",
+        "POST".bright_cyan().bold(),
+        item.title
+            .as_ref()
+            .unwrap_or(&"(No title)".to_string())
+            .white()
+            .bold()
+    ));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_cyan()));
+
+    if let Some(url) = &item.url {
+        result.push_str(&format!("{}: {}\n", "URL".green(), url.cyan().underline()));
+    }
+
+    result.push_str(&format!(
+        "{}: {}\n",
+        "Author".green(),
+        item.by
+            .as_ref()
+            .unwrap_or(&"(unknown)".to_string())
+            .bright_white()
+    ));
+    result.push_str(&format!(
+        "{}: {}\n",
+        "Score".green(),
+        item.score.unwrap_or(0).to_string().bright_yellow()
+    ));
+    result.push_str(&format!(
+        "{}: {}\n",
+        "Time".green(),
+        format_timestamp(item.time)
+            .unwrap_or("(unknown)".to_string())
+            .bright_black()
+    ));
+    result.push_str(&format!(
+        "{}: {}\n",
+        "Comments".green(),
+        item.descendants.unwrap_or(0).to_string().bright_magenta()
+    ));
+    result.push_str(&format!(
+        "{}: {}\n",
+        "ID".green(),
+        item.id.to_string().bright_white()
+    ));
+
+    if let Some(text) = &item.text {
+        result.push_str(&format!("\n{}\n", strip_html(text).bright_white()));
+    }
+
+    // Comments section
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_magenta()));
+    result.push_str(&format!(
+        "{} ({} {} {} {})\n",
+        "COMMENTS".bright_magenta().bold(),
+        "Page".bright_white(),
+        options.page.to_string().bright_cyan().bold(),
+        "of".bright_white(),
+        total_pages.to_string().bright_cyan().bold()
+    ));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_magenta()));
+
+    if comments.is_empty() {
+        result.push_str(&format!("\n{}\n", "No comments on this page.".yellow()));
+    } else {
+        for (idx, comment) in comments.iter().enumerate() {
+            let comment_num = (options.page - 1) * options.limit + idx + 1;
+            result.push_str(&format!(
+                "\n{} {} {} ({}: {})\n",
+                format!("[Comment #{comment_num}]").yellow().bold(),
+                "by".bright_black(),
+                comment
+                    .by
+                    .as_ref()
+                    .unwrap_or(&"(unknown)".to_string())
+                    .bright_white(),
+                "ID".bright_black(),
+                comment.id.to_string().bright_white()
+            ));
+            result.push_str(&format!(
+                "{}: {}\n",
+                "Time".green(),
+                format_timestamp(comment.time)
+                    .unwrap_or("(unknown)".to_string())
+                    .bright_black()
+            ));
+
+            if let Some(text) = &comment.text {
+                let stripped = strip_html(text);
+                let truncated = truncate_text(&stripped, 500);
+                result.push_str(&format!("{}\n", truncated.white()));
+            }
+
+            if let Some(kids) = &comment.kids {
+                result.push_str(&format!(
+                    "{} {}\n",
+                    "└─".bright_black(),
+                    format!("{} replies", kids.len()).bright_magenta()
+                ));
+            }
+        }
+    }
+
+    // Navigation section
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_yellow()));
+    result.push_str(&format!("{}\n", "NAVIGATION".bright_yellow().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_yellow()));
+    result.push_str(&format!(
+        "\n{} {} {} {} ({} {})\n",
+        "Showing page".bright_white(),
+        options.page.to_string().bright_cyan().bold(),
+        "of".bright_white(),
+        total_pages.to_string().bright_cyan().bold(),
+        total_comments.to_string().bright_cyan().bold(),
+        "total top-level comments".bright_white()
+    ));
+
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To view more comments".bright_white().bold()
+    ));
+    if options.page < total_pages {
+        result.push_str(&format!(
+            "  {}: {}\n",
+            "Next page".green(),
+            format!("mcptools hn read {} --page {}", item_id, options.page + 1).cyan()
+        ));
+    }
+    if options.page > 1 {
+        result.push_str(&format!(
+            "  {}: {}\n",
+            "Previous page".green(),
+            format!("mcptools hn read {} --page {}", item_id, options.page - 1).cyan()
+        ));
+    }
+    if options.page == total_pages && options.page > 1 {
+        result.push_str(&format!(
+            "  {}: {}\n",
+            "First page".green(),
+            format!("mcptools hn read {item_id} --page 1").cyan()
+        ));
+    }
+
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To read a comment thread".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
+        format!("mcptools hn read {item_id} --thread <comment_id>").cyan()
+    ));
+    if !comments.is_empty() {
+        result.push_str(&format!(
+            "  {}: {}\n",
+            "Example".green(),
+            format!("mcptools hn read {} --thread {}", item_id, comments[0].id).cyan()
+        ));
+    }
+
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To change page size".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
+        format!("mcptools hn read {item_id} --limit <number>").cyan()
+    ));
+
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To get JSON output".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
+        format!("mcptools hn read {item_id} --json").cyan()
+    ));
+    result.push('\n');
+
+    result
 }
 
 fn output_formatted(
@@ -229,177 +433,26 @@ fn output_formatted(
     total_pages: usize,
     item_id: &str,
 ) -> Result<()> {
-    // Post header
-    println!("\n{}", "=".repeat(80).bright_cyan());
-    println!(
-        "{}: {}",
-        "POST".bright_cyan().bold(),
-        item.title
-            .as_ref()
-            .unwrap_or(&"(No title)".to_string())
-            .white()
-            .bold()
+    let formatted = format_post_text(
+        item,
+        comments,
+        options,
+        total_comments,
+        total_pages,
+        item_id,
     );
-    println!("{}", "=".repeat(80).bright_cyan());
-
-    if let Some(url) = &item.url {
-        println!("{}: {}", "URL".green(), url.cyan().underline());
-    }
-
-    println!(
-        "{}: {}",
-        "Author".green(),
-        item.by
-            .as_ref()
-            .unwrap_or(&"(unknown)".to_string())
-            .bright_white()
-    );
-    println!(
-        "{}: {}",
-        "Score".green(),
-        item.score.unwrap_or(0).to_string().bright_yellow()
-    );
-    println!(
-        "{}: {}",
-        "Time".green(),
-        format_timestamp(item.time)
-            .unwrap_or("(unknown)".to_string())
-            .bright_black()
-    );
-    println!(
-        "{}: {}",
-        "Comments".green(),
-        item.descendants.unwrap_or(0).to_string().bright_magenta()
-    );
-    println!("{}: {}", "ID".green(), item.id.to_string().bright_white());
-
-    if let Some(text) = &item.text {
-        println!("\n{}", strip_html(text).bright_white());
-    }
-
-    // Comments section
-    println!("\n{}", "=".repeat(80).bright_magenta());
-    println!(
-        "{} ({} {} {} {})",
-        "COMMENTS".bright_magenta().bold(),
-        "Page".bright_white(),
-        options.page.to_string().bright_cyan().bold(),
-        "of".bright_white(),
-        total_pages.to_string().bright_cyan().bold()
-    );
-    println!("{}", "=".repeat(80).bright_magenta());
-
-    if comments.is_empty() {
-        println!("\n{}", "No comments on this page.".yellow());
-    } else {
-        for (idx, comment) in comments.iter().enumerate() {
-            let comment_num = (options.page - 1) * options.limit + idx + 1;
-            println!(
-                "\n{} {} {} ({}: {})",
-                format!("[Comment #{comment_num}]").yellow().bold(),
-                "by".bright_black(),
-                comment
-                    .by
-                    .as_ref()
-                    .unwrap_or(&"(unknown)".to_string())
-                    .bright_white(),
-                "ID".bright_black(),
-                comment.id.to_string().bright_white()
-            );
-            println!(
-                "{}: {}",
-                "Time".green(),
-                format_timestamp(comment.time)
-                    .unwrap_or("(unknown)".to_string())
-                    .bright_black()
-            );
-
-            if let Some(text) = &comment.text {
-                let stripped = strip_html(text);
-                let truncated = truncate_text(&stripped, 500);
-                println!("{}", truncated.white());
-            }
-
-            if let Some(kids) = &comment.kids {
-                println!(
-                    "{} {}",
-                    "└─".bright_black(),
-                    format!("{} replies", kids.len()).bright_magenta()
-                );
-            }
-        }
-    }
-
-    // Navigation section
-    println!("\n{}", "=".repeat(80).bright_yellow());
-    println!("{}", "NAVIGATION".bright_yellow().bold());
-    println!("{}", "=".repeat(80).bright_yellow());
-    println!(
-        "\n{} {} {} {} ({} {})",
-        "Showing page".bright_white(),
-        options.page.to_string().bright_cyan().bold(),
-        "of".bright_white(),
-        total_pages.to_string().bright_cyan().bold(),
-        total_comments.to_string().bright_cyan().bold(),
-        "total top-level comments".bright_white()
-    );
-
-    println!("\n{}:", "To view more comments".bright_white().bold());
-    if options.page < total_pages {
-        println!(
-            "  {}: {}",
-            "Next page".green(),
-            format!("mcptools hn read {} --page {}", item_id, options.page + 1).cyan()
-        );
-    }
-    if options.page > 1 {
-        println!(
-            "  {}: {}",
-            "Previous page".green(),
-            format!("mcptools hn read {} --page {}", item_id, options.page - 1).cyan()
-        );
-    }
-    if options.page == total_pages && options.page > 1 {
-        println!(
-            "  {}: {}",
-            "First page".green(),
-            format!("mcptools hn read {item_id} --page 1").cyan()
-        );
-    }
-
-    println!("\n{}:", "To read a comment thread".bright_white().bold());
-    println!(
-        "  {}",
-        format!("mcptools hn read {item_id} --thread <comment_id>").cyan()
-    );
-    if !comments.is_empty() {
-        println!(
-            "  {}: {}",
-            "Example".green(),
-            format!("mcptools hn read {} --thread {}", item_id, comments[0].id).cyan()
-        );
-    }
-
-    println!("\n{}:", "To change page size".bright_white().bold());
-    println!(
-        "  {}",
-        format!("mcptools hn read {item_id} --limit <number>").cyan()
-    );
-
-    println!("\n{}:", "To get JSON output".bright_white().bold());
-    println!("  {}", format!("mcptools hn read {item_id} --json").cyan());
-    println!();
-
+    print!("{}", formatted);
     Ok(())
 }
 
-fn output_thread_json(comment: &HnItem, children: &[HnItem]) -> Result<()> {
-    #[derive(Serialize)]
-    struct ThreadOutput {
-        comment: CommentOutput,
-        replies: Vec<CommentOutput>,
-    }
+#[derive(Serialize)]
+struct ThreadOutput {
+    comment: CommentOutput,
+    replies: Vec<CommentOutput>,
+}
 
+/// Build JSON string for comment thread
+fn format_thread_json(comment: &HnItem, children: &[HnItem]) -> Result<String> {
     let comment_output = CommentOutput {
         id: comment.id,
         author: comment.by.clone(),
@@ -424,24 +477,30 @@ fn output_thread_json(comment: &HnItem, children: &[HnItem]) -> Result<()> {
         replies,
     };
 
-    let json = serde_json::to_string_pretty(&output)?;
-    println!("{}", json);
+    serde_json::to_string_pretty(&output).map_err(|e| eyre!("JSON serialization failed: {}", e))
+}
 
+fn output_thread_json(comment: &HnItem, children: &[HnItem]) -> Result<()> {
+    let json = format_thread_json(comment, children)?;
+    println!("{}", json);
     Ok(())
 }
 
-fn output_thread_formatted(
+/// Build formatted text output for comment thread
+fn format_thread_text(
     comment: &HnItem,
     children: &[HnItem],
     post_id: &str,
     options: &ReadOptions,
-) -> Result<()> {
-    println!("\n{}", "=".repeat(80).bright_cyan());
-    println!("{}", "COMMENT THREAD".bright_cyan().bold());
-    println!("{}", "=".repeat(80).bright_cyan());
+) -> String {
+    let mut result = String::new();
 
-    println!(
-        "\n{} {} {} ({}: {})",
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_cyan()));
+    result.push_str(&format!("{}\n", "COMMENT THREAD".bright_cyan().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_cyan()));
+
+    result.push_str(&format!(
+        "\n{} {} {} ({}: {})\n",
         "[Root Comment]".yellow().bold(),
         "by".bright_black(),
         comment
@@ -451,32 +510,32 @@ fn output_thread_formatted(
             .bright_white(),
         "ID".bright_black(),
         comment.id.to_string().bright_white()
-    );
-    println!(
-        "{}: {}",
+    ));
+    result.push_str(&format!(
+        "{}: {}\n",
         "Time".green(),
         format_timestamp(comment.time)
             .unwrap_or("(unknown)".to_string())
             .bright_black()
-    );
+    ));
 
     if let Some(text) = &comment.text {
-        println!("\n{}", strip_html(text).bright_white());
+        result.push_str(&format!("\n{}\n", strip_html(text).bright_white()));
     }
 
     if !children.is_empty() {
-        println!("\n{}", "-".repeat(80).bright_magenta());
-        println!(
-            "{} ({} {})",
+        result.push_str(&format!("\n{}\n", "-".repeat(80).bright_magenta()));
+        result.push_str(&format!(
+            "{} ({} {})\n",
             "REPLIES".bright_magenta().bold(),
             children.len().to_string().bright_cyan().bold(),
             "total".bright_white()
-        );
-        println!("{}", "-".repeat(80).bright_magenta());
+        ));
+        result.push_str(&format!("{}\n", "-".repeat(80).bright_magenta()));
 
         for (idx, child) in children.iter().enumerate() {
-            println!(
-                "\n  {} {} {} ({}: {})",
+            result.push_str(&format!(
+                "\n  {} {} {} ({}: {})\n",
                 format!("[Reply #{}]", idx + 1).yellow().bold(),
                 "by".bright_black(),
                 child
@@ -486,64 +545,87 @@ fn output_thread_formatted(
                     .bright_white(),
                 "ID".bright_black(),
                 child.id.to_string().bright_white()
-            );
-            println!(
-                "  {}: {}",
+            ));
+            result.push_str(&format!(
+                "  {}: {}\n",
                 "Time".green(),
                 format_timestamp(child.time)
                     .unwrap_or("(unknown)".to_string())
                     .bright_black()
-            );
+            ));
 
             if let Some(text) = &child.text {
                 let stripped = strip_html(text);
                 let truncated = truncate_text(&stripped, 500);
                 for line in truncated.lines() {
-                    println!("  {}", line.white());
+                    result.push_str(&format!("  {}\n", line.white()));
                 }
             }
 
             if let Some(kids) = &child.kids {
                 if !kids.is_empty() {
-                    println!(
-                        "  {} {}",
+                    result.push_str(&format!(
+                        "  {} {}\n",
                         "└─".bright_black(),
                         format!("{} nested replies", kids.len()).bright_magenta()
-                    );
+                    ));
                 }
             }
         }
     } else {
-        println!("\n{}", "No replies to this comment.".yellow());
+        result.push_str(&format!("\n{}\n", "No replies to this comment.".yellow()));
     }
 
     // Navigation
-    println!("\n{}", "=".repeat(80).bright_yellow());
-    println!("{}", "NAVIGATION".bright_yellow().bold());
-    println!("{}", "=".repeat(80).bright_yellow());
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_yellow()));
+    result.push_str(&format!("{}\n", "NAVIGATION".bright_yellow().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_yellow()));
 
-    println!("\n{}:", "To go back to the post".bright_white().bold());
-    println!("  {}", format!("mcptools hn read {post_id}").cyan());
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To go back to the post".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
+        format!("mcptools hn read {post_id}").cyan()
+    ));
 
     if options.page > 1 {
-        println!("\n{}:", "To return to your page".bright_white().bold());
-        println!(
-            "  {}",
+        result.push_str(&format!(
+            "\n{}:\n",
+            "To return to your page".bright_white().bold()
+        ));
+        result.push_str(&format!(
+            "  {}\n",
             format!("mcptools hn read {} --page {}", post_id, options.page).cyan()
-        );
+        ));
     }
 
-    println!("\n{}:", "To get JSON output".bright_white().bold());
-    println!(
-        "  {}",
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To get JSON output".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
         format!(
             "mcptools hn read {} --thread {} --json",
             post_id, comment.id
         )
         .cyan()
-    );
-    println!();
+    ));
+    result.push('\n');
 
+    result
+}
+
+fn output_thread_formatted(
+    comment: &HnItem,
+    children: &[HnItem],
+    post_id: &str,
+    options: &ReadOptions,
+) -> Result<()> {
+    let formatted = format_thread_text(comment, children, post_id, options);
+    print!("{}", formatted);
     Ok(())
 }
 
@@ -601,4 +683,339 @@ pub async fn read_item_data(
         limit,
         total_comments,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_item() -> HnItem {
+        HnItem {
+            id: 12345,
+            item_type: "story".to_string(),
+            by: Some("testuser".to_string()),
+            time: Some(1234567890),
+            text: Some("<p>Test text with <b>HTML</b></p>".to_string()),
+            url: Some("https://example.com".to_string()),
+            title: Some("Test Story".to_string()),
+            score: Some(42),
+            descendants: Some(10),
+            kids: Some(vec![100, 200, 300]),
+            parent: None,
+            deleted: None,
+            dead: None,
+        }
+    }
+
+    fn create_test_comment(id: u64, author: &str, has_kids: bool) -> HnItem {
+        HnItem {
+            id,
+            item_type: "comment".to_string(),
+            by: Some(author.to_string()),
+            time: Some(1234567890),
+            text: Some("<p>Comment text</p>".to_string()),
+            url: None,
+            title: None,
+            score: None,
+            descendants: None,
+            kids: if has_kids { Some(vec![999]) } else { None },
+            parent: Some(12345),
+            deleted: None,
+            dead: None,
+        }
+    }
+
+    fn create_test_options(page: usize, limit: usize) -> ReadOptions {
+        ReadOptions {
+            item: "12345".to_string(),
+            limit,
+            page,
+            json: false,
+            thread: None,
+        }
+    }
+
+    // Post JSON Tests
+    #[test]
+    fn test_format_post_json_basic() {
+        let item = create_test_item();
+        let comments = vec![create_test_comment(100, "commenter1", false)];
+        let options = create_test_options(1, 10);
+
+        let result = format_post_json(&item, &comments, &options, 3, 1);
+        assert!(result.is_ok());
+
+        let json = result.unwrap();
+        assert!(json.contains("\"id\": 12345"));
+        assert!(json.contains("\"title\": \"Test Story\""));
+        assert!(json.contains("\"author\": \"testuser\""));
+        assert!(json.contains("Comment text"));
+    }
+
+    #[test]
+    fn test_format_post_json_empty_comments() {
+        let item = create_test_item();
+        let comments = vec![];
+        let options = create_test_options(1, 10);
+
+        let result = format_post_json(&item, &comments, &options, 0, 1);
+        assert!(result.is_ok());
+
+        let json = result.unwrap();
+        assert!(json.contains("\"comments\": []"));
+    }
+
+    #[test]
+    fn test_format_post_json_with_pagination() {
+        let item = create_test_item();
+        let comments = vec![create_test_comment(100, "commenter1", false)];
+        let options = create_test_options(2, 10);
+
+        let result = format_post_json(&item, &comments, &options, 30, 3);
+        assert!(result.is_ok());
+
+        let json = result.unwrap();
+        assert!(json.contains("\"current_page\": 2"));
+        assert!(json.contains("\"total_pages\": 3"));
+        assert!(json.contains("\"next_page_command\""));
+        assert!(json.contains("\"prev_page_command\""));
+        assert!(json.contains("--page 3"));
+        assert!(json.contains("--page 1"));
+    }
+
+    #[test]
+    fn test_format_post_json_first_page() {
+        let item = create_test_item();
+        let comments = vec![create_test_comment(100, "commenter1", false)];
+        let options = create_test_options(1, 10);
+
+        let result = format_post_json(&item, &comments, &options, 30, 3);
+        assert!(result.is_ok());
+
+        let json = result.unwrap();
+        assert!(json.contains("\"next_page_command\""));
+        assert!(json.contains("--page 2"));
+        // prev_page_command should be null on first page
+        assert!(json.contains("\"prev_page_command\": null"));
+    }
+
+    #[test]
+    fn test_format_post_json_last_page() {
+        let item = create_test_item();
+        let comments = vec![create_test_comment(100, "commenter1", false)];
+        let options = create_test_options(3, 10);
+
+        let result = format_post_json(&item, &comments, &options, 30, 3);
+        assert!(result.is_ok());
+
+        let json = result.unwrap();
+        assert!(json.contains("\"prev_page_command\""));
+        assert!(json.contains("--page 2"));
+        // next_page_command should be null on last page
+        assert!(json.contains("\"next_page_command\": null"));
+    }
+
+    // Post Text Tests
+    #[test]
+    fn test_format_post_text_structure() {
+        let item = create_test_item();
+        let comments = vec![create_test_comment(100, "commenter1", true)];
+        let options = create_test_options(1, 10);
+
+        let result = format_post_text(&item, &comments, &options, 3, 1, "12345");
+
+        // Check for main sections
+        assert!(result.contains("POST"));
+        assert!(result.contains("Test Story"));
+        assert!(result.contains("URL: https://example.com"));
+        assert!(result.contains("Author: testuser"));
+        assert!(result.contains("COMMENTS"));
+        assert!(result.contains("NAVIGATION"));
+    }
+
+    #[test]
+    fn test_format_post_text_with_comments() {
+        let item = create_test_item();
+        let comments = vec![
+            create_test_comment(100, "user1", false),
+            create_test_comment(200, "user2", true),
+        ];
+        let options = create_test_options(1, 10);
+
+        let result = format_post_text(&item, &comments, &options, 2, 1, "12345");
+
+        assert!(result.contains("[Comment #1]"));
+        assert!(result.contains("[Comment #2]"));
+        assert!(result.contains("user1"));
+        assert!(result.contains("user2"));
+        assert!(result.contains("1 replies")); // user2 has kids
+    }
+
+    #[test]
+    fn test_format_post_text_empty_comments() {
+        let item = create_test_item();
+        let comments = vec![];
+        let options = create_test_options(1, 10);
+
+        let result = format_post_text(&item, &comments, &options, 0, 1, "12345");
+
+        assert!(result.contains("No comments on this page"));
+    }
+
+    #[test]
+    fn test_format_post_text_navigation_hints() {
+        let item = create_test_item();
+        let comments = vec![create_test_comment(100, "user1", false)];
+        let options = create_test_options(2, 10);
+
+        let result = format_post_text(&item, &comments, &options, 30, 3, "12345");
+
+        // Should have navigation commands
+        assert!(result.contains("To view more comments"));
+        assert!(result.contains("Next page"));
+        assert!(result.contains("--page 3"));
+        assert!(result.contains("Previous page"));
+        assert!(result.contains("--page 1"));
+        assert!(result.contains("To read a comment thread"));
+        assert!(result.contains("To change page size"));
+        assert!(result.contains("To get JSON output"));
+    }
+
+    #[test]
+    fn test_format_post_text_reply_counts() {
+        let item = create_test_item();
+        let comments = vec![create_test_comment(100, "user1", true)];
+        let options = create_test_options(1, 10);
+
+        let result = format_post_text(&item, &comments, &options, 1, 1, "12345");
+
+        // Should show reply indicator
+        assert!(result.contains("└─"));
+        assert!(result.contains("1 replies"));
+    }
+
+    // Thread JSON Tests
+    #[test]
+    fn test_format_thread_json_basic() {
+        let comment = create_test_comment(100, "rootuser", true);
+        let children = vec![
+            create_test_comment(200, "child1", false),
+            create_test_comment(300, "child2", false),
+        ];
+
+        let result = format_thread_json(&comment, &children);
+        assert!(result.is_ok());
+
+        let json = result.unwrap();
+        assert!(json.contains("\"id\": 100"));
+        assert!(json.contains("rootuser"));
+        assert!(json.contains("\"id\": 200"));
+        assert!(json.contains("\"id\": 300"));
+        assert!(json.contains("child1"));
+        assert!(json.contains("child2"));
+    }
+
+    #[test]
+    fn test_format_thread_json_no_replies() {
+        let comment = create_test_comment(100, "rootuser", false);
+        let children = vec![];
+
+        let result = format_thread_json(&comment, &children);
+        assert!(result.is_ok());
+
+        let json = result.unwrap();
+        assert!(json.contains("\"id\": 100"));
+        assert!(json.contains("\"replies\": []"));
+    }
+
+    #[test]
+    fn test_format_thread_json_many_replies() {
+        let comment = create_test_comment(100, "rootuser", true);
+        let children = vec![
+            create_test_comment(200, "child1", false),
+            create_test_comment(300, "child2", true),
+            create_test_comment(400, "child3", false),
+        ];
+
+        let result = format_thread_json(&comment, &children);
+        assert!(result.is_ok());
+
+        let json = result.unwrap();
+        assert!(json.contains("child1"));
+        assert!(json.contains("child2"));
+        assert!(json.contains("child3"));
+    }
+
+    // Thread Text Tests
+    #[test]
+    fn test_format_thread_text_structure() {
+        let comment = create_test_comment(100, "rootuser", true);
+        let children = vec![create_test_comment(200, "child1", false)];
+        let options = create_test_options(1, 10);
+
+        let result = format_thread_text(&comment, &children, "12345", &options);
+
+        assert!(result.contains("COMMENT THREAD"));
+        assert!(result.contains("[Root Comment]"));
+        assert!(result.contains("rootuser"));
+        assert!(result.contains("REPLIES"));
+        assert!(result.contains("NAVIGATION"));
+    }
+
+    #[test]
+    fn test_format_thread_text_with_replies() {
+        let comment = create_test_comment(100, "rootuser", true);
+        let children = vec![
+            create_test_comment(200, "child1", false),
+            create_test_comment(300, "child2", true),
+        ];
+        let options = create_test_options(1, 10);
+
+        let result = format_thread_text(&comment, &children, "12345", &options);
+
+        assert!(result.contains("[Reply #1]"));
+        assert!(result.contains("[Reply #2]"));
+        assert!(result.contains("child1"));
+        assert!(result.contains("child2"));
+        assert!(result.contains("1 nested replies")); // child2 has kids
+    }
+
+    #[test]
+    fn test_format_thread_text_no_replies() {
+        let comment = create_test_comment(100, "rootuser", false);
+        let children = vec![];
+        let options = create_test_options(1, 10);
+
+        let result = format_thread_text(&comment, &children, "12345", &options);
+
+        assert!(result.contains("No replies to this comment"));
+    }
+
+    #[test]
+    fn test_format_thread_text_navigation() {
+        let comment = create_test_comment(100, "rootuser", false);
+        let children = vec![];
+        let options = create_test_options(2, 10);
+
+        let result = format_thread_text(&comment, &children, "12345", &options);
+
+        assert!(result.contains("To go back to the post"));
+        assert!(result.contains("mcptools hn read 12345"));
+        assert!(result.contains("To return to your page"));
+        assert!(result.contains("--page 2"));
+        assert!(result.contains("To get JSON output"));
+        assert!(result.contains("--thread 100"));
+    }
+
+    #[test]
+    fn test_format_thread_text_nested_indicator() {
+        let comment = create_test_comment(100, "rootuser", true);
+        let children = vec![create_test_comment(200, "child1", true)];
+        let options = create_test_options(1, 10);
+
+        let result = format_thread_text(&comment, &children, "12345", &options);
+
+        assert!(result.contains("└─"));
+        assert!(result.contains("1 nested replies"));
+    }
 }
