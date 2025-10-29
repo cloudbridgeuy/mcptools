@@ -2,8 +2,9 @@ use crate::prelude::{println, *};
 use colored::Colorize;
 use futures::future::join_all;
 use mcptools_core::hn::{
-    build_post_output, format_timestamp, strip_html, transform_comments, CommentOutput, HnItem,
-    PaginationInfo, PostOutput,
+    build_comment_tree, build_post_output, count_tree_comments, flatten_comment_tree,
+    format_timestamp, strip_html, transform_comments, CommentOutput, HnItem, PaginationInfo,
+    PostOutput, ThreadedCommentOutput,
 };
 use serde::Serialize;
 

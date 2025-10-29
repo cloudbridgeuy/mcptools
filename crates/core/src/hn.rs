@@ -77,6 +77,17 @@ pub struct CommentOutput {
     pub replies_count: usize,
 }
 
+/// Threaded comment output with nested replies
+#[derive(Debug, Serialize, Clone)]
+pub struct ThreadedCommentOutput {
+    pub id: u64,
+    pub author: Option<String>,
+    pub time: Option<String>,
+    pub text: Option<String>,
+    pub replies: Vec<ThreadedCommentOutput>,
+    pub depth: usize,
+}
+
 /// Pagination metadata for post reading
 #[derive(Debug, Serialize, Clone)]
 pub struct PaginationInfo {
@@ -262,6 +273,109 @@ pub fn build_post_output(
             prev_page_command: prev_page,
         },
     }
+}
+
+/// Build a threaded comment tree from a flat list of HnItems
+///
+/// Takes a flat list of comments and organizes them into a hierarchical tree
+/// structure based on parent-child relationships. Comments without parents in
+/// the list are treated as root-level comments.
+///
+/// This is a pure function that constructs the tree structure without any I/O.
+pub fn build_comment_tree(items: Vec<HnItem>, depth: usize) -> Vec<ThreadedCommentOutput> {
+    use std::collections::HashMap;
+
+    // Build a map of id -> HnItem for quick lookups
+    let item_map: HashMap<u64, &HnItem> = items.iter().map(|item| (item.id, item)).collect();
+
+    // Build a map of parent_id -> Vec<child_ids>
+    let mut children_map: HashMap<u64, Vec<u64>> = HashMap::new();
+    let mut root_ids: Vec<u64> = Vec::new();
+
+    for item in &items {
+        if let Some(parent_id) = item.parent {
+            // Only include this child if the parent exists in our item set
+            if item_map.contains_key(&parent_id) {
+                children_map.entry(parent_id).or_default().push(item.id);
+            } else {
+                // Parent not in our set, treat as root
+                root_ids.push(item.id);
+            }
+        } else {
+            // No parent, this is a root comment
+            root_ids.push(item.id);
+        }
+    }
+
+    // Recursively build the tree starting from root nodes
+    fn build_node(
+        id: u64,
+        item_map: &HashMap<u64, &HnItem>,
+        children_map: &HashMap<u64, Vec<u64>>,
+        current_depth: usize,
+    ) -> Option<ThreadedCommentOutput> {
+        let item = item_map.get(&id)?;
+
+        let child_ids = children_map.get(&id).cloned().unwrap_or_default();
+        let replies: Vec<ThreadedCommentOutput> = child_ids
+            .iter()
+            .filter_map(|child_id| build_node(*child_id, item_map, children_map, current_depth + 1))
+            .collect();
+
+        Some(ThreadedCommentOutput {
+            id: item.id,
+            author: item.by.clone(),
+            time: format_timestamp(item.time),
+            text: item.text.as_ref().map(|t| strip_html(t)),
+            replies,
+            depth: current_depth,
+        })
+    }
+
+    root_ids
+        .iter()
+        .filter_map(|id| build_node(*id, &item_map, &children_map, depth))
+        .collect()
+}
+
+/// Flatten a comment tree into a depth-first ordered list
+///
+/// Converts a hierarchical tree structure back into a flat list while
+/// preserving the depth information. Useful for pagination and display.
+///
+/// This is a pure function that transforms tree structure without any I/O.
+pub fn flatten_comment_tree(tree: Vec<ThreadedCommentOutput>) -> Vec<ThreadedCommentOutput> {
+    fn flatten_node(node: ThreadedCommentOutput, acc: &mut Vec<ThreadedCommentOutput>) {
+        let replies = node.replies.clone();
+        acc.push(ThreadedCommentOutput {
+            id: node.id,
+            author: node.author,
+            time: node.time,
+            text: node.text,
+            replies: vec![], // Clear replies in flattened version
+            depth: node.depth,
+        });
+
+        for reply in replies {
+            flatten_node(reply, acc);
+        }
+    }
+
+    let mut result = Vec::new();
+    for node in tree {
+        flatten_node(node, &mut result);
+    }
+    result
+}
+
+/// Count total comments in a threaded tree
+///
+/// Recursively counts all comments including nested replies.
+/// This is a pure function.
+pub fn count_tree_comments(tree: &[ThreadedCommentOutput]) -> usize {
+    tree.iter()
+        .map(|node| 1 + count_tree_comments(&node.replies))
+        .sum()
 }
 
 #[cfg(test)]
@@ -917,5 +1031,418 @@ mod tests {
         assert_eq!(output.pagination.total_pages, 0);
         assert!(output.pagination.next_page_command.is_none());
         assert!(output.pagination.prev_page_command.is_none());
+    }
+
+    #[test]
+    fn test_build_comment_tree_single_root() {
+        let items = vec![HnItem {
+            id: 100,
+            item_type: "comment".to_string(),
+            by: Some("user1".to_string()),
+            time: Some(1609459200),
+            text: Some("<p>Root comment</p>".to_string()),
+            dead: None,
+            deleted: None,
+            parent: None,
+            kids: None,
+            url: None,
+            score: None,
+            title: None,
+            descendants: None,
+        }];
+
+        let tree = build_comment_tree(items, 0);
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, 100);
+        assert_eq!(tree[0].author, Some("user1".to_string()));
+        assert_eq!(tree[0].text, Some("Root comment".to_string()));
+        assert_eq!(tree[0].replies.len(), 0);
+        assert_eq!(tree[0].depth, 0);
+    }
+
+    #[test]
+    fn test_build_comment_tree_with_replies() {
+        let items = vec![
+            HnItem {
+                id: 100,
+                item_type: "comment".to_string(),
+                by: Some("user1".to_string()),
+                time: Some(1609459200),
+                text: Some("Root comment".to_string()),
+                dead: None,
+                deleted: None,
+                parent: None,
+                kids: Some(vec![101, 102]),
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+            HnItem {
+                id: 101,
+                item_type: "comment".to_string(),
+                by: Some("user2".to_string()),
+                time: Some(1609459300),
+                text: Some("First reply".to_string()),
+                dead: None,
+                deleted: None,
+                parent: Some(100),
+                kids: None,
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+            HnItem {
+                id: 102,
+                item_type: "comment".to_string(),
+                by: Some("user3".to_string()),
+                time: Some(1609459400),
+                text: Some("Second reply".to_string()),
+                dead: None,
+                deleted: None,
+                parent: Some(100),
+                kids: None,
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+        ];
+
+        let tree = build_comment_tree(items, 0);
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, 100);
+        assert_eq!(tree[0].replies.len(), 2);
+        assert_eq!(tree[0].replies[0].id, 101);
+        assert_eq!(tree[0].replies[0].depth, 1);
+        assert_eq!(tree[0].replies[1].id, 102);
+        assert_eq!(tree[0].replies[1].depth, 1);
+    }
+
+    #[test]
+    fn test_build_comment_tree_nested() {
+        let items = vec![
+            HnItem {
+                id: 100,
+                item_type: "comment".to_string(),
+                by: Some("user1".to_string()),
+                time: Some(1609459200),
+                text: Some("Root".to_string()),
+                dead: None,
+                deleted: None,
+                parent: None,
+                kids: Some(vec![101]),
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+            HnItem {
+                id: 101,
+                item_type: "comment".to_string(),
+                by: Some("user2".to_string()),
+                time: Some(1609459300),
+                text: Some("Level 1".to_string()),
+                dead: None,
+                deleted: None,
+                parent: Some(100),
+                kids: Some(vec![102]),
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+            HnItem {
+                id: 102,
+                item_type: "comment".to_string(),
+                by: Some("user3".to_string()),
+                time: Some(1609459400),
+                text: Some("Level 2".to_string()),
+                dead: None,
+                deleted: None,
+                parent: Some(101),
+                kids: None,
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+        ];
+
+        let tree = build_comment_tree(items, 0);
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, 100);
+        assert_eq!(tree[0].depth, 0);
+        assert_eq!(tree[0].replies.len(), 1);
+        assert_eq!(tree[0].replies[0].id, 101);
+        assert_eq!(tree[0].replies[0].depth, 1);
+        assert_eq!(tree[0].replies[0].replies.len(), 1);
+        assert_eq!(tree[0].replies[0].replies[0].id, 102);
+        assert_eq!(tree[0].replies[0].replies[0].depth, 2);
+    }
+
+    #[test]
+    fn test_build_comment_tree_multiple_roots() {
+        let items = vec![
+            HnItem {
+                id: 100,
+                item_type: "comment".to_string(),
+                by: Some("user1".to_string()),
+                time: Some(1609459200),
+                text: Some("First root".to_string()),
+                dead: None,
+                deleted: None,
+                parent: None,
+                kids: None,
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+            HnItem {
+                id: 200,
+                item_type: "comment".to_string(),
+                by: Some("user2".to_string()),
+                time: Some(1609459300),
+                text: Some("Second root".to_string()),
+                dead: None,
+                deleted: None,
+                parent: None,
+                kids: None,
+                url: None,
+                score: None,
+                title: None,
+                descendants: None,
+            },
+        ];
+
+        let tree = build_comment_tree(items, 0);
+
+        assert_eq!(tree.len(), 2);
+        assert_eq!(tree[0].id, 100);
+        assert_eq!(tree[1].id, 200);
+        assert_eq!(tree[0].depth, 0);
+        assert_eq!(tree[1].depth, 0);
+    }
+
+    #[test]
+    fn test_build_comment_tree_orphaned_parent() {
+        // Test case where parent is not in the item list
+        let items = vec![HnItem {
+            id: 101,
+            item_type: "comment".to_string(),
+            by: Some("user1".to_string()),
+            time: Some(1609459200),
+            text: Some("Orphaned comment".to_string()),
+            dead: None,
+            deleted: None,
+            parent: Some(100), // Parent 100 doesn't exist in items
+            kids: None,
+            url: None,
+            score: None,
+            title: None,
+            descendants: None,
+        }];
+
+        let tree = build_comment_tree(items, 0);
+
+        // Should treat as root since parent is missing
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, 101);
+        assert_eq!(tree[0].depth, 0);
+    }
+
+    #[test]
+    fn test_flatten_comment_tree_single() {
+        let tree = vec![ThreadedCommentOutput {
+            id: 100,
+            author: Some("user1".to_string()),
+            time: Some("2021-01-01 00:00:00 UTC".to_string()),
+            text: Some("Comment".to_string()),
+            replies: vec![],
+            depth: 0,
+        }];
+
+        let flattened = flatten_comment_tree(tree);
+
+        assert_eq!(flattened.len(), 1);
+        assert_eq!(flattened[0].id, 100);
+        assert_eq!(flattened[0].replies.len(), 0);
+    }
+
+    #[test]
+    fn test_flatten_comment_tree_nested() {
+        let tree = vec![ThreadedCommentOutput {
+            id: 100,
+            author: Some("user1".to_string()),
+            time: Some("2021-01-01 00:00:00 UTC".to_string()),
+            text: Some("Root".to_string()),
+            replies: vec![
+                ThreadedCommentOutput {
+                    id: 101,
+                    author: Some("user2".to_string()),
+                    time: Some("2021-01-01 00:01:00 UTC".to_string()),
+                    text: Some("Reply 1".to_string()),
+                    replies: vec![],
+                    depth: 1,
+                },
+                ThreadedCommentOutput {
+                    id: 102,
+                    author: Some("user3".to_string()),
+                    time: Some("2021-01-01 00:02:00 UTC".to_string()),
+                    text: Some("Reply 2".to_string()),
+                    replies: vec![],
+                    depth: 1,
+                },
+            ],
+            depth: 0,
+        }];
+
+        let flattened = flatten_comment_tree(tree);
+
+        assert_eq!(flattened.len(), 3);
+        assert_eq!(flattened[0].id, 100);
+        assert_eq!(flattened[0].depth, 0);
+        assert_eq!(flattened[1].id, 101);
+        assert_eq!(flattened[1].depth, 1);
+        assert_eq!(flattened[2].id, 102);
+        assert_eq!(flattened[2].depth, 1);
+        // All replies should be cleared in flattened version
+        assert_eq!(flattened[0].replies.len(), 0);
+        assert_eq!(flattened[1].replies.len(), 0);
+        assert_eq!(flattened[2].replies.len(), 0);
+    }
+
+    #[test]
+    fn test_flatten_comment_tree_deeply_nested() {
+        let tree = vec![ThreadedCommentOutput {
+            id: 100,
+            author: Some("user1".to_string()),
+            time: Some("2021-01-01 00:00:00 UTC".to_string()),
+            text: Some("Root".to_string()),
+            replies: vec![ThreadedCommentOutput {
+                id: 101,
+                author: Some("user2".to_string()),
+                time: Some("2021-01-01 00:01:00 UTC".to_string()),
+                text: Some("Level 1".to_string()),
+                replies: vec![ThreadedCommentOutput {
+                    id: 102,
+                    author: Some("user3".to_string()),
+                    time: Some("2021-01-01 00:02:00 UTC".to_string()),
+                    text: Some("Level 2".to_string()),
+                    replies: vec![],
+                    depth: 2,
+                }],
+                depth: 1,
+            }],
+            depth: 0,
+        }];
+
+        let flattened = flatten_comment_tree(tree);
+
+        assert_eq!(flattened.len(), 3);
+        assert_eq!(flattened[0].id, 100);
+        assert_eq!(flattened[0].depth, 0);
+        assert_eq!(flattened[1].id, 101);
+        assert_eq!(flattened[1].depth, 1);
+        assert_eq!(flattened[2].id, 102);
+        assert_eq!(flattened[2].depth, 2);
+    }
+
+    #[test]
+    fn test_count_tree_comments_empty() {
+        let tree: Vec<ThreadedCommentOutput> = vec![];
+        let count = count_tree_comments(&tree);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_count_tree_comments_single() {
+        let tree = vec![ThreadedCommentOutput {
+            id: 100,
+            author: Some("user1".to_string()),
+            time: Some("2021-01-01 00:00:00 UTC".to_string()),
+            text: Some("Comment".to_string()),
+            replies: vec![],
+            depth: 0,
+        }];
+
+        let count = count_tree_comments(&tree);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_count_tree_comments_nested() {
+        let tree = vec![ThreadedCommentOutput {
+            id: 100,
+            author: Some("user1".to_string()),
+            time: Some("2021-01-01 00:00:00 UTC".to_string()),
+            text: Some("Root".to_string()),
+            replies: vec![
+                ThreadedCommentOutput {
+                    id: 101,
+                    author: Some("user2".to_string()),
+                    time: Some("2021-01-01 00:01:00 UTC".to_string()),
+                    text: Some("Reply 1".to_string()),
+                    replies: vec![],
+                    depth: 1,
+                },
+                ThreadedCommentOutput {
+                    id: 102,
+                    author: Some("user3".to_string()),
+                    time: Some("2021-01-01 00:02:00 UTC".to_string()),
+                    text: Some("Reply 2".to_string()),
+                    replies: vec![ThreadedCommentOutput {
+                        id: 103,
+                        author: Some("user4".to_string()),
+                        time: Some("2021-01-01 00:03:00 UTC".to_string()),
+                        text: Some("Nested reply".to_string()),
+                        replies: vec![],
+                        depth: 2,
+                    }],
+                    depth: 1,
+                },
+            ],
+            depth: 0,
+        }];
+
+        let count = count_tree_comments(&tree);
+        assert_eq!(count, 4); // 100, 101, 102, 103
+    }
+
+    #[test]
+    fn test_count_tree_comments_multiple_roots() {
+        let tree = vec![
+            ThreadedCommentOutput {
+                id: 100,
+                author: Some("user1".to_string()),
+                time: Some("2021-01-01 00:00:00 UTC".to_string()),
+                text: Some("Root 1".to_string()),
+                replies: vec![ThreadedCommentOutput {
+                    id: 101,
+                    author: Some("user2".to_string()),
+                    time: Some("2021-01-01 00:01:00 UTC".to_string()),
+                    text: Some("Reply".to_string()),
+                    replies: vec![],
+                    depth: 1,
+                }],
+                depth: 0,
+            },
+            ThreadedCommentOutput {
+                id: 200,
+                author: Some("user3".to_string()),
+                time: Some("2021-01-01 00:02:00 UTC".to_string()),
+                text: Some("Root 2".to_string()),
+                replies: vec![],
+                depth: 0,
+            },
+        ];
+
+        let count = count_tree_comments(&tree);
+        assert_eq!(count, 3); // 100, 101, 200
     }
 }
