@@ -190,19 +190,31 @@ pub struct JiraIssueResponse {
   - Verified with real web page fetches (JSON and formatted output)
   - Pattern established for remaining Phase 2 output refactorings
 
+- **Section 2.2**: Markdown TOC Output Formatting ✅
+  - Date Completed: 2025-10-29
+  - Files: `crates/mcptools/src/md/toc.rs` (refactored, added 280 lines of pure functions and tests)
+  - Tests: 9/9 passing
+  - Pure formatting functions: `format_output_json`, `format_output_text`
+  - Refactored wrappers: `output_json` (3 lines, 40% reduction from 5 lines), `output_formatted` (26 lines, 74% reduction from 101 lines)
+  - Successfully separated formatting logic from I/O operations (printing)
+  - All formatting logic testable with fixture data (no mocking required)
+  - TTY detection preserved (stderr vs stdout separation)
+  - Leveraged existing pure functions: `format_toc_indented`, `format_toc_markdown`
+  - Verified with real web page (JSON output confirmed)
+  - Pattern consistency maintained with Section 2.1
+
 ### In Progress 🚧
 - None
 
 ### Pending 📋
-- **Phase 2**: Output Functions (3 remaining sections)
-  - Section 2.2: Markdown TOC Output Formatting
+- **Phase 2**: Output Functions (2 remaining sections)
   - Section 2.3: HackerNews Read Item Output Formatting
   - Section 2.4: HackerNews List Items Output Formatting
 - **Phase 3**: Supporting Refactorings (2 sections)
 
 **Overall Progress**:
 - Phase 1: 6/6 core refactorings completed (100%)
-- Phase 2: 1/4 output refactorings completed (25%)
+- Phase 2: 2/4 output refactorings completed (50%)
 
 ---
 
@@ -1779,13 +1791,14 @@ This refactoring plan provides a clear path from the current mixed architecture 
 5. **Section 1.5: HackerNews - Item Read** (2025-10-28) - Comment transformation and post output building
 6. **Section 1.6: Markdown Converter** (2025-10-28) - Most complex refactoring with browser automation
 
-**Phase 2 - Output Functions** (Started, 1 of 4 completed):
+**Phase 2 - Output Functions** (In Progress, 2 of 4 completed):
 
 1. **Section 2.1: Markdown Fetch Output Formatting** (2025-10-28) - Established output formatting pattern
+2. **Section 2.2: Markdown TOC Output Formatting** (2025-10-29) - Applied pattern to TOC output
 
 These implementations demonstrate:
 - ✅ Complete separation of concerns between pure functions and I/O
-- ✅ Comprehensive testing without mocking (100 tests total - 89 core + 11 output - all passing)
+- ✅ Comprehensive testing without mocking (109 tests total - 89 core + 20 output - all passing)
 - ✅ Maintainable code structure that's easy to reason about
 - ✅ Proven template pattern successfully applied across all modules
 - ✅ Backward compatibility maintained (CLI and MCP handlers unchanged)
@@ -1800,14 +1813,13 @@ The key principle throughout is: **data transformation logic should be pure and 
 - **Phase 1**: 6/6 refactorings completed (100%)
   - 89 tests added to core crate (all passing, no mocking required)
   - Average code reduction: ~45% in refactored shell functions
-- **Phase 2**: 1/4 refactorings completed (25%)
-  - 11 tests added to shell crate (all passing, no mocking required)
-  - 92% code reduction in wrapper functions (output formatting)
+- **Phase 2**: 2/4 refactorings completed (50%)
+  - 20 tests added to shell crate (all passing, no mocking required)
+  - Average 83% code reduction in wrapper functions (92% + 74% / 2)
 - **Zero regressions**: All CLI and MCP functionality works identically
 - **Pattern established**: Clear template for both core transformations and output formatting
 
-**Next Steps**: Phase 2 (Output Functions) is in progress. Three remaining sections:
-- Section 2.2: Markdown TOC Output Formatting
+**Next Steps**: Phase 2 (Output Functions) is in progress. Two remaining sections:
 - Section 2.3: HackerNews Read Item Output Formatting
 - Section 2.4: HackerNews List Items Output Formatting
 

@@ -214,111 +214,390 @@ fn format_toc_markdown(entries: &[TocEntry]) -> String {
         .join("\n")
 }
 
+/// Formats TOC output as JSON string
+fn format_output_json(output: &TocOutput) -> Result<String> {
+    serde_json::to_string_pretty(output).map_err(|e| eyre!("JSON serialization failed: {}", e))
+}
+
+/// Formats TOC output as decorated text with metadata and usage hints
+fn format_output_text(output: &TocOutput, format: &OutputFormat, options: &TocOptions) -> String {
+    use colored::Colorize;
+
+    let mut result = String::new();
+
+    // Header
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_cyan()));
+    result.push_str(&format!("{}\n", "TABLE OF CONTENTS".bright_cyan().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_cyan()));
+
+    // URL
+    result.push_str(&format!(
+        "\n{}: {}\n",
+        "URL".green(),
+        output.url.cyan().underline()
+    ));
+
+    // Title
+    if let Some(title) = &output.title {
+        result.push_str(&format!(
+            "{}: {}\n",
+            "Title".green(),
+            title.bright_white().bold()
+        ));
+    }
+
+    // Selector information (always show if selector was used)
+    if let Some(selector) = &output.selector_used {
+        result.push_str(&format!(
+            "\n{}: {}\n",
+            "CSS Selector".green(),
+            selector.bright_white().bold()
+        ));
+        if let Some(count) = output.elements_found {
+            result.push_str(&format!(
+                "{}: {}\n",
+                "Elements Found".green(),
+                count.to_string().bright_yellow().bold()
+            ));
+        }
+    }
+
+    // Statistics
+    result.push_str(&format!(
+        "{}: {}\n",
+        "Total Headings".green(),
+        output.entries.len().to_string().bright_yellow().bold()
+    ));
+    result.push_str(&format!(
+        "{}: {}\n",
+        "Fetch Time".green(),
+        format!("{} ms", output.fetch_time_ms).bright_yellow()
+    ));
+
+    // Content section
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_magenta()));
+    result.push_str(&format!(
+        "{}\n",
+        "TABLE OF CONTENTS".bright_magenta().bold()
+    ));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_magenta()));
+    result.push('\n');
+
+    // Help section
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_yellow()));
+    result.push_str(&format!("{}\n", "USAGE".bright_yellow().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_yellow()));
+
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To get JSON output".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
+        format!("mcptools md toc {} --json", output.url).cyan()
+    ));
+
+    if !matches!(format, OutputFormat::Markdown) {
+        result.push_str(&format!(
+            "\n{}:\n",
+            "To get markdown list format".bright_white().bold()
+        ));
+        result.push_str(&format!(
+            "  {}\n",
+            format!("mcptools md toc {} --output markdown", output.url).cyan()
+        ));
+    }
+
+    if output.selector_used.is_none() {
+        result.push_str(&format!(
+            "\n{}:\n",
+            "To filter with CSS selector".bright_white().bold()
+        ));
+        result.push_str(&format!(
+            "  {}\n",
+            format!("mcptools md toc {} --selector \"article\"", output.url).cyan()
+        ));
+    }
+
+    result.push('\n');
+
+    result
+}
+
 fn output_json(output: &TocOutput) -> Result<()> {
-    let json = serde_json::to_string_pretty(output)?;
+    let json = format_output_json(output)?;
     println!("{}", json);
     Ok(())
 }
 
 fn output_formatted(output: &TocOutput, format: &OutputFormat, options: &TocOptions) -> Result<()> {
-    // Check if stdout is a TTY (terminal) or being piped
+    use colored::Colorize;
     let is_tty = std::io::stdout().is_terminal();
 
-    // Only show decorative output if outputting to a terminal
-    if is_tty {
-        // Header
-        eprintln!("\n{}", "=".repeat(80).bright_cyan());
-        eprintln!("{}", "TABLE OF CONTENTS".bright_cyan().bold());
-        eprintln!("{}", "=".repeat(80).bright_cyan());
-
-        // URL
-        eprintln!("\n{}: {}", "URL".green(), output.url.cyan().underline());
-
-        // Title
-        if let Some(title) = &output.title {
-            eprintln!("{}: {}", "Title".green(), title.bright_white().bold());
-        }
-
-        // Selector information (always show if selector was used)
-        if let Some(selector) = &output.selector_used {
-            eprintln!(
-                "\n{}: {}",
-                "CSS Selector".green(),
-                selector.bright_white().bold()
-            );
-            if let Some(count) = output.elements_found {
-                eprintln!(
-                    "{}: {}",
-                    "Elements Found".green(),
-                    count.to_string().bright_yellow().bold()
-                );
-            }
-        }
-
-        // Statistics
-        eprintln!(
-            "{}: {}",
-            "Total Headings".green(),
-            output.entries.len().to_string().bright_yellow().bold()
-        );
-        eprintln!(
-            "{}: {}",
-            "Fetch Time".green(),
-            format!("{} ms", output.fetch_time_ms).bright_yellow()
-        );
-
-        // Content section
-        eprintln!("\n{}", "=".repeat(80).bright_magenta());
-        eprintln!("{}", "TABLE OF CONTENTS".bright_magenta().bold());
-        eprintln!("{}", "=".repeat(80).bright_magenta());
-        eprintln!();
-    }
-
-    // Format and output TOC
-    let formatted = match format {
+    // Format TOC content
+    let content = match format {
         OutputFormat::Indented => format_toc_indented(&output.entries),
         OutputFormat::Markdown => format_toc_markdown(&output.entries),
         OutputFormat::Json => unreachable!("JSON format handled separately"),
     };
 
     if is_tty {
-        // Show content with colors
-        for line in formatted.lines() {
+        // Terminal output: metadata to stderr, content to stdout
+        let formatted_metadata = format_output_text(output, format, options);
+        eprint!("{formatted_metadata}");
+
+        // Content with colors
+        for line in content.lines() {
             println!("{}", line.white());
         }
-
-        // Help section
-        eprintln!("\n{}", "=".repeat(80).bright_yellow());
-        eprintln!("{}", "USAGE".bright_yellow().bold());
-        eprintln!("{}", "=".repeat(80).bright_yellow());
-
-        eprintln!("\n{}:", "To get JSON output".bright_white().bold());
-        eprintln!(
-            "  {}",
-            format!("mcptools md toc {} --json", output.url).cyan()
-        );
-
-        if !matches!(format, OutputFormat::Markdown) {
-            eprintln!("\n{}:", "To get markdown list format".bright_white().bold());
-            eprintln!(
-                "  {}",
-                format!("mcptools md toc {} --output markdown", output.url).cyan()
-            );
-        }
-
-        if output.selector_used.is_none() {
-            eprintln!("\n{}:", "To filter with CSS selector".bright_white().bold());
-            eprintln!(
-                "  {}",
-                format!("mcptools md toc {} --selector \"article\"", output.url).cyan()
-            );
-        }
-
-        eprintln!();
     } else {
-        // When piping, just output plain content without colors
-        println!("{}", formatted);
+        // Piped output: plain content only
+        println!("{}", content);
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_output(with_selector: bool, with_title: bool) -> TocOutput {
+        TocOutput {
+            url: "https://example.com".to_string(),
+            title: if with_title {
+                Some("Test Document".to_string())
+            } else {
+                None
+            },
+            entries: vec![
+                TocEntry {
+                    level: 1,
+                    text: "Introduction".to_string(),
+                    char_offset: 0,
+                    char_limit: 100,
+                },
+                TocEntry {
+                    level: 2,
+                    text: "Overview".to_string(),
+                    char_offset: 100,
+                    char_limit: 50,
+                },
+                TocEntry {
+                    level: 1,
+                    text: "Conclusion".to_string(),
+                    char_offset: 150,
+                    char_limit: 50,
+                },
+            ],
+            fetch_time_ms: 250,
+            selector_used: if with_selector {
+                Some("article".to_string())
+            } else {
+                None
+            },
+            elements_found: if with_selector { Some(1) } else { None },
+        }
+    }
+
+    // JSON Formatter Tests
+
+    #[test]
+    fn test_format_output_json_basic() {
+        let output = create_test_output(false, true);
+        let json = format_output_json(&output).unwrap();
+
+        // Verify JSON structure
+        assert!(json.contains("\"url\""));
+        assert!(json.contains("https://example.com"));
+        assert!(json.contains("\"title\""));
+        assert!(json.contains("Test Document"));
+        assert!(json.contains("\"entries\""));
+        assert!(json.contains("\"level\""));
+        assert!(json.contains("\"text\""));
+        assert!(json.contains("Introduction"));
+        assert!(json.contains("\"char_offset\""));
+        assert!(json.contains("\"char_limit\""));
+        assert!(json.contains("\"fetch_time_ms\""));
+        assert!(json.contains("250"));
+    }
+
+    #[test]
+    fn test_format_output_json_with_selector() {
+        let output = create_test_output(true, false);
+        let json = format_output_json(&output).unwrap();
+
+        // Verify selector fields are present
+        assert!(json.contains("\"selector_used\""));
+        assert!(json.contains("article"));
+        assert!(json.contains("\"elements_found\""));
+        assert!(json.contains("1"));
+    }
+
+    // Text Formatter Tests
+
+    #[test]
+    fn test_format_output_text_indented() {
+        let output = create_test_output(false, true);
+        let options = TocOptions {
+            url: "https://example.com".to_string(),
+            timeout: 30,
+            selector: None,
+            strategy: SelectionStrategy::First,
+            index: None,
+            output: OutputFormat::Indented,
+            json: false,
+        };
+        let formatted = format_output_text(&output, &OutputFormat::Indented, &options);
+
+        // Verify header section
+        assert!(formatted.contains("TABLE OF CONTENTS"));
+        assert!(formatted.contains("URL"));
+        assert!(formatted.contains("https://example.com"));
+        assert!(formatted.contains("Title"));
+        assert!(formatted.contains("Test Document"));
+
+        // Verify statistics
+        assert!(formatted.contains("Total Headings"));
+        assert!(formatted.contains("3")); // 3 entries
+        assert!(formatted.contains("Fetch Time"));
+        assert!(formatted.contains("250 ms"));
+
+        // Verify usage section
+        assert!(formatted.contains("USAGE"));
+        assert!(formatted.contains("To get JSON output"));
+        assert!(formatted.contains("mcptools md toc"));
+        assert!(formatted.contains("--json"));
+    }
+
+    #[test]
+    fn test_format_output_text_markdown() {
+        let output = create_test_output(false, false);
+        let options = TocOptions {
+            url: "https://example.com".to_string(),
+            timeout: 30,
+            selector: None,
+            strategy: SelectionStrategy::First,
+            index: None,
+            output: OutputFormat::Markdown,
+            json: false,
+        };
+        let formatted = format_output_text(&output, &OutputFormat::Markdown, &options);
+
+        // When format is Markdown, should NOT show markdown format hint
+        assert!(!formatted.contains("To get markdown list format"));
+
+        // Should still have other usage hints
+        assert!(formatted.contains("To get JSON output"));
+    }
+
+    #[test]
+    fn test_format_output_text_with_selector() {
+        let output = create_test_output(true, true);
+        let options = TocOptions {
+            url: "https://example.com".to_string(),
+            timeout: 30,
+            selector: Some("article".to_string()),
+            strategy: SelectionStrategy::First,
+            index: None,
+            output: OutputFormat::Indented,
+            json: false,
+        };
+        let formatted = format_output_text(&output, &OutputFormat::Indented, &options);
+
+        // Verify selector information is present
+        assert!(formatted.contains("CSS Selector"));
+        assert!(formatted.contains("article"));
+        assert!(formatted.contains("Elements Found"));
+        assert!(formatted.contains("1"));
+
+        // Should NOT show selector usage hint when selector is already used
+        assert!(!formatted.contains("To filter with CSS selector"));
+    }
+
+    #[test]
+    fn test_format_output_text_without_selector() {
+        let output = create_test_output(false, true);
+        let options = TocOptions {
+            url: "https://example.com".to_string(),
+            timeout: 30,
+            selector: None,
+            strategy: SelectionStrategy::First,
+            index: None,
+            output: OutputFormat::Indented,
+            json: false,
+        };
+        let formatted = format_output_text(&output, &OutputFormat::Indented, &options);
+
+        // Should NOT have selector information
+        assert!(!formatted.contains("CSS Selector"));
+        assert!(!formatted.contains("Elements Found"));
+
+        // Should show selector usage hint
+        assert!(formatted.contains("To filter with CSS selector"));
+    }
+
+    #[test]
+    fn test_format_output_text_with_title() {
+        let output = create_test_output(false, true);
+        let options = TocOptions {
+            url: "https://example.com".to_string(),
+            timeout: 30,
+            selector: None,
+            strategy: SelectionStrategy::First,
+            index: None,
+            output: OutputFormat::Indented,
+            json: false,
+        };
+        let formatted = format_output_text(&output, &OutputFormat::Indented, &options);
+
+        assert!(formatted.contains("Title"));
+        assert!(formatted.contains("Test Document"));
+    }
+
+    #[test]
+    fn test_format_output_text_without_title() {
+        let output = create_test_output(false, false);
+        let options = TocOptions {
+            url: "https://example.com".to_string(),
+            timeout: 30,
+            selector: None,
+            strategy: SelectionStrategy::First,
+            index: None,
+            output: OutputFormat::Indented,
+            json: false,
+        };
+        let formatted = format_output_text(&output, &OutputFormat::Indented, &options);
+
+        // Should not show Title field
+        let title_count = formatted.matches("Title").count();
+        // "Title" should not appear except in "TABLE OF CONTENTS" (which doesn't contain "Title")
+        assert_eq!(title_count, 0);
+    }
+
+    #[test]
+    fn test_format_output_text_structure() {
+        let output = create_test_output(false, true);
+        let options = TocOptions {
+            url: "https://example.com".to_string(),
+            timeout: 30,
+            selector: None,
+            strategy: SelectionStrategy::First,
+            index: None,
+            output: OutputFormat::Indented,
+            json: false,
+        };
+        let formatted = format_output_text(&output, &OutputFormat::Indented, &options);
+
+        // Verify all major sections are present
+        assert!(formatted.contains("TABLE OF CONTENTS")); // Header
+        assert!(formatted.contains("URL"));
+        assert!(formatted.contains("Total Headings"));
+        assert!(formatted.contains("Fetch Time"));
+        assert!(formatted.contains("USAGE")); // Help section
+
+        // Verify section separators
+        let separator_count = formatted.matches("========").count();
+        assert!(separator_count >= 6); // 3 sections × 2 lines each
+    }
 }
