@@ -9,3 +9,6 @@
 /archive/
 
 .DS_Store
+
+# Claude Code settings
+.claude/
