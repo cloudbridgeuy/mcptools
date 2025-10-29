@@ -31,7 +31,8 @@
       "mcp__mcptools__jira_get",
       "Bash(tree:*)",
       "Bash(cargo doc:*)",
-      "Bash(./target/debug/mcptools md fetch:*)"
+      "Bash(./target/debug/mcptools md fetch:*)",
+      "Bash(cargo clean:*)"
     ],
     "deny": [],
     "ask": []
