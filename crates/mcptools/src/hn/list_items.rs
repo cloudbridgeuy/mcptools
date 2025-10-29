@@ -35,10 +35,9 @@ pub async fn run(options: ListOptions, global: crate::Global) -> Result<()> {
         list_items_data(options.story_type.clone(), options.limit, options.page).await?;
 
     if options.json {
-        let json = serde_json::to_string_pretty(&list_output)?;
-        println!("{}", json);
+        output_json(&list_output)?;
     } else {
-        output_list_formatted(
+        output_formatted(
             &list_output.items,
             &options,
             list_output.pagination.total_items,
@@ -100,17 +99,20 @@ pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> R
     ))
 }
 
-fn output_list_formatted(
-    items: &[ListItem],
-    options: &ListOptions,
-    total_items: usize,
-) -> Result<()> {
+/// Convert list output to JSON string
+fn format_list_json(output: &ListOutput) -> Result<String> {
+    serde_json::to_string_pretty(output).map_err(|e| eyre!("JSON serialization failed: {}", e))
+}
+
+/// Convert list output to formatted text with colors
+fn format_list_text(items: &[ListItem], options: &ListOptions, total_items: usize) -> String {
+    let mut result = String::new();
     let total_pages = total_items.div_ceil(options.limit);
 
     // Header
-    println!("\n{}", "=".repeat(80).bright_cyan());
-    println!(
-        "{}",
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_cyan()));
+    result.push_str(&format!(
+        "{}\n",
         format!(
             "HACKERNEWS {} STORIES (Page {} of {})",
             options.story_type.to_uppercase(),
@@ -119,30 +121,34 @@ fn output_list_formatted(
         )
         .bright_cyan()
         .bold()
-    );
-    println!("{}", "=".repeat(80).bright_cyan());
+    ));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_cyan()));
 
     if items.is_empty() {
-        println!("\n{}", "No stories on this page.".yellow());
+        result.push_str(&format!("\n{}\n", "No stories on this page.".yellow()));
     } else {
         for (idx, item) in items.iter().enumerate() {
             let story_num = (options.page - 1) * options.limit + idx + 1;
-            println!(
-                "\n{} {}",
+            result.push_str(&format!(
+                "\n{} {}\n",
                 format!("[{story_num}]").yellow().bold(),
                 item.title
                     .as_ref()
                     .unwrap_or(&"(No title)".to_string())
                     .white()
                     .bold()
-            );
+            ));
 
             if let Some(url) = &item.url {
-                println!("    {}: {}", "URL".green(), url.cyan().underline());
+                result.push_str(&format!(
+                    "    {}: {}\n",
+                    "URL".green(),
+                    url.cyan().underline()
+                ));
             }
 
-            println!(
-                "    {}: {} | {}: {} | {}: {} | {}: {}",
+            result.push_str(&format!(
+                "    {}: {} | {}: {} | {}: {} | {}: {}\n",
                 "By".green(),
                 item.author
                     .as_ref()
@@ -157,25 +163,25 @@ fn output_list_formatted(
                     .as_ref()
                     .unwrap_or(&"unknown".to_string())
                     .bright_black()
-            );
+            ));
 
-            println!(
-                "    {}: {} | {}: {}",
+            result.push_str(&format!(
+                "    {}: {} | {}: {}\n",
                 "ID".green(),
                 item.id.to_string().bright_white(),
                 "Read".green(),
                 format!("mcptools hn read {}", item.id).cyan()
-            );
+            ));
         }
     }
 
     // Navigation section
-    println!("\n{}", "=".repeat(80).bright_yellow());
-    println!("{}", "NAVIGATION".bright_yellow().bold());
-    println!("{}", "=".repeat(80).bright_yellow());
+    result.push_str(&format!("\n{}\n", "=".repeat(80).bright_yellow()));
+    result.push_str(&format!("{}\n", "NAVIGATION".bright_yellow().bold()));
+    result.push_str(&format!("{}\n", "=".repeat(80).bright_yellow()));
 
-    println!(
-        "\n{} {} {} {} ({} {} {} {})",
+    result.push_str(&format!(
+        "\n{} {} {} {} ({} {} {} {})\n",
         "Showing page".bright_white(),
         options.page.to_string().bright_cyan().bold(),
         "of".bright_white(),
@@ -184,12 +190,12 @@ fn output_list_formatted(
         "total".bright_white(),
         options.story_type.bright_cyan().bold(),
         "stories".bright_white()
-    );
+    ));
 
-    println!("\n{}:", "To navigate".bright_white().bold());
+    result.push_str(&format!("\n{}:\n", "To navigate".bright_white().bold()));
     if options.page < total_pages {
-        println!(
-            "  {}: {}",
+        result.push_str(&format!(
+            "  {}: {}\n",
             "Next page".green(),
             format!(
                 "mcptools hn list {} --page {}",
@@ -197,11 +203,11 @@ fn output_list_formatted(
                 options.page + 1
             )
             .cyan()
-        );
+        ));
     }
     if options.page > 1 {
-        println!(
-            "  {}: {}",
+        result.push_str(&format!(
+            "  {}: {}\n",
             "Previous page".green(),
             format!(
                 "mcptools hn list {} --page {}",
@@ -209,45 +215,385 @@ fn output_list_formatted(
                 options.page - 1
             )
             .cyan()
-        );
+        ));
     }
     if options.page == total_pages && options.page > 1 {
-        println!(
-            "  {}: {}",
+        result.push_str(&format!(
+            "  {}: {}\n",
             "First page".green(),
             format!("mcptools hn list {} --page 1", options.story_type).cyan()
-        );
+        ));
     }
 
-    println!("\n{}:", "To change page size".bright_white().bold());
-    println!(
-        "  {}",
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To change page size".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
         format!("mcptools hn list {} --limit <number>", options.story_type).cyan()
-    );
+    ));
 
-    println!("\n{}:", "To list other story types".bright_white().bold());
-    println!(
-        "  {}",
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To list other story types".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
         "mcptools hn list <type>  (top, new, best, ask, show, job)".cyan()
-    );
+    ));
 
-    println!("\n{}:", "To read a story".bright_white().bold());
-    println!("  {}", "mcptools hn read <id>".cyan());
+    result.push_str(&format!("\n{}:\n", "To read a story".bright_white().bold()));
+    result.push_str(&format!("  {}\n", "mcptools hn read <id>".cyan()));
     if !items.is_empty() {
-        println!(
-            "  {}: {}",
+        result.push_str(&format!(
+            "  {}: {}\n",
             "Example".green(),
             format!("mcptools hn read {}", items[0].id).cyan()
-        );
+        ));
     }
 
-    println!("\n{}:", "To get JSON output".bright_white().bold());
-    println!(
-        "  {}",
+    result.push_str(&format!(
+        "\n{}:\n",
+        "To get JSON output".bright_white().bold()
+    ));
+    result.push_str(&format!(
+        "  {}\n",
         format!("mcptools hn list {} --json", options.story_type).cyan()
-    );
+    ));
 
-    println!();
+    result.push('\n');
+    result
+}
 
+fn output_json(output: &ListOutput) -> Result<()> {
+    let json = format_list_json(output)?;
+    println!("{}", json);
     Ok(())
+}
+
+fn output_formatted(items: &[ListItem], options: &ListOptions, total_items: usize) -> Result<()> {
+    let formatted = format_list_text(items, options, total_items);
+    print!("{}", formatted);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_item(id: u64, title: &str) -> ListItem {
+        ListItem {
+            id,
+            title: Some(title.to_string()),
+            url: Some(format!("https://example.com/{}", id)),
+            author: Some("testuser".to_string()),
+            score: Some(42),
+            comments: Some(10),
+            time: Some("2 hours ago".to_string()),
+        }
+    }
+
+    fn create_test_output(items: Vec<ListItem>, story_type: &str) -> ListOutput {
+        ListOutput {
+            story_type: story_type.to_string(),
+            items,
+            pagination: ListPaginationInfo {
+                current_page: 1,
+                total_pages: 1,
+                total_items: 1,
+                limit: 30,
+                next_page_command: None,
+                prev_page_command: None,
+            },
+        }
+    }
+
+    fn create_test_options(story_type: &str, page: usize, limit: usize) -> ListOptions {
+        ListOptions {
+            story_type: story_type.to_string(),
+            limit,
+            page,
+            json: false,
+        }
+    }
+
+    #[test]
+    fn test_format_list_json_basic() {
+        let item = create_test_item(1, "Test Story");
+        let output = create_test_output(vec![item], "top");
+
+        let json = format_list_json(&output).unwrap();
+
+        assert!(json.contains("\"id\": 1"));
+        assert!(json.contains("\"title\": \"Test Story\""));
+        assert!(json.contains("\"pagination\""));
+        assert!(json.contains("\"story_type\": \"top\""));
+    }
+
+    #[test]
+    fn test_format_list_json_multiple() {
+        let items = vec![
+            create_test_item(1, "First Story"),
+            create_test_item(2, "Second Story"),
+            create_test_item(3, "Third Story"),
+        ];
+        let mut output = create_test_output(items, "new");
+        output.pagination.total_items = 3;
+
+        let json = format_list_json(&output).unwrap();
+
+        assert!(json.contains("\"id\": 1"));
+        assert!(json.contains("\"id\": 2"));
+        assert!(json.contains("\"id\": 3"));
+        assert!(json.contains("\"total_items\": 3"));
+    }
+
+    #[test]
+    fn test_format_list_json_empty() {
+        let output = create_test_output(vec![], "top");
+
+        let json = format_list_json(&output).unwrap();
+
+        assert!(json.contains("\"items\": []"));
+        assert!(json.contains("\"pagination\""));
+    }
+
+    #[test]
+    fn test_format_list_json_with_pagination() {
+        let item = create_test_item(1, "Test Story");
+        let mut output = create_test_output(vec![item], "ask");
+        output.pagination = ListPaginationInfo {
+            current_page: 2,
+            total_pages: 5,
+            total_items: 50,
+            limit: 10,
+            next_page_command: Some("mcptools hn list ask --page 3".to_string()),
+            prev_page_command: Some("mcptools hn list ask --page 1".to_string()),
+        };
+
+        let json = format_list_json(&output).unwrap();
+
+        assert!(json.contains("\"current_page\": 2"));
+        assert!(json.contains("\"total_pages\": 5"));
+        assert!(json.contains("\"next_page_command\""));
+    }
+
+    #[test]
+    fn test_format_list_json_missing_optionals() {
+        let item = ListItem {
+            id: 123,
+            title: None,
+            url: None,
+            author: None,
+            score: None,
+            comments: None,
+            time: None,
+        };
+        let output = create_test_output(vec![item], "show");
+
+        let json = format_list_json(&output).unwrap();
+
+        assert!(json.contains("\"id\": 123"));
+        assert!(json.contains("\"title\": null"));
+    }
+
+    #[test]
+    fn test_format_list_json_structure() {
+        let item = create_test_item(1, "Test Story");
+        let output = create_test_output(vec![item], "top");
+
+        let json = format_list_json(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.get("items").is_some());
+        assert!(parsed.get("pagination").is_some());
+        assert!(parsed.get("story_type").is_some());
+        assert_eq!(parsed["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_format_list_text_basic() {
+        let item = create_test_item(1, "Test Story");
+        let options = create_test_options("top", 1, 30);
+
+        let formatted = format_list_text(&[item], &options, 1);
+
+        assert!(formatted.contains("HACKERNEWS TOP STORIES"));
+        assert!(formatted.contains("Page 1 of 1"));
+        assert!(formatted.contains("Test Story"));
+        assert!(formatted.contains("[1]"));
+    }
+
+    #[test]
+    fn test_format_list_text_multiple() {
+        let items = vec![
+            create_test_item(1, "First Story"),
+            create_test_item(2, "Second Story"),
+            create_test_item(3, "Third Story"),
+        ];
+        let options = create_test_options("new", 1, 30);
+
+        let formatted = format_list_text(&items, &options, 3);
+
+        assert!(formatted.contains("First Story"));
+        assert!(formatted.contains("Second Story"));
+        assert!(formatted.contains("Third Story"));
+        assert!(formatted.contains("[1]"));
+        assert!(formatted.contains("[2]"));
+        assert!(formatted.contains("[3]"));
+    }
+
+    #[test]
+    fn test_format_list_text_empty() {
+        let options = create_test_options("top", 1, 30);
+
+        let formatted = format_list_text(&[], &options, 0);
+
+        assert!(formatted.contains("No stories on this page"));
+    }
+
+    #[test]
+    fn test_format_list_text_includes_header() {
+        let item = create_test_item(1, "Test Story");
+        let options = create_test_options("ask", 1, 30);
+
+        let formatted = format_list_text(&[item], &options, 1);
+
+        assert!(formatted.contains("HACKERNEWS ASK STORIES"));
+        assert!(formatted.contains("=".repeat(80).as_str()));
+    }
+
+    #[test]
+    fn test_format_list_text_includes_pagination() {
+        let item = create_test_item(1, "Test Story");
+        let options = create_test_options("top", 2, 10);
+
+        let formatted = format_list_text(&[item], &options, 50);
+
+        assert!(formatted.contains("Showing page 2 of 5"));
+        assert!(formatted.contains("50 total top stories"));
+    }
+
+    #[test]
+    fn test_format_list_text_includes_navigation() {
+        let item = create_test_item(1, "Test Story");
+        let options = create_test_options("show", 2, 10);
+
+        let formatted = format_list_text(&[item], &options, 50);
+
+        assert!(formatted.contains("NAVIGATION"));
+        assert!(formatted.contains("To navigate:"));
+    }
+
+    #[test]
+    fn test_format_list_text_first_page() {
+        let item = create_test_item(1, "Test Story");
+        let options = create_test_options("top", 1, 10);
+
+        let formatted = format_list_text(&[item], &options, 50);
+
+        assert!(formatted.contains("Next page"));
+        assert!(!formatted.contains("Previous page"));
+    }
+
+    #[test]
+    fn test_format_list_text_last_page() {
+        let item = create_test_item(1, "Test Story");
+        let options = create_test_options("top", 5, 10);
+
+        let formatted = format_list_text(&[item], &options, 50);
+
+        assert!(!formatted.contains("Next page"));
+        assert!(formatted.contains("Previous page"));
+        assert!(formatted.contains("First page"));
+    }
+
+    #[test]
+    fn test_format_list_text_middle_page() {
+        let item = create_test_item(1, "Test Story");
+        let options = create_test_options("top", 3, 10);
+
+        let formatted = format_list_text(&[item], &options, 50);
+
+        assert!(formatted.contains("Next page"));
+        assert!(formatted.contains("Previous page"));
+        assert!(!formatted.contains("First page"));
+    }
+
+    #[test]
+    fn test_format_list_text_story_types() {
+        let story_types = vec!["top", "new", "best", "ask", "show", "job"];
+
+        for story_type in story_types {
+            let item = create_test_item(1, "Test Story");
+            let options = create_test_options(story_type, 1, 30);
+            let formatted = format_list_text(&[item], &options, 1);
+
+            assert!(
+                formatted.contains(&format!("HACKERNEWS {} STORIES", story_type.to_uppercase()))
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_list_text_missing_fields() {
+        let item = ListItem {
+            id: 123,
+            title: None,
+            url: None,
+            author: None,
+            score: None,
+            comments: None,
+            time: None,
+        };
+        let options = create_test_options("top", 1, 30);
+
+        let formatted = format_list_text(&[item], &options, 1);
+
+        assert!(formatted.contains("(No title)"));
+        assert!(formatted.contains("unknown"));
+        assert!(!formatted.contains("URL:"));
+    }
+
+    #[test]
+    fn test_format_list_text_includes_metadata() {
+        let item = create_test_item(42, "Test Story");
+        let options = create_test_options("top", 1, 30);
+
+        let formatted = format_list_text(&[item], &options, 1);
+
+        assert!(formatted.contains("By:"));
+        assert!(formatted.contains("testuser"));
+        assert!(formatted.contains("Score:"));
+        assert!(formatted.contains("42"));
+        assert!(formatted.contains("Comments:"));
+        assert!(formatted.contains("10"));
+        assert!(formatted.contains("Time:"));
+        assert!(formatted.contains("2 hours ago"));
+    }
+
+    #[test]
+    fn test_format_list_text_includes_read_command() {
+        let item = create_test_item(8863, "Test Story");
+        let options = create_test_options("top", 1, 30);
+
+        let formatted = format_list_text(&[item], &options, 1);
+
+        assert!(formatted.contains("mcptools hn read 8863"));
+        assert!(formatted.contains("Example:"));
+    }
+
+    #[test]
+    fn test_format_list_text_includes_usage_hints() {
+        let item = create_test_item(1, "Test Story");
+        let options = create_test_options("top", 1, 30);
+
+        let formatted = format_list_text(&[item], &options, 1);
+
+        assert!(formatted.contains("To change page size:"));
+        assert!(formatted.contains("To list other story types:"));
+        assert!(formatted.contains("To read a story:"));
+        assert!(formatted.contains("To get JSON output:"));
+    }
 }

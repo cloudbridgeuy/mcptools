@@ -32,7 +32,8 @@
       "Bash(tree:*)",
       "Bash(cargo doc:*)",
       "Bash(./target/debug/mcptools md fetch:*)",
-      "Bash(cargo clean:*)"
+      "Bash(cargo clean:*)",
+      "Bash(./target/debug/mcptools:*)"
     ],
     "deny": [],
     "ask": []

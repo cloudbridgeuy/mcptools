@@ -215,17 +215,27 @@ pub struct JiraIssueResponse {
   - Pattern consistency maintained with Sections 2.1 and 2.2
   - Total reduction: 384 lines → 14 lines (96% average reduction in wrappers)
 
+- **Section 2.4**: HackerNews List Items Output Formatting ✅
+  - Date Completed: 2025-10-29
+  - Files: `crates/mcptools/src/hn/list_items.rs` (refactored, added 477 lines of pure functions and tests)
+  - Tests: 20/20 passing (6 JSON + 14 text tests)
+  - Pure formatting functions: `format_list_json`, `format_list_text`
+  - Refactored wrappers: `output_json` (4 lines, new wrapper), `output_formatted` (4 lines, 97% reduction from 150 lines)
+  - Successfully separated formatting logic from I/O operations (printing)
+  - All formatting logic testable with fixture data (no mocking required)
+  - Verified with real HN API calls (all story types, pagination, JSON, formatted, piping)
+  - Pattern consistency maintained with all previous Phase 2 sections
+  - Total reduction: 150 lines → 4 lines (97% reduction in output_formatted wrapper)
+
 ### In Progress 🚧
 - None
 
 ### Pending 📋
-- **Phase 2**: Output Functions (1 remaining section)
-  - Section 2.4: HackerNews List Items Output Formatting
 - **Phase 3**: Supporting Refactorings (2 sections)
 
 **Overall Progress**:
 - Phase 1: 6/6 core refactorings completed (100%)
-- Phase 2: 3/4 output refactorings completed (75%)
+- Phase 2: 4/4 output refactorings completed (100%) ✅ **PHASE 2 COMPLETE!**
 
 ---
 
@@ -1791,7 +1801,7 @@ This assumes one person working sequentially. With multiple developers, Stages 1
 
 This refactoring plan provides a clear path from the current mixed architecture to a clean Functional Core - Imperative Shell implementation using a **two-crate architecture** (`mcptools_core` for pure functions, `mcptools` for I/O).
 
-**Progress Update**: **Phase 1 is 100% COMPLETE! Phase 2 has begun!**
+**Progress Update**: **Phase 1 is 100% COMPLETE! Phase 2 is 100% COMPLETE!**
 
 **Phase 1 - Core Data Functions** (All six refactorings completed):
 
@@ -1802,36 +1812,36 @@ This refactoring plan provides a clear path from the current mixed architecture 
 5. **Section 1.5: HackerNews - Item Read** (2025-10-28) - Comment transformation and post output building
 6. **Section 1.6: Markdown Converter** (2025-10-28) - Most complex refactoring with browser automation
 
-**Phase 2 - Output Functions** (In Progress, 2 of 4 completed):
+**Phase 2 - Output Functions** (All four refactorings completed):
 
 1. **Section 2.1: Markdown Fetch Output Formatting** (2025-10-28) - Established output formatting pattern
 2. **Section 2.2: Markdown TOC Output Formatting** (2025-10-29) - Applied pattern to TOC output
+3. **Section 2.3: HackerNews Read Item Output Formatting** (2025-10-29) - Complex multi-format output (post, thread, JSON, text)
+4. **Section 2.4: HackerNews List Items Output Formatting** (2025-10-29) - Final Phase 2 section completed
 
 These implementations demonstrate:
 - ✅ Complete separation of concerns between pure functions and I/O
-- ✅ Comprehensive testing without mocking (127 tests total - 89 core + 38 output - all passing)
+- ✅ Comprehensive testing without mocking (159 tests total - 101 core + 58 output - all passing)
 - ✅ Maintainable code structure that's easy to reason about
 - ✅ Proven template pattern successfully applied across all modules
 - ✅ Backward compatibility maintained (CLI and MCP handlers unchanged)
 - ✅ Successful dependency management (regex, chrono, serde_json, html2md, scraper added to core as needed)
 - ✅ Even complex browser automation and output formatting can be cleanly separated
 
-By following the execution order and applying the established pattern consistently across all modules, we'll achieve a more testable, maintainable, and robust codebase. The investment in this refactoring will pay dividends in reduced debugging time, easier feature additions, and greater confidence in code correctness.
+By following the execution order and applying the established pattern consistently across all modules, we have achieved a more testable, maintainable, and robust codebase. The investment in this refactoring has paid dividends in reduced debugging time, easier feature additions, and greater confidence in code correctness.
 
 The key principle throughout is: **data transformation logic should be pure and ignorant of where data comes from or where it goes**. By adhering to this principle and enforcing it through crate boundaries, we create a codebase that's easier to reason about, test, and extend.
 
 **Overall Achievement Summary**:
-- **Phase 1**: 6/6 refactorings completed (100%)
-  - 89 tests added to core crate (all passing, no mocking required)
+- **Phase 1**: 6/6 refactorings completed (100%) ✅
+  - 101 tests in core crate (all passing, no mocking required)
   - Average code reduction: ~45% in refactored shell functions
-- **Phase 2**: 3/4 refactorings completed (75%)
-  - 38 tests added to shell crate (all passing, no mocking required)
-  - Average 91% code reduction in wrapper functions across all sections
-  - Sections completed: Markdown Fetch (2.1), Markdown TOC (2.2), HN Read Item (2.3)
+- **Phase 2**: 4/4 refactorings completed (100%) ✅
+  - 58 tests added to shell crate (all passing, no mocking required)
+  - Average 94% code reduction in wrapper functions across all sections
+  - Sections completed: Markdown Fetch (2.1), Markdown TOC (2.2), HN Read Item (2.3), HN List Items (2.4)
 - **Zero regressions**: All CLI and MCP functionality works identically
 - **Pattern established**: Clear template for both core transformations and output formatting
+- **Total test count**: 159 tests (101 core + 58 output)
 
-**Next Steps**: Phase 2 (Output Functions) is nearly complete. One remaining section:
-- Section 2.4: HackerNews List Items Output Formatting
-
-After Phase 2, Phase 3 (Supporting Refactorings) can be tackled when needed.
+**Next Steps**: Phase 3 (Supporting Refactorings) can be tackled when needed. The core refactoring work is complete!
