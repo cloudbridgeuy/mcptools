@@ -1,5 +1,4 @@
 use crate::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -8,18 +7,11 @@ use std::process::Command;
 // Disambiguate println! from prelude
 use crate::prelude::println;
 
-/// GitHub release API response
-#[derive(Debug, Serialize, Deserialize)]
-struct GitHubRelease {
-    tag_name: String,
-    assets: Vec<GitHubAsset>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct GitHubAsset {
-    name: String,
-    browser_download_url: String,
-}
+// Import domain models and pure functions from core
+use mcptools_core::upgrade::{
+    find_matching_asset, get_github_arch, get_github_os, is_version_up_to_date, parse_version_tag,
+};
+pub use mcptools_core::upgrade::{GitHubAsset, GitHubRelease};
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "upgrade")]
@@ -39,18 +31,24 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
 
     // Fetch latest release from GitHub
     let latest_release = fetch_latest_release().await?;
-    let latest_version = latest_release.tag_name.trim_start_matches('v');
+    let latest_version = parse_version_tag(&latest_release.tag_name);
 
     println!("Latest version: {}", latest_version);
 
-    // Check if upgrade is needed
-    if !app.force && is_version_up_to_date(current_version, latest_version)? {
+    // Check if upgrade is needed (using pure function from core)
+    if !app.force
+        && is_version_up_to_date(current_version, latest_version)
+            .map_err(|e| eyre!("Version comparison failed: {}", e))?
+    {
         println!("You are already running the latest version!");
         return Ok(());
     }
 
-    // Get the appropriate binary for current OS/architecture
-    let asset = find_matching_asset(&latest_release)?;
+    // Get the appropriate binary for current OS/architecture (using pure functions from core)
+    let os = get_github_os(env::consts::OS).map_err(|e| eyre!("{}", e))?;
+    let arch = get_github_arch(env::consts::ARCH).map_err(|e| eyre!("{}", e))?;
+    let asset = find_matching_asset(&latest_release, os, arch).map_err(|e| eyre!("{}", e))?;
+
     println!("Downloading latest version...");
 
     // Download the new binary
@@ -85,59 +83,6 @@ async fn fetch_latest_release() -> Result<GitHubRelease> {
         .json::<GitHubRelease>()
         .await
         .context("Failed to parse GitHub release response")
-}
-
-/// Compare versions - returns true if current >= latest
-fn is_version_up_to_date(current: &str, latest: &str) -> Result<bool> {
-    let current_parts: Vec<&str> = current.split('.').collect();
-    let latest_parts: Vec<&str> = latest.split('.').collect();
-
-    // Pad with zeros if lengths differ
-    let max_len = current_parts.len().max(latest_parts.len());
-    let mut current_parts: Vec<u32> = current_parts
-        .iter()
-        .map(|p| p.parse::<u32>().unwrap_or(0))
-        .collect();
-    let mut latest_parts: Vec<u32> = latest_parts
-        .iter()
-        .map(|p| p.parse::<u32>().unwrap_or(0))
-        .collect();
-
-    current_parts.resize(max_len, 0);
-    latest_parts.resize(max_len, 0);
-
-    Ok(current_parts >= latest_parts)
-}
-
-/// Find the asset matching current OS and architecture
-fn find_matching_asset(release: &GitHubRelease) -> Result<&GitHubAsset> {
-    let os = get_github_os()?;
-    let arch = get_github_arch()?;
-    let target_name = format!("mcptools-{os}-{arch}");
-
-    release
-        .assets
-        .iter()
-        .find(|asset| asset.name == target_name)
-        .ok_or_else(|| eyre!("No binary found for {}-{}", os, arch))
-}
-
-/// Map Rust's OS constant to GitHub release naming
-fn get_github_os() -> Result<&'static str> {
-    match env::consts::OS {
-        "macos" => Ok("Darwin"),
-        "linux" => Ok("Linux"),
-        os => Err(eyre!("Unsupported OS: {}", os)),
-    }
-}
-
-/// Map Rust's ARCH constant to GitHub release naming
-fn get_github_arch() -> Result<&'static str> {
-    match env::consts::ARCH {
-        "aarch64" => Ok("arm64"),
-        "x86_64" => Ok("x86_64"),
-        arch => Err(eyre!("Unsupported architecture: {}", arch)),
-    }
 }
 
 /// Download the binary from the given URL to a temporary file

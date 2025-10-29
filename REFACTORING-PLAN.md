@@ -244,16 +244,38 @@ pub struct JiraIssueResponse {
   - Total test count in mcptools crate: 78 tests (58 existing + 20 new extract_toc tests)
   - Verified full test suite passes (101 core tests + 78 shell tests = 179 total)
 
+- **Section 3.2**: Upgrade Module ✅
+  - Date Completed: 2025-10-29
+  - Files: `crates/core/src/upgrade.rs` (new, 380 lines, 29 tests), `crates/core/src/lib.rs` (updated), `crates/mcptools/src/upgrade.rs` (refactored from 221 to 166 lines, 25% reduction)
+  - Tests: 29/29 passing (all new tests in core)
+  - Pure functions moved to core: `parse_version_tag`, `is_version_up_to_date`, `find_matching_asset`, `get_github_os`, `get_github_arch`
+  - Domain models moved to core: `GitHubRelease`, `GitHubAsset`
+  - Test coverage areas:
+    - Version parsing (with/without 'v' prefix, empty, multiple 'v')
+    - Version comparison (same, newer/older, major/minor versions, padding, four-part versions, invalid parts)
+    - Asset matching (Darwin arm64, Linux x86_64, not found, empty assets, multiple assets)
+    - OS mapping (macos, linux, unsupported, empty)
+    - Architecture mapping (aarch64, x86_64, unsupported, empty)
+  - Functions were already pure but had zero tests - now comprehensively tested
+  - Shell maintains I/O operations: `fetch_latest_release`, `download_binary`, `perform_upgrade`, `has_write_permission`
+  - All tests pass without mocking
+  - Total test count: 130 core tests + 78 shell tests = 208 total
+  - CLI functionality verified (`mcptools upgrade --help`)
+  - Pattern consistency maintained across all modules
+  - 25% code reduction in shell module
+
 ### In Progress 🚧
 - None
 
 ### Pending 📋
-- **Phase 3.2**: Upgrade Module (optional, low priority)
+- None
 
 **Overall Progress**:
 - Phase 1: 6/6 core refactorings completed (100%) ✅ **PHASE 1 COMPLETE!**
 - Phase 2: 4/4 output refactorings completed (100%) ✅ **PHASE 2 COMPLETE!**
-- Phase 3: 1/2 supporting refactorings completed (50%)
+- Phase 3: 2/2 supporting refactorings completed (100%) ✅ **PHASE 3 COMPLETE!**
+
+🎉 **ALL REFACTORING COMPLETE!** 🎉
 
 ---
 
@@ -1665,13 +1687,81 @@ Phase 3 includes minor improvements and cleanup that don't directly violate the 
 
 **Minor Improvement**: The `extract_toc` function (lines 131-185) is already pure and well-structured. No changes needed, but we should add comprehensive tests.
 
-### 3.2: Upgrade Module
+### 3.2: Upgrade Module ✅ **COMPLETED**
 
-**File**: `crates/mcptools/src/upgrade.rs`
+**Status**: ✅ **COMPLETED** - Final refactoring successfully implemented, establishing consistency across all modules.
 
-**Current Issue**: This module has several functions that mix I/O with logic, but it's a standalone feature with less critical importance. Functions like `is_version_up_to_date` (line 91) and pagination helpers are already pure, which is good.
+**Files Modified**:
+- **Core**: `crates/core/src/upgrade.rs` (new, 380 lines, 29 tests)
+- **Core**: `crates/core/src/lib.rs` (added upgrade module to exports and documentation)
+- **Shell**: `crates/mcptools/src/upgrade.rs` (refactored from 221 to 166 lines, 25% reduction)
 
-**Recommended Approach**: Leave this module as-is for now. It's a self-contained feature, and refactoring it provides less value than the core data functions. If time permits after Phases 1-2, we can apply similar patterns here.
+**Original Problem**: The upgrade module had several pure functions (`is_version_up_to_date`, `find_matching_asset`, `get_github_os`, `get_github_arch`) mixed with I/O operations (HTTP requests, file system operations). While these functions were already pure, they lacked tests and weren't in the core crate.
+
+**Solution Implemented**:
+
+Created a clean separation between pure transformation logic and I/O operations, adding comprehensive test coverage.
+
+**What Was Created in `mcptools_core`**:
+
+1. **Domain Models** (moved from mcptools):
+   - `GitHubRelease` (API response structure)
+   - `GitHubAsset` (release asset structure)
+
+2. **Pure Helper Function**:
+   ```rust
+   pub fn parse_version_tag(tag: &str) -> &str
+   ```
+   Removes 'v' prefix from version tags (e.g., "v1.2.3" → "1.2.3")
+
+3. **Pure Transformation Functions** (moved from mcptools):
+   - `is_version_up_to_date(current: &str, latest: &str) -> Result<bool, String>` - Semantic version comparison with padding
+   - `find_matching_asset(release: &GitHubRelease, os: &str, arch: &str) -> Result<&GitHubAsset, String>` - Asset filtering by OS/arch
+   - `get_github_os(os: &str) -> Result<&'static str, String>` - OS name mapping (macos→Darwin, linux→Linux)
+   - `get_github_arch(arch: &str) -> Result<&'static str, String>` - Architecture mapping (aarch64→arm64, x86_64→x86_64)
+
+4. **Comprehensive Tests** (29 tests, all passing):
+   - **parse_version_tag** (4 tests): with/without 'v' prefix, empty, multiple 'v'
+   - **is_version_up_to_date** (13 tests):
+     - Same version, current newer/older
+     - Major/minor version comparisons
+     - Padding behavior (different version lengths)
+     - Four-part versions, invalid parts treated as zero
+   - **find_matching_asset** (5 tests): Darwin arm64, Linux x86_64, not found, empty assets, multiple assets
+   - **get_github_os** (4 tests): macos, linux, unsupported, empty
+   - **get_github_arch** (4 tests): aarch64, x86_64, unsupported, empty
+
+**What Was Refactored in `mcptools`**:
+
+The `upgrade.rs` shell module now:
+- Imports domain models and pure functions from `mcptools_core::upgrade`
+- Reduced from 221 lines to 166 lines (25% reduction)
+- Removed duplicate implementations of pure functions
+- Uses `parse_version_tag` from core instead of inline `.trim_start_matches('v')`
+- Delegates to core functions: `is_version_up_to_date`, `get_github_os`, `get_github_arch`, `find_matching_asset`
+- Maintains all I/O operations: `fetch_latest_release`, `download_binary`, `perform_upgrade`, `has_write_permission`
+- Remains fully compatible with existing CLI functionality
+
+**Key Achievement**: Successfully completed all refactorings! The upgrade module now follows the same Functional Core - Imperative Shell pattern as all other modules, with zero previously-untested pure functions now having 29 comprehensive tests.
+
+**Verification**:
+- ✅ All 29 core tests pass without mocking
+- ✅ Total test count: 130 tests across core crate (101 original + 29 upgrade)
+- ✅ Total test count: 78 tests across shell crate
+- ✅ Total project tests: 208 (130 core + 78 shell)
+- ✅ mcptools builds successfully
+- ✅ CLI functionality verified (`mcptools upgrade --help` works)
+- ✅ Clean separation of concerns achieved
+- ✅ 25% code reduction in shell module
+
+**Lessons Learned**:
+
+1. **Already Pure Functions**: Many functions were already pure, just needed to move to core and add tests
+2. **Zero Test Coverage**: All pure functions had 0 tests before refactoring, now 29 tests
+3. **Pattern Consistency**: Successfully applied the same pattern from Phases 1 & 2
+4. **Error Type Conversion**: Core functions return `Result<T, String>` for simplicity, shell converts to `eyre::Result`
+5. **Helper Function Extraction**: `parse_version_tag` was inline logic in shell, now a testable function
+6. **Parameter Simplification**: `find_matching_asset` signature improved to accept os/arch strings instead of reading from `env::consts`
 
 ---
 
@@ -1819,7 +1909,7 @@ This assumes one person working sequentially. With multiple developers, Stages 1
 
 This refactoring plan provides a clear path from the current mixed architecture to a clean Functional Core - Imperative Shell implementation using a **two-crate architecture** (`mcptools_core` for pure functions, `mcptools` for I/O).
 
-**Progress Update**: **Phase 1 is 100% COMPLETE! Phase 2 is 100% COMPLETE!**
+**Progress Update**: 🎉 **ALL PHASES 100% COMPLETE!** 🎉
 
 **Phase 1 - Core Data Functions** (All six refactorings completed):
 
@@ -1837,14 +1927,20 @@ This refactoring plan provides a clear path from the current mixed architecture 
 3. **Section 2.3: HackerNews Read Item Output Formatting** (2025-10-29) - Complex multi-format output (post, thread, JSON, text)
 4. **Section 2.4: HackerNews List Items Output Formatting** (2025-10-29) - Final Phase 2 section completed
 
+**Phase 3 - Supporting Refactorings** (All two refactorings completed):
+
+1. **Section 3.1: Table of Contents Testing** (2025-10-29) - Added 20 comprehensive tests for pure `extract_toc` function
+2. **Section 3.2: Upgrade Module** (2025-10-29) - Moved pure functions to core, added 29 comprehensive tests
+
 These implementations demonstrate:
 - ✅ Complete separation of concerns between pure functions and I/O
-- ✅ Comprehensive testing without mocking (159 tests total - 101 core + 58 output - all passing)
+- ✅ Comprehensive testing without mocking (208 tests total - 130 core + 78 shell - all passing)
 - ✅ Maintainable code structure that's easy to reason about
 - ✅ Proven template pattern successfully applied across all modules
 - ✅ Backward compatibility maintained (CLI and MCP handlers unchanged)
 - ✅ Successful dependency management (regex, chrono, serde_json, html2md, scraper added to core as needed)
 - ✅ Even complex browser automation and output formatting can be cleanly separated
+- ✅ Pure functions that were previously untested now have comprehensive test coverage
 
 By following the execution order and applying the established pattern consistently across all modules, we have achieved a more testable, maintainable, and robust codebase. The investment in this refactoring has paid dividends in reduced debugging time, easier feature additions, and greater confidence in code correctness.
 
@@ -1858,11 +1954,13 @@ The key principle throughout is: **data transformation logic should be pure and 
   - 58 tests added to shell crate (all passing, no mocking required)
   - Average 94% code reduction in wrapper functions across all sections
   - Sections completed: Markdown Fetch (2.1), Markdown TOC (2.2), HN Read Item (2.3), HN List Items (2.4)
-- **Phase 3**: 1/2 refactorings completed (50%) 🚧
+- **Phase 3**: 2/2 refactorings completed (100%) ✅
   - Section 3.1 (TOC Testing): ✅ Complete - 20 comprehensive tests added for `extract_toc` function
-  - Section 3.2 (Upgrade Module): Optional, low priority
+  - Section 3.2 (Upgrade Module): ✅ Complete - 29 tests added, pure functions moved to core, 25% code reduction
 - **Zero regressions**: All CLI and MCP functionality works identically
 - **Pattern established**: Clear template for both core transformations and output formatting
-- **Total test count**: 179 tests (101 core + 78 shell)
+- **Total test count**: 208 tests (130 core + 78 shell)
 
-**Next Steps**: Phase 3.2 (Upgrade Module refactoring) is optional and low priority. The critical refactoring work is complete!
+🎉 **ALL REFACTORING WORK IS COMPLETE!** 🎉
+
+The mcptools codebase now fully implements the Functional Core - Imperative Shell pattern with comprehensive test coverage and clean separation of concerns.
