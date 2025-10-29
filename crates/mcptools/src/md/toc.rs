@@ -600,4 +600,329 @@ mod tests {
         let separator_count = formatted.matches("========").count();
         assert!(separator_count >= 6); // 3 sections × 2 lines each
     }
+
+    // Tests for extract_toc function
+
+    #[test]
+    fn test_extract_toc_single_heading() {
+        let markdown = "# Introduction\n\nSome content here.";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].level, 1);
+        assert_eq!(entries[0].text, "Introduction");
+        assert_eq!(entries[0].char_offset, 0);
+        assert_eq!(entries[0].char_limit, markdown.chars().count());
+    }
+
+    #[test]
+    fn test_extract_toc_multiple_same_level() {
+        let markdown = "# First\nContent 1\n# Second\nContent 2\n# Third\nContent 3";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 3);
+
+        assert_eq!(entries[0].level, 1);
+        assert_eq!(entries[0].text, "First");
+        assert_eq!(entries[0].char_offset, 0);
+
+        assert_eq!(entries[1].level, 1);
+        assert_eq!(entries[1].text, "Second");
+
+        assert_eq!(entries[2].level, 1);
+        assert_eq!(entries[2].text, "Third");
+        // Last heading extends to end of document
+        assert_eq!(
+            entries[2].char_offset + entries[2].char_limit,
+            markdown.chars().count()
+        );
+    }
+
+    #[test]
+    fn test_extract_toc_nested_structure() {
+        let markdown =
+            "# Chapter 1\n## Section 1.1\n### Subsection 1.1.1\n## Section 1.2\n# Chapter 2";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 5);
+
+        assert_eq!(entries[0].level, 1);
+        assert_eq!(entries[0].text, "Chapter 1");
+
+        assert_eq!(entries[1].level, 2);
+        assert_eq!(entries[1].text, "Section 1.1");
+
+        assert_eq!(entries[2].level, 3);
+        assert_eq!(entries[2].text, "Subsection 1.1.1");
+
+        assert_eq!(entries[3].level, 2);
+        assert_eq!(entries[3].text, "Section 1.2");
+
+        assert_eq!(entries[4].level, 1);
+        assert_eq!(entries[4].text, "Chapter 2");
+    }
+
+    #[test]
+    fn test_extract_toc_all_heading_levels() {
+        let markdown = "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 6);
+        assert_eq!(entries[0].level, 1);
+        assert_eq!(entries[1].level, 2);
+        assert_eq!(entries[2].level, 3);
+        assert_eq!(entries[3].level, 4);
+        assert_eq!(entries[4].level, 5);
+        assert_eq!(entries[5].level, 6);
+    }
+
+    #[test]
+    fn test_extract_toc_empty_markdown() {
+        let markdown = "";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_toc_no_headings() {
+        let markdown = "Just some plain text\nwith no headings\nat all.";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_toc_heading_with_special_characters() {
+        let markdown = "# Special: Characters! & More?\n## Code `example` here\n### (Parentheses)";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].text, "Special: Characters! & More?");
+        assert_eq!(entries[1].text, "Code `example` here");
+        assert_eq!(entries[2].text, "(Parentheses)");
+    }
+
+    #[test]
+    fn test_extract_toc_heading_with_extra_whitespace() {
+        let markdown = "#    Extra    Spaces   \n##\t\tTabs\t\t";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].text, "Extra    Spaces");
+        assert_eq!(entries[1].text, "Tabs");
+    }
+
+    #[test]
+    fn test_extract_toc_section_boundaries() {
+        let markdown = "# First\nContent A\n## Nested\nContent B\n# Second\nContent C";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 3);
+
+        // First H1 section should extend to the second H1
+        assert_eq!(entries[0].level, 1);
+        assert_eq!(entries[0].text, "First");
+        let first_section_end = entries[0].char_offset + entries[0].char_limit;
+
+        // Second H1 should start where first ends
+        assert_eq!(entries[2].char_offset, first_section_end);
+
+        // Nested H2 section should extend to the next H1
+        assert_eq!(entries[1].level, 2);
+        assert_eq!(
+            entries[1].char_offset + entries[1].char_limit,
+            entries[2].char_offset
+        );
+    }
+
+    #[test]
+    fn test_extract_toc_consecutive_headings() {
+        let markdown = "# First\n## Second\n### Third\nSome content";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 3);
+
+        // All offsets should be sequential
+        assert!(entries[0].char_offset < entries[1].char_offset);
+        assert!(entries[1].char_offset < entries[2].char_offset);
+    }
+
+    #[test]
+    fn test_extract_toc_unicode_content() {
+        let markdown = "# 日本語 Title\n\n🚀 Content with emoji\n\n## Café";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].text, "日本語 Title");
+        assert_eq!(entries[1].text, "Café");
+
+        // Verify total length calculation with unicode
+        let last_entry = &entries[1];
+        assert!(last_entry.char_offset + last_entry.char_limit <= markdown.chars().count());
+    }
+
+    #[test]
+    fn test_extract_toc_char_offset_accuracy() {
+        let markdown = "First line\n# Heading\nContent line";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        // "First line\n" is 11 chars, heading should start there
+        assert_eq!(entries[0].char_offset, 11);
+    }
+
+    #[test]
+    fn test_extract_toc_h2_followed_by_h1() {
+        let markdown = "# Chapter 1\n## Section\nContent\n# Chapter 2\nMore content";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 3);
+
+        // H2 section should end when H1 starts
+        let h2_end = entries[1].char_offset + entries[1].char_limit;
+        assert_eq!(h2_end, entries[2].char_offset);
+    }
+
+    #[test]
+    fn test_extract_toc_h3_followed_by_h1() {
+        let markdown = "# Chapter\n## Section\n### Subsection\nContent\n# Next Chapter";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 4);
+
+        // H3 section should end when H1 starts
+        let h3_end = entries[2].char_offset + entries[2].char_limit;
+        assert_eq!(h3_end, entries[3].char_offset);
+    }
+
+    #[test]
+    fn test_extract_toc_last_heading_extends_to_end() {
+        let markdown = "# First\n## Nested\nSome content\nMore content\nEven more";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 2);
+
+        // Last heading (H2) should extend to end of document
+        let last_entry = &entries[1];
+        assert_eq!(
+            last_entry.char_offset + last_entry.char_limit,
+            markdown.chars().count()
+        );
+    }
+
+    #[test]
+    fn test_extract_toc_heading_at_end() {
+        let markdown = "# First\nSome content\n# Last";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 2);
+
+        // Last heading should have some char_limit even with no content after
+        assert!(entries[1].char_limit > 0);
+        assert_eq!(
+            entries[1].char_offset + entries[1].char_limit,
+            markdown.chars().count()
+        );
+    }
+
+    #[test]
+    fn test_extract_toc_complex_nested_structure() {
+        let markdown = "# Part 1\n## Chapter 1.1\n### Section 1.1.1\n### Section 1.1.2\n## Chapter 1.2\n# Part 2\n## Chapter 2.1";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 7);
+
+        // Verify hierarchy
+        assert_eq!(entries[0].level, 1); // Part 1
+        assert_eq!(entries[1].level, 2); // Chapter 1.1
+        assert_eq!(entries[2].level, 3); // Section 1.1.1
+        assert_eq!(entries[3].level, 3); // Section 1.1.2
+        assert_eq!(entries[4].level, 2); // Chapter 1.2
+        assert_eq!(entries[5].level, 1); // Part 2
+        assert_eq!(entries[6].level, 2); // Chapter 2.1
+
+        // Part 1 section should extend to Part 2
+        assert_eq!(
+            entries[0].char_offset + entries[0].char_limit,
+            entries[5].char_offset
+        );
+    }
+
+    #[test]
+    fn test_extract_toc_multiline_content_between_headings() {
+        let markdown =
+            "# Heading 1\n\nParagraph 1\nParagraph 2\nParagraph 3\n\n# Heading 2\n\nMore content";
+        let entries = extract_toc(markdown).unwrap();
+
+        assert_eq!(entries.len(), 2);
+
+        // First section should include all content until second heading
+        let first_section_content_length = entries[0].char_limit;
+        assert!(first_section_content_length > "# Heading 1\n".len());
+
+        // Verify boundaries
+        assert_eq!(
+            entries[0].char_offset + entries[0].char_limit,
+            entries[1].char_offset
+        );
+    }
+
+    #[test]
+    fn test_format_toc_indented() {
+        let entries = vec![
+            TocEntry {
+                level: 1,
+                text: "Chapter 1".to_string(),
+                char_offset: 0,
+                char_limit: 100,
+            },
+            TocEntry {
+                level: 2,
+                text: "Section 1.1".to_string(),
+                char_offset: 100,
+                char_limit: 50,
+            },
+            TocEntry {
+                level: 1,
+                text: "Chapter 2".to_string(),
+                char_offset: 150,
+                char_limit: 75,
+            },
+        ];
+
+        let formatted = format_toc_indented(&entries);
+
+        // H1 should have no indent
+        assert!(formatted.contains("Chapter 1  [--offset 0 --limit 100]"));
+        // H2 should have 2-space indent
+        assert!(formatted.contains("  Section 1.1  [--offset 100 --limit 50]"));
+        // Second H1 should have no indent
+        assert!(formatted.contains("Chapter 2  [--offset 150 --limit 75]"));
+    }
+
+    #[test]
+    fn test_format_toc_markdown() {
+        let entries = vec![
+            TocEntry {
+                level: 1,
+                text: "Chapter 1".to_string(),
+                char_offset: 0,
+                char_limit: 100,
+            },
+            TocEntry {
+                level: 2,
+                text: "Section 1.1".to_string(),
+                char_offset: 100,
+                char_limit: 50,
+            },
+        ];
+
+        let formatted = format_toc_markdown(&entries);
+
+        // H1 should start with "* "
+        assert!(formatted.contains("* Chapter 1  [--offset 0 --limit 100]"));
+        // H2 should have indent and bullet
+        assert!(formatted.contains("  * Section 1.1  [--offset 100 --limit 50]"));
+    }
 }

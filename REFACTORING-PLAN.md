@@ -227,15 +227,33 @@ pub struct JiraIssueResponse {
   - Pattern consistency maintained with all previous Phase 2 sections
   - Total reduction: 150 lines → 4 lines (97% reduction in output_formatted wrapper)
 
+- **Section 3.1**: Table of Contents Testing ✅
+  - Date Completed: 2025-10-29
+  - Files: `crates/mcptools/src/md/toc.rs` (added 20 comprehensive tests for `extract_toc` function + 2 tests for formatting helpers)
+  - Tests: 22/22 passing (all new tests)
+  - Test coverage areas:
+    - Basic functionality (single heading, multiple same level, nested structure, all heading levels H1-H6)
+    - Edge cases (empty markdown, no headings, heading at end, consecutive headings)
+    - Character offset accuracy (including Unicode characters)
+    - Section boundary calculations (H2→H1, H3→H1, last heading extends to end)
+    - Heading text variations (special characters, extra whitespace, inline code)
+    - Complex nested structures (multi-level hierarchies)
+    - Helper function tests (`format_toc_indented`, `format_toc_markdown`)
+  - `extract_toc` function was already pure - no refactoring needed
+  - All tests pass without mocking
+  - Total test count in mcptools crate: 78 tests (58 existing + 20 new extract_toc tests)
+  - Verified full test suite passes (101 core tests + 78 shell tests = 179 total)
+
 ### In Progress 🚧
 - None
 
 ### Pending 📋
-- **Phase 3**: Supporting Refactorings (2 sections)
+- **Phase 3.2**: Upgrade Module (optional, low priority)
 
 **Overall Progress**:
-- Phase 1: 6/6 core refactorings completed (100%)
+- Phase 1: 6/6 core refactorings completed (100%) ✅ **PHASE 1 COMPLETE!**
 - Phase 2: 4/4 output refactorings completed (100%) ✅ **PHASE 2 COMPLETE!**
+- Phase 3: 1/2 supporting refactorings completed (50%)
 
 ---
 
@@ -1840,8 +1858,11 @@ The key principle throughout is: **data transformation logic should be pure and 
   - 58 tests added to shell crate (all passing, no mocking required)
   - Average 94% code reduction in wrapper functions across all sections
   - Sections completed: Markdown Fetch (2.1), Markdown TOC (2.2), HN Read Item (2.3), HN List Items (2.4)
+- **Phase 3**: 1/2 refactorings completed (50%) 🚧
+  - Section 3.1 (TOC Testing): ✅ Complete - 20 comprehensive tests added for `extract_toc` function
+  - Section 3.2 (Upgrade Module): Optional, low priority
 - **Zero regressions**: All CLI and MCP functionality works identically
 - **Pattern established**: Clear template for both core transformations and output formatting
-- **Total test count**: 159 tests (101 core + 58 output)
+- **Total test count**: 179 tests (101 core + 78 shell)
 
-**Next Steps**: Phase 3 (Supporting Refactorings) can be tackled when needed. The core refactoring work is complete!
+**Next Steps**: Phase 3.2 (Upgrade Module refactoring) is optional and low priority. The critical refactoring work is complete!
