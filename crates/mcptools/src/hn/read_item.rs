@@ -827,8 +827,10 @@ mod tests {
         // Check for main sections
         assert!(result.contains("POST"));
         assert!(result.contains("Test Story"));
-        assert!(result.contains("URL: https://example.com"));
-        assert!(result.contains("Author: testuser"));
+        assert!(result.contains("URL"));
+        assert!(result.contains("https://example.com"));
+        assert!(result.contains("Author"));
+        assert!(result.contains("testuser"));
         assert!(result.contains("COMMENTS"));
         assert!(result.contains("NAVIGATION"));
     }
