@@ -109,6 +109,7 @@ pub async fn search_issues_data(
     next_page: Option<String>,
 ) -> Result<SearchOutput> {
     use crate::atlassian::{create_authenticated_client, AtlassianConfig};
+    use mcptools_core::pagination;
 
     let config = AtlassianConfig::from_env()?;
     let client = create_authenticated_client(&config)?;
@@ -129,10 +130,27 @@ pub async fn search_issues_data(
         ("expand", "names"),
     ];
 
-    // Add nextPageToken if provided
+    // Add nextPageToken if provided - resolve hash to full token if needed
     let next_page_str_owned;
-    if let Some(ref token) = next_page {
-        next_page_str_owned = token.clone();
+    if let Some(ref token_or_hash) = next_page {
+        // Check if this looks like an 8-character hash or a full token
+        let actual_token =
+            if token_or_hash.len() == 8 && token_or_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+                // Try to load the full token from pagination directory
+                let pagination_dir = get_pagination_dir()?;
+                match pagination::load_token(&pagination_dir, token_or_hash) {
+                    Ok(token) => token,
+                    Err(_) => {
+                        // If not found in pagination storage, treat it as a full token
+                        token_or_hash.clone()
+                    }
+                }
+            } else {
+                // Not a hash format, treat as full token
+                token_or_hash.clone()
+            };
+
+        next_page_str_owned = actual_token;
         query_params.push(("nextPageToken", next_page_str_owned.as_str()));
     }
 
@@ -157,8 +175,24 @@ pub async fn search_issues_data(
     let search_response: JiraSearchResponse = serde_json::from_str(&body_text)
         .map_err(|e| eyre!("Failed to parse Jira response: {}", e))?;
 
-    // Delegate to pure transformation function
-    Ok(transform_search_response(search_response))
+    // Transform response and store pagination token if present
+    let mut output = transform_search_response(search_response);
+
+    if let Some(ref token) = output.next_page_token {
+        let pagination_dir = get_pagination_dir()?;
+        match pagination::save_token(&pagination_dir, token) {
+            Ok(hash) => {
+                // Replace the full token with the hash for user display
+                output.next_page_token = Some(hash);
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to save pagination token: {}", e);
+                // Keep the full token if hashing fails
+            }
+        }
+    }
+
+    Ok(output)
 }
 
 /// Handle the search command
@@ -356,4 +390,19 @@ fn get_queries_dir() -> Result<PathBuf> {
     std::fs::create_dir_all(&queries_dir)?;
 
     Ok(queries_dir)
+}
+
+/// Get the pagination directory, creating it if necessary
+fn get_pagination_dir() -> Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .ok()
+        .map(PathBuf::from)
+        .ok_or_else(|| eyre!("Could not determine home directory (HOME env var not set)"))?;
+
+    let pagination_dir = home.join(".config/mcptools/pagination");
+
+    // Create directory if it doesn't exist
+    std::fs::create_dir_all(&pagination_dir)?;
+
+    Ok(pagination_dir)
 }

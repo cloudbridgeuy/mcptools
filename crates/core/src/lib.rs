@@ -76,5 +76,6 @@
 pub mod atlassian;
 pub mod hn;
 pub mod md;
+pub mod pagination;
 pub mod queries;
 pub mod upgrade;
