@@ -9,19 +9,19 @@ pub async fn handle_jira_search(
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     #[derive(Deserialize)]
-    struct JiraListArgs {
+    struct JiraSearchArgs {
         query: String,
         limit: Option<usize>,
         #[serde(rename = "nextPageToken")]
         next_page_token: Option<String>,
     }
 
-    let args: JiraListArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
+    let args: JiraSearchArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
-        code: -32602,
-        message: format!("Invalid arguments: {e}"),
-        data: None,
-    })?;
+            code: -32602,
+            message: format!("Invalid arguments: {e}"),
+            data: None,
+        })?;
 
     if global.verbose {
         eprintln!(
@@ -35,7 +35,7 @@ pub async fn handle_jira_search(
     }
 
     // Call the Jira module's data function
-    let list_data = crate::atlassian::jira::list_issues_data(
+    let search_data = crate::atlassian::jira::search_issues_data(
         args.query,
         args.limit.unwrap_or(10),
         args.next_page_token,
@@ -48,7 +48,7 @@ pub async fn handle_jira_search(
     })?;
 
     // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
+    let json_string = serde_json::to_string_pretty(&search_data).map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Serialization error: {e}"),
         data: None,

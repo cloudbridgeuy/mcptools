@@ -1,5 +1,5 @@
 pub mod get;
-pub mod list;
+pub mod search;
 
 use crate::prelude::{println, *};
 
@@ -8,7 +8,7 @@ use crate::prelude::{println, *};
 pub enum Commands {
     /// Search Jira issues using JQL
     #[clap(name = "search")]
-    Search(list::ListOptions),
+    Search(search::SearchOptions),
 
     /// Get detailed information about a Jira ticket
     #[clap(name = "get")]
@@ -22,11 +22,11 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
     }
 
     match cmd {
-        Commands::Search(options) => list::handler(options).await,
+        Commands::Search(options) => search::handler(options).await,
         Commands::Get(options) => get::handler(options).await,
     }
 }
 
 // Re-export public data functions for external use (e.g., MCP)
 pub use get::get_ticket_data;
-pub use list::list_issues_data;
+pub use search::search_issues_data;

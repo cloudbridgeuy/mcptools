@@ -87,7 +87,7 @@ Then load it before running commands:
 
 ```bash
 source .env
-mcptools atlassian jira list "project = PROJ"
+mcptools atlassian jira search "project = PROJ"
 ```
 
 ### Option D: Pass as Command-Line Arguments
@@ -97,7 +97,7 @@ mcptools \
   --atlassian-url "https://your-domain.atlassian.net" \
   --atlassian-email "your-email@company.com" \
   --atlassian-token "your-api-token-here" \
-  atlassian jira list "project = PROJ"
+  atlassian jira search "project = PROJ"
 ```
 
 ## Step 4: Verify Configuration
@@ -105,7 +105,7 @@ mcptools \
 Test your configuration with a simple Jira query:
 
 ```bash
-mcptools atlassian jira list "project IS NOT EMPTY" --limit 5
+mcptools atlassian jira search "project IS NOT EMPTY" --limit 5
 ```
 
 Expected output (if successful):
@@ -126,24 +126,24 @@ If you get an error like `ATLASSIAN_BASE_URL environment variable not set`, ensu
 
 ### Jira Commands
 
-**List open issues in a project:**
+**Search for open issues in a project:**
 ```bash
-mcptools atlassian jira list "project = PROJ AND status = Open"
+mcptools atlassian jira search "project = PROJ AND status = Open"
 ```
 
-**List issues assigned to you:**
+**Search for issues assigned to you:**
 ```bash
-mcptools atlassian jira list "assignee = currentUser()"
+mcptools atlassian jira search "assignee = currentUser()"
 ```
 
 **Search with JQL and limit results:**
 ```bash
-mcptools atlassian jira list "text ~ 'database' AND status = 'In Progress'" --limit 20
+mcptools atlassian jira search "text ~ 'database' AND status = 'In Progress'" --limit 20
 ```
 
 **Output as JSON:**
 ```bash
-mcptools atlassian jira list "project = PROJ" --json | jq '.issues[] | {key, summary, status}'
+mcptools atlassian jira search "project = PROJ" --json | jq '.issues[] | {key, summary, status}'
 ```
 
 ### Confluence Commands
@@ -167,7 +167,7 @@ mcptools atlassian confluence search "text ~ 'api'" --limit 5 --json
 
 The Atlassian module is also available as MCP tools that Claude can use:
 
-- **`jira_list`** - Search Jira issues using JQL
+- **`jira_search`** - Search Jira issues using JQL
 - **`confluence_search`** - Search Confluence pages using CQL
 
 These tools are automatically available when using mcptools as an MCP server.

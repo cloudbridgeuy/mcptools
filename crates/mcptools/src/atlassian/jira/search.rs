@@ -3,28 +3,28 @@ use serde::{Deserialize, Serialize};
 
 // Import domain models and pure functions from core crate
 use mcptools_core::atlassian::jira::transform_search_response;
-pub use mcptools_core::atlassian::jira::{IssueOutput, JiraSearchResponse, ListOutput};
+pub use mcptools_core::atlassian::jira::{IssueOutput, JiraSearchResponse, SearchOutput};
 
-/// Options for listing Jira issues
+/// Options for searching Jira issues
 #[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
 #[command(after_help = "EXAMPLES:
   # Get all tickets assigned to the current user:
-  mcptools atlassian jira list \"assignee = currentUser()\"
+  mcptools atlassian jira search \"assignee = currentUser()\"
 
   # Get only active tickets (excluding Done/Closed):
-  mcptools atlassian jira list \"assignee = currentUser() AND status NOT IN (Done, Closed)\"
+  mcptools atlassian jira search \"assignee = currentUser() AND status NOT IN (Done, Closed)\"
 
   # Get only completed tickets (Done/Closed):
-  mcptools atlassian jira list \"assignee = currentUser() AND status IN (Done, Closed)\"
+  mcptools atlassian jira search \"assignee = currentUser() AND status IN (Done, Closed)\"
 
   # Find tickets by summary (search by name):
-  mcptools atlassian jira list \"summary ~ \\\"bug fix\\\"\"
+  mcptools atlassian jira search \"summary ~ \\\"bug fix\\\"\"
 
   # Combine criteria: active tickets with specific text in summary:
-  mcptools atlassian jira list \"assignee = currentUser() AND status NOT IN (Done, Closed) AND summary ~ \\\"api\\\"\"
+  mcptools atlassian jira search \"assignee = currentUser() AND status NOT IN (Done, Closed) AND summary ~ \\\"api\\\"\"
 
   # Fetch next page using pagination token:
-  mcptools atlassian jira list \"assignee = currentUser()\" --limit 50 --next-page <token>
+  mcptools atlassian jira search \"assignee = currentUser()\" --limit 50 --next-page <token>
 
 NOTES:
   - JQL queries use Jira Query Language syntax
@@ -34,7 +34,7 @@ NOTES:
   - Results are limited to 10 per page by default; use --limit to change
   - Use --next-page with the token from the previous response to fetch additional pages
   - Pagination tokens expire after 7 days")]
-pub struct ListOptions {
+pub struct SearchOptions {
     /// JQL query (e.g., "project = PROJ AND status = Open")
     #[clap(env = "JIRA_QUERY")]
     pub query: String,
@@ -55,11 +55,11 @@ pub struct ListOptions {
 /// Public data function - used by both CLI and MCP
 /// Supports pagination with nextPageToken using GET /rest/api/3/search/jql
 /// Note: This endpoint uses token-based pagination, not offset-based
-pub async fn list_issues_data(
+pub async fn search_issues_data(
     query: String,
     limit: usize,
     next_page: Option<String>,
-) -> Result<ListOutput> {
+) -> Result<SearchOutput> {
     use crate::atlassian::{create_authenticated_client, AtlassianConfig};
 
     let config = AtlassianConfig::from_env()?;
@@ -113,9 +113,9 @@ pub async fn list_issues_data(
     Ok(transform_search_response(search_response))
 }
 
-/// Handle the list command
-pub async fn handler(options: ListOptions) -> Result<()> {
-    let data = list_issues_data(options.query.clone(), options.limit, options.next_page).await?;
+/// Handle the search command
+pub async fn handler(options: SearchOptions) -> Result<()> {
+    let data = search_issues_data(options.query.clone(), options.limit, options.next_page).await?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&data)?);
@@ -149,7 +149,7 @@ pub async fn handler(options: ListOptions) -> Result<()> {
 
         // Print pagination info
         if let Some(next_token) = &data.next_page_token {
-            eprintln!("\nTo fetch the next page, run:\n  mcptools atlassian jira list '{}' --limit {} --next-page {}",
+            eprintln!("\nTo fetch the next page, run:\n  mcptools atlassian jira search '{}' --limit {} --next-page {}",
                 options.query, options.limit, next_token);
         }
     }

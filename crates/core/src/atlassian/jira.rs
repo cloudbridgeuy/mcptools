@@ -67,9 +67,9 @@ pub struct IssueOutput {
     pub assignee: Option<String>,
 }
 
-/// Output structure for list command
+/// Output structure for search command
 #[derive(Debug, Serialize, PartialEq)]
-pub struct ListOutput {
+pub struct SearchOutput {
     pub issues: Vec<IssueOutput>,
     pub total: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -350,8 +350,8 @@ fn render_adf_node(node: &serde_json::Value, depth: usize) -> Option<String> {
 /// * `search_response` - The raw response from Jira search API
 ///
 /// # Returns
-/// * `ListOutput` - Cleaned and transformed search results
-pub fn transform_search_response(search_response: JiraSearchResponse) -> ListOutput {
+/// * `SearchOutput` - Cleaned and transformed search results
+pub fn transform_search_response(search_response: JiraSearchResponse) -> SearchOutput {
     let issues: Vec<IssueOutput> = search_response
         .issues
         .into_iter()
@@ -375,7 +375,7 @@ pub fn transform_search_response(search_response: JiraSearchResponse) -> ListOut
     // GET /rest/api/3/search/jql always returns 'total' field
     let total = search_response.total.map(|t| t as usize).unwrap_or(0);
 
-    ListOutput {
+    SearchOutput {
         issues,
         total,
         next_page_token: search_response.next_page_token,

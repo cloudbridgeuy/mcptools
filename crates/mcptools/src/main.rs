@@ -29,7 +29,7 @@ pub struct App {
 #[derive(Debug, Clone, clap::Args)]
 pub struct Global {
     /// Whether to display additional information.
-    #[clap(long, env = "YAWNS_VERBOSE", global = true, default_value = "false")]
+    #[clap(long, env = "MCPTOOLS_VERBOSE", global = true, default_value = "false")]
     verbose: bool,
 
     /// Atlassian base URL (e.g., https://your-domain.atlassian.net)
