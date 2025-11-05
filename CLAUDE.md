@@ -41,7 +41,9 @@ The pattern is based on Gary Bernhardt's original talk on the concept.
 
 ## Jira Ticket Management with mcptools
 
-### Listing Your Jira Tickets
+### Searching Jira Tickets
+
+#### Basic Search
 
 To list your current open Jira tickets, use the following command:
 
@@ -53,6 +55,59 @@ mcptools atlassian jira search "assignee = currentUser() AND status NOT IN (Done
 mcptools atlassian jira search "assignee = currentUser() AND status NOT IN (Done, Closed)" --limit 10
 ```
 
+#### Pagination with Short Token Hashes
+
+When search results exceed the limit, the CLI will display a compact pagination command:
+
+```bash
+# Example output:
+# Found 30 issue(s):
+# [results...]
+# To fetch the next page, run:
+#   mcptools atlassian jira search '...' --limit 30 --next-page a1b2c3d4
+
+# Fetch the next page using the 8-character hash
+mcptools atlassian jira search 'project = "PROD"' --limit 30 --next-page a1b2c3d4
+```
+
+**How Pagination Works:**
+
+- When results are paginated, the full pagination token is stored locally in `~/.config/mcptools/pagination/`
+- Instead of showing the full 100+ character token, only an 8-character MD5 hash is displayed
+- You can copy and paste the hash directly into the `--next-page` parameter
+- The system automatically resolves the hash to the full token when executing the search
+- For backward compatibility, you can still pass the full token if needed (useful for scripts or saved commands)
+
+#### Saved Queries
+
+You can save and reuse frequently used search queries:
+
+```bash
+# Save a query
+mcptools atlassian jira search 'project = "PM" AND "Assigned Guild[Dropdown]" = DevOps' --save --query devops
+
+# Execute a saved query
+mcptools atlassian jira search --query devops
+
+# Execute with custom limit
+mcptools atlassian jira search --query devops --limit 20
+
+# Paginate through saved query results using the hash
+mcptools atlassian jira search --query devops --limit 30 --next-page a1b2c3d4
+
+# Update existing query
+mcptools atlassian jira search 'project = "PM" AND status = Open' --save --query devops --update
+
+# List all saved queries
+mcptools atlassian jira search --list
+
+# View query contents
+mcptools atlassian jira search --load --query devops
+
+# Delete a query
+mcptools atlassian jira search --delete --query devops
+```
+
 ### Retrieving Details of a Specific Ticket
 
 To get detailed information about a specific Jira ticket, use the ticket key:
@@ -62,7 +117,7 @@ To get detailed information about a specific Jira ticket, use the ticket key:
 mcptools atlassian jira get PROJ-123
 ```
 
-### Customizing Search Queries
+#### Advanced JQL Query Tips
 
 You can customize your Jira ticket search with advanced JQL queries:
 
