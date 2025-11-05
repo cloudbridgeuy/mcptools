@@ -1451,7 +1451,7 @@ mod tests {
     #[test]
     fn test_parse_assignee_identifier_account_id() {
         // Arrange: Long alphanumeric string that looks like Jira accountId
-        let input = "5b10a2844c20165700ede21g";
+        let input = "5b10a2844c20165700edge21g";
 
         // Act: Parse identifier
         let result = parse_assignee_identifier(input);
@@ -1607,7 +1607,7 @@ mod tests {
             Some("Done"),
             Some("High"),
             Some("Story"),
-            Some("5b10a2844c20165700ede21g"),
+            Some("5b10a2844c20165700edge21g"),
             Some("DevOps"),
             Some("Platform"),
         );
@@ -1615,7 +1615,7 @@ mod tests {
         // Assert: Verify all fields are in payload (note: status is excluded by design)
         assert_eq!(payload["priority"]["name"], "High");
         assert_eq!(payload["issuetype"]["name"], "Story");
-        assert_eq!(payload["assignee"]["id"], "5b10a2844c20165700ede21g");
+        assert_eq!(payload["assignee"]["id"], "5b10a2844c20165700edge21g");
         assert_eq!(payload["customfield_10527"]["value"], "DevOps");
         assert_eq!(payload["customfield_10528"]["value"], "Platform");
     }
