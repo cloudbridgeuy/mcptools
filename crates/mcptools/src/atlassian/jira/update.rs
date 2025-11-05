@@ -218,53 +218,68 @@ async fn search_user_by_email(
     base_url: &str,
     email: &str,
 ) -> Result<String> {
-    let url = format!(
-        "{base_url}/rest/api/3/users/search?query={}",
-        urlencoding::encode(email)
-    );
+    let mut start_at = 0;
+    const MAX_RESULTS: usize = 50;
 
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| eyre!("Failed to search for user by email: {}", e))?;
+    loop {
+        let url = format!(
+            "{base_url}/rest/api/3/users/search?query={}&startAt={}&maxResults={}",
+            urlencoding::encode(email),
+            start_at,
+            MAX_RESULTS
+        );
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(eyre!("Jira user search error [{}]: {}", status, body));
-    }
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| eyre!("Failed to search for user by email: {}", e))?;
 
-    let body_text = response
-        .text()
-        .await
-        .map_err(|e| eyre!("Failed to read user search response: {}", e))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(eyre!("Jira user search error [{}]: {}", status, body));
+        }
 
-    let users: JiraUserSearchResponse = serde_json::from_str(&body_text)
-        .map_err(|e| eyre!("Failed to parse user search response: {}", e))?;
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| eyre!("Failed to read user search response: {}", e))?;
 
-    // First try to find an exact match on email (case-insensitive)
-    let exact_match = users.iter().find(|u| {
-        u.email_address
-            .as_ref()
-            .map(|ea| ea.eq_ignore_ascii_case(email))
-            .unwrap_or(false)
-    });
+        let users: JiraUserSearchResponse = serde_json::from_str(&body_text)
+            .map_err(|e| eyre!("Failed to parse user search response: {}", e))?;
 
-    if let Some(user) = exact_match {
-        return Ok(user.account_id.clone());
-    }
+        // If no results in this page, stop searching
+        if users.is_empty() {
+            break;
+        }
 
-    // If no exact match, try partial match
-    let partial_match = users.iter().find(|u| {
-        u.email_address
-            .as_ref()
-            .map(|ea| ea.to_lowercase().contains(&email.to_lowercase()))
-            .unwrap_or(false)
-    });
+        // First try to find an exact match on email (case-insensitive)
+        let exact_match = users.iter().find(|u| {
+            u.email_address
+                .as_ref()
+                .map(|ea| ea.eq_ignore_ascii_case(email))
+                .unwrap_or(false)
+        });
 
-    if let Some(user) = partial_match {
-        return Ok(user.account_id.clone());
+        if let Some(user) = exact_match {
+            return Ok(user.account_id.clone());
+        }
+
+        // If no exact match, try partial match
+        let partial_match = users.iter().find(|u| {
+            u.email_address
+                .as_ref()
+                .map(|ea| ea.to_lowercase().contains(&email.to_lowercase()))
+                .unwrap_or(false)
+        });
+
+        if let Some(user) = partial_match {
+            return Ok(user.account_id.clone());
+        }
+
+        // Move to next page
+        start_at += MAX_RESULTS;
     }
 
     Err(eyre!("No user found with email: {}", email))
@@ -276,69 +291,82 @@ async fn search_user_by_name(
     base_url: &str,
     name: &str,
 ) -> Result<String> {
-    let url = format!(
-        "{base_url}/rest/api/3/users/search?query={}",
-        urlencoding::encode(name)
-    );
+    let mut start_at = 0;
+    const MAX_RESULTS: usize = 50;
 
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| eyre!("Failed to search for user by name: {}", e))?;
+    loop {
+        let url = format!(
+            "{base_url}/rest/api/3/users/search?query={}&startAt={}&maxResults={}",
+            urlencoding::encode(name),
+            start_at,
+            MAX_RESULTS
+        );
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(eyre!("Jira user search error [{}]: {}", status, body));
-    }
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| eyre!("Failed to search for user by name: {}", e))?;
 
-    let body_text = response
-        .text()
-        .await
-        .map_err(|e| eyre!("Failed to read user search response: {}", e))?;
-
-    let users: JiraUserSearchResponse = serde_json::from_str(&body_text)
-        .map_err(|e| eyre!("Failed to parse user search response: {}", e))?;
-
-    if users.is_empty() {
-        std::eprintln!("DEBUG: User search for '{}' returned 0 results", name);
-        return Err(eyre!("No user found with name: {}", name));
-    }
-
-    // First try to find an exact match on display name (case-insensitive)
-    let exact_match = users.iter().find(|u| {
-        u.display_name
-            .as_ref()
-            .map(|dn| dn.eq_ignore_ascii_case(name))
-            .unwrap_or(false)
-    });
-
-    if let Some(user) = exact_match {
-        return Ok(user.account_id.clone());
-    }
-
-    // If no exact match, try case-insensitive word matching (handles "luis ramirez" vs "Luis Ramirez")
-    let word_match = users.iter().find(|u| {
-        if let Some(dn) = u.display_name.as_ref() {
-            let dn_lower = dn.to_lowercase();
-            let name_lower = name.to_lowercase();
-
-            // Check if all words from search are in the display name
-            name_lower
-                .split_whitespace()
-                .all(|word| dn_lower.contains(word))
-        } else {
-            false
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(eyre!("Jira user search error [{}]: {}", status, body));
         }
-    });
 
-    if let Some(user) = word_match {
-        return Ok(user.account_id.clone());
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| eyre!("Failed to read user search response: {}", e))?;
+
+        let users: JiraUserSearchResponse = serde_json::from_str(&body_text)
+            .map_err(|e| eyre!("Failed to parse user search response: {}", e))?;
+
+        // If no results in this page, stop searching
+        if users.is_empty() {
+            break;
+        }
+
+        // First try to find an exact match on display name (case-insensitive)
+        let exact_match = users.iter().find(|u| {
+            u.display_name
+                .as_ref()
+                .map(|dn| dn.eq_ignore_ascii_case(name))
+                .unwrap_or(false)
+        });
+
+        if let Some(user) = exact_match {
+            return Ok(user.account_id.clone());
+        }
+
+        // If no exact match, try case-insensitive word matching (handles "luis ramirez" vs "Luis Ramirez")
+        let word_match = users.iter().find(|u| {
+            if let Some(dn) = u.display_name.as_ref() {
+                let dn_lower = dn.to_lowercase();
+                let name_lower = name.to_lowercase();
+
+                // Check if all words from search are in the display name
+                name_lower
+                    .split_whitespace()
+                    .all(|word| dn_lower.contains(word))
+            } else {
+                false
+            }
+        });
+
+        if let Some(user) = word_match {
+            return Ok(user.account_id.clone());
+        }
+
+        // Move to next page
+        start_at += MAX_RESULTS;
     }
 
-    // User not found in search results
-    Err(eyre!("No user found with name '{}'. Search returned {} results. User may be inactive, deactivated, or not in the system.", name, users.len()))
+    // User not found in any search result pages
+    Err(eyre!(
+        "No user found with name '{}'. User may be inactive, deactivated, or not in the system.",
+        name
+    ))
 }
 
 /// Get the current user's account ID from Jira
