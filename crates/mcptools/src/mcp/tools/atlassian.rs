@@ -311,3 +311,89 @@ pub async fn handle_jira_fields(
         data: None,
     })
 }
+
+/// Handle Jira create command via MCP
+pub async fn handle_jira_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct JiraCreateArgs {
+        summary: String,
+        description: Option<String>,
+        project: Option<String>,
+        #[serde(rename = "issueType")]
+        issue_type: Option<String>,
+        priority: Option<String>,
+        assignee: Option<String>,
+        #[serde(rename = "assignedGuild")]
+        assigned_guild: Option<String>,
+        #[serde(rename = "assignedPod")]
+        assigned_pod: Option<String>,
+    }
+
+    let args: JiraCreateArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
+        .map_err(|e| JsonRpcError {
+            code: -32602,
+            message: format!("Invalid arguments: {e}"),
+            data: None,
+        })?;
+
+    if global.verbose {
+        let desc_preview = args.description.as_ref().map(|d| {
+            let len = d.len();
+            &d[..std::cmp::min(50, len)]
+        });
+        eprintln!(
+            "Calling jira_create: summary={}, description={:?}, project={:?}, issueType={:?}, priority={:?}, assignee={:?}, assignedGuild={:?}, assignedPod={:?}",
+            args.summary,
+            desc_preview,
+            args.project,
+            args.issue_type,
+            args.priority,
+            args.assignee,
+            args.assigned_guild,
+            args.assigned_pod
+        );
+    }
+
+    // Build CreateOptions from MCP arguments
+    let create_options = crate::atlassian::jira::create::CreateOptions {
+        summary: args.summary,
+        description: args.description,
+        project: args.project.unwrap_or_else(|| "PROD".to_string()),
+        issue_type: args.issue_type.unwrap_or_else(|| "Task".to_string()),
+        priority: args.priority,
+        assignee: args.assignee,
+        assigned_guild: args.assigned_guild,
+        assigned_pod: args.assigned_pod,
+        json: true, // MCP always returns JSON
+    };
+
+    // Call the Jira module's data function
+    let create_data = crate::atlassian::jira::create_ticket_data(create_options)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    // Convert to JSON and wrap in MCP result format
+    let json_string = serde_json::to_string_pretty(&create_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}

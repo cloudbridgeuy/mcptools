@@ -1,3 +1,4 @@
+pub mod create;
 pub mod fields;
 pub mod get;
 pub mod search;
@@ -8,6 +9,10 @@ use crate::prelude::{println, *};
 /// Jira commands
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
+    /// Create a new Jira ticket
+    #[clap(name = "create")]
+    Create(create::CreateOptions),
+
     /// Search Jira issues using JQL
     #[clap(name = "search")]
     Search(search::SearchOptions),
@@ -32,6 +37,7 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
     }
 
     match cmd {
+        Commands::Create(options) => create::handler(options).await,
         Commands::Search(options) => search::handler(options).await,
         Commands::Get(options) => get::handler(options).await,
         Commands::Update(options) => update::handler(options).await,
@@ -40,6 +46,7 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
 }
 
 // Re-export public data functions for external use (e.g., MCP)
+pub use create::create_ticket_data;
 pub use fields::get_fields_data;
 pub use get::get_ticket_data;
 pub use search::search_issues_data;

@@ -250,6 +250,48 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            name: "jira_create".to_string(),
+            description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, assigned guild, and assigned pod. Returns the created ticket key. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Title/summary of the ticket (required)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description of the ticket"
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Project key (default: PROD)"
+                    },
+                    "issueType": {
+                        "type": "string",
+                        "description": "Issue type (e.g., 'Bug', 'Story', 'Epic', 'Task')"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "description": "Priority (e.g., 'Highest', 'High', 'Medium', 'Low', 'Lowest')"
+                    },
+                    "assignee": {
+                        "type": "string",
+                        "description": "Assignee (email, display name, account ID, or \"me\" for current user)"
+                    },
+                    "assignedGuild": {
+                        "type": "string",
+                        "description": "Assigned guild"
+                    },
+                    "assignedPod": {
+                        "type": "string",
+                        "description": "Assigned pod"
+                    }
+                },
+                "required": ["summary"]
+            }),
+        },
+        Tool {
             name: "jira_get".to_string(),
             description: "Get detailed information about a Jira ticket. Returns comprehensive information about a specific issue using its issue key. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -343,6 +385,7 @@ pub async fn handle_tools_call(
 
     match params.name.as_str() {
         "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
+        "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
         "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
         "jira_fields" => atlassian::handle_jira_fields(params.arguments, global).await,
