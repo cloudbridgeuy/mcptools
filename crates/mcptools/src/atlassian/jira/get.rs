@@ -86,71 +86,121 @@ pub async fn handler(options: GetOptions) -> Result<()> {
     if options.json {
         println!("{}", serde_json::to_string_pretty(&ticket)?);
     } else {
-        println!("\n{} - {}\n", ticket.key, ticket.summary);
+        println!(
+            "\n{} - {}\n",
+            ticket.key.bold().cyan(),
+            ticket.summary.bright_white()
+        );
 
         let mut table = crate::prelude::new_table();
-        table.add_row(prettytable::row!["Status", ticket.status]);
+        table.add_row(prettytable::row![
+            "Status".bold().cyan(),
+            ticket.status.green().to_string()
+        ]);
 
         if let Some(priority) = &ticket.priority {
-            table.add_row(prettytable::row!["Priority", priority]);
+            table.add_row(prettytable::row![
+                "Priority".bold().cyan(),
+                priority.bright_yellow().to_string()
+            ]);
         }
 
         if let Some(issue_type) = &ticket.issue_type {
-            table.add_row(prettytable::row!["Type", issue_type]);
+            table.add_row(prettytable::row![
+                "Type".bold().cyan(),
+                issue_type.bright_blue().to_string()
+            ]);
         }
 
         let assignee = ticket.assignee.unwrap_or_else(|| "Unassigned".to_string());
-        table.add_row(prettytable::row!["Assignee", assignee]);
+        let assignee_colored = if assignee == "Unassigned" {
+            assignee.bright_black().to_string()
+        } else {
+            assignee.bright_magenta().to_string()
+        };
+        table.add_row(prettytable::row![
+            "Assignee".bold().cyan(),
+            assignee_colored
+        ]);
 
         if let Some(guild) = &ticket.assigned_guild {
-            table.add_row(prettytable::row!["Assigned Guild", guild]);
+            table.add_row(prettytable::row![
+                "Assigned Guild".bold().cyan(),
+                guild.bright_cyan().to_string()
+            ]);
         }
 
         if let Some(pod) = &ticket.assigned_pod {
-            table.add_row(prettytable::row!["Assigned Pod", pod]);
+            let pod_colored = if pod == "Unassigned" {
+                pod.bright_black().to_string()
+            } else {
+                pod.bright_cyan().to_string()
+            };
+            table.add_row(prettytable::row!["Assigned Pod".bold().cyan(), pod_colored]);
         }
 
         if let Some(created) = &ticket.created {
-            table.add_row(prettytable::row!["Created", created]);
+            table.add_row(prettytable::row![
+                "Created".bold().cyan(),
+                created.bright_black().to_string()
+            ]);
         }
 
         if let Some(updated) = &ticket.updated {
-            table.add_row(prettytable::row!["Updated", updated]);
+            table.add_row(prettytable::row![
+                "Updated".bold().cyan(),
+                updated.bright_black().to_string()
+            ]);
         }
 
         if let Some(due_date) = &ticket.due_date {
-            table.add_row(prettytable::row!["Due Date", due_date]);
+            table.add_row(prettytable::row![
+                "Due Date".bold().cyan(),
+                due_date.yellow().to_string()
+            ]);
         }
 
         table.printstd();
 
         if let Some(description) = &ticket.description {
-            println!("\nDescription:");
+            println!("\n{}:", "Description".bold().cyan());
             println!("{}\n", description);
         }
 
         if !ticket.labels.is_empty() {
-            println!("\nLabels: {}", ticket.labels.join(", "));
+            println!(
+                "\n{}: {}",
+                "Labels".bold().cyan(),
+                ticket.labels.join(", ").bright_green()
+            );
         }
 
         if !ticket.components.is_empty() {
-            println!("Components: {}", ticket.components.join(", "));
+            println!(
+                "{}: {}",
+                "Components".bold().cyan(),
+                ticket.components.join(", ").bright_blue()
+            );
         }
 
         if let Some(epic_link) = &ticket.epic_link {
-            println!("Epic: {}", epic_link);
+            println!("{}: {}", "Epic".bold().cyan(), epic_link.bright_magenta());
         }
 
         if let Some(story_points) = ticket.story_points {
-            println!("Story Points: {}", story_points);
+            println!(
+                "{}: {}",
+                "Story Points".bold().cyan(),
+                story_points.to_string().bright_yellow()
+            );
         }
 
         if let Some(sprint) = &ticket.sprint {
-            println!("Sprint: {}", sprint);
+            println!("{}: {}", "Sprint".bold().cyan(), sprint.bright_green());
         }
 
         if !ticket.comments.is_empty() {
-            println!("\n{}", "Comments:".bold());
+            println!("\n{}", "Comments:".bold().cyan());
             for (index, comment) in ticket.comments.iter().enumerate() {
                 let content = match &comment.body {
                     serde_json::Value::Object(map) => {

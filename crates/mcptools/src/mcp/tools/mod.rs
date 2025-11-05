@@ -263,6 +263,62 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": ["issueKey"]
             }),
         },
+        Tool {
+            name: "jira_update".to_string(),
+            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Assigned Guild, and Assigned Pod. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "ticketKey": {
+                        "type": "string",
+                        "description": "Ticket key (e.g., PROJ-123)"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "New status (e.g., 'In Progress', 'Done')"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "description": "New priority (e.g., 'High', 'Low')"
+                    },
+                    "issueType": {
+                        "type": "string",
+                        "description": "New issue type (e.g., 'Story', 'Bug', 'Epic')"
+                    },
+                    "assignee": {
+                        "type": "string",
+                        "description": "New assignee (email, display name, account ID, or \"me\" for current user)"
+                    },
+                    "assignedGuild": {
+                        "type": "string",
+                        "description": "New assigned guild"
+                    },
+                    "assignedPod": {
+                        "type": "string",
+                        "description": "New assigned pod"
+                    }
+                },
+                "required": ["ticketKey"]
+            }),
+        },
+        Tool {
+            name: "jira_fields".to_string(),
+            description: "List available values for Jira custom fields (assigned-guild and assigned-pod). Returns possible field values for a given project. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project key (default: PROD)"
+                    },
+                    "field": {
+                        "type": "string",
+                        "description": "Specific field to display (assigned-guild or assigned-pod), shows all by default"
+                    }
+                },
+                "required": []
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -288,6 +344,8 @@ pub async fn handle_tools_call(
     match params.name.as_str() {
         "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
+        "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
+        "jira_fields" => atlassian::handle_jira_fields(params.arguments, global).await,
         "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,

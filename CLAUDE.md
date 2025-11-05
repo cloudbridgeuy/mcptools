@@ -84,6 +84,118 @@ mcptools atlassian jira search "assignee = currentUser() AND priority = High AND
 - Supports time-based queries like `created >= -1w` (tickets created in the last week)
 - Can filter by project, status, priority, labels, and more
 
+### Updating Jira Tickets
+
+To update a Jira ticket's fields, use the update command:
+
+```bash
+# Update a single field
+mcptools atlassian jira update PROJ-123 --status "In Progress"
+
+# Update multiple fields at once
+mcptools atlassian jira update PROJ-123 --status "In Progress" --priority "High" --assignee "guzmán@example.com"
+
+# Assign to yourself
+mcptools atlassian jira update PROJ-123 --assignee "me"
+
+# Update custom guild and pod fields
+mcptools atlassian jira update PROJ-123 --assigned-guild "DevOps" --assigned-pod "Platform"
+
+# Update issue type
+mcptools atlassian jira update PROJ-123 --issue-type "Story"
+
+# Output as JSON
+mcptools atlassian jira update PROJ-123 --status "Done" --json
+```
+
+**Update Options:**
+
+- `--status`: Transition to a new status (e.g., "In Progress", "Done"). Validates against available workflow transitions.
+- `--priority`: Set priority (e.g., "High", "Medium", "Low")
+- `--issue-type`: Change issue type (e.g., "Story", "Bug", "Epic")
+- `--assignee`: Assign to a user. Accepts:
+  - Email address: `user@example.com`
+  - Display name: `John Doe`
+  - Account ID: `5f7a1c2b3d4e5f6a`
+  - Special value: `me` (current authenticated user)
+- `--assigned-guild`: Set custom guild field
+- `--assigned-pod`: Set custom pod field
+- `--json`: Output results as JSON format
+
+**Partial Updates:**
+
+The update command supports partial updates - if one field fails to update, others may still succeed. Each field's update result is reported separately.
+
+### Listing Jira Custom Field Values
+
+To discover available values for custom Jira fields, use the fields command:
+
+```bash
+# List all custom field values for default project (PROD)
+mcptools atlassian jira fields
+
+# List values for a specific project
+mcptools atlassian jira fields --project "MYPROJECT"
+
+# List values for a specific field only
+mcptools atlassian jira fields --field "assigned-guild"
+
+# List values for a specific field in a specific project
+mcptools atlassian jira fields --project "MYPROJECT" --field "assigned-pod"
+
+# Output as JSON
+mcptools atlassian jira fields --json
+```
+
+**Field Options:**
+
+- `--project`: Project key to query (defaults to "PROD")
+- `--field`: Specific field to display. Options:
+  - `assigned-guild`: Custom guild assignments
+  - `assigned-pod`: Custom pod assignments
+  - Omit to show all available fields
+- `--json`: Output results as JSON format
+
+**Typical Workflow:**
+
+1. Use `jira fields` to discover available values for guild and pod assignments
+2. Use `jira update` to set those fields on your tickets
+3. Use `jira search` to find tickets by their current field values
+4. Use `jira get` to view detailed ticket information
+
+### Using Jira Commands via MCP Server
+
+Both `jira_update` and `jira_fields` commands are available through the MCP server for integration with Claude and other clients:
+
+**Example MCP Calls:**
+
+Get available field values:
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_fields",
+    "arguments": {"project": "PROD"}
+  }
+}
+```
+
+Update a ticket:
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_update",
+    "arguments": {
+      "ticketKey": "PROJ-123",
+      "status": "In Progress",
+      "assignee": "me",
+      "assignedGuild": "DevOps"
+    }
+  }
+}
+```
+
 **Environment Variables:**
 Ensure you have set the following environment variables before using Jira commands:
 
