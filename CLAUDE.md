@@ -220,11 +220,74 @@ mcptools atlassian jira fields --json
 
 ### Using Jira Commands via MCP Server
 
-Both `jira_update` and `jira_fields` commands are available through the MCP server for integration with Claude and other clients:
+The `jira_search`, `jira_update`, and `jira_fields` commands are available through the MCP server for integration with Claude and other clients:
 
-**Example MCP Calls:**
+#### Search Tickets via MCP
+
+Search for Jira tickets with optional pagination:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_search",
+    "arguments": {
+      "query": "assignee = currentUser() AND status NOT IN (Done, Closed)",
+      "limit": 30
+    }
+  }
+}
+```
+
+Fetch the next page using a pagination token hash (8 characters):
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_search",
+    "arguments": {
+      "query": "assignee = currentUser() AND status NOT IN (Done, Closed)",
+      "limit": 30,
+      "nextPageToken": "a1b2c3d4"
+    }
+  }
+}
+```
+
+Or with a full pagination token (for backward compatibility):
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_search",
+    "arguments": {
+      "query": "assignee = currentUser() AND status NOT IN (Done, Closed)",
+      "limit": 30,
+      "nextPageToken": "Ch0jU3RyaW5nJlVGSlBSQT09JUludCZNell4TURNPRAeGILa5q2lMyJZ..."
+    }
+  }
+}
+```
+
+**Search Arguments:**
+
+- `query` (required): JQL query string
+- `limit` (optional): Number of results per page (default: 10, max: 100)
+- `nextPageToken` (optional): Pagination token (either 8-char hash or full token)
+
+**Response Format:**
+
+The response includes:
+- `issues`: Array of issue objects with `key`, `summary`, `status`, `assignee`, `description`
+- `nextPageToken`: 8-character hash for fetching the next page (if more results exist)
+- `totalIssuesCount`: Total number of issues matching the query
+
+#### Get Available Field Values via MCP
 
 Get available field values:
+
 ```json
 {
   "method": "tools/call",
@@ -235,7 +298,10 @@ Get available field values:
 }
 ```
 
+#### Update a Ticket via MCP
+
 Update a ticket:
+
 ```json
 {
   "method": "tools/call",
