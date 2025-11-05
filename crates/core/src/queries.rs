@@ -164,7 +164,6 @@ fn validate_query_name(name: &str) -> Result<(), QueryError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
 
     #[test]
