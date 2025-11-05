@@ -8,9 +8,15 @@ pub async fn handle_jira_search(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
+    use mcptools_core::queries;
+    use std::env;
+    use std::path::PathBuf;
+
     #[derive(Deserialize)]
     struct JiraSearchArgs {
-        query: String,
+        query: Option<String>,
+        #[serde(rename = "queryName")]
+        query_name: Option<String>,
         limit: Option<usize>,
         #[serde(rename = "nextPageToken")]
         next_page_token: Option<String>,
@@ -23,10 +29,36 @@ pub async fn handle_jira_search(
             data: None,
         })?;
 
+    // Resolve query: either use provided query or load saved query
+    let resolved_query = if let Some(query_name) = args.query_name {
+        // Load saved query
+        let home = env::var("HOME")
+            .ok()
+            .map(PathBuf::from)
+            .ok_or_else(|| JsonRpcError {
+                code: -32603,
+                message: "Could not determine home directory".to_string(),
+                data: None,
+            })?;
+        let queries_dir = home.join(".config/mcptools/queries");
+
+        queries::load_query(&queries_dir, &query_name).map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Failed to load query: {e}"),
+            data: None,
+        })?
+    } else {
+        args.query.ok_or_else(|| JsonRpcError {
+            code: -32602,
+            message: "Must provide either 'query' or 'queryName'".to_string(),
+            data: None,
+        })?
+    };
+
     if global.verbose {
         eprintln!(
             "Calling jira_search: query={}, limit={:?}, nextPageToken={:?}",
-            args.query,
+            resolved_query,
             args.limit,
             args.next_page_token
                 .as_ref()
@@ -36,7 +68,7 @@ pub async fn handle_jira_search(
 
     // Call the Jira module's data function
     let search_data = crate::atlassian::jira::search_issues_data(
-        args.query,
+        resolved_query,
         args.limit.unwrap_or(10),
         args.next_page_token,
     )
@@ -381,6 +413,263 @@ pub async fn handle_jira_create(
 
     // Convert to JSON and wrap in MCP result format
     let json_string = serde_json::to_string_pretty(&create_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira query list command via MCP
+pub async fn handle_jira_query_list(
+    _arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use mcptools_core::queries;
+    use std::env;
+    use std::path::PathBuf;
+
+    let home = env::var("HOME")
+        .ok()
+        .map(PathBuf::from)
+        .ok_or_else(|| JsonRpcError {
+            code: -32603,
+            message: "Could not determine home directory".to_string(),
+            data: None,
+        })?;
+    let queries_dir = home.join(".config/mcptools/queries");
+
+    if global.verbose {
+        eprintln!("Calling jira_query_list");
+    }
+
+    let queries_list = queries::list_queries(&queries_dir).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Failed to list queries: {e}"),
+        data: None,
+    })?;
+
+    let json_string = serde_json::to_string_pretty(&serde_json::json!({
+        "queries": queries_list
+    }))
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira query save command via MCP
+pub async fn handle_jira_query_save(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use mcptools_core::queries;
+    use std::env;
+    use std::path::PathBuf;
+
+    #[derive(Deserialize)]
+    struct JiraQuerySaveArgs {
+        name: String,
+        query: String,
+        update: Option<bool>,
+    }
+
+    let args: JiraQuerySaveArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    let home = env::var("HOME")
+        .ok()
+        .map(PathBuf::from)
+        .ok_or_else(|| JsonRpcError {
+            code: -32603,
+            message: "Could not determine home directory".to_string(),
+            data: None,
+        })?;
+    let queries_dir = home.join(".config/mcptools/queries");
+
+    if global.verbose {
+        eprintln!(
+            "Calling jira_query_save: name={}, update={}",
+            args.name,
+            args.update.unwrap_or(false)
+        );
+    }
+
+    queries::save_query(
+        &queries_dir,
+        &args.name,
+        &args.query,
+        args.update.unwrap_or(false),
+    )
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Failed to save query: {e}"),
+        data: None,
+    })?;
+
+    let json_string = serde_json::to_string_pretty(&serde_json::json!({
+        "status": "success",
+        "message": format!("Query '{}' saved", args.name)
+    }))
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira query delete command via MCP
+pub async fn handle_jira_query_delete(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use mcptools_core::queries;
+    use std::env;
+    use std::path::PathBuf;
+
+    #[derive(Deserialize)]
+    struct JiraQueryDeleteArgs {
+        name: String,
+    }
+
+    let args: JiraQueryDeleteArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    let home = env::var("HOME")
+        .ok()
+        .map(PathBuf::from)
+        .ok_or_else(|| JsonRpcError {
+            code: -32603,
+            message: "Could not determine home directory".to_string(),
+            data: None,
+        })?;
+    let queries_dir = home.join(".config/mcptools/queries");
+
+    if global.verbose {
+        eprintln!("Calling jira_query_delete: name={}", args.name);
+    }
+
+    queries::delete_query(&queries_dir, &args.name).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Failed to delete query: {e}"),
+        data: None,
+    })?;
+
+    let json_string = serde_json::to_string_pretty(&serde_json::json!({
+        "status": "success",
+        "message": format!("Query '{}' deleted", args.name)
+    }))
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira query load command via MCP
+pub async fn handle_jira_query_load(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use mcptools_core::queries;
+    use std::env;
+    use std::path::PathBuf;
+
+    #[derive(Deserialize)]
+    struct JiraQueryLoadArgs {
+        name: String,
+    }
+
+    let args: JiraQueryLoadArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    let home = env::var("HOME")
+        .ok()
+        .map(PathBuf::from)
+        .ok_or_else(|| JsonRpcError {
+            code: -32603,
+            message: "Could not determine home directory".to_string(),
+            data: None,
+        })?;
+    let queries_dir = home.join(".config/mcptools/queries");
+
+    if global.verbose {
+        eprintln!("Calling jira_query_load: name={}", args.name);
+    }
+
+    let query = queries::load_query(&queries_dir, &args.name).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Failed to load query: {e}"),
+        data: None,
+    })?;
+
+    let json_string = serde_json::to_string_pretty(&serde_json::json!({
+        "name": args.name,
+        "query": query
+    }))
+    .map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Serialization error: {e}"),
         data: None,

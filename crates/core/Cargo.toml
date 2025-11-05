@@ -22,3 +22,6 @@ html-escape = { workspace = true }
 chrono = { workspace = true }
 html2md = { workspace = true }
 scraper = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.8"

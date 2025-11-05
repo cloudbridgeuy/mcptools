@@ -79,13 +79,17 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
     let tools = vec![
         Tool {
             name: "jira_search".to_string(),
-            description: "Search Jira issues using JQL (Jira Query Language). Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            description: "Search Jira issues using JQL (Jira Query Language) or a saved query. Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
                         "description": "JQL query to search issues (e.g., 'project = PROJ AND status = Open')"
+                    },
+                    "queryName": {
+                        "type": "string",
+                        "description": "Name of a saved query to execute instead of providing raw JQL"
                     },
                     "limit": {
                         "type": "number",
@@ -96,7 +100,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                         "description": "Pagination token for fetching the next page. Use the nextPageToken from the previous response to get additional results. Tokens expire after 7 days."
                     }
                 },
-                "required": ["query"]
+                "required": []
             }),
         },
         Tool {
@@ -361,6 +365,65 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": []
             }),
         },
+        Tool {
+            name: "jira_query_list".to_string(),
+            description: "List all saved Jira queries. Returns a list of query names stored in ~/.config/mcptools/queries/".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        Tool {
+            name: "jira_query_save".to_string(),
+            description: "Save a Jira JQL query with a name for later reuse. Queries are stored in ~/.config/mcptools/queries/ as .jql files.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name for the saved query (alphanumeric, hyphens, underscores only)"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "JQL query to save"
+                    },
+                    "update": {
+                        "type": "boolean",
+                        "description": "If true, overwrites an existing query with the same name (default: false)"
+                    }
+                },
+                "required": ["name", "query"]
+            }),
+        },
+        Tool {
+            name: "jira_query_delete".to_string(),
+            description: "Delete a saved Jira query by name. Removes the query from ~/.config/mcptools/queries/".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the saved query to delete"
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
+        Tool {
+            name: "jira_query_load".to_string(),
+            description: "Load and display the contents of a saved Jira query. Returns the query name and the JQL query text.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the saved query to load"
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -389,6 +452,10 @@ pub async fn handle_tools_call(
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
         "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
         "jira_fields" => atlassian::handle_jira_fields(params.arguments, global).await,
+        "jira_query_list" => atlassian::handle_jira_query_list(params.arguments, global).await,
+        "jira_query_save" => atlassian::handle_jira_query_save(params.arguments, global).await,
+        "jira_query_delete" => atlassian::handle_jira_query_delete(params.arguments, global).await,
+        "jira_query_load" => atlassian::handle_jira_query_load(params.arguments, global).await,
         "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
