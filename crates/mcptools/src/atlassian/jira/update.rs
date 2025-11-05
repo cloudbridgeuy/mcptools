@@ -6,7 +6,7 @@ use clap::Args;
 use colored::Colorize;
 use mcptools_core::atlassian::jira::{
     build_update_payload, find_transition_by_status, parse_assignee_identifier, AssigneeIdentifier,
-    FieldUpdateResult, JiraTransitionsResponse, JiraUserSearchResponse, UpdateOutput,
+    FieldUpdateResult, JiraTransitionsResponse, JiraUserSearchResponse, TicketOutput, UpdateOutput,
 };
 use prettytable::row;
 
@@ -243,16 +243,31 @@ async fn search_user_by_email(
     let users: JiraUserSearchResponse = serde_json::from_str(&body_text)
         .map_err(|e| eyre!("Failed to parse user search response: {}", e))?;
 
-    users
-        .users
-        .and_then(|mut u| {
-            if !u.is_empty() {
-                Some(u.remove(0).account_id)
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| eyre!("No user found with email: {}", email))
+    // First try to find an exact match on email (case-insensitive)
+    let exact_match = users.iter().find(|u| {
+        u.email_address
+            .as_ref()
+            .map(|ea| ea.eq_ignore_ascii_case(email))
+            .unwrap_or(false)
+    });
+
+    if let Some(user) = exact_match {
+        return Ok(user.account_id.clone());
+    }
+
+    // If no exact match, try partial match
+    let partial_match = users.iter().find(|u| {
+        u.email_address
+            .as_ref()
+            .map(|ea| ea.to_lowercase().contains(&email.to_lowercase()))
+            .unwrap_or(false)
+    });
+
+    if let Some(user) = partial_match {
+        return Ok(user.account_id.clone());
+    }
+
+    Err(eyre!("No user found with email: {}", email))
 }
 
 /// Search for user by display name
@@ -286,16 +301,44 @@ async fn search_user_by_name(
     let users: JiraUserSearchResponse = serde_json::from_str(&body_text)
         .map_err(|e| eyre!("Failed to parse user search response: {}", e))?;
 
-    users
-        .users
-        .and_then(|mut u| {
-            if !u.is_empty() {
-                Some(u.remove(0).account_id)
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| eyre!("No user found with name: {}", name))
+    if users.is_empty() {
+        std::eprintln!("DEBUG: User search for '{}' returned 0 results", name);
+        return Err(eyre!("No user found with name: {}", name));
+    }
+
+    // First try to find an exact match on display name (case-insensitive)
+    let exact_match = users.iter().find(|u| {
+        u.display_name
+            .as_ref()
+            .map(|dn| dn.eq_ignore_ascii_case(name))
+            .unwrap_or(false)
+    });
+
+    if let Some(user) = exact_match {
+        return Ok(user.account_id.clone());
+    }
+
+    // If no exact match, try case-insensitive word matching (handles "luis ramirez" vs "Luis Ramirez")
+    let word_match = users.iter().find(|u| {
+        if let Some(dn) = u.display_name.as_ref() {
+            let dn_lower = dn.to_lowercase();
+            let name_lower = name.to_lowercase();
+
+            // Check if all words from search are in the display name
+            name_lower
+                .split_whitespace()
+                .all(|word| dn_lower.contains(word))
+        } else {
+            false
+        }
+    });
+
+    if let Some(user) = word_match {
+        return Ok(user.account_id.clone());
+    }
+
+    // User not found in search results
+    Err(eyre!("No user found with name '{}'. Search returned {} results. User may be inactive, deactivated, or not in the system.", name, users.len()))
 }
 
 /// Get the current user's account ID from Jira
@@ -460,15 +503,17 @@ async fn update_issue_fields(
 
 /// CLI handler for update command
 pub async fn handler(options: UpdateOptions) -> Result<()> {
-    let output = update_ticket_data(options.clone()).await?;
+    let update_output = update_ticket_data(options.clone()).await?;
 
     if options.json {
-        std::println!("{}", serde_json::to_string_pretty(&output)?);
+        // For JSON output, fetch and return the full ticket details
+        let ticket = super::get::get_ticket_data(update_output.ticket_key.clone()).await?;
+        std::println!("{}", serde_json::to_string_pretty(&ticket)?);
     } else {
-        // Display summary
+        // Display update summary
         std::println!(
             "{}",
-            format!("Updated ticket: {}", output.ticket_key)
+            format!("Updated ticket: {}", update_output.ticket_key)
                 .green()
                 .bold()
         );
@@ -483,7 +528,7 @@ pub async fn handler(options: UpdateOptions) -> Result<()> {
             "Value".bold().cyan()
         ]);
 
-        for result in &output.fields_updated {
+        for result in &update_output.fields_updated {
             let status_str = if result.success { "✓" } else { "✗" };
             let status_colored = if result.success {
                 status_str.green().bold()
@@ -508,7 +553,7 @@ pub async fn handler(options: UpdateOptions) -> Result<()> {
 
         table.printstd();
 
-        if output.partial_failure {
+        if update_output.partial_failure {
             std::println!();
             std::println!(
                 "{}",
@@ -516,6 +561,125 @@ pub async fn handler(options: UpdateOptions) -> Result<()> {
                     .yellow()
                     .bold()
             );
+        }
+
+        // Fetch and display the full ticket details
+        std::println!();
+        std::println!("{}", "Current ticket state:".bold().cyan());
+
+        let ticket = super::get::get_ticket_data(update_output.ticket_key.clone()).await?;
+
+        std::println!(
+            "\n{} - {}\n",
+            ticket.key.bold().cyan(),
+            ticket.summary.bright_white()
+        );
+
+        let mut detail_table = new_table();
+        detail_table.add_row(row![
+            "Status".bold().cyan(),
+            ticket.status.green().to_string()
+        ]);
+
+        if let Some(priority) = &ticket.priority {
+            detail_table.add_row(row![
+                "Priority".bold().cyan(),
+                priority.bright_yellow().to_string()
+            ]);
+        }
+
+        if let Some(issue_type) = &ticket.issue_type {
+            detail_table.add_row(row![
+                "Type".bold().cyan(),
+                issue_type.bright_blue().to_string()
+            ]);
+        }
+
+        let assignee = ticket
+            .assignee
+            .clone()
+            .unwrap_or_else(|| "Unassigned".to_string());
+        let assignee_colored = if assignee == "Unassigned" {
+            assignee.bright_black().to_string()
+        } else {
+            assignee.bright_magenta().to_string()
+        };
+        detail_table.add_row(row!["Assignee".bold().cyan(), assignee_colored]);
+
+        if let Some(guild) = &ticket.assigned_guild {
+            detail_table.add_row(row![
+                "Assigned Guild".bold().cyan(),
+                guild.bright_cyan().to_string()
+            ]);
+        }
+
+        if let Some(pod) = &ticket.assigned_pod {
+            let pod_colored = if pod == "Unassigned" {
+                pod.bright_black().to_string()
+            } else {
+                pod.bright_cyan().to_string()
+            };
+            detail_table.add_row(row!["Assigned Pod".bold().cyan(), pod_colored]);
+        }
+
+        if let Some(created) = &ticket.created {
+            detail_table.add_row(row![
+                "Created".bold().cyan(),
+                created.bright_black().to_string()
+            ]);
+        }
+
+        if let Some(updated) = &ticket.updated {
+            detail_table.add_row(row![
+                "Updated".bold().cyan(),
+                updated.bright_black().to_string()
+            ]);
+        }
+
+        if let Some(due_date) = &ticket.due_date {
+            detail_table.add_row(row![
+                "Due Date".bold().cyan(),
+                due_date.yellow().to_string()
+            ]);
+        }
+
+        detail_table.printstd();
+
+        if let Some(description) = &ticket.description {
+            std::println!("\n{}:", "Description".bold().cyan());
+            std::println!("{}\n", description);
+        }
+
+        if !ticket.labels.is_empty() {
+            std::println!(
+                "\n{}: {}",
+                "Labels".bold().cyan(),
+                ticket.labels.join(", ").bright_green()
+            );
+        }
+
+        if !ticket.components.is_empty() {
+            std::println!(
+                "{}: {}",
+                "Components".bold().cyan(),
+                ticket.components.join(", ").bright_blue()
+            );
+        }
+
+        if let Some(epic_link) = &ticket.epic_link {
+            std::println!("{}: {}", "Epic".bold().cyan(), epic_link.bright_magenta());
+        }
+
+        if let Some(story_points) = ticket.story_points {
+            std::println!(
+                "{}: {}",
+                "Story Points".bold().cyan(),
+                story_points.to_string().bright_yellow()
+            );
+        }
+
+        if let Some(sprint) = &ticket.sprint {
+            std::println!("{}: {}", "Sprint".bold().cyan(), sprint.bright_green());
         }
     }
 

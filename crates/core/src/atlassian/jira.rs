@@ -474,11 +474,9 @@ pub struct JiraUser {
     pub email_address: Option<String>,
 }
 
-/// User search response from Jira API
-#[derive(Debug, Deserialize, Clone)]
-pub struct JiraUserSearchResponse {
-    pub users: Option<Vec<JiraUser>>,
-}
+/// User search response from Jira API - the API returns a bare array
+/// See: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-user-search/#api-rest-api-3-users-search-get
+pub type JiraUserSearchResponse = Vec<JiraUser>;
 
 /// Update request payload for Jira API
 #[derive(Debug, Serialize, Clone)]
