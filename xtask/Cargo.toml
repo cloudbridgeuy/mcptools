@@ -6,7 +6,7 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.5.48", features = [
+clap = { version = "4.5.53", features = [
   "derive",
 ] } # A simple to use, efficient, and full-featured Command Line Argument Parser
 duct = "1.1.0" # A library for running child processes
