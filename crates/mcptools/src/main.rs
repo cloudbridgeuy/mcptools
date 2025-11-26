@@ -43,6 +43,10 @@ pub struct Global {
     /// Atlassian API token
     #[clap(long, env = "ATLASSIAN_API_TOKEN", global = true, hide = true)]
     pub atlassian_token: Option<String>,
+
+    /// Bitbucket API token (falls back to ATLASSIAN_API_TOKEN if not set)
+    #[clap(long, env = "BITBUCKET_API_TOKEN", global = true, hide = true)]
+    pub bitbucket_api_token: Option<String>,
 }
 
 #[derive(Debug, clap::Parser)]
