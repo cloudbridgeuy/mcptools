@@ -424,6 +424,67 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": ["name"]
             }),
         },
+        Tool {
+            name: "bitbucket_pr_list".to_string(),
+            description: "List pull requests for a Bitbucket repository. Returns PR details including ID, title, author, state, and branches. Supports filtering by state and pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository in workspace/repo_slug format (e.g., 'myworkspace/myrepo')"
+                    },
+                    "state": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Filter by PR state(s): OPEN, MERGED, DECLINED, SUPERSEDED"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of results per page (default: 10)"
+                    },
+                    "nextPage": {
+                        "type": "string",
+                        "description": "Pagination URL for fetching the next page of results"
+                    }
+                },
+                "required": ["repo"]
+            }),
+        },
+        Tool {
+            name: "bitbucket_pr_read".to_string(),
+            description: "Read details of a specific Bitbucket pull request including diff, diffstat, and comments. Use lineLimit to control diff output size (default: 500 lines, use -1 for unlimited). Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository in workspace/repo_slug format (e.g., 'myworkspace/myrepo')"
+                    },
+                    "prNumber": {
+                        "type": "number",
+                        "description": "Pull request number"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of comments per page (default: 100)"
+                    },
+                    "diffLimit": {
+                        "type": "number",
+                        "description": "Maximum number of diffstat entries per page (default: 500)"
+                    },
+                    "lineLimit": {
+                        "type": "number",
+                        "description": "Truncate diff output to N lines (default: 500, use -1 for unlimited)"
+                    },
+                    "noDiff": {
+                        "type": "boolean",
+                        "description": "Skip fetching diff content entirely (default: false)"
+                    }
+                },
+                "required": ["repo", "prNumber"]
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -457,6 +518,8 @@ pub async fn handle_tools_call(
         "jira_query_delete" => atlassian::handle_jira_query_delete(params.arguments, global).await,
         "jira_query_load" => atlassian::handle_jira_query_load(params.arguments, global).await,
         "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
+        "bitbucket_pr_list" => atlassian::handle_bitbucket_pr_list(params.arguments, global).await,
+        "bitbucket_pr_read" => atlassian::handle_bitbucket_pr_read(params.arguments, global).await,
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,

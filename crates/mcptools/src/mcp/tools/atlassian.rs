@@ -686,3 +686,164 @@ pub async fn handle_jira_query_load(
         data: None,
     })
 }
+
+/// Handle Bitbucket PR list command via MCP
+pub async fn handle_bitbucket_pr_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{list_pr_data, ListPRParams};
+
+    #[derive(Deserialize)]
+    struct BitbucketPRListArgs {
+        repo: String,
+        state: Option<Vec<String>>,
+        limit: Option<usize>,
+        #[serde(rename = "nextPage")]
+        next_page: Option<String>,
+    }
+
+    let args: BitbucketPRListArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_pr_list: repo={}, state={:?}, limit={:?}, nextPage={:?}",
+            args.repo, args.state, args.limit, args.next_page
+        );
+    }
+
+    // Build ListPRParams from MCP arguments
+    let params = ListPRParams {
+        repo: args.repo,
+        states: args.state,
+        limit: args.limit.unwrap_or(10),
+        next_page: args.next_page,
+        base_url_override: None,
+        api_token_override: global.bitbucket_api_token.clone(),
+    };
+
+    // Call the Bitbucket module's data function (no spinner for MCP)
+    let list_data = list_pr_data(params, None).await.map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {e}"),
+        data: None,
+    })?;
+
+    // Convert to JSON and wrap in MCP result format
+    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Bitbucket PR read command via MCP
+pub async fn handle_bitbucket_pr_read(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{read_pr_data, ReadPRParams};
+
+    #[derive(Deserialize)]
+    struct BitbucketPRReadArgs {
+        repo: String,
+        #[serde(rename = "prNumber")]
+        pr_number: u64,
+        limit: Option<usize>,
+        #[serde(rename = "diffLimit")]
+        diff_limit: Option<usize>,
+        #[serde(rename = "lineLimit")]
+        line_limit: Option<i32>,
+        #[serde(rename = "noDiff")]
+        no_diff: Option<bool>,
+    }
+
+    let args: BitbucketPRReadArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_pr_read: repo={}, prNumber={}, limit={:?}, diffLimit={:?}, lineLimit={:?}, noDiff={:?}",
+            args.repo, args.pr_number, args.limit, args.diff_limit, args.line_limit, args.no_diff
+        );
+    }
+
+    // Build ReadPRParams from MCP arguments
+    let params = ReadPRParams {
+        repo: args.repo,
+        pr_number: args.pr_number,
+        base_url_override: None,
+        api_token_override: global.bitbucket_api_token.clone(),
+        comment_limit: args.limit.unwrap_or(100),
+        comment_next_page: None,
+        diff_limit: args.diff_limit.unwrap_or(500),
+        diff_next_page: None,
+        no_diff: args.no_diff.unwrap_or(false),
+    };
+
+    // Call the Bitbucket module's data function (no spinner for MCP)
+    let mut pr_data = read_pr_data(params, None).await.map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {e}"),
+        data: None,
+    })?;
+
+    // Apply line limit to diff content if specified
+    // Default to 500 lines, -1 means unlimited
+    let line_limit = args.line_limit.unwrap_or(500);
+    if line_limit >= 0 {
+        if let Some(ref diff_content) = pr_data.diff_content {
+            let lines: Vec<&str> = diff_content.lines().collect();
+            if lines.len() > line_limit as usize {
+                let truncated: String = lines[..line_limit as usize].join("\n");
+                pr_data.diff_content = Some(format!(
+                    "{}\n\n... (truncated at {} lines, use lineLimit=-1 for full diff or increase lineLimit)",
+                    truncated,
+                    line_limit
+                ));
+            }
+        }
+    }
+
+    // Convert to JSON and wrap in MCP result format
+    let json_string = serde_json::to_string_pretty(&pr_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
