@@ -6,6 +6,9 @@ Useful MCP Tools to use with LLM Coding Agents
 
 `mcptools` is a Model Context Protocol (MCP) server that exposes various tools for LLM agents to interact with external services. Currently provides tools for:
 
+- **Atlassian Jira**: Search, create, update tickets, and manage custom fields (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_fields`)
+- **Atlassian Confluence**: Search pages using CQL (`confluence_search`)
+- **Atlassian Bitbucket**: List and read pull requests with diff support (`bitbucket_pr_list`, `bitbucket_pr_read`)
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
 - **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
 
@@ -102,7 +105,219 @@ Send JSON-RPC requests via stdin, receive responses via stdout.
 
 ## Available Tools
 
-### hn_read_item
+### Atlassian Tools
+
+**Environment Variables:** Each service supports its own credentials that override the shared `ATLASSIAN_*` variables:
+- Jira: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` (fallback: `ATLASSIAN_*`)
+- Confluence: `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN` (fallback: `ATLASSIAN_*`)
+- Bitbucket: `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD`
+
+For detailed setup instructions, see [docs/ATLASSIAN_SETUP.md](docs/ATLASSIAN_SETUP.md). For a quick start guide, see [docs/ATLASSIAN_QUICK_START.md](docs/ATLASSIAN_QUICK_START.md).
+
+#### jira_search
+
+Search Jira issues using JQL (Jira Query Language).
+
+**Parameters:**
+
+- `query` (string) - JQL query to search issues (e.g., `project = PROJ AND status = Open`)
+- `queryName` (string) - Name of a saved query to execute instead of providing raw JQL
+- `limit` (number, optional) - Maximum results to return (default: 10, max: 100)
+- `nextPageToken` (string, optional) - Pagination token for fetching the next page
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_search",
+    "arguments": {
+      "query": "assignee = currentUser() AND status NOT IN (Done, Closed)",
+      "limit": 20
+    }
+  }
+}
+```
+
+#### jira_get
+
+Get detailed information about a specific Jira ticket.
+
+**Parameters:**
+
+- `issueKey` (string, required) - Jira issue key (e.g., `PROJ-123`)
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_get",
+    "arguments": {
+      "issueKey": "PROJ-123"
+    }
+  }
+}
+```
+
+#### jira_create
+
+Create a new Jira ticket.
+
+**Parameters:**
+
+- `summary` (string, required) - Title/summary of the ticket
+- `description` (string, optional) - Description of the ticket
+- `project` (string, optional) - Project key (default: PROD)
+- `issueType` (string, optional) - Issue type (e.g., Bug, Story, Task)
+- `priority` (string, optional) - Priority (e.g., High, Medium, Low)
+- `assignee` (string, optional) - Assignee (email, display name, or "me")
+- `assignedGuild` (string, optional) - Custom guild field
+- `assignedPod` (string, optional) - Custom pod field
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_create",
+    "arguments": {
+      "summary": "Fix login bug",
+      "description": "Users cannot log in with SSO",
+      "issueType": "Bug",
+      "priority": "High"
+    }
+  }
+}
+```
+
+#### jira_update
+
+Update fields on an existing Jira ticket.
+
+**Parameters:**
+
+- `ticketKey` (string, required) - Ticket key (e.g., PROJ-123)
+- `status` (string, optional) - New status (e.g., "In Progress", "Done")
+- `priority` (string, optional) - New priority
+- `issueType` (string, optional) - New issue type
+- `assignee` (string, optional) - New assignee (email, display name, or "me")
+- `assignedGuild` (string, optional) - New assigned guild
+- `assignedPod` (string, optional) - New assigned pod
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_update",
+    "arguments": {
+      "ticketKey": "PROJ-123",
+      "status": "In Progress",
+      "assignee": "me"
+    }
+  }
+}
+```
+
+#### jira_fields
+
+List available values for Jira custom fields.
+
+**Parameters:**
+
+- `project` (string, optional) - Project key (default: PROD)
+- `field` (string, optional) - Specific field to display (assigned-guild or assigned-pod)
+
+#### confluence_search
+
+Search Confluence pages using CQL (Confluence Query Language).
+
+**Parameters:**
+
+- `query` (string, required) - CQL query to search pages
+- `limit` (number, optional) - Maximum results to return (default: 10)
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "confluence_search",
+    "arguments": {
+      "query": "space = WIKI AND text ~ 'deployment'",
+      "limit": 10
+    }
+  }
+}
+```
+
+#### bitbucket_pr_list
+
+List pull requests for a Bitbucket repository.
+
+**Parameters:**
+
+- `repo` (string, required) - Repository in `workspace/repo_slug` format
+- `state` (array, optional) - Filter by PR state(s): OPEN, MERGED, DECLINED, SUPERSEDED
+- `limit` (number, optional) - Max results per page (default: 10)
+- `nextPage` (string, optional) - Pagination URL for fetching the next page
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_pr_list",
+    "arguments": {
+      "repo": "myworkspace/myrepo",
+      "state": ["OPEN"],
+      "limit": 20
+    }
+  }
+}
+```
+
+#### bitbucket_pr_read
+
+Read details of a specific Bitbucket pull request including diff, diffstat, and comments.
+
+**Parameters:**
+
+- `repo` (string, required) - Repository in `workspace/repo_slug` format
+- `prNumber` (number, required) - Pull request number
+- `limit` (number, optional) - Max comments per page (default: 100)
+- `diffLimit` (number, optional) - Max diffstat entries per page (default: 500)
+- `lineLimit` (number, optional) - Truncate diff to N lines (default: 500, use -1 for unlimited)
+- `noDiff` (boolean, optional) - Skip fetching diff content (default: false)
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_pr_read",
+    "arguments": {
+      "repo": "myworkspace/myrepo",
+      "prNumber": 123,
+      "lineLimit": 200
+    }
+  }
+}
+```
+
+**Note:** The `lineLimit` parameter defaults to 500 lines to prevent overwhelming responses. Use `lineLimit: -1` for the complete diff.
+
+### HackerNews Tools
+
+#### hn_read_item
 
 Read HackerNews posts and comments with pagination support.
 
@@ -148,7 +363,7 @@ Read HackerNews posts and comments with pagination support.
 }
 ```
 
-### hn_list_items
+#### hn_list_items
 
 List HackerNews stories with pagination support.
 
@@ -176,7 +391,9 @@ List HackerNews stories with pagination support.
 }
 ```
 
-### md_fetch
+### Web Scraping Tools
+
+#### md_fetch
 
 Fetch web pages using headless Chrome and convert to Markdown. Supports CSS selector filtering to extract specific page elements, character-based pagination, and section extraction using offsets from `md_toc`.
 
@@ -257,7 +474,7 @@ Fetch web pages using headless Chrome and convert to Markdown. Supports CSS sele
 }
 ```
 
-### md_toc
+#### md_toc
 
 Extract table of contents from web pages by parsing markdown headings (H1-H6). Returns character offsets and limits for each section, enabling precise section extraction with `md_fetch`. Sections are defined as: heading + all content until the next same-or-higher-level heading.
 
@@ -504,6 +721,68 @@ curl -X POST http://127.0.0.1:3000/message \
 ## CLI Usage (Non-MCP)
 
 You can also use the tools directly via CLI without running an MCP server.
+
+### Atlassian
+
+#### Jira
+
+```bash
+# Search for issues assigned to you
+mcptools atlassian jira search "assignee = currentUser() AND status NOT IN (Done, Closed)"
+
+# Search with limit
+mcptools atlassian jira search "project = PROJ AND status = Open" --limit 20
+
+# Get ticket details
+mcptools atlassian jira get PROJ-123
+
+# Create a new ticket
+mcptools atlassian jira create --summary "Fix bug" --description "Details..." --issue-type Bug
+
+# Update a ticket
+mcptools atlassian jira update PROJ-123 --status "In Progress" --assignee me
+
+# List custom field values
+mcptools atlassian jira fields --project PROJ
+
+# Output as JSON
+mcptools atlassian jira search "project = PROJ" --json
+```
+
+#### Confluence
+
+```bash
+# Search for pages
+mcptools atlassian confluence search "text ~ 'deployment'"
+
+# Search in a specific space
+mcptools atlassian confluence search "space = WIKI AND text ~ 'api'" --limit 10
+
+# Output as JSON
+mcptools atlassian confluence search "text ~ 'guide'" --json
+```
+
+#### Bitbucket Pull Requests
+
+```bash
+# List open PRs in a repository
+mcptools atlassian bitbucket pr list --repo "myworkspace/myrepo"
+
+# Filter by state
+mcptools atlassian bitbucket pr list --repo "myworkspace/myrepo" --state OPEN --state MERGED
+
+# Read PR details with diff
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123
+
+# Skip diff content
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --no-diff
+
+# Limit diff output to 200 lines
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --line-limit 200
+
+# Only show diff (skip details and comments)
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --diff-only
+```
 
 ### HackerNews (hn)
 

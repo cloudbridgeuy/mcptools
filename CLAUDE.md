@@ -318,10 +318,163 @@ Update a ticket:
 ```
 
 **Environment Variables:**
-Ensure you have set the following environment variables before using Jira commands:
 
-- `ATLASSIAN_BASE_URL`
-- `ATLASSIAN_EMAIL`
-- `ATLASSIAN_API_TOKEN`
+Jira supports service-specific environment variables that take precedence over the shared Atlassian credentials:
 
-See the [Atlassian Configuration](#atlassian-configuration) section for details on setting up these credentials.
+| Variable | Description | Fallback |
+|----------|-------------|----------|
+| `JIRA_BASE_URL` | Jira instance URL | `ATLASSIAN_BASE_URL` |
+| `JIRA_EMAIL` | Email for Jira auth | `ATLASSIAN_EMAIL` |
+| `JIRA_API_TOKEN` | API token for Jira | `ATLASSIAN_API_TOKEN` |
+
+**Note:** Atlassian may require different API tokens for different services (Jira vs Confluence). Use service-specific variables when needed, or set only `ATLASSIAN_*` variables if using the same credentials for all services.
+
+See the [Atlassian Configuration](docs/ATLASSIAN_SETUP.md) guide for detailed setup instructions.
+
+## Bitbucket Pull Request Management with mcptools
+
+### Listing Pull Requests
+
+#### Basic Usage
+
+To list pull requests in a Bitbucket repository:
+
+```bash
+# List all open PRs (default)
+mcptools atlassian bitbucket pr list --repo "myworkspace/myrepo"
+
+# Filter by state (can be repeated)
+mcptools atlassian bitbucket pr list --repo "myworkspace/myrepo" --state OPEN
+mcptools atlassian bitbucket pr list --repo "myworkspace/myrepo" --state MERGED --state DECLINED
+
+# Limit results
+mcptools atlassian bitbucket pr list --repo "myworkspace/myrepo" --limit 20
+
+# Output as JSON
+mcptools atlassian bitbucket pr list --repo "myworkspace/myrepo" --json
+```
+
+**Available States:**
+- `OPEN`: Open pull requests
+- `MERGED`: Merged pull requests
+- `DECLINED`: Declined pull requests
+- `SUPERSEDED`: Superseded pull requests
+
+#### Pagination
+
+When results exceed the limit, use the pagination URL:
+
+```bash
+# Fetch the next page using the URL from previous response
+mcptools atlassian bitbucket pr list --repo "myworkspace/myrepo" --next-page "https://api.bitbucket.org/2.0/repositories/..."
+```
+
+### Reading Pull Request Details
+
+To read detailed information about a specific pull request:
+
+```bash
+# Read PR details including diff, diffstat, and comments
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123
+
+# Skip fetching diff content
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --no-diff
+
+# Only print the diff content
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --diff-only
+
+# Truncate diff output to 200 lines
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --line-limit 200
+
+# No line limit (show full diff)
+mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --line-limit -1
+```
+
+**Read Options:**
+
+- `--repo`: Repository in workspace/repo_slug format (required)
+- `--no-diff`: Skip fetching diff content
+- `--diff-only`: Only print diff content (skip PR details, diffstat, comments)
+- `--line-limit`: Truncate diff output to N lines (-1 = no limit, default: -1 for CLI)
+- `--limit`: Maximum comments per page (default: 100)
+- `--diff-limit`: Maximum diffstat entries per page (default: 500)
+
+### Using Bitbucket Commands via MCP Server
+
+The `bitbucket_pr_list` and `bitbucket_pr_read` commands are available through the MCP server:
+
+#### List PRs via MCP
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_pr_list",
+    "arguments": {
+      "repo": "myworkspace/myrepo",
+      "state": ["OPEN"],
+      "limit": 10
+    }
+  }
+}
+```
+
+**Arguments:**
+- `repo` (required): Repository in workspace/repo_slug format
+- `state` (optional): Array of states to filter by
+- `limit` (optional): Max results per page (default: 10)
+- `nextPage` (optional): Pagination URL for next page
+
+**Response includes:**
+- `pull_requests`: Array of PR objects with `id`, `title`, `author`, `state`, `source_branch`, `destination_branch`
+- `next_page`: URL for fetching additional results (if available)
+- `total_count`: Total number of PRs (if available)
+
+#### Read PR Details via MCP
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_pr_read",
+    "arguments": {
+      "repo": "myworkspace/myrepo",
+      "prNumber": 123,
+      "lineLimit": 500
+    }
+  }
+}
+```
+
+**Arguments:**
+- `repo` (required): Repository in workspace/repo_slug format
+- `prNumber` (required): Pull request number
+- `limit` (optional): Max comments per page (default: 100)
+- `diffLimit` (optional): Max diffstat entries per page (default: 500)
+- `lineLimit` (optional): Truncate diff to N lines (default: 500, use -1 for unlimited)
+- `noDiff` (optional): Skip fetching diff content (default: false)
+
+**Line Limit Behavior:**
+
+The MCP tool defaults to 500 lines for the diff to prevent overwhelming responses. To get more lines:
+- Set `lineLimit` to a higher value (e.g., 1000)
+- Set `lineLimit` to -1 for the complete diff
+
+When truncated, the response includes a message indicating how to fetch more.
+
+**Response includes:**
+- `id`, `title`, `description`, `state`, `author`
+- `source_branch`, `destination_branch`, `source_repo`, `destination_repo`
+- `source_commit`, `destination_commit`
+- `created_on`, `updated_on`
+- `reviewers`, `approvals`
+- `html_link`: URL to view PR in browser
+- `diffstat`: File changes summary
+- `diff_content`: The actual diff (unless `noDiff` is true)
+- `comments`: Array of PR comments
+
+**Environment Variables:**
+Ensure you have set the following environment variables:
+
+- `BITBUCKET_USERNAME`: Your Bitbucket username
+- `BITBUCKET_APP_PASSWORD`: Your Bitbucket app password
