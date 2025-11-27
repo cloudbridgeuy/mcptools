@@ -1,4 +1,4 @@
-use super::{create_authenticated_client, AtlassianConfig};
+use super::{create_confluence_client, ConfluenceConfig};
 use crate::prelude::{eprintln, println, *};
 use serde::{Deserialize, Serialize};
 
@@ -39,8 +39,8 @@ pub struct SearchOptions {
 /// to the pure function in the core crate.
 pub async fn search_pages_data(query: String, limit: usize) -> Result<SearchOutput> {
     // Configure HTTP client (I/O setup)
-    let config = AtlassianConfig::from_env()?;
-    let client = create_authenticated_client(&config)?;
+    let config = ConfluenceConfig::from_env()?;
+    let client = create_confluence_client(&config)?;
 
     // Build API URL (I/O configuration)
     let base_url = config.base_url.trim_end_matches('/');

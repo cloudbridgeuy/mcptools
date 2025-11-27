@@ -19,10 +19,10 @@ pub struct GetOptions {
 
 /// Get detailed ticket information from Jira
 pub async fn get_ticket_data(issue_key: String) -> Result<TicketOutput> {
-    use crate::atlassian::{create_authenticated_client, AtlassianConfig};
+    use crate::atlassian::{create_jira_client, JiraConfig};
 
-    let config = AtlassianConfig::from_env()?;
-    let client = create_authenticated_client(&config)?;
+    let config = JiraConfig::from_env()?;
+    let client = create_jira_client(&config)?;
 
     let ticket_url = format!(
         "{}/rest/api/3/issue/{}?expand=changelog",

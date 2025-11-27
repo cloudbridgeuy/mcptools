@@ -51,12 +51,107 @@ impl AtlassianConfig {
     }
 }
 
+/// Jira-specific configuration with fallback to shared Atlassian credentials
+#[derive(Debug, Clone)]
+pub struct JiraConfig {
+    pub base_url: String,
+    pub email: String,
+    pub api_token: String,
+}
+
+impl JiraConfig {
+    /// Load configuration from environment variables
+    /// Tries JIRA_* first, falls back to ATLASSIAN_*
+    pub fn from_env() -> Result<Self> {
+        let base_url = std::env::var("JIRA_BASE_URL")
+            .or_else(|_| std::env::var("ATLASSIAN_BASE_URL"))
+            .map_err(|_| {
+                eyre!("Neither JIRA_BASE_URL nor ATLASSIAN_BASE_URL environment variable is set")
+            })?;
+
+        let email = std::env::var("JIRA_EMAIL")
+            .or_else(|_| std::env::var("ATLASSIAN_EMAIL"))
+            .map_err(|_| {
+                eyre!("Neither JIRA_EMAIL nor ATLASSIAN_EMAIL environment variable is set")
+            })?;
+
+        let api_token = std::env::var("JIRA_API_TOKEN")
+            .or_else(|_| std::env::var("ATLASSIAN_API_TOKEN"))
+            .map_err(|_| {
+                eyre!("Neither JIRA_API_TOKEN nor ATLASSIAN_API_TOKEN environment variable is set")
+            })?;
+
+        Ok(Self {
+            base_url,
+            email,
+            api_token,
+        })
+    }
+}
+
+/// Confluence-specific configuration with fallback to shared Atlassian credentials
+#[derive(Debug, Clone)]
+pub struct ConfluenceConfig {
+    pub base_url: String,
+    pub email: String,
+    pub api_token: String,
+}
+
+impl ConfluenceConfig {
+    /// Load configuration from environment variables
+    /// Tries CONFLUENCE_* first, falls back to ATLASSIAN_*
+    pub fn from_env() -> Result<Self> {
+        let base_url = std::env::var("CONFLUENCE_BASE_URL")
+            .or_else(|_| std::env::var("ATLASSIAN_BASE_URL"))
+            .map_err(|_| {
+                eyre!(
+                    "Neither CONFLUENCE_BASE_URL nor ATLASSIAN_BASE_URL environment variable is set"
+                )
+            })?;
+
+        let email = std::env::var("CONFLUENCE_EMAIL")
+            .or_else(|_| std::env::var("ATLASSIAN_EMAIL"))
+            .map_err(|_| {
+                eyre!("Neither CONFLUENCE_EMAIL nor ATLASSIAN_EMAIL environment variable is set")
+            })?;
+
+        let api_token = std::env::var("CONFLUENCE_API_TOKEN")
+            .or_else(|_| std::env::var("ATLASSIAN_API_TOKEN"))
+            .map_err(|_| {
+                eyre!(
+                    "Neither CONFLUENCE_API_TOKEN nor ATLASSIAN_API_TOKEN environment variable is set"
+                )
+            })?;
+
+        Ok(Self {
+            base_url,
+            email,
+            api_token,
+        })
+    }
+}
+
 /// Create an authenticated HTTP client with Basic Auth headers
 pub fn create_authenticated_client(config: &AtlassianConfig) -> Result<reqwest::Client> {
+    create_basic_auth_client(&config.email, &config.api_token)
+}
+
+/// Create an authenticated HTTP client for Jira API
+pub fn create_jira_client(config: &JiraConfig) -> Result<reqwest::Client> {
+    create_basic_auth_client(&config.email, &config.api_token)
+}
+
+/// Create an authenticated HTTP client for Confluence API
+pub fn create_confluence_client(config: &ConfluenceConfig) -> Result<reqwest::Client> {
+    create_basic_auth_client(&config.email, &config.api_token)
+}
+
+/// Internal helper to create Basic Auth HTTP client
+fn create_basic_auth_client(email: &str, api_token: &str) -> Result<reqwest::Client> {
     use base64::Engine;
     use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 
-    let auth_string = format!("{}:{}", config.email, config.api_token);
+    let auth_string = format!("{}:{}", email, api_token);
     let auth_encoded = base64::engine::general_purpose::STANDARD.encode(&auth_string);
 
     let mut headers = HeaderMap::new();

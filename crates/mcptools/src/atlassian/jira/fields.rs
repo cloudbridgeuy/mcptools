@@ -1,6 +1,6 @@
 //! List available values for Jira custom fields
 
-use crate::atlassian::{create_authenticated_client, AtlassianConfig};
+use crate::atlassian::{create_jira_client, JiraConfig};
 use crate::prelude::*;
 use clap::Args;
 use colored::Colorize;
@@ -24,8 +24,8 @@ pub struct FieldsOptions {
 
 /// Fetch field metadata from Jira API
 pub async fn get_fields_data(options: FieldsOptions) -> Result<FieldsOutput> {
-    let config = AtlassianConfig::from_env()?;
-    let client = create_authenticated_client(&config)?;
+    let config = JiraConfig::from_env()?;
+    let client = create_jira_client(&config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     // Build the URL to fetch create metadata

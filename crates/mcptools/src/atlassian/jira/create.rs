@@ -1,6 +1,6 @@
 //! Create Jira tickets
 
-use crate::atlassian::{create_authenticated_client, AtlassianConfig};
+use crate::atlassian::{create_jira_client, JiraConfig};
 use crate::prelude::*;
 use clap::Args;
 use colored::Colorize;
@@ -56,8 +56,8 @@ pub type CreateOutput = TicketOutput;
 /// - Building and sending create requests
 /// - Parsing the response
 pub async fn create_ticket_data(options: CreateOptions) -> Result<CreateOutput> {
-    let config = AtlassianConfig::from_env()?;
-    let client = create_authenticated_client(&config)?;
+    let config = JiraConfig::from_env()?;
+    let client = create_jira_client(&config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     // Handle assignee lookup if provided

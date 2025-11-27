@@ -108,11 +108,11 @@ pub async fn search_issues_data(
     limit: usize,
     next_page: Option<String>,
 ) -> Result<SearchOutput> {
-    use crate::atlassian::{create_authenticated_client, AtlassianConfig};
+    use crate::atlassian::{create_jira_client, JiraConfig};
     use mcptools_core::pagination;
 
-    let config = AtlassianConfig::from_env()?;
-    let client = create_authenticated_client(&config)?;
+    let config = JiraConfig::from_env()?;
+    let client = create_jira_client(&config)?;
 
     // Handle base_url that may or may not have trailing slash
     let base_url = config.base_url.trim_end_matches('/');
