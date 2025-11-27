@@ -1,6 +1,7 @@
 use crate::atlassian::{create_bitbucket_client, BitbucketConfig};
 use crate::prelude::{println, *};
 use color_eyre::owo_colors::OwoColorize;
+use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlassian::bitbucket::{
     transform_pr_response, BitbucketComment, BitbucketCommentsResponse, BitbucketDiffstat,
     BitbucketDiffstatResponse, BitbucketPRResponse, PROutput,
@@ -74,10 +75,17 @@ pub struct ReadPRParams {
     pub no_diff: bool,
 }
 
+/// Helper to set spinner message if spinner is present
+fn set_spinner_msg(spinner: Option<&ProgressBar>, msg: impl Into<String>) {
+    if let Some(s) = spinner {
+        s.set_message(msg.into());
+    }
+}
+
 /// Fetch PR data from Bitbucket API
 ///
 /// This function fetches PR details, comments, diffstats, and optionally diff content.
-pub async fn read_pr_data(params: ReadPRParams) -> Result<PROutput> {
+pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -> Result<PROutput> {
     let ReadPRParams {
         repo,
         pr_number,
@@ -95,6 +103,10 @@ pub async fn read_pr_data(params: ReadPRParams) -> Result<PROutput> {
     let base_url = config.base_url.trim_end_matches('/');
 
     // Fetch PR details
+    set_spinner_msg(
+        spinner,
+        format!("Fetching PR #{} from {}...", pr_number, repo),
+    );
     let pr_url = format!(
         "{}/repositories/{}/pullrequests/{}",
         base_url, repo, pr_number
@@ -132,6 +144,7 @@ pub async fn read_pr_data(params: ReadPRParams) -> Result<PROutput> {
         .ok_or_else(|| eyre!("PR response missing destination commit hash"))?;
 
     // Fetch diffstats (auto-paginate by default)
+    set_spinner_msg(spinner, "Fetching diffstats...");
     let diffstats = fetch_all_diffstats(
         &client,
         base_url,
@@ -140,6 +153,7 @@ pub async fn read_pr_data(params: ReadPRParams) -> Result<PROutput> {
         &destination_commit,
         diff_limit,
         diff_next_page,
+        spinner,
     )
     .await?;
 
@@ -147,10 +161,12 @@ pub async fn read_pr_data(params: ReadPRParams) -> Result<PROutput> {
     let diff_content = if no_diff {
         None
     } else {
+        set_spinner_msg(spinner, "Fetching diff content...");
         Some(fetch_diff_content(&client, base_url, &repo, pr_number).await?)
     };
 
     // Fetch ALL comments (auto-paginate by default)
+    set_spinner_msg(spinner, "Fetching comments...");
     let comments = fetch_all_comments(
         &client,
         base_url,
@@ -158,6 +174,7 @@ pub async fn read_pr_data(params: ReadPRParams) -> Result<PROutput> {
         pr_number,
         comment_limit,
         comment_next_page,
+        spinner,
     )
     .await?;
 
@@ -196,6 +213,7 @@ async fn fetch_diff_content(
 }
 
 /// Fetch all diffstats, handling pagination automatically
+#[allow(clippy::too_many_arguments)]
 async fn fetch_all_diffstats(
     client: &reqwest::Client,
     base_url: &str,
@@ -204,6 +222,7 @@ async fn fetch_all_diffstats(
     destination_commit: &str,
     limit: usize,
     start_page_url: Option<String>,
+    spinner: Option<&ProgressBar>,
 ) -> Result<Vec<BitbucketDiffstat>> {
     let mut all_diffstats = Vec::new();
 
@@ -222,7 +241,11 @@ async fn fetch_all_diffstats(
         None => Some(format!("{}?pagelen={}", diffstat_base_url, limit)),
     };
 
+    let mut page = 1;
     while let Some(url) = next_url {
+        if page > 1 {
+            set_spinner_msg(spinner, format!("Fetching diffstats (page {})...", page));
+        }
         let response = client
             .get(&url)
             .send()
@@ -244,6 +267,7 @@ async fn fetch_all_diffstats(
 
         // Check for next page
         next_url = diffstat_response.next;
+        page += 1;
     }
 
     Ok(all_diffstats)
@@ -257,6 +281,7 @@ async fn fetch_all_comments(
     pr_number: u64,
     limit: usize,
     start_page_url: Option<String>,
+    spinner: Option<&ProgressBar>,
 ) -> Result<Vec<BitbucketComment>> {
     let mut all_comments = Vec::new();
     let comments_base_url = format!(
@@ -270,7 +295,18 @@ async fn fetch_all_comments(
         None => Some(format!("{}?pagelen={}", comments_base_url, limit)),
     };
 
+    let mut page = 1;
     while let Some(url) = next_url {
+        if page > 1 {
+            set_spinner_msg(
+                spinner,
+                format!(
+                    "Fetching comments (page {}, {} found)...",
+                    page,
+                    all_comments.len()
+                ),
+            );
+        }
         let response = client
             .get(&url)
             .send()
@@ -292,6 +328,7 @@ async fn fetch_all_comments(
 
         // Check for next page
         next_url = comments_response.next;
+        page += 1;
     }
 
     // Sort chronologically by created_on
@@ -302,8 +339,17 @@ async fn fetch_all_comments(
 
 /// Handle the PR read command - human-readable output only
 pub async fn handler(options: ReadOptions, global: crate::Global) -> Result<()> {
+    // Create spinner for progress indication
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.cyan} {msg}")
+            .unwrap(),
+    );
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
     let params = ReadPRParams {
-        repo: options.repo,
+        repo: options.repo.clone(),
         pr_number: options.pr_number,
         base_url_override: options.base_url,
         api_token_override: global.bitbucket_api_token,
@@ -313,7 +359,10 @@ pub async fn handler(options: ReadOptions, global: crate::Global) -> Result<()> 
         diff_next_page: options.diff_next_page,
         no_diff: options.no_diff,
     };
-    let pr = read_pr_data(params).await?;
+    let pr = read_pr_data(params, Some(&spinner)).await?;
+
+    // Clear the spinner before printing output
+    spinner.finish_and_clear();
 
     // If --diff-only, just print the diff and exit
     if options.diff_only {

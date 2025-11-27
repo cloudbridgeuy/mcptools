@@ -386,6 +386,73 @@ fn strip_html(html: &str) -> String {
 }
 
 // =============================================================================
+// PR List Types
+// =============================================================================
+
+/// Paginated response from Bitbucket PR list endpoint
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketPRListResponse {
+    pub values: Vec<BitbucketPRResponse>,
+    #[serde(default)]
+    pub size: Option<u32>,
+    #[serde(default)]
+    pub page: Option<u32>,
+    #[serde(default)]
+    pub pagelen: Option<u32>,
+    #[serde(default)]
+    pub next: Option<String>,
+    #[serde(default)]
+    pub previous: Option<String>,
+}
+
+/// Simplified PR info for list display
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct PRListItem {
+    pub id: u64,
+    pub title: String,
+    pub author: String,
+    pub state: String,
+    pub source_branch: String,
+    pub destination_branch: String,
+}
+
+/// Output structure for PR list command
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct PRListOutput {
+    pub pull_requests: Vec<PRListItem>,
+    pub next_page: Option<String>,
+    pub total_count: Option<u32>,
+}
+
+/// Transform Bitbucket PR list response to output domain model
+///
+/// # Arguments
+/// * `response` - The paginated PR list response from Bitbucket API
+///
+/// # Returns
+/// * `PRListOutput` - Cleaned and transformed PR list with pagination info
+pub fn transform_pr_list_response(response: BitbucketPRListResponse) -> PRListOutput {
+    let pull_requests: Vec<PRListItem> = response
+        .values
+        .into_iter()
+        .map(|pr| PRListItem {
+            id: pr.id,
+            title: pr.title,
+            author: pr.author.display_name,
+            state: pr.state,
+            source_branch: pr.source.branch.name,
+            destination_branch: pr.destination.branch.name,
+        })
+        .collect();
+
+    PRListOutput {
+        pull_requests,
+        next_page: response.next,
+        total_count: response.size,
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
