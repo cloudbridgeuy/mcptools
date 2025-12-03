@@ -726,7 +726,7 @@ pub async fn handle_bitbucket_pr_list(
         limit: args.limit.unwrap_or(10),
         next_page: args.next_page,
         base_url_override: None,
-        api_token_override: global.bitbucket_api_token.clone(),
+        app_password_override: global.bitbucket_app_password.clone(),
     };
 
     // Call the Bitbucket module's data function (no spinner for MCP)
@@ -797,7 +797,7 @@ pub async fn handle_bitbucket_pr_read(
         repo: args.repo,
         pr_number: args.pr_number,
         base_url_override: None,
-        api_token_override: global.bitbucket_api_token.clone(),
+        app_password_override: global.bitbucket_app_password.clone(),
         comment_limit: args.limit.unwrap_or(100),
         comment_next_page: None,
         diff_limit: args.diff_limit.unwrap_or(500),

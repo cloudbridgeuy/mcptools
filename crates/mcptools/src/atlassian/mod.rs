@@ -172,8 +172,8 @@ fn create_basic_auth_client(email: &str, api_token: &str) -> Result<reqwest::Cli
 #[derive(Debug, Clone)]
 pub struct BitbucketConfig {
     pub base_url: String,
-    pub email: String,
-    pub api_token: String,
+    pub username: String,
+    pub app_password: String,
 }
 
 impl BitbucketConfig {
@@ -181,33 +181,34 @@ impl BitbucketConfig {
     pub const DEFAULT_BASE_URL: &'static str = "https://api.bitbucket.org/2.0";
 
     /// Load configuration from environment variables
-    /// Uses ATLASSIAN_EMAIL for auth
-    /// Uses BITBUCKET_API_TOKEN if set, otherwise falls back to ATLASSIAN_API_TOKEN
+    /// Uses BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD for authentication
     /// Uses BITBUCKET_BASE_URL with default fallback
     pub fn from_env() -> Result<Self> {
-        // Try BITBUCKET_API_TOKEN first, fall back to ATLASSIAN_API_TOKEN
-        let api_token = std::env::var("BITBUCKET_API_TOKEN")
-            .or_else(|_| std::env::var("ATLASSIAN_API_TOKEN"))
-            .map_err(|_| {
-                eyre!("Neither BITBUCKET_API_TOKEN nor ATLASSIAN_API_TOKEN environment variable is set")
-            })?;
+        let username = std::env::var("BITBUCKET_USERNAME")
+            .map_err(|_| eyre!("BITBUCKET_USERNAME environment variable not set"))?;
+
+        let app_password = std::env::var("BITBUCKET_APP_PASSWORD")
+            .map_err(|_| eyre!("BITBUCKET_APP_PASSWORD environment variable not set"))?;
 
         Ok(Self {
             base_url: std::env::var("BITBUCKET_BASE_URL")
                 .unwrap_or_else(|_| Self::DEFAULT_BASE_URL.to_string()),
-            email: std::env::var("ATLASSIAN_EMAIL")
-                .map_err(|_| eyre!("ATLASSIAN_EMAIL environment variable not set"))?,
-            api_token,
+            username,
+            app_password,
         })
     }
 
     /// Apply CLI overrides to the configuration
-    pub fn with_overrides(mut self, base_url: Option<String>, api_token: Option<String>) -> Self {
+    pub fn with_overrides(
+        mut self,
+        base_url: Option<String>,
+        app_password: Option<String>,
+    ) -> Self {
         if let Some(url) = base_url {
             self.base_url = url;
         }
-        if let Some(token) = api_token {
-            self.api_token = token;
+        if let Some(password) = app_password {
+            self.app_password = password;
         }
         self
     }
@@ -218,7 +219,7 @@ pub fn create_bitbucket_client(config: &BitbucketConfig) -> Result<reqwest::Clie
     use base64::Engine;
     use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 
-    let auth_string = format!("{}:{}", config.email, config.api_token);
+    let auth_string = format!("{}:{}", config.username, config.app_password);
     let auth_encoded = base64::engine::general_purpose::STANDARD.encode(&auth_string);
 
     let mut headers = HeaderMap::new();

@@ -61,8 +61,8 @@ pub struct ReadPRParams {
     pub pr_number: u64,
     /// Override for Bitbucket API base URL
     pub base_url_override: Option<String>,
-    /// Override for API token
-    pub api_token_override: Option<String>,
+    /// Override for app password
+    pub app_password_override: Option<String>,
     /// Maximum comments per page
     pub comment_limit: usize,
     /// Pagination URL for comments
@@ -90,7 +90,7 @@ pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -
         repo,
         pr_number,
         base_url_override,
-        api_token_override,
+        app_password_override,
         comment_limit,
         comment_next_page,
         diff_limit,
@@ -98,7 +98,8 @@ pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -
         no_diff,
     } = params;
     // Setup config and client with CLI overrides
-    let config = BitbucketConfig::from_env()?.with_overrides(base_url_override, api_token_override);
+    let config =
+        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
     let client = create_bitbucket_client(&config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
@@ -352,7 +353,7 @@ pub async fn handler(options: ReadOptions, global: crate::Global) -> Result<()> 
         repo: options.repo.clone(),
         pr_number: options.pr_number,
         base_url_override: options.base_url,
-        api_token_override: global.bitbucket_api_token,
+        app_password_override: global.bitbucket_app_password,
         comment_limit: options.limit,
         comment_next_page: options.next_page,
         diff_limit: options.diff_limit,

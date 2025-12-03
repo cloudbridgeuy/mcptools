@@ -49,8 +49,8 @@ pub struct ListPRParams {
     pub next_page: Option<String>,
     /// Override for Bitbucket API base URL
     pub base_url_override: Option<String>,
-    /// Override for API token
-    pub api_token_override: Option<String>,
+    /// Override for app password
+    pub app_password_override: Option<String>,
 }
 
 /// Helper to set spinner message if spinner is present
@@ -73,11 +73,12 @@ pub async fn list_pr_data(
         limit,
         next_page,
         base_url_override,
-        api_token_override,
+        app_password_override,
     } = params;
 
     // Setup config and client with CLI overrides
-    let config = BitbucketConfig::from_env()?.with_overrides(base_url_override, api_token_override);
+    let config =
+        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
     let client = create_bitbucket_client(&config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
@@ -143,7 +144,7 @@ pub async fn handler(options: ListOptions, global: crate::Global) -> Result<()> 
         limit: options.limit,
         next_page: options.next_page,
         base_url_override: options.base_url,
-        api_token_override: global.bitbucket_api_token,
+        app_password_override: global.bitbucket_app_password,
     };
 
     let data = list_pr_data(params, Some(&spinner)).await?;

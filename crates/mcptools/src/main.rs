@@ -44,9 +44,9 @@ pub struct Global {
     #[clap(long, env = "ATLASSIAN_API_TOKEN", global = true, hide = true)]
     pub atlassian_token: Option<String>,
 
-    /// Bitbucket API token (falls back to ATLASSIAN_API_TOKEN if not set)
-    #[clap(long, env = "BITBUCKET_API_TOKEN", global = true, hide = true)]
-    pub bitbucket_api_token: Option<String>,
+    /// Bitbucket app password for authentication
+    #[clap(long, env = "BITBUCKET_APP_PASSWORD", global = true, hide = true)]
+    pub bitbucket_app_password: Option<String>,
 }
 
 #[derive(Debug, clap::Parser)]
