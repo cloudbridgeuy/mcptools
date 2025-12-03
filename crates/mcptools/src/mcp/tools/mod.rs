@@ -79,7 +79,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
     let tools = vec![
         Tool {
             name: "jira_search".to_string(),
-            description: "Search Jira issues using JQL (Jira Query Language) or a saved query. Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            description: "Search Jira issues using JQL (Jira Query Language) or a saved query. Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -105,7 +105,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "confluence_search".to_string(),
-            description: "Search Confluence pages using CQL (Confluence Query Language). Returns a list of pages matching the query with title, type, URL, and optionally the plain text content. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            description: "Search Confluence pages using CQL (Confluence Query Language). Returns a list of pages matching the query with title, type, URL, and optionally the plain text content. Requires CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, and CONFLUENCE_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -255,7 +255,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_create".to_string(),
-            description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, assigned guild, and assigned pod. Returns the created ticket key. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, assigned guild, and assigned pod. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -297,7 +297,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_get".to_string(),
-            description: "Get detailed information about a Jira ticket. Returns comprehensive information about a specific issue using its issue key. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            description: "Get detailed information about a Jira ticket. Returns comprehensive information about a specific issue using its issue key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -311,7 +311,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_update".to_string(),
-            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Assigned Guild, and Assigned Pod. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Assigned Guild, and Assigned Pod. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -349,7 +349,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_fields".to_string(),
-            description: "List available values for Jira custom fields (assigned-guild and assigned-pod). Returns possible field values for a given project. Requires ATLASSIAN_BASE_URL, ATLASSIAN_EMAIL, and ATLASSIAN_API_TOKEN environment variables.".to_string(),
+            description: "List available values for Jira custom fields (assigned-guild and assigned-pod). Returns possible field values for a given project. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
