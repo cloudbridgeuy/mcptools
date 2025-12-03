@@ -86,6 +86,60 @@ mcptools atlassian jira search "priority = High AND status NOT IN (Done, Closed)
 mcptools atlassian jira search "project = PROJ" --json | jq '.issues[] | {key, summary, status}'
 ```
 
+### Save and Reuse Queries
+
+```bash
+# Save a query
+mcptools atlassian jira search 'project = "PROJ" AND status = Open' --save --query my-open-issues
+
+# Execute saved query
+mcptools atlassian jira search --query my-open-issues
+
+# List saved queries
+mcptools atlassian jira search --list
+
+# Delete a saved query
+mcptools atlassian jira search --delete --query my-open-issues
+```
+
+### Create Tickets
+
+```bash
+# Create a simple ticket
+mcptools atlassian jira create "Fix login bug"
+
+# Create with all options
+mcptools atlassian jira create "Implement new feature" \
+  --description "Details about the feature" \
+  --project PROJ \
+  --issue-type Story \
+  --priority High \
+  --assignee me
+```
+
+### Update Tickets
+
+```bash
+# Update status
+mcptools atlassian jira update PROJ-123 --status "In Progress"
+
+# Assign to yourself
+mcptools atlassian jira update PROJ-123 --assignee me
+
+# Update multiple fields
+mcptools atlassian jira update PROJ-123 --status Done --priority Low
+```
+
+### List Field Values
+
+```bash
+# List available guild/pod values
+mcptools atlassian jira fields
+
+# For a specific project
+mcptools atlassian jira fields --project MYPROJECT
+```
+
 ---
 
 ## Common Confluence Queries
