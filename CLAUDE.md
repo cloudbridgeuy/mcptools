@@ -46,12 +46,17 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 
 For detailed usage of each feature, see the context files:
 
+### Integrations
 - **[Jira](docs/context/jira.md)** - Search, create, update tickets; saved queries; MCP tools
 - **[Confluence](docs/context/confluence.md)** - Search pages; CQL queries
 - **[Bitbucket](docs/context/bitbucket.md)** - List and read pull requests
 - **[HackerNews](docs/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](docs/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
+
+### Infrastructure
 - **[MCP Server](docs/context/mcp-server.md)** - Server configuration; available tools
+- **[Upgrade](docs/context/upgrade.md)** - Self-update mechanism; platform support
+- **[Testing & Env Vars](docs/context/testing.md)** - All environment variables; scripting
 
 ## Common Commands
 
