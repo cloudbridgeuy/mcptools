@@ -233,6 +233,65 @@ List available values for Jira custom fields.
 - `project` (string, optional) - Project key (default: PROD)
 - `field` (string, optional) - Specific field to display (assigned-guild or assigned-pod)
 
+#### jira_query_list
+
+List all saved Jira queries.
+
+**Parameters:** None
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_query_list",
+    "arguments": {}
+  }
+}
+```
+
+#### jira_query_save
+
+Save a Jira JQL query with a name for later reuse.
+
+**Parameters:**
+
+- `name` (string, required) - Name for the saved query (alphanumeric, hyphens, underscores only)
+- `query` (string, required) - JQL query to save
+- `update` (boolean, optional) - If true, overwrites an existing query with the same name (default: false)
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_query_save",
+    "arguments": {
+      "name": "my-open-bugs",
+      "query": "project = PROJ AND type = Bug AND status != Done"
+    }
+  }
+}
+```
+
+#### jira_query_delete
+
+Delete a saved Jira query by name.
+
+**Parameters:**
+
+- `name` (string, required) - Name of the saved query to delete
+
+#### jira_query_load
+
+Load and display the contents of a saved Jira query.
+
+**Parameters:**
+
+- `name` (string, required) - Name of the saved query to load
+
 #### confluence_search
 
 Search Confluence pages using CQL (Confluence Query Language).
@@ -921,6 +980,18 @@ mcptools md fetch https://docs.example.com --selector "main" --limit 1000
 ```
 
 This approach ensures Claude Code gets focused, relevant content without unnecessary overhead.
+
+### Upgrade
+
+Upgrade mcptools to the latest version.
+
+```bash
+# Upgrade to the latest version
+mcptools upgrade
+
+# Force upgrade even if already on latest
+mcptools upgrade --force
+```
 
 ## Development
 
