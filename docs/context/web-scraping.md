@@ -24,14 +24,37 @@ mcptools md fetch https://example.com --selector "article" --strategy all
 mcptools md fetch https://example.com --selector "article" --strategy last
 mcptools md fetch https://example.com --selector "p" --strategy n --index 2
 
-# Get raw HTML
+# Get raw HTML instead of Markdown
 mcptools md fetch https://example.com --raw-html
+
+# Include metadata (title, URL, HTML size, fetch time)
+mcptools md fetch https://example.com --include-metadata
+
+# Custom timeout
+mcptools md fetch https://example.com --timeout 60
 
 # Output as JSON
 mcptools md fetch https://example.com --json
 ```
 
-**Selection Strategies:** `first` (default), `last`, `all`, `n`
+### Complete CLI Flags Reference
+
+| Flag | Env Var | Default | Description |
+|------|---------|---------|-------------|
+| `<URL>` | `MD_URL` | required | URL to fetch |
+| `--timeout`, `-t` | `MD_TIMEOUT` | 30 | Timeout in seconds |
+| `--json` | - | false | Output as JSON |
+| `--raw-html` | - | false | Output raw HTML instead of Markdown |
+| `--include-metadata` | - | false | Include title, URL, HTML size, fetch time |
+| `--selector` | `MD_SELECTOR` | - | CSS selector to filter content |
+| `--strategy` | `MD_STRATEGY` | first | Selection strategy: first, last, all, n |
+| `--index` | `MD_INDEX` | - | Index for 'n' strategy (0-indexed) |
+| `--paginated` | `MD_PAGINATED` | false | Enable pagination explicitly |
+| `--offset` | `MD_OFFSET` | 0 | Character offset to start from |
+| `--limit` | `MD_LIMIT` | 1000 | Characters per page |
+| `--page` | `MD_PAGE` | 1 | Page number (1-indexed) |
+
+**Note:** Pagination is auto-enabled when `--offset`, `--limit`, or `--page` are set.
 
 ### Extract Table of Contents
 
@@ -128,4 +151,18 @@ mcptools md toc https://docs.example.com --selector "main"
 
 ## Environment Variables
 
-No environment variables required. Requires Chrome/Chromium installed.
+All CLI flags can be set via environment variables for scripting/testing:
+
+| Variable | Description |
+|----------|-------------|
+| `MD_URL` | URL to fetch |
+| `MD_TIMEOUT` | Timeout in seconds |
+| `MD_SELECTOR` | CSS selector |
+| `MD_STRATEGY` | Selection strategy |
+| `MD_INDEX` | Index for 'n' strategy |
+| `MD_PAGINATED` | Enable pagination |
+| `MD_OFFSET` | Character offset |
+| `MD_LIMIT` | Characters per page |
+| `MD_PAGE` | Page number |
+
+Requires Chrome/Chromium installed on the system.
