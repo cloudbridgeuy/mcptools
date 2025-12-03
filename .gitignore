@@ -11,4 +11,5 @@
 .DS_Store
 
 # Claude Code settings
-.claude/
+.claude/*
+!.claude/context/
