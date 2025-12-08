@@ -36,7 +36,7 @@ tower-http = { version = "0.6.6", features = ["cors"] }
 colored = "3.0.0"
 headless_chrome = "1.0.18"
 html2md = "0.2.15"
-scraper = "0.24.0"
+scraper = "0.25.0"
 base64 = "0.22.1"
 html-escape = "0.2.13"
 md5 = "0.8.0"
