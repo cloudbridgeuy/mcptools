@@ -28,7 +28,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 anstream = "0.6.20"
 prettytable = "0.10.0"
 futures = "0.3.31"
-reqwest = { version = "0.12.23", features = ["json"] }
+reqwest = { version = "0.12.25", features = ["json"] }
 regex = "1.11.3"
 chrono = "0.4.42"
 axum = "0.8.6"
