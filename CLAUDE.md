@@ -52,6 +52,7 @@ For detailed usage of each feature, see the context files:
 - **[Bitbucket](.claude/context/bitbucket.md)** - List and read pull requests
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
+- **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
 
 ### Infrastructure
 - **[MCP Server](.claude/context/mcp-server.md)** - Server configuration; available tools
