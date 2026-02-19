@@ -25,4 +25,4 @@ scraper = { workspace = true }
 md5 = "0.7"
 
 [dev-dependencies]
-tempfile = "3.8"
+tempfile = "3.24"
