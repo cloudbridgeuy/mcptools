@@ -1,6 +1,7 @@
 mod atlassian;
 mod hn;
 mod md;
+mod strand;
 
 use serde::{Deserialize, Serialize};
 
@@ -485,6 +486,37 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": ["repo", "prNumber"]
             }),
         },
+        Tool {
+            name: "generate_code".to_string(),
+            description: "Generate Rust code using a local Ollama model. Accepts an instruction, optional context, and optional file paths for context. Returns raw Rust source code. Requires a running Ollama instance with the specified model.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "instruction": {
+                        "type": "string",
+                        "description": "The instruction describing what Rust code to generate or modify"
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Additional context for the generation (e.g., project description, constraints)"
+                    },
+                    "files": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "File paths to read and include as context for the model"
+                    },
+                    "ollama_url": {
+                        "type": "string",
+                        "description": "Ollama base URL (default: http://localhost:11434)"
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name for code generation (default: strand-rust-coder)"
+                    }
+                },
+                "required": ["instruction"]
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -524,6 +556,7 @@ pub async fn handle_tools_call(
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
         "md_toc" => md::handle_md_toc(params.arguments, global).await,
+        "generate_code" => strand::handle_generate_code(params.arguments, global).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),
