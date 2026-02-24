@@ -73,8 +73,9 @@ pub fn format_annotation(annotation: &DevAnnotation, index: usize) -> String {
     };
 
     format!(
-        "**#{}** `{}`{}{} — {}",
+        "**#{}** [{}] `{}`{}{} — {}",
         index + 1,
+        annotation.id,
         annotation.selector,
         component,
         status,
@@ -220,7 +221,7 @@ mod tests {
         let result = format_annotation(&a, 0);
         assert_eq!(
             result,
-            "**#1** `div.calendar > h1` (CalendarHeader) — Font size too small on mobile"
+            "**#1** [abc] `div.calendar > h1` (CalendarHeader) — Font size too small on mobile"
         );
     }
 
@@ -239,7 +240,7 @@ mod tests {
         let result = format_annotation(&a, 0);
         assert_eq!(
             result,
-            "**#1** `div.calendar > h1` — Font size too small on mobile"
+            "**#1** [abc] `div.calendar > h1` — Font size too small on mobile"
         );
     }
 
