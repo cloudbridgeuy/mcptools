@@ -53,6 +53,7 @@ For detailed usage of each feature, see the context files:
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
 - **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
+- **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
 
 ### Infrastructure
 - **[MCP Server](.claude/context/mcp-server.md)** - Server configuration; available tools
