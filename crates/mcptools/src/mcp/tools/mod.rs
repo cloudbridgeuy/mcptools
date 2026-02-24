@@ -1,3 +1,4 @@
+mod annotations;
 mod atlassian;
 mod hn;
 mod md;
@@ -517,6 +518,74 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": ["instruction"]
             }),
         },
+        Tool {
+            name: "ui_annotations_list".to_string(),
+            description: "List all UI annotations from the calendsync dev server. Returns selector, component name, note, and resolution status for each annotation.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Dev server URL (default: CALENDSYNC_DEV_URL env or http://localhost:3000)"
+                    }
+                },
+                "required": []
+            }),
+        },
+        Tool {
+            name: "ui_annotations_get".to_string(),
+            description: "Get a single UI annotation by ID with full details including computed styles, bounding box, and optional screenshot.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Annotation ID"
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "Dev server URL (default: CALENDSYNC_DEV_URL env or http://localhost:3000)"
+                    }
+                },
+                "required": ["id"]
+            }),
+        },
+        Tool {
+            name: "ui_annotations_resolve".to_string(),
+            description: "Mark a UI annotation as resolved with a summary of the changes made.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Annotation ID to resolve"
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "Summary of what was done to address the annotation"
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "Dev server URL (default: CALENDSYNC_DEV_URL env or http://localhost:3000)"
+                    }
+                },
+                "required": ["id", "summary"]
+            }),
+        },
+        Tool {
+            name: "ui_annotations_clear".to_string(),
+            description: "Clear all UI annotations from the dev server.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Dev server URL (default: CALENDSYNC_DEV_URL env or http://localhost:3000)"
+                    }
+                },
+                "required": []
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -557,6 +626,18 @@ pub async fn handle_tools_call(
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
         "md_toc" => md::handle_md_toc(params.arguments, global).await,
         "generate_code" => strand::handle_generate_code(params.arguments, global).await,
+        "ui_annotations_list" => {
+            annotations::handle_ui_annotations_list(params.arguments, global).await
+        }
+        "ui_annotations_get" => {
+            annotations::handle_ui_annotations_get(params.arguments, global).await
+        }
+        "ui_annotations_resolve" => {
+            annotations::handle_ui_annotations_resolve(params.arguments, global).await
+        }
+        "ui_annotations_clear" => {
+            annotations::handle_ui_annotations_clear(params.arguments, global).await
+        }
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),
