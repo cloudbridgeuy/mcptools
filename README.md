@@ -11,6 +11,7 @@ Useful MCP Tools to use with LLM Coding Agents
 - **Atlassian Bitbucket**: List and read pull requests with diff support (`bitbucket_pr_list`, `bitbucket_pr_read`)
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
 - **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
+- **UI Annotations**: Query and manage UI annotations from a calendsync dev server (`ui_annotations_list`, `ui_annotations_get`, `ui_annotations_resolve`, `ui_annotations_clear`)
 
 ## Installation
 
@@ -618,6 +619,106 @@ Extract table of contents from web pages by parsing markdown headings (H1-H6). R
   }
 }
 // Returns only the "Installation" section
+```
+
+### UI Annotation Tools
+
+**Environment Variable:** `CALENDSYNC_DEV_URL` — Base URL of the calendsync dev server (default: `http://localhost:3000`)
+
+#### ui_annotations_list
+
+List all UI annotations from the calendsync dev server. Returns selector, component name, note, and resolution status for each annotation.
+
+**Parameters:**
+
+- `url` (string, optional) — Dev server URL (overrides `CALENDSYNC_DEV_URL`)
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "ui_annotations_list",
+    "arguments": {}
+  }
+}
+```
+
+#### ui_annotations_get
+
+Get a single UI annotation by ID with full details including computed styles, bounding box, and optional screenshot.
+
+**Parameters:**
+
+- `id` (string, required) — Annotation ID
+- `url` (string, optional) — Dev server URL (overrides `CALENDSYNC_DEV_URL`)
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "ui_annotations_get",
+    "arguments": {
+      "id": "abc-123"
+    }
+  }
+}
+```
+
+#### ui_annotations_resolve
+
+Mark a UI annotation as resolved with a summary of the changes made.
+
+**Parameters:**
+
+- `id` (string, required) — Annotation ID
+- `summary` (string, required) — Description of what was fixed
+- `url` (string, optional) — Dev server URL (overrides `CALENDSYNC_DEV_URL`)
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "ui_annotations_resolve",
+    "arguments": {
+      "id": "abc-123",
+      "summary": "Increased font size to 24px for mobile"
+    }
+  }
+}
+```
+
+#### ui_annotations_clear
+
+Clear all UI annotations from the dev server.
+
+**Parameters:**
+
+- `url` (string, optional) — Dev server URL (overrides `CALENDSYNC_DEV_URL`)
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "ui_annotations_clear",
+    "arguments": {}
+  }
+}
 ```
 
 ## MCP Protocol Implementation
