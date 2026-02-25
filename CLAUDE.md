@@ -53,6 +53,7 @@ For detailed usage of each feature, see the context files:
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
 - **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
+- **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
 
 ### Infrastructure
@@ -89,6 +90,15 @@ mcptools atlassian bitbucket pr read --repo "workspace/repo" 123
 ```bash
 mcptools hn read 8863
 mcptools hn list --story-type top
+```
+
+### PDF
+
+```bash
+mcptools pdf toc document.pdf
+mcptools pdf read document.pdf s-1-0
+mcptools pdf image document.pdf Im1 --output photo.jpg
+mcptools pdf info document.pdf
 ```
 
 ### Web Scraping
