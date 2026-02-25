@@ -44,3 +44,6 @@ dirs-next = "2.0.0"
 urlencoding = "2.1.1"
 indicatif = "0.17"
 rig-core = "0.31.0"
+lopdf = "0.39"
+unicode-normalization = "0.1"
+pdf = { version = "0.1.0", path = "crates/pdf" }
