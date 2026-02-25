@@ -2,6 +2,7 @@ mod annotations;
 mod atlassian;
 mod hn;
 mod md;
+mod pdf;
 mod strand;
 
 use serde::{Deserialize, Serialize};
@@ -586,6 +587,70 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": []
             }),
         },
+        Tool {
+            name: "pdf_toc".to_string(),
+            description: "Parse a PDF file and return its document tree (table of contents) with section IDs, headings, content previews, and image counts. Use the section IDs with pdf_read to read specific sections.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the PDF file"
+                    }
+                },
+                "required": ["path"]
+            }),
+        },
+        Tool {
+            name: "pdf_read".to_string(),
+            description: "Read a specific section of a PDF document as Markdown. Requires a section ID from pdf_toc. Returns the section title, rendered Markdown text, and image references.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the PDF file"
+                    },
+                    "sectionId": {
+                        "type": "string",
+                        "description": "Section ID from pdf_toc (e.g., 's-1-0')"
+                    }
+                },
+                "required": ["path", "sectionId"]
+            }),
+        },
+        Tool {
+            name: "pdf_image".to_string(),
+            description: "Extract a specific image from a PDF document. Returns the image as base64-encoded data with format information.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the PDF file"
+                    },
+                    "imageId": {
+                        "type": "string",
+                        "description": "Image ID (XObject name from the PDF)"
+                    }
+                },
+                "required": ["path", "imageId"]
+            }),
+        },
+        Tool {
+            name: "pdf_info".to_string(),
+            description: "Get metadata about a PDF document including title, author, page count, and creator.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the PDF file"
+                    }
+                },
+                "required": ["path"]
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -638,6 +703,10 @@ pub async fn handle_tools_call(
         "ui_annotations_clear" => {
             annotations::handle_ui_annotations_clear(params.arguments, global).await
         }
+        "pdf_toc" => pdf::handle_pdf_toc(params.arguments, global).await,
+        "pdf_read" => pdf::handle_pdf_read(params.arguments, global).await,
+        "pdf_image" => pdf::handle_pdf_image(params.arguments, global).await,
+        "pdf_info" => pdf::handle_pdf_info(params.arguments, global).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),

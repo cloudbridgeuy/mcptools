@@ -8,6 +8,7 @@ mod error;
 mod hn;
 mod mcp;
 mod md;
+mod pdf;
 mod prelude;
 mod strand;
 mod upgrade;
@@ -64,6 +65,9 @@ pub enum SubCommands {
     /// Convert web pages to Markdown using headless Chrome
     MD(crate::md::App),
 
+    /// PDF document navigation and extraction
+    Pdf(crate::pdf::App),
+
     /// Local Rust code generation using Ollama
     Strand(crate::strand::App),
 
@@ -83,6 +87,7 @@ async fn main() -> Result<()> {
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
         SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,
         SubCommands::MD(sub_app) => crate::md::run(sub_app, app.global).await,
+        SubCommands::Pdf(sub_app) => crate::pdf::run(sub_app, app.global).await,
         SubCommands::Strand(sub_app) => crate::strand::run(sub_app, app.global).await,
         SubCommands::Upgrade(sub_app) => crate::upgrade::run(sub_app, app.global).await,
     }
