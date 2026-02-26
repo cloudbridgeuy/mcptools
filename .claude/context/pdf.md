@@ -123,6 +123,16 @@ Returns title, author, page count, and creator.
    mcptools pdf image document.pdf Im1 --output image.jpg
    ```
 
+### Filtering Decorative Images
+
+PDFs frequently reuse decorative images (logos, backgrounds, page headers) across many pages. When `pdf_images` returns results, the same image ID appearing on multiple pages is almost certainly decorative. To find meaningful content images (screenshots, diagrams, charts):
+
+1. **List images for a section** — scope with a `sectionId` to reduce noise.
+2. **Identify recurring IDs** — image IDs that appear on nearly every page (e.g., a company logo or page background) are decorative. Ignore these.
+3. **Extract unique IDs** — images that appear only within the target section are the actual content. These are the screenshots, diagrams, and figures worth extracting.
+
+Example: a section spanning pages 27-29 returns 9 images (3 per page). Two IDs repeat on every page (logo + background) — skip those. The 3 unique IDs are the actual screenshots.
+
 ## MCP Tools
 
 ### pdf_toc

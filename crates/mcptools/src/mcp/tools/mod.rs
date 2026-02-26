@@ -614,7 +614,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "pdf_images".to_string(),
-            description: "List all images in a PDF section or the whole document. Returns image IDs, formats, section IDs, section titles, and page numbers. Use with pdf_image to extract specific images.".to_string(),
+            description: "List all images in a PDF section or the whole document. Returns image IDs, formats, section IDs, section titles, and page numbers. Use with pdf_image to extract specific images. NOTE: PDFs often reuse decorative images (logos, backgrounds, headers) across many pages — the same image ID will appear on multiple pages. To find meaningful content images (screenshots, diagrams, photos), filter out IDs that repeat across many pages and focus on IDs that appear only within the target section.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
