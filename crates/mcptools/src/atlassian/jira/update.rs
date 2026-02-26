@@ -37,6 +37,14 @@ pub struct UpdateOptions {
     #[arg(long, short = 'd')]
     pub description: Option<String>,
 
+    /// Sprint name to assign the ticket to
+    #[arg(long)]
+    pub sprint: Option<String>,
+
+    /// Board ID for sprint operations
+    #[arg(long, env = "JIRA_BOARD_ID")]
+    pub board: Option<u64>,
+
     /// Output as JSON
     #[arg(long, global = true)]
     pub json: bool,
@@ -60,9 +68,10 @@ pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> 
         && options.issue_type.is_none()
         && options.assignee.is_none()
         && options.description.is_none()
+        && options.sprint.is_none()
     {
         return Err(eyre!(
-            "At least one field must be provided for update (--status, --priority, --type, --assignee, or --description)"
+            "At least one field must be provided for update (--status, --priority, --type, --assignee, --description, or --sprint)"
         ));
     }
 
@@ -108,6 +117,31 @@ pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> 
             Err(e) => {
                 results.push(FieldUpdateResult {
                     field: "status".to_string(),
+                    success: false,
+                    value: None,
+                    error: Some(e.to_string()),
+                });
+            }
+        }
+    }
+
+    // Handle sprint assignment if provided
+    if let Some(sprint_name) = &options.sprint {
+        let board_id = options.board.ok_or_else(|| {
+            eyre!("--board is required when using --sprint (or set JIRA_BOARD_ID)")
+        })?;
+        match handle_sprint_assignment(&options.ticket_key, sprint_name, board_id).await {
+            Ok(()) => {
+                results.push(FieldUpdateResult {
+                    field: "sprint".to_string(),
+                    success: true,
+                    value: Some(sprint_name.clone()),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                results.push(FieldUpdateResult {
+                    field: "sprint".to_string(),
                     success: false,
                     value: None,
                     error: Some(e.to_string()),
@@ -496,6 +530,16 @@ async fn update_issue_fields(
     }
 
     Ok(results)
+}
+
+/// Handle sprint assignment via Agile API
+async fn handle_sprint_assignment(
+    ticket_key: &str,
+    sprint_name: &str,
+    board_id: u64,
+) -> Result<()> {
+    let sprint_id = super::sprint::resolve_sprint_name(board_id, sprint_name).await?;
+    super::sprint::move_issue_to_sprint(ticket_key, sprint_id).await
 }
 
 /// CLI handler for update command

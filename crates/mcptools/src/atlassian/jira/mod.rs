@@ -2,6 +2,7 @@ pub mod attachment;
 pub mod create;
 pub mod get;
 pub mod search;
+pub mod sprint;
 pub mod update;
 
 use colored::Colorize;
@@ -31,6 +32,10 @@ pub enum Commands {
     /// Manage attachments on Jira tickets
     #[command(subcommand)]
     Attachment(attachment::AttachmentCommands),
+
+    /// Manage sprints on a Jira board
+    #[command(subcommand)]
+    Sprint(sprint::SprintCommands),
 }
 
 /// Run Jira commands
@@ -45,6 +50,7 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
         Commands::Get(options) => get::handler(options).await,
         Commands::Update(options) => update::handler(options).await,
         Commands::Attachment(cmd) => attachment::handler(cmd).await,
+        Commands::Sprint(cmd) => sprint::handler(cmd).await,
     }
 }
 
@@ -221,4 +227,5 @@ pub use attachment::{download_attachment_data, list_attachments_data, upload_att
 pub use create::create_ticket_data;
 pub use get::get_ticket_data;
 pub use search::search_issues_data;
+pub use sprint::{list_sprints_data, move_issue_to_sprint, resolve_sprint_name};
 pub use update::update_ticket_data;

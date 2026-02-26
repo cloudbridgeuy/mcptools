@@ -258,7 +258,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_create".to_string(),
-            description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, and assignee. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, and sprint assignment. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -285,6 +285,14 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     "assignee": {
                         "type": "string",
                         "description": "Assignee (email, display name, account ID, or \"me\" for current user)"
+                    },
+                    "sprint": {
+                        "type": "string",
+                        "description": "Sprint name to assign the issue to after creation (resolves name to ID automatically)"
+                    },
+                    "boardId": {
+                        "type": "number",
+                        "description": "Board ID for sprint operations (required when sprint is provided)"
                     }
                 },
                 "required": ["summary"]
@@ -306,7 +314,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_update".to_string(),
-            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, and Description (markdown). Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Description (markdown), and Sprint assignment. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -333,9 +341,35 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     "description": {
                         "type": "string",
                         "description": "New description for the ticket (supports markdown: headings, bold, italic, lists, code blocks, inline code, links)"
+                    },
+                    "sprint": {
+                        "type": "string",
+                        "description": "Sprint name to assign the issue to (resolves name to ID automatically)"
+                    },
+                    "boardId": {
+                        "type": "number",
+                        "description": "Board ID for sprint operations (required when sprint is provided)"
                     }
                 },
                 "required": ["ticketKey"]
+            }),
+        },
+        Tool {
+            name: "jira_sprint_list".to_string(),
+            description: "List sprints for a Jira board. Returns sprint metadata including ID, name, state, and dates. Use this to discover sprint IDs and names before assigning issues to sprints via jira_update or jira_create. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "boardId": {
+                        "type": "number",
+                        "description": "Jira board ID"
+                    },
+                    "state": {
+                        "type": "string",
+                        "description": "Comma-separated sprint states to filter (default: 'active,future'). Options: active, future, closed."
+                    }
+                },
+                "required": ["boardId"]
             }),
         },
         Tool {
@@ -756,6 +790,7 @@ pub async fn handle_tools_call(
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
         "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
+        "jira_sprint_list" => atlassian::handle_jira_sprint_list(params.arguments, global).await,
         "jira_attachment_list" => {
             atlassian::handle_jira_attachment_list(params.arguments, global).await
         }

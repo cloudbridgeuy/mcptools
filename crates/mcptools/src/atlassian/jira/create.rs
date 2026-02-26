@@ -5,7 +5,7 @@ use colored::Colorize;
 use mcptools_core::atlassian::jira::{
     markdown_to_adf, parse_assignee_identifier, AssigneeIdentifier, TicketOutput,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::atlassian::{create_jira_client, JiraConfig};
 use crate::prelude::*;
@@ -36,6 +36,14 @@ pub struct CreateOptions {
     #[arg(long)]
     pub assignee: Option<String>,
 
+    /// Sprint name to assign the ticket to after creation
+    #[arg(long)]
+    pub sprint: Option<String>,
+
+    /// Board ID for sprint operations
+    #[arg(long, env = "JIRA_BOARD_ID")]
+    pub board: Option<u64>,
+
     /// Output as JSON
     #[arg(long, global = true)]
     pub json: bool,
@@ -51,6 +59,12 @@ pub type CreateOutput = TicketOutput;
 /// - Building and sending create requests
 /// - Parsing the response
 pub async fn create_ticket_data(options: CreateOptions) -> Result<CreateOutput> {
+    if options.sprint.is_some() && options.board.is_none() {
+        return Err(eyre!(
+            "--board is required when using --sprint (or set JIRA_BOARD_ID)"
+        ));
+    }
+
     let config = JiraConfig::from_env()?;
     let client = create_jira_client(&config)?;
     let base_url = config.base_url.trim_end_matches('/');
@@ -161,7 +175,24 @@ pub async fn create_ticket_data(options: CreateOptions) -> Result<CreateOutput> 
         .map_err(|e| eyre!("Failed to parse create response: {}", e))?;
 
     // Fetch the full ticket details using the get_ticket_data function
-    super::get::get_ticket_data(create_response.key).await
+    let ticket = super::get::get_ticket_data(create_response.key).await?;
+
+    // Assign to sprint if requested (post-creation, graceful degradation)
+    if let Some(sprint_name) = &options.sprint {
+        let board_id = options.board.unwrap(); // safe: validated above
+        match super::sprint::resolve_sprint_name(board_id, sprint_name).await {
+            Ok(sprint_id) => {
+                if let Err(e) = super::sprint::move_issue_to_sprint(&ticket.key, sprint_id).await {
+                    std::eprintln!("Warning: ticket created but sprint assignment failed: {e}");
+                }
+            }
+            Err(e) => {
+                std::eprintln!("Warning: ticket created but sprint resolution failed: {e}");
+            }
+        }
+    }
+
+    Ok(ticket)
 }
 
 /// Look up assignee account ID from email, display name, account ID, or special "me" keyword

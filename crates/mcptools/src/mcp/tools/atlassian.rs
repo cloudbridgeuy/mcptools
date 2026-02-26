@@ -204,6 +204,63 @@ pub async fn handle_jira_get(
     })
 }
 
+/// Handle Jira sprint list command via MCP
+pub async fn handle_jira_sprint_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct JiraSprintListArgs {
+        #[serde(rename = "boardId")]
+        board_id: u64,
+        state: Option<String>,
+    }
+
+    let args: JiraSprintListArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling jira_sprint_list: boardId={}, state={:?}",
+            args.board_id, args.state
+        );
+    }
+
+    let sprints = crate::atlassian::jira::list_sprints_data(
+        args.board_id,
+        args.state.as_deref().unwrap_or("active,future"),
+    )
+    .await
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {e}"),
+        data: None,
+    })?;
+
+    let json_string = serde_json::to_string_pretty(&sprints).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
 /// Handle Jira update command via MCP
 pub async fn handle_jira_update(
     arguments: Option<serde_json::Value>,
@@ -219,6 +276,9 @@ pub async fn handle_jira_update(
         issue_type: Option<String>,
         assignee: Option<String>,
         description: Option<String>,
+        sprint: Option<String>,
+        #[serde(rename = "boardId")]
+        board_id: Option<u64>,
     }
 
     let args: JiraUpdateArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
@@ -230,13 +290,15 @@ pub async fn handle_jira_update(
 
     if global.verbose {
         eprintln!(
-            "Calling jira_update: ticketKey={}, status={:?}, priority={:?}, issueType={:?}, assignee={:?}, description={:?}",
+            "Calling jira_update: ticketKey={}, status={:?}, priority={:?}, issueType={:?}, assignee={:?}, description={:?}, sprint={:?}, boardId={:?}",
             args.ticket_key,
             args.status,
             args.priority,
             args.issue_type,
             args.assignee,
             args.description,
+            args.sprint,
+            args.board_id,
         );
     }
 
@@ -248,6 +310,8 @@ pub async fn handle_jira_update(
         issue_type: args.issue_type,
         assignee: args.assignee,
         description: args.description,
+        sprint: args.sprint,
+        board: args.board_id,
         json: true, // MCP always returns JSON
     };
 
@@ -293,6 +357,9 @@ pub async fn handle_jira_create(
         issue_type: Option<String>,
         priority: Option<String>,
         assignee: Option<String>,
+        sprint: Option<String>,
+        #[serde(rename = "boardId")]
+        board_id: Option<u64>,
     }
 
     let args: JiraCreateArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
@@ -308,13 +375,15 @@ pub async fn handle_jira_create(
             &d[..std::cmp::min(50, len)]
         });
         eprintln!(
-            "Calling jira_create: summary={}, description={:?}, project={:?}, issueType={:?}, priority={:?}, assignee={:?}",
+            "Calling jira_create: summary={}, description={:?}, project={:?}, issueType={:?}, priority={:?}, assignee={:?}, sprint={:?}, boardId={:?}",
             args.summary,
             desc_preview,
             args.project,
             args.issue_type,
             args.priority,
             args.assignee,
+            args.sprint,
+            args.board_id,
         );
     }
 
@@ -326,6 +395,8 @@ pub async fn handle_jira_create(
         issue_type: args.issue_type.unwrap_or_else(|| "Task".to_string()),
         priority: args.priority,
         assignee: args.assignee,
+        sprint: args.sprint,
+        board: args.board_id,
         json: true, // MCP always returns JSON
     };
 
