@@ -12,6 +12,7 @@ struct SectionBuilder {
     title: String,
     children: Vec<Section>,
     content_parts: Vec<String>,
+    char_count: usize,
     image_count: usize,
     first_page: usize,
     last_page: usize,
@@ -25,6 +26,7 @@ impl SectionBuilder {
             title,
             children: Vec::new(),
             content_parts: Vec::new(),
+            char_count: 0,
             image_count: 0,
             first_page: page,
             last_page: page,
@@ -32,6 +34,7 @@ impl SectionBuilder {
     }
 
     fn append_text(&mut self, text: &str, page: usize) {
+        self.char_count += text.chars().count();
         self.content_parts.push(text.to_string());
         self.update_page(page);
     }
@@ -45,7 +48,9 @@ impl SectionBuilder {
             parts.push(row.join(" | "));
         }
         if !parts.is_empty() {
-            self.content_parts.push(parts.join("\n"));
+            let table_text = parts.join("\n");
+            self.char_count += table_text.chars().count();
+            self.content_parts.push(table_text);
         }
         self.update_page(page);
     }
@@ -73,6 +78,7 @@ impl SectionBuilder {
             title: self.title,
             children: self.children,
             content_preview: preview,
+            char_count: self.char_count,
             image_count: self.image_count,
             page_range: (self.first_page, self.last_page),
         }
@@ -102,11 +108,15 @@ pub fn build_tree(blocks: &[ClassifiedBlock], metadata: DocumentMetadata) -> Doc
         .or_else(|| sections.first().map(|s| s.title.clone()))
         .unwrap_or_else(|| "Untitled".to_string());
 
+    let (total_chars, total_images) = sum_section_stats(&sections);
+
     DocumentTree {
         title,
         metadata,
         sections,
         index,
+        total_chars,
+        total_images,
     }
 }
 
@@ -235,6 +245,7 @@ fn build_fallback_sections(
                     title: format!("Page {}", page_num),
                     children: Vec::new(),
                     content_preview: String::new(),
+                    char_count: 0,
                     image_count: 0,
                     page_range: (page_num, page_num),
                 }
@@ -247,6 +258,7 @@ fn build_fallback_sections(
         .enumerate()
         .map(|(idx, (page, (texts, img_count)))| {
             let full_text = texts.join(" ");
+            let char_count = full_text.chars().count();
             let preview = content_preview(&full_text, 100);
             Section {
                 id: SectionId::new(1, idx),
@@ -254,11 +266,26 @@ fn build_fallback_sections(
                 title: format!("Page {}", page),
                 children: Vec::new(),
                 content_preview: preview,
+                char_count,
                 image_count: img_count,
                 page_range: (page, page),
             }
         })
         .collect()
+}
+
+/// Recursively sum char_count and image_count across all sections.
+fn sum_section_stats(sections: &[Section]) -> (usize, usize) {
+    let mut chars = 0;
+    let mut images = 0;
+    for s in sections {
+        chars += s.char_count;
+        images += s.image_count;
+        let (c, i) = sum_section_stats(&s.children);
+        chars += c;
+        images += i;
+    }
+    (chars, images)
 }
 
 /// Build a flat index of all sections with breadcrumb paths.
@@ -280,6 +307,7 @@ fn flatten_section(section: &Section, parent_path: &[String], entries: &mut Vec<
         level: section.level,
         title: section.title.clone(),
         path: path.clone(),
+        char_count: section.char_count,
         image_count: section.image_count,
     });
 
@@ -741,5 +769,88 @@ mod tests {
         assert_eq!(tree.sections[0].id.as_str(), "s-1-0");
         assert_eq!(tree.sections[0].children[0].id.as_str(), "s-2-0");
         assert_eq!(tree.sections[0].children[1].id.as_str(), "s-2-1");
+    }
+
+    // --- char_count tracking ---
+
+    #[test]
+    fn test_char_count_tracking() {
+        let blocks = vec![
+            ClassifiedBlock::Heading {
+                level: 1,
+                title: "Chapter".to_string(),
+                page: 1,
+            },
+            ClassifiedBlock::Paragraph {
+                text: "Hello world".to_string(), // 11 chars
+                page: 1,
+            },
+            ClassifiedBlock::Heading {
+                level: 2,
+                title: "Sub".to_string(),
+                page: 2,
+            },
+            ClassifiedBlock::Paragraph {
+                text: "Sub content here".to_string(), // 16 chars
+                page: 2,
+            },
+        ];
+
+        let tree = build_tree(&blocks, default_metadata());
+        let chapter = &tree.sections[0];
+        assert_eq!(chapter.char_count, 11);
+        assert_eq!(chapter.children[0].char_count, 16);
+
+        // Total should include all sections recursively.
+        assert_eq!(tree.total_chars, 27);
+    }
+
+    #[test]
+    fn test_total_images_tracking() {
+        let blocks = vec![
+            ClassifiedBlock::Heading {
+                level: 1,
+                title: "A".to_string(),
+                page: 1,
+            },
+            ClassifiedBlock::Image {
+                id: "img1".to_string(),
+                page: 1,
+            },
+            ClassifiedBlock::Heading {
+                level: 2,
+                title: "B".to_string(),
+                page: 2,
+            },
+            ClassifiedBlock::Image {
+                id: "img2".to_string(),
+                page: 2,
+            },
+            ClassifiedBlock::Image {
+                id: "img3".to_string(),
+                page: 2,
+            },
+        ];
+
+        let tree = build_tree(&blocks, default_metadata());
+        assert_eq!(tree.total_images, 3);
+    }
+
+    #[test]
+    fn test_char_count_in_index() {
+        let blocks = vec![
+            ClassifiedBlock::Heading {
+                level: 1,
+                title: "Chapter".to_string(),
+                page: 1,
+            },
+            ClassifiedBlock::Paragraph {
+                text: "Some text".to_string(), // 9 chars
+                page: 1,
+            },
+        ];
+
+        let tree = build_tree(&blocks, default_metadata());
+        assert_eq!(tree.index.entries[0].char_count, 9);
     }
 }

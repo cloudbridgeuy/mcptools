@@ -1867,6 +1867,7 @@ dependencies = [
  "mcptools_core",
  "pdf",
  "prettytable",
+ "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
  "rig-core",
@@ -2159,6 +2160,7 @@ name = "pdf"
 version = "0.1.0"
 dependencies = [
  "lopdf",
+ "rand 0.8.5",
  "regex",
  "serde",
  "thiserror 2.0.18",

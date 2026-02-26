@@ -33,14 +33,6 @@ pub struct CreateOptions {
     #[arg(long)]
     pub assignee: Option<String>,
 
-    /// Assigned guild
-    #[arg(long)]
-    pub assigned_guild: Option<String>,
-
-    /// Assigned pod
-    #[arg(long)]
-    pub assigned_pod: Option<String>,
-
     /// Output as JSON
     #[arg(long, global = true)]
     pub json: bool,
@@ -110,14 +102,6 @@ pub async fn create_ticket_data(options: CreateOptions) -> Result<CreateOutput> 
 
     if let Some(assignee_id) = assignee_account_id {
         fields["assignee"] = serde_json::json!({ "id": assignee_id });
-    }
-
-    if let Some(guild) = &options.assigned_guild {
-        fields["customfield_10527"] = serde_json::json!({ "value": guild });
-    }
-
-    if let Some(pod) = &options.assigned_pod {
-        fields["customfield_10528"] = serde_json::json!({ "value": pod });
     }
 
     // Send create request
@@ -418,22 +402,6 @@ pub async fn handler(options: CreateOptions) -> Result<()> {
             assignee_colored
         ]);
 
-        if let Some(guild) = &ticket.assigned_guild {
-            table.add_row(prettytable::row![
-                "Assigned Guild".bold().cyan(),
-                guild.bright_cyan().to_string()
-            ]);
-        }
-
-        if let Some(pod) = &ticket.assigned_pod {
-            let pod_colored = if pod == "Unassigned" {
-                pod.bright_black().to_string()
-            } else {
-                pod.bright_cyan().to_string()
-            };
-            table.add_row(prettytable::row!["Assigned Pod".bold().cyan(), pod_colored]);
-        }
-
         if let Some(created) = &ticket.created {
             table.add_row(prettytable::row![
                 "Created".bold().cyan(),
@@ -476,22 +444,6 @@ pub async fn handler(options: CreateOptions) -> Result<()> {
                 "Components".bold().cyan(),
                 ticket.components.join(", ").bright_blue()
             );
-        }
-
-        if let Some(epic_link) = &ticket.epic_link {
-            std::println!("{}: {}", "Epic".bold().cyan(), epic_link.bright_magenta());
-        }
-
-        if let Some(story_points) = ticket.story_points {
-            std::println!(
-                "{}: {}",
-                "Story Points".bold().cyan(),
-                story_points.to_string().bright_yellow()
-            );
-        }
-
-        if let Some(sprint) = &ticket.sprint {
-            std::println!("{}: {}", "Sprint".bold().cyan(), sprint.bright_green());
         }
     }
 

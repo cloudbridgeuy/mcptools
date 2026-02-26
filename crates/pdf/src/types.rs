@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -108,6 +109,8 @@ pub struct DocumentTree {
     pub metadata: DocumentMetadata,
     pub sections: Vec<Section>,
     pub index: SectionIndex,
+    pub total_chars: usize,
+    pub total_images: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -117,6 +120,7 @@ pub struct Section {
     pub title: String,
     pub children: Vec<Section>,
     pub content_preview: String,
+    pub char_count: usize,
     pub image_count: usize,
     pub page_range: (usize, usize),
 }
@@ -132,6 +136,7 @@ pub struct IndexEntry {
     pub level: HeadingLevel,
     pub title: String,
     pub path: Vec<String>,
+    pub char_count: usize,
     pub image_count: usize,
 }
 
@@ -206,6 +211,48 @@ pub enum ClassifiedBlock {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PeekPosition {
+    Beginning,
+    Middle,
+    Ending,
+    Random,
+}
+
+impl fmt::Display for PeekPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PeekPosition::Beginning => write!(f, "beginning"),
+            PeekPosition::Middle => write!(f, "middle"),
+            PeekPosition::Ending => write!(f, "ending"),
+            PeekPosition::Random => write!(f, "random"),
+        }
+    }
+}
+
+impl FromStr for PeekPosition {
+    type Err = InvalidPeekPosition;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "beginning" => Ok(PeekPosition::Beginning),
+            "middle" => Ok(PeekPosition::Middle),
+            "ending" => Ok(PeekPosition::Ending),
+            "random" => Ok(PeekPosition::Random),
+            _ => Err(InvalidPeekPosition),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeekContent {
+    pub id: Option<SectionId>,
+    pub title: String,
+    pub snippet: String,
+    pub position: PeekPosition,
+    pub total_chars: usize,
+}
+
 #[derive(Debug, Error)]
 #[error("Heading level must be between 1 and 6")]
 pub struct InvalidHeadingLevel;
@@ -213,6 +260,10 @@ pub struct InvalidHeadingLevel;
 #[derive(Debug, Error)]
 #[error("Invalid section ID format (expected 's-{{depth}}-{{index}}')")]
 pub struct InvalidSectionId;
+
+#[derive(Debug, PartialEq, Eq, Error)]
+#[error("Invalid peek position (expected 'beginning', 'middle', 'ending', or 'random')")]
+pub struct InvalidPeekPosition;
 
 #[cfg(test)]
 mod tests {
@@ -259,5 +310,44 @@ mod tests {
     fn test_image_format_display() {
         assert_eq!(format!("{}", ImageFormat::Jpeg), "jpeg");
         assert_eq!(format!("{}", ImageFormat::Unknown), "unknown");
+    }
+
+    #[test]
+    fn test_peek_position_valid() {
+        assert_eq!(
+            "beginning".parse::<PeekPosition>(),
+            Ok(PeekPosition::Beginning)
+        );
+        assert_eq!("middle".parse::<PeekPosition>(), Ok(PeekPosition::Middle));
+        assert_eq!("ending".parse::<PeekPosition>(), Ok(PeekPosition::Ending));
+        assert_eq!("random".parse::<PeekPosition>(), Ok(PeekPosition::Random));
+    }
+
+    #[test]
+    fn test_peek_position_case_insensitive() {
+        assert_eq!(
+            "BEGINNING".parse::<PeekPosition>(),
+            Ok(PeekPosition::Beginning)
+        );
+        assert_eq!("Middle".parse::<PeekPosition>(), Ok(PeekPosition::Middle));
+    }
+
+    #[test]
+    fn test_peek_position_invalid() {
+        assert!("invalid".parse::<PeekPosition>().is_err());
+        assert!("".parse::<PeekPosition>().is_err());
+    }
+
+    #[test]
+    fn test_peek_position_display_roundtrip() {
+        for pos in &[
+            PeekPosition::Beginning,
+            PeekPosition::Middle,
+            PeekPosition::Ending,
+            PeekPosition::Random,
+        ] {
+            let s = format!("{}", pos);
+            assert_eq!(s.parse::<PeekPosition>().unwrap(), *pos);
+        }
     }
 }

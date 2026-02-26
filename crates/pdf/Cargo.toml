@@ -11,3 +11,4 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
 unicode-normalization = { workspace = true }
+rand = { workspace = true }

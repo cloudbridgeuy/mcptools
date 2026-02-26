@@ -76,12 +76,6 @@ pub struct SearchOutput {
     pub next_page_token: Option<String>,
 }
 
-/// Jira custom field option (for select fields)
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct JiraCustomFieldOption {
-    pub value: String,
-}
-
 /// Jira priority field
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct JiraPriority {
@@ -98,12 +92,6 @@ pub struct JiraIssueType {
 /// Jira component field
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct JiraComponent {
-    pub name: String,
-}
-
-/// Jira sprint field
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct JiraSprint {
     pub name: String,
 }
 
@@ -130,16 +118,6 @@ pub struct JiraExtendedFields {
     pub labels: Vec<String>,
     #[serde(default)]
     pub components: Vec<JiraComponent>,
-    #[serde(default)]
-    pub customfield_10009: Option<String>, // Epic Link (common custom field ID)
-    #[serde(default)]
-    pub customfield_10014: Option<f64>, // Story Points (common custom field ID)
-    #[serde(default)]
-    pub customfield_10010: Option<Vec<JiraSprint>>, // Sprint (common custom field ID)
-    #[serde(default)]
-    pub customfield_10527: Option<JiraCustomFieldOption>, // Assigned Guild
-    #[serde(default)]
-    pub customfield_10528: Option<JiraCustomFieldOption>, // Assigned Pod
 }
 
 /// Extended issue response for detailed read
@@ -176,11 +154,6 @@ pub struct TicketOutput {
     pub due_date: Option<String>,
     pub labels: Vec<String>,
     pub components: Vec<String>,
-    pub epic_link: Option<String>,
-    pub story_points: Option<f64>,
-    pub sprint: Option<String>,
-    pub assigned_guild: Option<String>,
-    pub assigned_pod: Option<String>,
     pub comments: Vec<JiraComment>,
 }
 
@@ -396,14 +369,6 @@ pub fn transform_ticket_response(
     issue: JiraExtendedIssueResponse,
     comments: Vec<JiraComment>,
 ) -> TicketOutput {
-    // Extract sprint from custom field (first element of array)
-    let sprint = issue
-        .fields
-        .customfield_10010
-        .as_ref()
-        .and_then(|sprints| sprints.first())
-        .map(|s| s.name.clone());
-
     TicketOutput {
         key: issue.key,
         summary: issue.fields.summary,
@@ -431,19 +396,6 @@ pub fn transform_ticket_response(
             .into_iter()
             .map(|c| c.name)
             .collect(),
-        epic_link: issue.fields.customfield_10009,
-        story_points: issue.fields.customfield_10014,
-        sprint,
-        assigned_guild: issue
-            .fields
-            .customfield_10527
-            .as_ref()
-            .map(|g| g.value.clone()),
-        assigned_pod: issue
-            .fields
-            .customfield_10528
-            .as_ref()
-            .map(|p| p.value.clone()),
         comments,
     }
 }
@@ -477,12 +429,6 @@ pub struct JiraUser {
 /// User search response from Jira API - the API returns a bare array
 /// See: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-user-search/#api-rest-api-3-users-search-get
 pub type JiraUserSearchResponse = Vec<JiraUser>;
-
-/// Update request payload for Jira API
-#[derive(Debug, Serialize, Clone)]
-pub struct JiraUpdateRequest {
-    pub fields: serde_json::Value,
-}
 
 /// Field update result (success or error)
 #[derive(Debug, Serialize, Clone, PartialEq)]
@@ -559,22 +505,16 @@ pub fn find_transition_by_status(
 /// Build update payload from field values
 ///
 /// # Arguments
-/// * `status` - Optional status name
 /// * `priority` - Optional priority name
 /// * `issue_type` - Optional issue type name
 /// * `assignee_account_id` - Optional assignee account ID
-/// * `assigned_guild` - Optional assigned guild value
-/// * `assigned_pod` - Optional assigned pod value
 ///
 /// # Returns
 /// * `serde_json::Value` - The fields object for the update request
 pub fn build_update_payload(
-    status: Option<&str>,
     priority: Option<&str>,
     issue_type: Option<&str>,
     assignee_account_id: Option<&str>,
-    assigned_guild: Option<&str>,
-    assigned_pod: Option<&str>,
 ) -> serde_json::Value {
     let mut fields = serde_json::json!({});
 
@@ -590,140 +530,7 @@ pub fn build_update_payload(
         fields["assignee"] = serde_json::json!({ "id": account_id });
     }
 
-    if let Some(guild) = assigned_guild {
-        fields["customfield_10527"] = serde_json::json!({ "value": guild });
-    }
-
-    if let Some(pod) = assigned_pod {
-        fields["customfield_10528"] = serde_json::json!({ "value": pod });
-    }
-
-    // Note: status is handled separately via transitions API
-    let _ = status; // Prevent unused warning; status is not included in the payload
-
     fields
-}
-
-/// Create meta response from Jira API
-#[derive(Debug, Deserialize, Clone)]
-pub struct JiraCreateMeta {
-    pub projects: Vec<JiraMetaProject>,
-}
-
-/// Project metadata from create meta API
-#[derive(Debug, Deserialize, Clone)]
-pub struct JiraMetaProject {
-    pub key: String,
-    #[serde(rename = "issuetypes")]
-    pub issue_types: Vec<JiraMetaIssueType>,
-}
-
-/// Issue type metadata from create meta API
-#[derive(Debug, Deserialize, Clone)]
-pub struct JiraMetaIssueType {
-    pub name: String,
-    pub fields: serde_json::Value, // Using Value to avoid needing all possible fields
-}
-
-/// Field metadata with allowed values
-#[derive(Debug, Deserialize, Clone)]
-pub struct JiraFieldWithOptions {
-    pub name: String,
-    #[serde(default)]
-    pub required: bool,
-    #[serde(rename = "allowedValues", default)]
-    pub allowed_values: Option<Vec<JiraFieldAllowedValue>>,
-}
-
-/// Allowed value for a field
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct JiraFieldAllowedValue {
-    pub id: String,
-    pub value: String,
-    #[serde(default)]
-    pub disabled: bool,
-}
-
-/// Output structure for fields command
-#[derive(Debug, Serialize, Clone, PartialEq)]
-pub struct FieldInfo {
-    pub field_id: String,
-    pub field_name: String,
-    pub allowed_values: Vec<String>,
-}
-
-/// Output structure for fields command
-#[derive(Debug, Serialize, Clone, PartialEq)]
-pub struct FieldsOutput {
-    pub fields: Vec<FieldInfo>,
-}
-
-/// Extract field options from create meta response
-///
-/// # Arguments
-/// * `meta` - The create meta response from Jira
-/// * `field_ids` - List of field IDs to extract (e.g., ["customfield_10527", "customfield_10528"])
-///
-/// # Returns
-/// * `FieldsOutput` - Extracted fields with their allowed values
-pub fn extract_field_options(
-    meta: JiraCreateMeta,
-    field_ids: &[&str],
-) -> Result<FieldsOutput, String> {
-    let mut fields = Vec::new();
-
-    // Get the first project's first issue type fields (they should be similar across types)
-    let project = meta
-        .projects
-        .first()
-        .ok_or_else(|| "No projects found in metadata".to_string())?;
-
-    let issue_type = project
-        .issue_types
-        .first()
-        .ok_or_else(|| "No issue types found in project".to_string())?;
-
-    let fields_obj = issue_type
-        .fields
-        .as_object()
-        .ok_or_else(|| "Fields is not an object".to_string())?;
-
-    // Map field IDs to field names for display
-    let field_names = std::collections::HashMap::from([
-        ("customfield_10527", "Assigned Guild"),
-        ("customfield_10528", "Assigned Pod"),
-    ]);
-
-    for field_id in field_ids {
-        if let Some(field_data) = fields_obj.get(*field_id) {
-            if let Ok(field_info) =
-                serde_json::from_value::<JiraFieldWithOptions>(field_data.clone())
-            {
-                // Extract allowed values, filtering out disabled ones and sorting
-                let mut allowed_values: Vec<String> = field_info
-                    .allowed_values
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|v| !v.disabled)
-                    .map(|v| v.value)
-                    .collect();
-
-                allowed_values.sort();
-
-                fields.push(FieldInfo {
-                    field_id: field_id.to_string(),
-                    field_name: field_names.get(field_id).unwrap_or(&"").to_string(),
-                    allowed_values,
-                });
-            }
-        }
-    }
-
-    if fields.is_empty() {
-        return Err("No fields found with allowed values".to_string());
-    }
-
-    Ok(FieldsOutput { fields })
 }
 
 #[cfg(test)]
@@ -1006,7 +813,6 @@ mod tests {
         summary: &str,
         status: &str,
         priority: Option<String>,
-        sprint: Option<Vec<JiraSprint>>,
     ) -> JiraExtendedIssueResponse {
         JiraExtendedIssueResponse {
             key: key.to_string(),
@@ -1036,15 +842,6 @@ mod tests {
                         name: "API".to_string(),
                     },
                 ],
-                customfield_10009: Some("EPIC-123".to_string()),
-                customfield_10014: Some(5.0),
-                customfield_10010: sprint,
-                customfield_10527: Some(JiraCustomFieldOption {
-                    value: "Backend Guild".to_string(),
-                }),
-                customfield_10528: Some(JiraCustomFieldOption {
-                    value: "Platform Pod".to_string(),
-                }),
             },
         }
     }
@@ -1057,9 +854,6 @@ mod tests {
             "Implement authentication",
             "In Progress",
             Some("High".to_string()),
-            Some(vec![JiraSprint {
-                name: "Sprint 42".to_string(),
-            }]),
         );
 
         let comments = vec![JiraComment {
@@ -1088,11 +882,6 @@ mod tests {
         assert_eq!(output.due_date, Some("2024-01-15".to_string()));
         assert_eq!(output.labels, vec!["backend", "api"]);
         assert_eq!(output.components, vec!["Auth", "API"]);
-        assert_eq!(output.epic_link, Some("EPIC-123".to_string()));
-        assert_eq!(output.story_points, Some(5.0));
-        assert_eq!(output.sprint, Some("Sprint 42".to_string()));
-        assert_eq!(output.assigned_guild, Some("Backend Guild".to_string()));
-        assert_eq!(output.assigned_pod, Some("Platform Pod".to_string()));
         assert_eq!(output.comments.len(), 1);
     }
 
@@ -1115,11 +904,6 @@ mod tests {
                 duedate: None,
                 labels: vec![],
                 components: vec![],
-                customfield_10009: None,
-                customfield_10014: None,
-                customfield_10010: None,
-                customfield_10527: None,
-                customfield_10528: None,
             },
         };
 
@@ -1139,57 +923,13 @@ mod tests {
         assert_eq!(output.due_date, None);
         assert!(output.labels.is_empty());
         assert!(output.components.is_empty());
-        assert_eq!(output.epic_link, None);
-        assert_eq!(output.story_points, None);
-        assert_eq!(output.sprint, None);
-        assert_eq!(output.assigned_guild, None);
-        assert_eq!(output.assigned_pod, None);
         assert!(output.comments.is_empty());
-    }
-
-    #[test]
-    fn test_transform_ticket_response_with_sprint() {
-        // Arrange: Create a ticket with sprint
-        let issue = create_extended_issue_response(
-            "PROJ-100",
-            "Sprint test",
-            "Done",
-            None,
-            Some(vec![
-                JiraSprint {
-                    name: "Sprint 1".to_string(),
-                },
-                JiraSprint {
-                    name: "Sprint 2".to_string(),
-                },
-            ]),
-        );
-
-        // Act: Transform the ticket
-        let output = transform_ticket_response(issue, vec![]);
-
-        // Assert: Verify first sprint is selected
-        assert_eq!(output.sprint, Some("Sprint 1".to_string()));
-    }
-
-    #[test]
-    fn test_transform_ticket_response_without_sprint() {
-        // Arrange: Create a ticket with empty sprint array
-        let issue =
-            create_extended_issue_response("PROJ-101", "No sprint", "To Do", None, Some(vec![]));
-
-        // Act: Transform the ticket
-        let output = transform_ticket_response(issue, vec![]);
-
-        // Assert: Verify sprint is None
-        assert_eq!(output.sprint, None);
     }
 
     #[test]
     fn test_transform_ticket_response_with_comments() {
         // Arrange: Create a ticket with multiple comments
-        let issue =
-            create_extended_issue_response("PROJ-200", "Comment test", "In Review", None, None);
+        let issue = create_extended_issue_response("PROJ-200", "Comment test", "In Review", None);
 
         let comments = vec![
             JiraComment {
@@ -1242,11 +982,6 @@ mod tests {
                 duedate: None,
                 labels: vec![],
                 components: vec![],
-                customfield_10009: None,
-                customfield_10014: None,
-                customfield_10010: None,
-                customfield_10527: None,
-                customfield_10528: None,
             },
         };
 
@@ -1255,30 +990,6 @@ mod tests {
 
         // Assert: Verify empty priority is filtered out
         assert_eq!(output.priority, None);
-    }
-
-    #[test]
-    fn test_transform_ticket_response_custom_fields() {
-        // Arrange: Create a ticket with all custom fields
-        let issue = create_extended_issue_response(
-            "PROJ-400",
-            "Custom fields test",
-            "In Progress",
-            None,
-            Some(vec![JiraSprint {
-                name: "Sprint 10".to_string(),
-            }]),
-        );
-
-        // Act: Transform the ticket
-        let output = transform_ticket_response(issue, vec![]);
-
-        // Assert: Verify custom fields are extracted
-        assert_eq!(output.epic_link, Some("EPIC-123".to_string()));
-        assert_eq!(output.story_points, Some(5.0));
-        assert_eq!(output.sprint, Some("Sprint 10".to_string()));
-        assert_eq!(output.assigned_guild, Some("Backend Guild".to_string()));
-        assert_eq!(output.assigned_pod, Some("Platform Pod".to_string()));
     }
 
     #[test]
@@ -1602,51 +1313,32 @@ mod tests {
     fn test_build_update_payload_all_fields() {
         // Arrange: All fields provided
         let payload = build_update_payload(
-            Some("Done"),
             Some("High"),
             Some("Story"),
             Some("5b10a2844c20165700edge21g"),
-            Some("DevOps"),
-            Some("Platform"),
         );
 
-        // Assert: Verify all fields are in payload (note: status is excluded by design)
+        // Assert: Verify all fields are in payload
         assert_eq!(payload["priority"]["name"], "High");
         assert_eq!(payload["issuetype"]["name"], "Story");
         assert_eq!(payload["assignee"]["id"], "5b10a2844c20165700edge21g");
-        assert_eq!(payload["customfield_10527"]["value"], "DevOps");
-        assert_eq!(payload["customfield_10528"]["value"], "Platform");
     }
 
     #[test]
     fn test_build_update_payload_single_field() {
         // Arrange: Only priority provided
-        let payload = build_update_payload(None, Some("Low"), None, None, None, None);
+        let payload = build_update_payload(Some("Low"), None, None);
 
         // Assert: Verify only priority is in payload
         assert_eq!(payload["priority"]["name"], "Low");
         assert!(payload.get("issuetype").is_none());
-        assert!(payload.get("assignee").is_none());
-        assert!(payload.get("customfield_10527").is_none());
-        assert!(payload.get("customfield_10528").is_none());
-    }
-
-    #[test]
-    fn test_build_update_payload_custom_fields_only() {
-        // Arrange: Only custom fields provided
-        let payload = build_update_payload(None, None, None, None, Some("Backend"), Some("Pod-A"));
-
-        // Assert: Verify custom fields are in payload
-        assert_eq!(payload["customfield_10527"]["value"], "Backend");
-        assert_eq!(payload["customfield_10528"]["value"], "Pod-A");
-        assert!(payload.get("priority").is_none());
         assert!(payload.get("assignee").is_none());
     }
 
     #[test]
     fn test_build_update_payload_empty() {
         // Arrange: No fields provided
-        let payload = build_update_payload(None, None, None, None, None, None);
+        let payload = build_update_payload(None, None, None);
 
         // Assert: Verify payload is empty object
         assert_eq!(payload, serde_json::json!({}));
@@ -1655,176 +1347,9 @@ mod tests {
     #[test]
     fn test_build_update_payload_with_assignee() {
         // Arrange: Assignee account ID provided
-        let payload = build_update_payload(None, None, None, Some("account123"), None, None);
+        let payload = build_update_payload(None, None, Some("account123"));
 
         // Assert: Verify assignee is in payload with id field
         assert_eq!(payload["assignee"]["id"], "account123");
-    }
-
-    // Tests for extract_field_options
-    #[test]
-    fn test_extract_field_options_both_fields() {
-        // Arrange: Create create meta response with both custom fields
-        let meta = JiraCreateMeta {
-            projects: vec![JiraMetaProject {
-                key: "PROD".to_string(),
-                issue_types: vec![JiraMetaIssueType {
-                    name: "Story".to_string(),
-                    fields: serde_json::json!({
-                        "customfield_10527": {
-                            "name": "Assigned Guild",
-                            "required": false,
-                            "allowedValues": [
-                                {"id": "1", "value": "DevOps", "disabled": false},
-                                {"id": "2", "value": "Backend", "disabled": false},
-                                {"id": "3", "value": "Frontend", "disabled": false},
-                            ]
-                        },
-                        "customfield_10528": {
-                            "name": "Assigned Pod",
-                            "required": false,
-                            "allowedValues": [
-                                {"id": "4", "value": "Pod-A", "disabled": false},
-                                {"id": "5", "value": "Pod-B", "disabled": false},
-                                {"id": "6", "value": "Unassigned", "disabled": false},
-                            ]
-                        }
-                    }),
-                }],
-            }],
-        };
-
-        // Act: Extract field options
-        let result = extract_field_options(meta, &["customfield_10527", "customfield_10528"]);
-
-        // Assert: Verify both fields are extracted and sorted
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert_eq!(output.fields.len(), 2);
-
-        // Check Assigned Guild
-        assert_eq!(output.fields[0].field_id, "customfield_10527");
-        assert_eq!(output.fields[0].field_name, "Assigned Guild");
-        assert_eq!(
-            output.fields[0].allowed_values,
-            vec!["Backend", "DevOps", "Frontend"]
-        );
-
-        // Check Assigned Pod
-        assert_eq!(output.fields[1].field_id, "customfield_10528");
-        assert_eq!(output.fields[1].field_name, "Assigned Pod");
-        assert_eq!(
-            output.fields[1].allowed_values,
-            vec!["Pod-A", "Pod-B", "Unassigned"]
-        );
-    }
-
-    #[test]
-    fn test_extract_field_options_single_field() {
-        // Arrange: Create create meta response with only one custom field requested
-        let meta = JiraCreateMeta {
-            projects: vec![JiraMetaProject {
-                key: "PROD".to_string(),
-                issue_types: vec![JiraMetaIssueType {
-                    name: "Story".to_string(),
-                    fields: serde_json::json!({
-                        "customfield_10527": {
-                            "name": "Assigned Guild",
-                            "required": false,
-                            "allowedValues": [
-                                {"id": "1", "value": "DevOps", "disabled": false},
-                                {"id": "2", "value": "Backend", "disabled": false},
-                            ]
-                        },
-                        "customfield_10528": {
-                            "name": "Assigned Pod",
-                            "required": false,
-                            "allowedValues": [
-                                {"id": "3", "value": "Pod-A", "disabled": false},
-                            ]
-                        }
-                    }),
-                }],
-            }],
-        };
-
-        // Act: Extract only guild field
-        let result = extract_field_options(meta, &["customfield_10527"]);
-
-        // Assert: Verify only one field is extracted
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert_eq!(output.fields.len(), 1);
-        assert_eq!(output.fields[0].field_name, "Assigned Guild");
-        assert_eq!(output.fields[0].allowed_values, vec!["Backend", "DevOps"]);
-    }
-
-    #[test]
-    fn test_extract_field_options_filters_disabled() {
-        // Arrange: Create create meta response with disabled values
-        let meta = JiraCreateMeta {
-            projects: vec![JiraMetaProject {
-                key: "PROD".to_string(),
-                issue_types: vec![JiraMetaIssueType {
-                    name: "Story".to_string(),
-                    fields: serde_json::json!({
-                        "customfield_10527": {
-                            "name": "Assigned Guild",
-                            "required": false,
-                            "allowedValues": [
-                                {"id": "1", "value": "DevOps", "disabled": false},
-                                {"id": "2", "value": "OldTeam", "disabled": true},
-                                {"id": "3", "value": "Backend", "disabled": false},
-                            ]
-                        }
-                    }),
-                }],
-            }],
-        };
-
-        // Act: Extract field options
-        let result = extract_field_options(meta, &["customfield_10527"]);
-
-        // Assert: Verify disabled values are filtered out
-        assert!(result.is_ok());
-        let output = result.unwrap();
-        assert_eq!(output.fields[0].allowed_values, vec!["Backend", "DevOps"]);
-        assert!(!output.fields[0]
-            .allowed_values
-            .contains(&"OldTeam".to_string()));
-    }
-
-    #[test]
-    fn test_extract_field_options_no_projects() {
-        // Arrange: Create empty meta response
-        let meta = JiraCreateMeta { projects: vec![] };
-
-        // Act: Extract field options
-        let result = extract_field_options(meta, &["customfield_10527"]);
-
-        // Assert: Verify error is returned
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "No projects found in metadata");
-    }
-
-    #[test]
-    fn test_extract_field_options_field_not_found() {
-        // Arrange: Create create meta response without requested field
-        let meta = JiraCreateMeta {
-            projects: vec![JiraMetaProject {
-                key: "PROD".to_string(),
-                issue_types: vec![JiraMetaIssueType {
-                    name: "Story".to_string(),
-                    fields: serde_json::json!({}),
-                }],
-            }],
-        };
-
-        // Act: Extract non-existent field
-        let result = extract_field_options(meta, &["customfield_99999"]);
-
-        // Assert: Verify error is returned
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "No fields found with allowed values");
     }
 }

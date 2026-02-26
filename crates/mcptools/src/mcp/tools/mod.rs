@@ -258,7 +258,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_create".to_string(),
-            description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, assigned guild, and assigned pod. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, and assignee. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -285,14 +285,6 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     "assignee": {
                         "type": "string",
                         "description": "Assignee (email, display name, account ID, or \"me\" for current user)"
-                    },
-                    "assignedGuild": {
-                        "type": "string",
-                        "description": "Assigned guild"
-                    },
-                    "assignedPod": {
-                        "type": "string",
-                        "description": "Assigned pod"
                     }
                 },
                 "required": ["summary"]
@@ -314,7 +306,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_update".to_string(),
-            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Assigned Guild, and Assigned Pod. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, and Assignee. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -337,35 +329,9 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     "assignee": {
                         "type": "string",
                         "description": "New assignee (email, display name, account ID, or \"me\" for current user)"
-                    },
-                    "assignedGuild": {
-                        "type": "string",
-                        "description": "New assigned guild"
-                    },
-                    "assignedPod": {
-                        "type": "string",
-                        "description": "New assigned pod"
                     }
                 },
                 "required": ["ticketKey"]
-            }),
-        },
-        Tool {
-            name: "jira_fields".to_string(),
-            description: "List available values for Jira custom fields (assigned-guild and assigned-pod). Returns possible field values for a given project. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "project": {
-                        "type": "string",
-                        "description": "Project key (default: PROD)"
-                    },
-                    "field": {
-                        "type": "string",
-                        "description": "Specific field to display (assigned-guild or assigned-pod), shows all by default"
-                    }
-                },
-                "required": []
             }),
         },
         Tool {
@@ -603,7 +569,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "pdf_read".to_string(),
-            description: "Read a specific section of a PDF document as Markdown. Requires a section ID from pdf_toc. Returns the section title, rendered Markdown text, and image references.".to_string(),
+            description: "Read a section of a PDF document as Markdown, or the entire document if no section specified. Returns the section title, rendered Markdown text, and image references.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -613,15 +579,60 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     },
                     "sectionId": {
                         "type": "string",
-                        "description": "Section ID from pdf_toc (e.g., 's-1-0')"
+                        "description": "Section ID from pdf_toc (e.g., 's-1-0'). Omit for whole document."
                     }
                 },
-                "required": ["path", "sectionId"]
+                "required": ["path"]
+            }),
+        },
+        Tool {
+            name: "pdf_peek".to_string(),
+            description: "Sample a text snippet from a PDF section at a given position (beginning, middle, ending, random) without reading the full content. Returns the snippet with total character count so you know how much content remains. Defaults to the whole document if no section specified.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the PDF file"
+                    },
+                    "sectionId": {
+                        "type": "string",
+                        "description": "Section ID from pdf_toc (e.g., 's-1-0'). Omit for whole document."
+                    },
+                    "position": {
+                        "type": "string",
+                        "enum": ["beginning", "middle", "ending", "random"],
+                        "description": "Where to sample from (default: beginning)"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum characters to return (default: 500)"
+                    }
+                },
+                "required": ["path"]
+            }),
+        },
+        Tool {
+            name: "pdf_images".to_string(),
+            description: "List all images in a PDF section or the whole document. Returns image IDs, formats, and alt text. Use with pdf_image to extract specific images.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path to the PDF file"
+                    },
+                    "sectionId": {
+                        "type": "string",
+                        "description": "Section ID from pdf_toc. Omit for all images."
+                    }
+                },
+                "required": ["path"]
             }),
         },
         Tool {
             name: "pdf_image".to_string(),
-            description: "Extract a specific image from a PDF document. Returns the image as base64-encoded data with format information.".to_string(),
+            description: "Extract a specific image from a PDF document by ID, or pick a random image. Returns the image as base64-encoded data with format information. Optionally scope to a section.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -631,10 +642,18 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     },
                     "imageId": {
                         "type": "string",
-                        "description": "Image ID (XObject name from the PDF)"
+                        "description": "Image ID (XObject name from the PDF). Required unless random is true."
+                    },
+                    "sectionId": {
+                        "type": "string",
+                        "description": "Section ID to scope image selection (used with random)"
+                    },
+                    "random": {
+                        "type": "boolean",
+                        "description": "Pick a random image. Cannot be used with imageId."
                     }
                 },
-                "required": ["path", "imageId"]
+                "required": ["path"]
             }),
         },
         Tool {
@@ -678,7 +697,6 @@ pub async fn handle_tools_call(
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
         "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
-        "jira_fields" => atlassian::handle_jira_fields(params.arguments, global).await,
         "jira_query_list" => atlassian::handle_jira_query_list(params.arguments, global).await,
         "jira_query_save" => atlassian::handle_jira_query_save(params.arguments, global).await,
         "jira_query_delete" => atlassian::handle_jira_query_delete(params.arguments, global).await,
@@ -705,6 +723,8 @@ pub async fn handle_tools_call(
         }
         "pdf_toc" => pdf::handle_pdf_toc(params.arguments, global).await,
         "pdf_read" => pdf::handle_pdf_read(params.arguments, global).await,
+        "pdf_peek" => pdf::handle_pdf_peek(params.arguments, global).await,
+        "pdf_images" => pdf::handle_pdf_images(params.arguments, global).await,
         "pdf_image" => pdf::handle_pdf_image(params.arguments, global).await,
         "pdf_info" => pdf::handle_pdf_info(params.arguments, global).await,
         _ => Err(JsonRpcError {

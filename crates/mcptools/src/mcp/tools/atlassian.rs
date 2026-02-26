@@ -218,10 +218,6 @@ pub async fn handle_jira_update(
         #[serde(rename = "issueType")]
         issue_type: Option<String>,
         assignee: Option<String>,
-        #[serde(rename = "assignedGuild")]
-        assigned_guild: Option<String>,
-        #[serde(rename = "assignedPod")]
-        assigned_pod: Option<String>,
     }
 
     let args: JiraUpdateArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
@@ -233,14 +229,12 @@ pub async fn handle_jira_update(
 
     if global.verbose {
         eprintln!(
-            "Calling jira_update: ticketKey={}, status={:?}, priority={:?}, issueType={:?}, assignee={:?}, assignedGuild={:?}, assignedPod={:?}",
+            "Calling jira_update: ticketKey={}, status={:?}, priority={:?}, issueType={:?}, assignee={:?}",
             args.ticket_key,
             args.status,
             args.priority,
             args.issue_type,
             args.assignee,
-            args.assigned_guild,
-            args.assigned_pod
         );
     }
 
@@ -251,8 +245,6 @@ pub async fn handle_jira_update(
         priority: args.priority,
         issue_type: args.issue_type,
         assignee: args.assignee,
-        assigned_guild: args.assigned_guild,
-        assigned_pod: args.assigned_pod,
         json: true, // MCP always returns JSON
     };
 
@@ -284,66 +276,6 @@ pub async fn handle_jira_update(
     })
 }
 
-/// Handle Jira fields command via MCP
-pub async fn handle_jira_fields(
-    arguments: Option<serde_json::Value>,
-    global: &crate::Global,
-) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct JiraFieldsArgs {
-        project: Option<String>,
-        field: Option<String>,
-    }
-
-    let args: JiraFieldsArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
-        .map_err(|e| JsonRpcError {
-            code: -32602,
-            message: format!("Invalid arguments: {e}"),
-            data: None,
-        })?;
-
-    if global.verbose {
-        eprintln!(
-            "Calling jira_fields: project={:?}, field={:?}",
-            args.project, args.field
-        );
-    }
-
-    // Build FieldsOptions from MCP arguments
-    let fields_options = crate::atlassian::jira::fields::FieldsOptions {
-        project: args.project.unwrap_or_else(|| "PROD".to_string()),
-        field: args.field,
-        json: true, // MCP always returns JSON
-    };
-
-    // Call the Jira module's data function
-    let fields_data = crate::atlassian::jira::get_fields_data(fields_options)
-        .await
-        .map_err(|e| JsonRpcError {
-            code: -32603,
-            message: format!("Tool execution error: {e}"),
-            data: None,
-        })?;
-
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&fields_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
-}
-
 /// Handle Jira create command via MCP
 pub async fn handle_jira_create(
     arguments: Option<serde_json::Value>,
@@ -358,10 +290,6 @@ pub async fn handle_jira_create(
         issue_type: Option<String>,
         priority: Option<String>,
         assignee: Option<String>,
-        #[serde(rename = "assignedGuild")]
-        assigned_guild: Option<String>,
-        #[serde(rename = "assignedPod")]
-        assigned_pod: Option<String>,
     }
 
     let args: JiraCreateArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
@@ -377,15 +305,13 @@ pub async fn handle_jira_create(
             &d[..std::cmp::min(50, len)]
         });
         eprintln!(
-            "Calling jira_create: summary={}, description={:?}, project={:?}, issueType={:?}, priority={:?}, assignee={:?}, assignedGuild={:?}, assignedPod={:?}",
+            "Calling jira_create: summary={}, description={:?}, project={:?}, issueType={:?}, priority={:?}, assignee={:?}",
             args.summary,
             desc_preview,
             args.project,
             args.issue_type,
             args.priority,
             args.assignee,
-            args.assigned_guild,
-            args.assigned_pod
         );
     }
 
@@ -397,8 +323,6 @@ pub async fn handle_jira_create(
         issue_type: args.issue_type.unwrap_or_else(|| "Task".to_string()),
         priority: args.priority,
         assignee: args.assignee,
-        assigned_guild: args.assigned_guild,
-        assigned_pod: args.assigned_pod,
         json: true, // MCP always returns JSON
     };
 

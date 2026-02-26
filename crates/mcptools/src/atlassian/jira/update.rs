@@ -32,14 +32,6 @@ pub struct UpdateOptions {
     #[arg(long)]
     pub assignee: Option<String>,
 
-    /// New assigned guild
-    #[arg(long)]
-    pub assigned_guild: Option<String>,
-
-    /// New assigned pod
-    #[arg(long)]
-    pub assigned_pod: Option<String>,
-
     /// Output as JSON
     #[arg(long, global = true)]
     pub json: bool,
@@ -62,11 +54,9 @@ pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> 
         && options.priority.is_none()
         && options.issue_type.is_none()
         && options.assignee.is_none()
-        && options.assigned_guild.is_none()
-        && options.assigned_pod.is_none()
     {
         return Err(eyre!(
-            "At least one field must be provided for update (--status, --priority, --type, --assignee, --assigned-guild, or --assigned-pod)"
+            "At least one field must be provided for update (--status, --priority, --type, or --assignee)"
         ));
     }
 
@@ -120,14 +110,11 @@ pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> 
         }
     }
 
-    // Build payload for other fields
+    // Build payload for other fields (status is handled separately via transitions)
     let payload = build_update_payload(
-        options.status.as_deref(),
         options.priority.as_deref(),
         options.issue_type.as_deref(),
         assignee_account_id.as_deref(),
-        options.assigned_guild.as_deref(),
-        options.assigned_pod.as_deref(),
     );
 
     // Only send update request if there are fields to update (excluding status which is handled separately)
@@ -149,22 +136,6 @@ pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> 
                 if options.issue_type.is_some() {
                     results.push(FieldUpdateResult {
                         field: "issue_type".to_string(),
-                        success: false,
-                        value: None,
-                        error: Some(e.to_string()),
-                    });
-                }
-                if options.assigned_guild.is_some() {
-                    results.push(FieldUpdateResult {
-                        field: "assigned_guild".to_string(),
-                        success: false,
-                        value: None,
-                        error: Some(e.to_string()),
-                    });
-                }
-                if options.assigned_pod.is_some() {
-                    results.push(FieldUpdateResult {
-                        field: "assigned_pod".to_string(),
                         success: false,
                         value: None,
                         error: Some(e.to_string()),
@@ -394,8 +365,6 @@ async fn get_current_user_account_id(client: &reqwest::Client, base_url: &str) -
     struct CurrentUser {
         #[serde(rename = "accountId")]
         account_id: String,
-        #[serde(rename = "displayName", default)]
-        display_name: Option<String>,
     }
 
     let user: CurrentUser = serde_json::from_str(&body_text)
@@ -509,8 +478,6 @@ async fn update_issue_fields(
             let field_name = match key.as_str() {
                 "priority" => "priority",
                 "issuetype" => "issue_type",
-                "customfield_10527" => "assigned_guild",
-                "customfield_10528" => "assigned_pod",
                 _ => key,
             };
 
@@ -634,22 +601,6 @@ pub async fn handler(options: UpdateOptions) -> Result<()> {
         };
         detail_table.add_row(row!["Assignee".bold().cyan(), assignee_colored]);
 
-        if let Some(guild) = &ticket.assigned_guild {
-            detail_table.add_row(row![
-                "Assigned Guild".bold().cyan(),
-                guild.bright_cyan().to_string()
-            ]);
-        }
-
-        if let Some(pod) = &ticket.assigned_pod {
-            let pod_colored = if pod == "Unassigned" {
-                pod.bright_black().to_string()
-            } else {
-                pod.bright_cyan().to_string()
-            };
-            detail_table.add_row(row!["Assigned Pod".bold().cyan(), pod_colored]);
-        }
-
         if let Some(created) = &ticket.created {
             detail_table.add_row(row![
                 "Created".bold().cyan(),
@@ -692,22 +643,6 @@ pub async fn handler(options: UpdateOptions) -> Result<()> {
                 "Components".bold().cyan(),
                 ticket.components.join(", ").bright_blue()
             );
-        }
-
-        if let Some(epic_link) = &ticket.epic_link {
-            std::println!("{}: {}", "Epic".bold().cyan(), epic_link.bright_magenta());
-        }
-
-        if let Some(story_points) = ticket.story_points {
-            std::println!(
-                "{}: {}",
-                "Story Points".bold().cyan(),
-                story_points.to_string().bright_yellow()
-            );
-        }
-
-        if let Some(sprint) = &ticket.sprint {
-            std::println!("{}: {}", "Sprint".bold().cyan(), sprint.bright_green());
         }
     }
 
