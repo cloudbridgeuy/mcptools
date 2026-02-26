@@ -70,6 +70,10 @@ mcptools atlassian jira search "assignee = currentUser() AND status NOT IN (Done
 mcptools atlassian jira get PROJ-123
 mcptools atlassian jira create "Fix bug" --issue-type Bug
 mcptools atlassian jira update PROJ-123 --status "In Progress"
+mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issue"
+mcptools atlassian jira attachment list PROJ-123
+mcptools atlassian jira attachment download PROJ-123 12345
+mcptools atlassian jira attachment upload PROJ-123 report.pdf screenshot.png
 ```
 
 ### Confluence

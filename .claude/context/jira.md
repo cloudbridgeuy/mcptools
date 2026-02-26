@@ -71,9 +71,39 @@ mcptools atlassian jira update PROJ-123 --status "In Progress"
 # Assign to yourself
 mcptools atlassian jira update PROJ-123 --assignee me
 
+# Update description (markdown supported)
+mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issue"
+
 # Update multiple fields
 mcptools atlassian jira update PROJ-123 --status Done --priority Low --issue-type Bug
 ```
+
+### Attachments
+
+```bash
+# List attachments on a ticket
+mcptools atlassian jira attachment list PROJ-123
+mcptools atlassian jira attachment list PROJ-123 --json
+
+# Download an attachment by ID
+mcptools atlassian jira attachment download PROJ-123 12345
+mcptools atlassian jira attachment download PROJ-123 12345 --output ./file.pdf
+
+# Upload files as attachments
+mcptools atlassian jira attachment upload PROJ-123 report.pdf screenshot.png
+```
+
+### Markdown Description Support
+
+The `--description` flag on `create` and `update` accepts markdown and converts it to Atlassian Document Format (ADF). Supported elements:
+
+- Paragraphs (blank-line separated)
+- Headings (`# H1` through `###### H6`)
+- **Bold** (`**text**`), *italic* (`*text*`), `inline code`
+- Links (`[text](url)`)
+- Bullet lists (`- item`, `* item`)
+- Ordered lists (`1. item`)
+- Code blocks (triple backticks with optional language)
 
 ## MCP Tools
 
@@ -133,6 +163,49 @@ mcptools atlassian jira update PROJ-123 --status Done --priority Low --issue-typ
       "ticketKey": "PROJ-123",
       "status": "In Progress",
       "assignee": "me"
+    }
+  }
+}
+```
+
+### jira_attachment_list
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_attachment_list",
+    "arguments": { "issueKey": "PROJ-123" }
+  }
+}
+```
+
+### jira_attachment_download
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_attachment_download",
+    "arguments": {
+      "issueKey": "PROJ-123",
+      "attachmentId": "12345",
+      "outputPath": "/tmp/file.pdf"
+    }
+  }
+}
+```
+
+### jira_attachment_upload
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_attachment_upload",
+    "arguments": {
+      "issueKey": "PROJ-123",
+      "filePaths": ["/path/to/report.pdf", "/path/to/screenshot.png"]
     }
   }
 }
