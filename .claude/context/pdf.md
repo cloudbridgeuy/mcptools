@@ -11,7 +11,7 @@ Key modules:
 - `parser/layout.rs` — text extraction, font-size-based heading detection
 - `parser/table.rs` — spatial alignment table detection
 - `tree.rs` — stack-based nesting algorithm, builds `DocumentTree`
-- `images.rs` — image extraction, magic byte format detection
+- `images.rs` — image extraction, format detection, raw-to-PNG re-encoding, CCITT fax decoding
 - `render/markdown.rs` — section content to Markdown
 - `render/cleanup.rs` — text normalization (ligatures, hyphenation, CJK)
 - `lib.rs` — public API: `ParsedDocument`, `parse()`, `read_section()`, `peek_section()`, `list_section_images()`, `get_image()`, `info()`, `extract_window()`
@@ -85,7 +85,7 @@ mcptools pdf image document.pdf --random
 mcptools pdf image document.pdf --random --section s-1-0
 ```
 
-Image IDs are XObject names from the PDF (visible in section image references and `pdf images` output).
+Image IDs are XObject names from the PDF (visible in section image references and `pdf images` output). All image formats are supported for export: JPEG and JPEG2000 images are extracted as-is, while FlateDecode (raw pixel data) and CCITTFaxDecode (fax) images are automatically re-encoded as PNG.
 
 Options:
 - `--output` / `-o`: Save to file instead of printing base64
