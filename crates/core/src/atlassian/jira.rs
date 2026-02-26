@@ -155,6 +155,30 @@ pub struct TicketOutput {
     pub labels: Vec<String>,
     pub components: Vec<String>,
     pub comments: Vec<JiraComment>,
+    pub attachments: Vec<AttachmentOutput>,
+}
+
+/// Jira attachment response from API
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct JiraAttachmentResponse {
+    pub id: String,
+    pub filename: String,
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    pub size: u64,
+    pub created: String,
+    pub content: String,
+}
+
+/// Output struct for displaying attachment information
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+pub struct AttachmentOutput {
+    pub id: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub size_human: String,
+    pub created: String,
 }
 
 /// Extract description from Jira field (handles both string and ADF)
@@ -355,19 +379,21 @@ pub fn transform_search_response(search_response: JiraSearchResponse) -> SearchO
     }
 }
 
-/// Convert Jira extended issue response + comments to ticket output
+/// Convert Jira extended issue response + comments + attachments to ticket output
 ///
 /// Transforms the detailed API response into our clean domain model.
 ///
 /// # Arguments
 /// * `issue` - The raw extended issue response from Jira API
 /// * `comments` - The parsed comments array
+/// * `attachments` - The transformed attachment outputs
 ///
 /// # Returns
 /// * `TicketOutput` - Cleaned and transformed ticket with all details
 pub fn transform_ticket_response(
     issue: JiraExtendedIssueResponse,
     comments: Vec<JiraComment>,
+    attachments: Vec<AttachmentOutput>,
 ) -> TicketOutput {
     TicketOutput {
         key: issue.key,
@@ -397,6 +423,7 @@ pub fn transform_ticket_response(
             .map(|c| c.name)
             .collect(),
         comments,
+        attachments,
     }
 }
 
@@ -508,6 +535,7 @@ pub fn find_transition_by_status(
 /// * `priority` - Optional priority name
 /// * `issue_type` - Optional issue type name
 /// * `assignee_account_id` - Optional assignee account ID
+/// * `description` - Optional description in ADF format
 ///
 /// # Returns
 /// * `serde_json::Value` - The fields object for the update request
@@ -515,6 +543,7 @@ pub fn build_update_payload(
     priority: Option<&str>,
     issue_type: Option<&str>,
     assignee_account_id: Option<&str>,
+    description: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     let mut fields = serde_json::json!({});
 
@@ -530,7 +559,403 @@ pub fn build_update_payload(
         fields["assignee"] = serde_json::json!({ "id": account_id });
     }
 
+    if let Some(desc) = description {
+        fields["description"] = desc.clone();
+    }
+
     fields
+}
+
+/// Format a byte count as a human-readable size string (e.g., "1.5 KB", "3.0 MB").
+pub fn format_file_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let size_float = bytes as f64;
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    if size_float < KB {
+        format!("{} B", bytes)
+    } else if size_float < MB {
+        format!("{:.1} KB", size_float / KB)
+    } else if size_float < GB {
+        format!("{:.1} MB", size_float / MB)
+    } else {
+        format!("{:.1} GB", size_float / GB)
+    }
+}
+
+/// Convert raw Jira attachment API responses into the domain output model.
+pub fn transform_attachment_response(raw: Vec<JiraAttachmentResponse>) -> Vec<AttachmentOutput> {
+    raw.into_iter()
+        .map(|resp| AttachmentOutput {
+            id: resp.id,
+            filename: resp.filename,
+            mime_type: resp.mime_type,
+            size_bytes: resp.size,
+            size_human: format_file_size(resp.size),
+            created: resp.created,
+        })
+        .collect()
+}
+
+/// Convert markdown text to Atlassian Document Format (ADF) JSON.
+///
+/// Handles block-level elements (headings, code blocks, lists, paragraphs)
+/// and inline marks (bold, italic, code, links). Never fails — malformed
+/// markdown degrades to plain text paragraphs.
+pub fn markdown_to_adf(input: &str) -> serde_json::Value {
+    let lines: Vec<&str> = input.lines().collect();
+    let mut blocks: Vec<serde_json::Value> = Vec::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i];
+
+        // Fenced code block
+        if let Some(rest) = line.strip_prefix("```") {
+            let language = rest.trim().to_string();
+            let mut code_lines: Vec<&str> = Vec::new();
+            i += 1;
+            while i < lines.len() && !lines[i].starts_with("```") {
+                code_lines.push(lines[i]);
+                i += 1;
+            }
+            if i < lines.len() {
+                i += 1; // skip closing fence
+            }
+            let code_text = code_lines.join("\n");
+            let mut node = serde_json::json!({
+                "type": "codeBlock",
+                "content": [{
+                    "type": "text",
+                    "text": code_text
+                }]
+            });
+            if !language.is_empty() {
+                node["attrs"] = serde_json::json!({ "language": language });
+            }
+            blocks.push(node);
+            continue;
+        }
+
+        // Heading
+        if is_heading_line(line) {
+            let level = line.chars().take_while(|c| *c == '#').count().min(6);
+            let text = line[level..].trim();
+            if !text.is_empty() {
+                blocks.push(serde_json::json!({
+                    "type": "heading",
+                    "attrs": { "level": level },
+                    "content": parse_inline_marks(text)
+                }));
+            }
+            i += 1;
+            continue;
+        }
+
+        // Unordered list
+        if is_unordered_list_item(line) {
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            while i < lines.len() && is_unordered_list_item(lines[i]) {
+                let item_text = strip_unordered_prefix(lines[i]);
+                items.push(serde_json::json!({
+                    "type": "listItem",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": parse_inline_marks(item_text)
+                    }]
+                }));
+                i += 1;
+            }
+            blocks.push(serde_json::json!({
+                "type": "bulletList",
+                "content": items
+            }));
+            continue;
+        }
+
+        // Ordered list
+        if is_ordered_list_item(line) {
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            while i < lines.len() && is_ordered_list_item(lines[i]) {
+                let item_text = strip_ordered_prefix(lines[i]);
+                items.push(serde_json::json!({
+                    "type": "listItem",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": parse_inline_marks(item_text)
+                    }]
+                }));
+                i += 1;
+            }
+            blocks.push(serde_json::json!({
+                "type": "orderedList",
+                "content": items
+            }));
+            continue;
+        }
+
+        // Blank line — skip
+        if line.trim().is_empty() {
+            i += 1;
+            continue;
+        }
+
+        // Paragraph — collect consecutive non-empty, non-special lines
+        let mut para_text = String::new();
+        while i < lines.len()
+            && !lines[i].trim().is_empty()
+            && !is_heading_line(lines[i])
+            && !lines[i].starts_with("```")
+            && !is_unordered_list_item(lines[i])
+            && !is_ordered_list_item(lines[i])
+        {
+            if !para_text.is_empty() {
+                para_text.push(' ');
+            }
+            para_text.push_str(lines[i]);
+            i += 1;
+        }
+        if !para_text.is_empty() {
+            blocks.push(serde_json::json!({
+                "type": "paragraph",
+                "content": parse_inline_marks(&para_text)
+            }));
+        }
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "type": "doc",
+        "content": blocks
+    })
+}
+
+/// Check if a line is a CommonMark heading (starts with 1-6 `#` followed by a space or end of string).
+fn is_heading_line(line: &str) -> bool {
+    if !line.starts_with('#') {
+        return false;
+    }
+    let level = line.chars().take_while(|c| *c == '#').count();
+    if level > 6 {
+        return false;
+    }
+    let rest = &line[level..];
+    rest.is_empty() || rest.starts_with(' ')
+}
+
+/// Check if a line is an unordered list item (starts with `- ` or `* `).
+fn is_unordered_list_item(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("- ") || trimmed.starts_with("* ")
+}
+
+/// Strip the unordered list prefix from a line.
+fn strip_unordered_prefix(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .map(|s| s.trim_start())
+        .unwrap_or(trimmed)
+}
+
+/// Check if a line is an ordered list item (starts with `N. `).
+fn is_ordered_list_item(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let mut chars = trimmed.chars();
+    // Must start with at least one digit
+    match chars.next() {
+        Some(c) if c.is_ascii_digit() => {}
+        _ => return false,
+    }
+    // Skip remaining digits
+    for c in chars.by_ref() {
+        if c == '.' {
+            // Must be followed by a space
+            return chars.next() == Some(' ');
+        }
+        if !c.is_ascii_digit() {
+            return false;
+        }
+    }
+    false
+}
+
+/// Strip the ordered list prefix from a line.
+fn strip_ordered_prefix(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    if let Some(dot_pos) = trimmed.find(". ") {
+        let prefix = &trimmed[..dot_pos];
+        if prefix.chars().all(|c| c.is_ascii_digit()) {
+            return trimmed[dot_pos + 2..].trim_start();
+        }
+    }
+    trimmed
+}
+
+/// Parse inline markdown marks into ADF text nodes.
+///
+/// Handles: **bold**, *italic*, ***bold italic***, `code`, [text](url).
+/// Unclosed marks are treated as literal text.
+fn parse_inline_marks(text: &str) -> Vec<serde_json::Value> {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut result: Vec<serde_json::Value> = Vec::new();
+    let mut buf = String::new();
+    let mut i = 0;
+
+    while i < len {
+        // Backtick — inline code
+        if chars[i] == '`' {
+            if let Some(close) = find_char(&chars, '`', i + 1) {
+                flush_text(&mut buf, &mut result);
+                let content: String = chars[i + 1..close].iter().collect();
+                result.push(serde_json::json!({
+                    "type": "text",
+                    "text": content,
+                    "marks": [{ "type": "code" }]
+                }));
+                i = close + 1;
+                continue;
+            }
+            // No closing backtick — literal
+            buf.push('`');
+            i += 1;
+            continue;
+        }
+
+        // Link — [text](url)
+        if chars[i] == '[' {
+            if let Some(close_bracket) = find_char(&chars, ']', i + 1) {
+                if close_bracket + 1 < len && chars[close_bracket + 1] == '(' {
+                    if let Some(close_paren) = find_char(&chars, ')', close_bracket + 2) {
+                        flush_text(&mut buf, &mut result);
+                        let link_text: String = chars[i + 1..close_bracket].iter().collect();
+                        let href: String = chars[close_bracket + 2..close_paren].iter().collect();
+                        result.push(serde_json::json!({
+                            "type": "text",
+                            "text": link_text,
+                            "marks": [{
+                                "type": "link",
+                                "attrs": { "href": href }
+                            }]
+                        }));
+                        i = close_paren + 1;
+                        continue;
+                    }
+                }
+            }
+            // Malformed link — literal
+            buf.push('[');
+            i += 1;
+            continue;
+        }
+
+        // Bold+italic (***), bold (**), or italic (*)
+        if chars[i] == '*' {
+            // Count consecutive asterisks
+            let star_count = chars[i..].iter().take_while(|c| **c == '*').count();
+
+            if star_count >= 3 {
+                // Try ***bold italic***
+                if let Some(close) = find_sequence(&chars, "***", i + 3) {
+                    flush_text(&mut buf, &mut result);
+                    let content: String = chars[i + 3..close].iter().collect();
+                    result.push(serde_json::json!({
+                        "type": "text",
+                        "text": content,
+                        "marks": [{ "type": "strong" }, { "type": "em" }]
+                    }));
+                    i = close + 3;
+                    continue;
+                }
+            }
+
+            if star_count >= 2 {
+                // Try **bold**
+                if let Some(close) = find_sequence(&chars, "**", i + 2) {
+                    flush_text(&mut buf, &mut result);
+                    let content: String = chars[i + 2..close].iter().collect();
+                    result.push(serde_json::json!({
+                        "type": "text",
+                        "text": content,
+                        "marks": [{ "type": "strong" }]
+                    }));
+                    i = close + 2;
+                    continue;
+                }
+            }
+
+            // Try *italic* — closing must be single * not followed by *
+            if let Some(close) = find_single_star_close(&chars, i + 1) {
+                flush_text(&mut buf, &mut result);
+                let content: String = chars[i + 1..close].iter().collect();
+                result.push(serde_json::json!({
+                    "type": "text",
+                    "text": content,
+                    "marks": [{ "type": "em" }]
+                }));
+                i = close + 1;
+                continue;
+            }
+
+            // Unclosed — treat stars as literal
+            for _ in 0..star_count {
+                buf.push('*');
+            }
+            i += star_count;
+            continue;
+        }
+
+        // Regular character
+        buf.push(chars[i]);
+        i += 1;
+    }
+
+    flush_text(&mut buf, &mut result);
+    result
+}
+
+/// Flush accumulated plain text into a text node.
+fn flush_text(buf: &mut String, result: &mut Vec<serde_json::Value>) {
+    if !buf.is_empty() {
+        result.push(serde_json::json!({ "type": "text", "text": buf.clone() }));
+        buf.clear();
+    }
+}
+
+/// Find the first occurrence of `target` in `chars` starting at index `from`.
+fn find_char(chars: &[char], target: char, from: usize) -> Option<usize> {
+    (from..chars.len()).find(|&j| chars[j] == target)
+}
+
+/// Find the first occurrence of a multi-character sequence starting at `from`.
+fn find_sequence(chars: &[char], seq: &str, from: usize) -> Option<usize> {
+    let seq_chars: Vec<char> = seq.chars().collect();
+    let seq_len = seq_chars.len();
+    if chars.len() < from + seq_len {
+        return None;
+    }
+    (from..=chars.len() - seq_len).find(|&j| chars[j..j + seq_len] == seq_chars[..])
+}
+
+/// Find closing single `*` that is NOT part of `**`.
+fn find_single_star_close(chars: &[char], from: usize) -> Option<usize> {
+    let len = chars.len();
+    for j in from..len {
+        if chars[j] == '*' {
+            // Check it's a single star (not preceded or followed by *)
+            let preceded_by_star = j > 0 && chars[j - 1] == '*';
+            let followed_by_star = j + 1 < len && chars[j + 1] == '*';
+            if !preceded_by_star && !followed_by_star {
+                return Some(j);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -867,7 +1292,7 @@ mod tests {
         }];
 
         // Act: Transform the ticket
-        let output = transform_ticket_response(issue, comments.clone());
+        let output = transform_ticket_response(issue, comments.clone(), vec![]);
 
         // Assert: Verify all fields are transformed correctly
         assert_eq!(output.key, "PROJ-456");
@@ -908,7 +1333,7 @@ mod tests {
         };
 
         // Act: Transform the ticket
-        let output = transform_ticket_response(issue, vec![]);
+        let output = transform_ticket_response(issue, vec![], vec![]);
 
         // Assert: Verify minimal fields work correctly
         assert_eq!(output.key, "PROJ-789");
@@ -953,7 +1378,7 @@ mod tests {
         ];
 
         // Act: Transform the ticket
-        let output = transform_ticket_response(issue, comments);
+        let output = transform_ticket_response(issue, comments, vec![]);
 
         // Assert: Verify comments are preserved
         assert_eq!(output.comments.len(), 2);
@@ -986,7 +1411,7 @@ mod tests {
         };
 
         // Act: Transform the ticket
-        let output = transform_ticket_response(issue, vec![]);
+        let output = transform_ticket_response(issue, vec![], vec![]);
 
         // Assert: Verify empty priority is filtered out
         assert_eq!(output.priority, None);
@@ -1316,6 +1741,7 @@ mod tests {
             Some("High"),
             Some("Story"),
             Some("5b10a2844c20165700edge21g"),
+            None,
         );
 
         // Assert: Verify all fields are in payload
@@ -1327,7 +1753,7 @@ mod tests {
     #[test]
     fn test_build_update_payload_single_field() {
         // Arrange: Only priority provided
-        let payload = build_update_payload(Some("Low"), None, None);
+        let payload = build_update_payload(Some("Low"), None, None, None);
 
         // Assert: Verify only priority is in payload
         assert_eq!(payload["priority"]["name"], "Low");
@@ -1338,7 +1764,7 @@ mod tests {
     #[test]
     fn test_build_update_payload_empty() {
         // Arrange: No fields provided
-        let payload = build_update_payload(None, None, None);
+        let payload = build_update_payload(None, None, None, None);
 
         // Assert: Verify payload is empty object
         assert_eq!(payload, serde_json::json!({}));
@@ -1347,9 +1773,324 @@ mod tests {
     #[test]
     fn test_build_update_payload_with_assignee() {
         // Arrange: Assignee account ID provided
-        let payload = build_update_payload(None, None, Some("account123"));
+        let payload = build_update_payload(None, None, Some("account123"), None);
 
         // Assert: Verify assignee is in payload with id field
         assert_eq!(payload["assignee"]["id"], "account123");
+    }
+
+    #[test]
+    fn test_build_update_payload_with_description() {
+        // Arrange: Description ADF value provided
+        let adf = serde_json::json!({
+            "version": 1,
+            "type": "doc",
+            "content": [{
+                "type": "paragraph",
+                "content": [{ "type": "text", "text": "Updated description" }]
+            }]
+        });
+        let payload = build_update_payload(None, None, None, Some(&adf));
+
+        // Assert: Verify description is in payload
+        assert_eq!(payload["description"]["type"], "doc");
+        assert_eq!(payload["description"]["version"], 1);
+        assert_eq!(
+            payload["description"]["content"][0]["content"][0]["text"],
+            "Updated description"
+        );
+    }
+
+    // Tests for format_file_size
+    #[test]
+    fn test_format_file_size_zero() {
+        assert_eq!(format_file_size(0), "0 B");
+    }
+
+    #[test]
+    fn test_format_file_size_bytes() {
+        assert_eq!(format_file_size(500), "500 B");
+        assert_eq!(format_file_size(1), "1 B");
+        assert_eq!(format_file_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn test_format_file_size_kilobytes() {
+        assert_eq!(format_file_size(1024), "1.0 KB");
+        assert_eq!(format_file_size(1536), "1.5 KB");
+        assert_eq!(format_file_size(10240), "10.0 KB");
+    }
+
+    #[test]
+    fn test_format_file_size_megabytes() {
+        assert_eq!(format_file_size(1048576), "1.0 MB");
+        assert_eq!(format_file_size(5242880), "5.0 MB");
+    }
+
+    #[test]
+    fn test_format_file_size_gigabytes() {
+        assert_eq!(format_file_size(1073741824), "1.0 GB");
+        assert_eq!(format_file_size(2147483648), "2.0 GB");
+    }
+
+    // Tests for transform_attachment_response
+    #[test]
+    fn test_transform_attachment_response_empty() {
+        let result = transform_attachment_response(vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_transform_attachment_response_single() {
+        let raw = vec![JiraAttachmentResponse {
+            id: "12345".to_string(),
+            filename: "report.pdf".to_string(),
+            mime_type: "application/pdf".to_string(),
+            size: 2048,
+            created: "2024-01-15T10:30:00Z".to_string(),
+            content: "https://example.com/attachments/12345".to_string(),
+        }];
+
+        let result = transform_attachment_response(raw);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "12345");
+        assert_eq!(result[0].filename, "report.pdf");
+        assert_eq!(result[0].mime_type, "application/pdf");
+        assert_eq!(result[0].size_bytes, 2048);
+        assert_eq!(result[0].size_human, "2.0 KB");
+        assert_eq!(result[0].created, "2024-01-15T10:30:00Z");
+    }
+
+    #[test]
+    fn test_transform_attachment_response_multiple() {
+        let raw = vec![
+            JiraAttachmentResponse {
+                id: "1".to_string(),
+                filename: "small.txt".to_string(),
+                mime_type: "text/plain".to_string(),
+                size: 100,
+                created: "2024-01-01T00:00:00Z".to_string(),
+                content: "https://example.com/1".to_string(),
+            },
+            JiraAttachmentResponse {
+                id: "2".to_string(),
+                filename: "large.zip".to_string(),
+                mime_type: "application/zip".to_string(),
+                size: 5242880,
+                created: "2024-01-02T00:00:00Z".to_string(),
+                content: "https://example.com/2".to_string(),
+            },
+        ];
+
+        let result = transform_attachment_response(raw);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].size_human, "100 B");
+        assert_eq!(result[1].size_human, "5.0 MB");
+    }
+
+    // Tests for transform_ticket_response with attachments
+    #[test]
+    fn test_transform_ticket_response_with_attachments() {
+        let issue = create_extended_issue_response("PROJ-500", "Attachment test", "Open", None);
+
+        let attachments = vec![AttachmentOutput {
+            id: "att-1".to_string(),
+            filename: "screenshot.png".to_string(),
+            mime_type: "image/png".to_string(),
+            size_bytes: 4096,
+            size_human: "4.0 KB".to_string(),
+            created: "2024-06-01T12:00:00Z".to_string(),
+        }];
+
+        let output = transform_ticket_response(issue, vec![], attachments);
+        assert_eq!(output.attachments.len(), 1);
+        assert_eq!(output.attachments[0].filename, "screenshot.png");
+    }
+
+    // Tests for markdown_to_adf
+
+    #[test]
+    fn test_markdown_to_adf_empty_input() {
+        let result = markdown_to_adf("");
+        assert_eq!(result["version"], 1);
+        assert_eq!(result["type"], "doc");
+        assert_eq!(result["content"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_markdown_to_adf_single_paragraph() {
+        let result = markdown_to_adf("Hello world");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "paragraph");
+        assert_eq!(content[0]["content"][0]["text"], "Hello world");
+    }
+
+    #[test]
+    fn test_markdown_to_adf_heading() {
+        let result = markdown_to_adf("## My Heading");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "heading");
+        assert_eq!(content[0]["attrs"]["level"], 2);
+        assert_eq!(content[0]["content"][0]["text"], "My Heading");
+    }
+
+    #[test]
+    fn test_markdown_to_adf_code_block() {
+        let result = markdown_to_adf("```rust\nfn main() {}\n```");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "codeBlock");
+        assert_eq!(content[0]["attrs"]["language"], "rust");
+        assert_eq!(content[0]["content"][0]["text"], "fn main() {}");
+    }
+
+    #[test]
+    fn test_markdown_to_adf_code_block_no_language() {
+        let result = markdown_to_adf("```\nsome code\n```");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "codeBlock");
+        assert!(content[0].get("attrs").is_none());
+    }
+
+    #[test]
+    fn test_markdown_to_adf_bullet_list() {
+        let result = markdown_to_adf("- first\n- second\n- third");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "bulletList");
+        let items = content[0]["content"].as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0]["content"][0]["content"][0]["text"], "first");
+    }
+
+    #[test]
+    fn test_markdown_to_adf_ordered_list() {
+        let result = markdown_to_adf("1. first\n2. second");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "orderedList");
+        let items = content[0]["content"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn test_markdown_to_adf_mixed_content() {
+        let md =
+            "# Title\n\nA paragraph with **bold**.\n\n- item one\n- item two\n\n```\ncode\n```";
+        let result = markdown_to_adf(md);
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "heading");
+        assert_eq!(content[1]["type"], "paragraph");
+        assert_eq!(content[2]["type"], "bulletList");
+        assert_eq!(content[3]["type"], "codeBlock");
+    }
+
+    #[test]
+    fn test_markdown_to_adf_two_paragraphs() {
+        let result = markdown_to_adf("First paragraph.\n\nSecond paragraph.");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "paragraph");
+        assert_eq!(content[1]["type"], "paragraph");
+    }
+
+    // Tests for parse_inline_marks (via markdown_to_adf)
+
+    #[test]
+    fn test_inline_bold_in_paragraph() {
+        let result = markdown_to_adf("hello **bold** world");
+        let inlines = result["content"][0]["content"].as_array().unwrap();
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(inlines[0]["text"], "hello ");
+        assert_eq!(inlines[1]["text"], "bold");
+        assert_eq!(inlines[1]["marks"][0]["type"], "strong");
+        assert_eq!(inlines[2]["text"], " world");
+    }
+
+    #[test]
+    fn test_inline_italic_in_paragraph() {
+        let result = markdown_to_adf("hello *italic* world");
+        let inlines = result["content"][0]["content"].as_array().unwrap();
+        assert_eq!(inlines[1]["text"], "italic");
+        assert_eq!(inlines[1]["marks"][0]["type"], "em");
+    }
+
+    #[test]
+    fn test_inline_bold_italic_in_paragraph() {
+        let result = markdown_to_adf("***both***");
+        let inlines = result["content"][0]["content"].as_array().unwrap();
+        assert_eq!(inlines.len(), 1);
+        assert_eq!(inlines[0]["text"], "both");
+        assert_eq!(inlines[0]["marks"][0]["type"], "strong");
+        assert_eq!(inlines[0]["marks"][1]["type"], "em");
+    }
+
+    #[test]
+    fn test_inline_code_in_paragraph() {
+        let result = markdown_to_adf("use `println!` macro");
+        let inlines = result["content"][0]["content"].as_array().unwrap();
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(inlines[1]["text"], "println!");
+        assert_eq!(inlines[1]["marks"][0]["type"], "code");
+    }
+
+    #[test]
+    fn test_inline_link_in_paragraph() {
+        let result = markdown_to_adf("click [here](https://example.com) now");
+        let inlines = result["content"][0]["content"].as_array().unwrap();
+        assert_eq!(inlines.len(), 3);
+        assert_eq!(inlines[1]["text"], "here");
+        assert_eq!(inlines[1]["marks"][0]["type"], "link");
+        assert_eq!(
+            inlines[1]["marks"][0]["attrs"]["href"],
+            "https://example.com"
+        );
+    }
+
+    #[test]
+    fn test_inline_unclosed_bold() {
+        let result = markdown_to_adf("hello **unclosed");
+        let inlines = result["content"][0]["content"].as_array().unwrap();
+        assert_eq!(inlines.len(), 1);
+        assert_eq!(inlines[0]["text"], "hello **unclosed");
+    }
+
+    #[test]
+    fn test_inline_unclosed_backtick() {
+        let result = markdown_to_adf("hello `unclosed");
+        let inlines = result["content"][0]["content"].as_array().unwrap();
+        assert_eq!(inlines.len(), 1);
+        assert_eq!(inlines[0]["text"], "hello `unclosed");
+    }
+
+    #[test]
+    fn test_markdown_to_adf_heading_with_inline_marks() {
+        let result = markdown_to_adf("# Title with **bold**");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "heading");
+        let inlines = content[0]["content"].as_array().unwrap();
+        assert_eq!(inlines.len(), 2);
+        assert_eq!(inlines[0]["text"], "Title with ");
+        assert_eq!(inlines[1]["text"], "bold");
+        assert_eq!(inlines[1]["marks"][0]["type"], "strong");
+    }
+
+    #[test]
+    fn test_markdown_to_adf_star_bullet_list() {
+        let result = markdown_to_adf("* alpha\n* beta");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "bulletList");
+        let items = content[0]["content"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["content"][0]["content"][0]["text"], "alpha");
+    }
+
+    #[test]
+    fn test_markdown_to_adf_hashtag_is_paragraph_not_heading() {
+        // CommonMark requires a space after # for headings; #hashtag should be a paragraph
+        let result = markdown_to_adf("#hashtag");
+        let content = result["content"].as_array().unwrap();
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "paragraph");
+        assert_eq!(content[0]["content"][0]["text"], "#hashtag");
     }
 }
