@@ -93,6 +93,27 @@ mcptools atlassian jira attachment download PROJ-123 12345 --output ./file.pdf
 mcptools atlassian jira attachment upload PROJ-123 report.pdf screenshot.png
 ```
 
+### Sprints
+
+```bash
+# List sprints on a board (active + future by default)
+mcptools atlassian jira sprint list --board 1
+
+# List all sprint states
+mcptools atlassian jira sprint list --board 1 --state active,future,closed
+
+# Output as JSON
+mcptools atlassian jira sprint list --board 1 --json
+
+# Assign a ticket to a sprint (update)
+mcptools atlassian jira update PROJ-123 --sprint "Sprint 30" --board 1
+
+# Create a ticket and assign to a sprint
+mcptools atlassian jira create "New task" --project PROJ --sprint "Sprint 30" --board 1
+```
+
+The `--board` flag can be omitted if `JIRA_BOARD_ID` is set.
+
 ### Markdown Description Support
 
 The `--description` flag on `create` and `update` accepts markdown and converts it to Atlassian Document Format (ADF). Supported elements:
@@ -168,6 +189,21 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
 }
 ```
 
+### jira_sprint_list
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_sprint_list",
+    "arguments": {
+      "boardId": 1,
+      "state": "active,future"
+    }
+  }
+}
+```
+
 ### jira_attachment_list
 
 ```json
@@ -225,6 +261,7 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
 | `JIRA_BASE_URL` | Jira instance URL | `ATLASSIAN_BASE_URL` |
 | `JIRA_EMAIL` | Email for Jira auth | `ATLASSIAN_EMAIL` |
 | `JIRA_API_TOKEN` | API token for Jira | `ATLASSIAN_API_TOKEN` |
+| `JIRA_BOARD_ID` | Default board ID for sprint operations | None |
 
 ## JQL Query Tips
 

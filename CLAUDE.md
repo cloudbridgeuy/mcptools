@@ -38,7 +38,7 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 
 | Service | Variables | Fallback |
 |---------|-----------|----------|
-| Jira | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` | `ATLASSIAN_*` |
+| Jira | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_BOARD_ID` | `ATLASSIAN_*` |
 | Confluence | `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN` | `ATLASSIAN_*` |
 | Bitbucket | `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` | None (required) |
 
@@ -74,6 +74,10 @@ mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issu
 mcptools atlassian jira attachment list PROJ-123
 mcptools atlassian jira attachment download PROJ-123 12345
 mcptools atlassian jira attachment upload PROJ-123 report.pdf screenshot.png
+mcptools atlassian jira sprint list --board 1
+mcptools atlassian jira sprint list --board 1 --state active,future,closed
+mcptools atlassian jira update PROJ-123 --sprint "Sprint 30" --board 1
+mcptools atlassian jira create "New task" --sprint "Sprint 30" --board 1
 ```
 
 ### Confluence
