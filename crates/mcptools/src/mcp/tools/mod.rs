@@ -306,7 +306,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "jira_update".to_string(),
-            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, and Assignee. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, and Description (markdown). Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -329,9 +329,68 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     "assignee": {
                         "type": "string",
                         "description": "New assignee (email, display name, account ID, or \"me\" for current user)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "New description for the ticket (supports markdown: headings, bold, italic, lists, code blocks, inline code, links)"
                     }
                 },
                 "required": ["ticketKey"]
+            }),
+        },
+        Tool {
+            name: "jira_attachment_list".to_string(),
+            description: "List all attachments on a Jira ticket. Returns attachment metadata including ID, filename, size, MIME type, and creation date. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "issueKey": {
+                        "type": "string",
+                        "description": "The Jira issue key (e.g., PROJ-123)"
+                    }
+                },
+                "required": ["issueKey"]
+            }),
+        },
+        Tool {
+            name: "jira_attachment_download".to_string(),
+            description: "Download a specific attachment from a Jira ticket by attachment ID. Use jira_attachment_list first to get attachment IDs. Saves to a temp file by default, or to a specified output path. Returns the saved file path.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "issueKey": {
+                        "type": "string",
+                        "description": "The Jira issue key (e.g., PROJ-123)"
+                    },
+                    "attachmentId": {
+                        "type": "string",
+                        "description": "The attachment ID to download"
+                    },
+                    "outputPath": {
+                        "type": "string",
+                        "description": "Optional file path to save the attachment to. Defaults to a temp directory."
+                    }
+                },
+                "required": ["issueKey", "attachmentId"]
+            }),
+        },
+        Tool {
+            name: "jira_attachment_upload".to_string(),
+            description: "Upload one or more files as attachments to a Jira ticket. Accepts an array of local file paths. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "issueKey": {
+                        "type": "string",
+                        "description": "The Jira issue key (e.g., PROJ-123)"
+                    },
+                    "filePaths": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Array of local file paths to upload"
+                    }
+                },
+                "required": ["issueKey", "filePaths"]
             }),
         },
         Tool {
@@ -697,6 +756,15 @@ pub async fn handle_tools_call(
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
         "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
+        "jira_attachment_list" => {
+            atlassian::handle_jira_attachment_list(params.arguments, global).await
+        }
+        "jira_attachment_download" => {
+            atlassian::handle_jira_attachment_download(params.arguments, global).await
+        }
+        "jira_attachment_upload" => {
+            atlassian::handle_jira_attachment_upload(params.arguments, global).await
+        }
         "jira_query_list" => atlassian::handle_jira_query_list(params.arguments, global).await,
         "jira_query_save" => atlassian::handle_jira_query_save(params.arguments, global).await,
         "jira_query_delete" => atlassian::handle_jira_query_delete(params.arguments, global).await,

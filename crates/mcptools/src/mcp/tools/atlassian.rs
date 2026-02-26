@@ -218,6 +218,7 @@ pub async fn handle_jira_update(
         #[serde(rename = "issueType")]
         issue_type: Option<String>,
         assignee: Option<String>,
+        description: Option<String>,
     }
 
     let args: JiraUpdateArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
@@ -229,12 +230,13 @@ pub async fn handle_jira_update(
 
     if global.verbose {
         eprintln!(
-            "Calling jira_update: ticketKey={}, status={:?}, priority={:?}, issueType={:?}, assignee={:?}",
+            "Calling jira_update: ticketKey={}, status={:?}, priority={:?}, issueType={:?}, assignee={:?}, description={:?}",
             args.ticket_key,
             args.status,
             args.priority,
             args.issue_type,
             args.assignee,
+            args.description,
         );
     }
 
@@ -245,6 +247,7 @@ pub async fn handle_jira_update(
         priority: args.priority,
         issue_type: args.issue_type,
         assignee: args.assignee,
+        description: args.description,
         json: true, // MCP always returns JSON
     };
 
@@ -755,6 +758,182 @@ pub async fn handle_bitbucket_pr_read(
 
     // Convert to JSON and wrap in MCP result format
     let json_string = serde_json::to_string_pretty(&pr_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira attachment list command via MCP
+pub async fn handle_jira_attachment_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct JiraAttachmentListArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+    }
+
+    let args: JiraAttachmentListArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!("Calling jira_attachment_list: issueKey={}", args.issue_key);
+    }
+
+    let attachments = crate::atlassian::jira::list_attachments_data(args.issue_key)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    let json_string = serde_json::to_string_pretty(&attachments).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira attachment download command via MCP
+pub async fn handle_jira_attachment_download(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct JiraAttachmentDownloadArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        #[serde(rename = "attachmentId")]
+        attachment_id: String,
+        #[serde(rename = "outputPath")]
+        output_path: Option<String>,
+    }
+
+    let args: JiraAttachmentDownloadArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling jira_attachment_download: issueKey={}, attachmentId={}, outputPath={:?}",
+            args.issue_key, args.attachment_id, args.output_path,
+        );
+    }
+
+    let output = args.output_path.map(std::path::PathBuf::from);
+
+    let path = crate::atlassian::jira::download_attachment_data(
+        args.issue_key,
+        args.attachment_id,
+        output,
+    )
+    .await
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {e}"),
+        data: None,
+    })?;
+
+    let json_string =
+        serde_json::to_string_pretty(&serde_json::json!({ "path": path.display().to_string() }))
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Serialization error: {e}"),
+                data: None,
+            })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira attachment upload command via MCP
+pub async fn handle_jira_attachment_upload(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct JiraAttachmentUploadArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        #[serde(rename = "filePaths")]
+        file_paths: Vec<String>,
+    }
+
+    let args: JiraAttachmentUploadArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling jira_attachment_upload: issueKey={}, filePaths={:?}",
+            args.issue_key, args.file_paths,
+        );
+    }
+
+    let paths: Vec<std::path::PathBuf> = args
+        .file_paths
+        .into_iter()
+        .map(std::path::PathBuf::from)
+        .collect();
+
+    let uploads = crate::atlassian::jira::upload_attachment_data(args.issue_key, paths)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    let json_string = serde_json::to_string_pretty(&uploads).map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Serialization error: {e}"),
         data: None,
