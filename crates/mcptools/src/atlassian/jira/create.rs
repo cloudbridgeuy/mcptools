@@ -1,11 +1,14 @@
 //! Create Jira tickets
 
-use crate::atlassian::{create_jira_client, JiraConfig};
-use crate::prelude::*;
 use clap::Args;
 use colored::Colorize;
-use mcptools_core::atlassian::jira::{parse_assignee_identifier, AssigneeIdentifier, TicketOutput};
+use mcptools_core::atlassian::jira::{
+    markdown_to_adf, parse_assignee_identifier, AssigneeIdentifier, TicketOutput,
+};
 use serde::{Deserialize, Serialize};
+
+use crate::atlassian::{create_jira_client, JiraConfig};
+use crate::prelude::*;
 
 /// Create a new Jira ticket
 #[derive(Args, Debug, Clone)]
@@ -72,25 +75,9 @@ pub async fn create_ticket_data(options: CreateOptions) -> Result<CreateOutput> 
         }
     });
 
-    // Add description if provided (convert to ADF format)
+    // Add description if provided (convert markdown to ADF format)
     if let Some(description) = &options.description {
-        // Convert plain text to Atlassian Document Format (ADF)
-        let adf_description = serde_json::json!({
-            "type": "doc",
-            "version": 1,
-            "content": [
-                {
-                    "type": "paragraph",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": description
-                        }
-                    ]
-                }
-            ]
-        });
-        fields["description"] = adf_description;
+        fields["description"] = markdown_to_adf(description);
     }
 
     // Add issue type (defaults to Task)
@@ -355,96 +342,11 @@ pub async fn handler(options: CreateOptions) -> Result<()> {
     if options.json {
         std::println!("{}", serde_json::to_string_pretty(&ticket)?);
     } else {
-        // Display creation confirmation
         std::println!(
             "\n{}",
-            format!("✓ Created ticket: {}", ticket.key).green().bold()
+            format!("Created ticket: {}", ticket.key).green().bold()
         );
-
-        // Display full ticket details (same as get command)
-        std::println!(
-            "\n{} - {}\n",
-            ticket.key.bold().cyan(),
-            ticket.summary.bright_white()
-        );
-
-        let mut table = crate::prelude::new_table();
-        table.add_row(prettytable::row![
-            "Status".bold().cyan(),
-            ticket.status.green().to_string()
-        ]);
-
-        if let Some(priority) = &ticket.priority {
-            table.add_row(prettytable::row![
-                "Priority".bold().cyan(),
-                priority.bright_yellow().to_string()
-            ]);
-        }
-
-        if let Some(issue_type) = &ticket.issue_type {
-            table.add_row(prettytable::row![
-                "Type".bold().cyan(),
-                issue_type.bright_blue().to_string()
-            ]);
-        }
-
-        let assignee = ticket
-            .assignee
-            .clone()
-            .unwrap_or_else(|| "Unassigned".to_string());
-        let assignee_colored = if assignee == "Unassigned" {
-            assignee.bright_black().to_string()
-        } else {
-            assignee.bright_magenta().to_string()
-        };
-        table.add_row(prettytable::row![
-            "Assignee".bold().cyan(),
-            assignee_colored
-        ]);
-
-        if let Some(created) = &ticket.created {
-            table.add_row(prettytable::row![
-                "Created".bold().cyan(),
-                created.bright_black().to_string()
-            ]);
-        }
-
-        if let Some(updated) = &ticket.updated {
-            table.add_row(prettytable::row![
-                "Updated".bold().cyan(),
-                updated.bright_black().to_string()
-            ]);
-        }
-
-        if let Some(due_date) = &ticket.due_date {
-            table.add_row(prettytable::row![
-                "Due Date".bold().cyan(),
-                due_date.yellow().to_string()
-            ]);
-        }
-
-        table.printstd();
-
-        if let Some(description) = &ticket.description {
-            std::println!("\n{}:", "Description".bold().cyan());
-            std::println!("{}\n", description);
-        }
-
-        if !ticket.labels.is_empty() {
-            std::println!(
-                "\n{}: {}",
-                "Labels".bold().cyan(),
-                ticket.labels.join(", ").bright_green()
-            );
-        }
-
-        if !ticket.components.is_empty() {
-            std::println!(
-                "{}: {}",
-                "Components".bold().cyan(),
-                ticket.components.join(", ").bright_blue()
-            );
-        }
+        super::display_ticket(&ticket);
     }
 
     Ok(())

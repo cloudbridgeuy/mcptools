@@ -5,8 +5,9 @@ use crate::prelude::*;
 use clap::Args;
 use colored::Colorize;
 use mcptools_core::atlassian::jira::{
-    build_update_payload, find_transition_by_status, parse_assignee_identifier, AssigneeIdentifier,
-    FieldUpdateResult, JiraTransitionsResponse, JiraUserSearchResponse, TicketOutput, UpdateOutput,
+    build_update_payload, find_transition_by_status, markdown_to_adf, parse_assignee_identifier,
+    AssigneeIdentifier, FieldUpdateResult, JiraTransitionsResponse, JiraUserSearchResponse,
+    UpdateOutput,
 };
 use prettytable::row;
 
@@ -32,6 +33,10 @@ pub struct UpdateOptions {
     #[arg(long)]
     pub assignee: Option<String>,
 
+    /// New description (supports markdown)
+    #[arg(long, short = 'd')]
+    pub description: Option<String>,
+
     /// Output as JSON
     #[arg(long, global = true)]
     pub json: bool,
@@ -54,9 +59,10 @@ pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> 
         && options.priority.is_none()
         && options.issue_type.is_none()
         && options.assignee.is_none()
+        && options.description.is_none()
     {
         return Err(eyre!(
-            "At least one field must be provided for update (--status, --priority, --type, or --assignee)"
+            "At least one field must be provided for update (--status, --priority, --type, --assignee, or --description)"
         ));
     }
 
@@ -110,32 +116,35 @@ pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> 
         }
     }
 
+    // Convert description to ADF if provided
+    let adf_description = options.description.as_deref().map(markdown_to_adf);
+
     // Build payload for other fields (status is handled separately via transitions)
     let payload = build_update_payload(
         options.priority.as_deref(),
         options.issue_type.as_deref(),
         assignee_account_id.as_deref(),
+        adf_description.as_ref(),
     );
 
-    // Only send update request if there are fields to update (excluding status which is handled separately)
-    if !payload.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+    // Only send update request if the payload has fields (status is handled separately via transitions)
+    let has_fields = payload.as_object().map(|o| !o.is_empty()).unwrap_or(false);
+
+    if has_fields {
         match update_issue_fields(&client, base_url, &options.ticket_key, payload).await {
             Ok(updated_fields) => {
                 results.extend(updated_fields);
             }
             Err(e) => {
-                // If there's a general update error, track which fields were being updated
-                if options.priority.is_some() {
+                // Track which fields failed in the general update error
+                let failed_fields = [
+                    options.priority.as_ref().map(|_| "priority"),
+                    options.issue_type.as_ref().map(|_| "issue_type"),
+                    options.description.as_ref().map(|_| "description"),
+                ];
+                for field in failed_fields.into_iter().flatten() {
                     results.push(FieldUpdateResult {
-                        field: "priority".to_string(),
-                        success: false,
-                        value: None,
-                        error: Some(e.to_string()),
-                    });
-                }
-                if options.issue_type.is_some() {
-                    results.push(FieldUpdateResult {
-                        field: "issue_type".to_string(),
+                        field: field.to_string(),
                         success: false,
                         value: None,
                         error: Some(e.to_string()),
@@ -164,22 +173,10 @@ async fn lookup_assignee(
     let identifier = parse_assignee_identifier(assignee_input);
 
     match identifier {
-        AssigneeIdentifier::AccountId(id) => {
-            // Already an account ID, return as-is
-            Ok(id)
-        }
-        AssigneeIdentifier::Email(email) => {
-            // Search for user by email
-            search_user_by_email(client, base_url, &email).await
-        }
-        AssigneeIdentifier::DisplayName(name) => {
-            // Search for user by display name
-            search_user_by_name(client, base_url, &name).await
-        }
-        AssigneeIdentifier::CurrentUser => {
-            // Get current user's account ID
-            get_current_user_account_id(client, base_url).await
-        }
+        AssigneeIdentifier::AccountId(id) => Ok(id),
+        AssigneeIdentifier::Email(email) => search_user_by_email(client, base_url, &email).await,
+        AssigneeIdentifier::DisplayName(name) => search_user_by_name(client, base_url, &name).await,
+        AssigneeIdentifier::CurrentUser => get_current_user_account_id(client, base_url).await,
     }
 }
 
@@ -419,7 +416,6 @@ async fn handle_status_transition(
         })?;
 
     // Execute transition
-    let transition_url = format!("{base_url}/rest/api/3/issue/{ticket_key}/transitions");
     let transition_payload = serde_json::json!({
         "transition": {
             "id": transition_id
@@ -427,7 +423,7 @@ async fn handle_status_transition(
     });
 
     let response = client
-        .post(&transition_url)
+        .post(&url)
         .json(&transition_payload)
         .send()
         .await
@@ -481,13 +477,19 @@ async fn update_issue_fields(
                 _ => key,
             };
 
+            let value = if key == "description" {
+                Some("(updated)".to_string())
+            } else {
+                fields_obj[key]["name"]
+                    .as_str()
+                    .or_else(|| fields_obj[key]["value"].as_str())
+                    .map(|s| s.to_string())
+            };
+
             results.push(FieldUpdateResult {
                 field: field_name.to_string(),
                 success: true,
-                value: fields_obj[key]["name"]
-                    .as_str()
-                    .or_else(|| fields_obj[key]["value"].as_str())
-                    .map(|s| s.to_string()),
+                value,
                 error: None,
             });
         }
@@ -533,9 +535,9 @@ pub async fn handler(options: UpdateOptions) -> Result<()> {
 
             let value = result
                 .value
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| result.error.as_ref().cloned().unwrap_or_default());
+                .clone()
+                .or_else(|| result.error.clone())
+                .unwrap_or_default();
 
             let value_colored = if result.success {
                 value.green()
@@ -563,87 +565,7 @@ pub async fn handler(options: UpdateOptions) -> Result<()> {
         std::println!("{}", "Current ticket state:".bold().cyan());
 
         let ticket = super::get::get_ticket_data(update_output.ticket_key.clone()).await?;
-
-        std::println!(
-            "\n{} - {}\n",
-            ticket.key.bold().cyan(),
-            ticket.summary.bright_white()
-        );
-
-        let mut detail_table = new_table();
-        detail_table.add_row(row![
-            "Status".bold().cyan(),
-            ticket.status.green().to_string()
-        ]);
-
-        if let Some(priority) = &ticket.priority {
-            detail_table.add_row(row![
-                "Priority".bold().cyan(),
-                priority.bright_yellow().to_string()
-            ]);
-        }
-
-        if let Some(issue_type) = &ticket.issue_type {
-            detail_table.add_row(row![
-                "Type".bold().cyan(),
-                issue_type.bright_blue().to_string()
-            ]);
-        }
-
-        let assignee = ticket
-            .assignee
-            .clone()
-            .unwrap_or_else(|| "Unassigned".to_string());
-        let assignee_colored = if assignee == "Unassigned" {
-            assignee.bright_black().to_string()
-        } else {
-            assignee.bright_magenta().to_string()
-        };
-        detail_table.add_row(row!["Assignee".bold().cyan(), assignee_colored]);
-
-        if let Some(created) = &ticket.created {
-            detail_table.add_row(row![
-                "Created".bold().cyan(),
-                created.bright_black().to_string()
-            ]);
-        }
-
-        if let Some(updated) = &ticket.updated {
-            detail_table.add_row(row![
-                "Updated".bold().cyan(),
-                updated.bright_black().to_string()
-            ]);
-        }
-
-        if let Some(due_date) = &ticket.due_date {
-            detail_table.add_row(row![
-                "Due Date".bold().cyan(),
-                due_date.yellow().to_string()
-            ]);
-        }
-
-        detail_table.printstd();
-
-        if let Some(description) = &ticket.description {
-            std::println!("\n{}:", "Description".bold().cyan());
-            std::println!("{}\n", description);
-        }
-
-        if !ticket.labels.is_empty() {
-            std::println!(
-                "\n{}: {}",
-                "Labels".bold().cyan(),
-                ticket.labels.join(", ").bright_green()
-            );
-        }
-
-        if !ticket.components.is_empty() {
-            std::println!(
-                "{}: {}",
-                "Components".bold().cyan(),
-                ticket.components.join(", ").bright_blue()
-            );
-        }
+        super::display_ticket(&ticket);
     }
 
     Ok(())
