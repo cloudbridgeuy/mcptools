@@ -67,7 +67,7 @@ mcptools pdf images document.pdf
 mcptools pdf images document.pdf s-1-0
 ```
 
-Returns image IDs, formats, and alt text for all images in the specified scope.
+Returns image IDs, formats, section IDs, section titles, and page numbers for all images in the specified scope.
 
 ### Extract an Image
 
@@ -245,6 +245,7 @@ Returns base64-encoded image data with format and size.
 - `HeadingLevel` — 1 through 6
 - `ImageId` — XObject name string
 - `ImageFormat` — Jpeg, Png, Jpeg2000, Gif, Tiff, Bmp, WebP, Unknown
+- `EnrichedImageRef` — image ID, format, section ID, section title, page number (returned by `list_section_images`)
 - `PeekPosition` — Beginning, Middle, Ending, Random
 - `PeekContent` — snippet with position, total chars, section info
 - `DocumentTree` — nested sections with metadata and flat index
