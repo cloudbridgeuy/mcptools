@@ -66,7 +66,6 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `jira_get` | Get Jira ticket details |
 | `jira_create` | Create a new Jira ticket |
 | `jira_update` | Update Jira ticket fields |
-| `jira_fields` | List custom field values |
 | `jira_query_list` | List saved queries |
 | `jira_query_save` | Save a JQL query |
 | `jira_query_delete` | Delete a saved query |
@@ -88,6 +87,32 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 |------|-------------|
 | `md_fetch` | Fetch page as Markdown |
 | `md_toc` | Extract table of contents |
+
+### Strand
+
+| Tool | Description |
+|------|-------------|
+| `generate_code` | Generate Rust code via local Ollama model |
+
+### PDF
+
+| Tool | Description |
+|------|-------------|
+| `pdf_toc` | Parse document tree / table of contents |
+| `pdf_read` | Read section content as Markdown |
+| `pdf_peek` | Sample text snippet from section |
+| `pdf_images` | List images in section or document |
+| `pdf_image` | Extract specific image by ID |
+| `pdf_info` | Get document metadata |
+
+### UI Annotations
+
+| Tool | Description |
+|------|-------------|
+| `ui_annotations_list` | List all annotations |
+| `ui_annotations_get` | Get annotation by ID |
+| `ui_annotations_resolve` | Mark annotation as resolved |
+| `ui_annotations_clear` | Clear all annotations |
 
 ## Testing with curl
 

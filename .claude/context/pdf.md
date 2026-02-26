@@ -14,7 +14,7 @@ Key modules:
 - `images.rs` — image extraction, magic byte format detection
 - `render/markdown.rs` — section content to Markdown
 - `render/cleanup.rs` — text normalization (ligatures, hyphenation, CJK)
-- `lib.rs` — public API: `ParsedDocument`, `parse()`, `read_section()`, `get_image()`, `info()`
+- `lib.rs` — public API: `ParsedDocument`, `parse()`, `read_section()`, `peek_section()`, `list_section_images()`, `get_image()`, `info()`, `extract_window()`
 
 ## CLI Commands
 
@@ -29,22 +29,68 @@ Returns the full document tree as JSON with section IDs, headings, content previ
 ### Read a Section
 
 ```bash
+# Read a specific section
 mcptools pdf read document.pdf s-1-0
+
+# Read the whole document
+mcptools pdf read document.pdf
 ```
 
-Returns the section content as rendered Markdown with image references. Section IDs come from the `pdf toc` output (format: `s-{depth}-{index}`).
+Returns the section content as rendered Markdown with image references. Section IDs come from the `pdf toc` output (format: `s-{depth}-{index}`). Omit the section ID to read the entire document.
+
+### Peek at a Section
+
+```bash
+# Peek at beginning of a section (default)
+mcptools pdf peek document.pdf s-1-0
+
+# Peek at middle of whole document with custom limit
+mcptools pdf peek document.pdf --position middle --limit 300
+
+# Random sample from a section
+mcptools pdf peek document.pdf s-1-0 --position random --limit 200
+```
+
+Samples a text snippet from a section without reading the full content. Returns the snippet, the position it was taken from, and total character count. Useful for quickly assessing content before committing to a full read.
+
+Options:
+- `--position` / `-p`: Where to sample from — `beginning` (default), `middle`, `ending`, `random`
+- `--limit` / `-l`: Maximum characters to return (default: 500)
+
+### List Images
+
+```bash
+# List all images in the document
+mcptools pdf images document.pdf
+
+# List images in a specific section
+mcptools pdf images document.pdf s-1-0
+```
+
+Returns image IDs, formats, and alt text for all images in the specified scope.
 
 ### Extract an Image
 
 ```bash
-# Save to file
+# Save to file by ID
 mcptools pdf image document.pdf Im1 --output photo.jpg
 
 # Print base64 to stdout
 mcptools pdf image document.pdf Im1
+
+# Random image from the document
+mcptools pdf image document.pdf --random
+
+# Random image from a specific section
+mcptools pdf image document.pdf --random --section s-1-0
 ```
 
-Image IDs are XObject names from the PDF (visible in section image references).
+Image IDs are XObject names from the PDF (visible in section image references and `pdf images` output).
+
+Options:
+- `--output` / `-o`: Save to file instead of printing base64
+- `--section` / `-s`: Scope image selection to a section (used with `--random`)
+- `--random` / `-r`: Pick a random image (cannot be used with an image ID)
 
 ### Document Info
 
@@ -61,13 +107,19 @@ Returns title, author, page count, and creator.
    mcptools pdf toc document.pdf
    ```
 
-2. **Read a specific section by ID:**
+2. **Peek at sections to assess content:**
+   ```bash
+   mcptools pdf peek document.pdf s-1-0
+   ```
+
+3. **Read specific sections of interest:**
    ```bash
    mcptools pdf read document.pdf s-1-0
    ```
 
-3. **Extract images referenced in the section:**
+4. **List and extract images:**
    ```bash
+   mcptools pdf images document.pdf s-1-0
    mcptools pdf image document.pdf Im1 --output image.jpg
    ```
 
@@ -105,7 +157,49 @@ Returns title, author, page count, and creator.
 
 **Arguments:**
 - `path` (required): Absolute path to the PDF file
-- `sectionId` (required): Section ID from `pdf_toc` (e.g., `s-1-0`)
+- `sectionId` (optional): Section ID from `pdf_toc` (e.g., `s-1-0`). Omit for whole document.
+
+### pdf_peek
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "pdf_peek",
+    "arguments": {
+      "path": "/absolute/path/to/document.pdf",
+      "sectionId": "s-1-0",
+      "position": "middle",
+      "limit": 300
+    }
+  }
+}
+```
+
+**Arguments:**
+- `path` (required): Absolute path to the PDF file
+- `sectionId` (optional): Section ID from `pdf_toc`. Omit for whole document.
+- `position` (optional): Where to sample — `beginning` (default), `middle`, `ending`, `random`
+- `limit` (optional): Maximum characters to return (default: 500)
+
+### pdf_images
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "pdf_images",
+    "arguments": {
+      "path": "/absolute/path/to/document.pdf",
+      "sectionId": "s-1-0"
+    }
+  }
+}
+```
+
+**Arguments:**
+- `path` (required): Absolute path to the PDF file
+- `sectionId` (optional): Section ID from `pdf_toc`. Omit for all images.
 
 ### pdf_image
 
@@ -124,7 +218,9 @@ Returns title, author, page count, and creator.
 
 **Arguments:**
 - `path` (required): Absolute path to the PDF file
-- `imageId` (required): Image ID (XObject name from the PDF)
+- `imageId` (optional): Image ID (XObject name). Required unless `random` is true.
+- `sectionId` (optional): Section ID to scope image selection (used with `random`)
+- `random` (optional): Pick a random image. Cannot be used with `imageId`.
 
 Returns base64-encoded image data with format and size.
 
@@ -149,6 +245,8 @@ Returns base64-encoded image data with format and size.
 - `HeadingLevel` — 1 through 6
 - `ImageId` — XObject name string
 - `ImageFormat` — Jpeg, Png, Jpeg2000, Gif, Tiff, Bmp, WebP, Unknown
+- `PeekPosition` — Beginning, Middle, Ending, Random
+- `PeekContent` — snippet with position, total chars, section info
 - `DocumentTree` — nested sections with metadata and flat index
 - `SectionContent` — rendered Markdown text with image references
 - `ParsedDocument` — holds intermediate state for efficient repeated queries

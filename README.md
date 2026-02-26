@@ -6,11 +6,13 @@ Useful MCP Tools to use with LLM Coding Agents
 
 `mcptools` is a Model Context Protocol (MCP) server that exposes various tools for LLM agents to interact with external services. Currently provides tools for:
 
-- **Atlassian Jira**: Search, create, update tickets, and manage custom fields (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_fields`)
+- **Atlassian Jira**: Search, create, update tickets, and saved queries (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_query_list`, `jira_query_save`, `jira_query_delete`, `jira_query_load`)
 - **Atlassian Confluence**: Search pages using CQL (`confluence_search`)
 - **Atlassian Bitbucket**: List and read pull requests with diff support (`bitbucket_pr_list`, `bitbucket_pr_read`)
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
 - **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
+- **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)
+- **Strand**: Generate Rust code via local Ollama model (`generate_code`)
 - **UI Annotations**: Query and manage UI annotations from a calendsync dev server (`ui_annotations_list`, `ui_annotations_get`, `ui_annotations_resolve`, `ui_annotations_clear`)
 
 ## Installation
@@ -175,8 +177,6 @@ Create a new Jira ticket.
 - `issueType` (string, optional) - Issue type (e.g., Bug, Story, Task)
 - `priority` (string, optional) - Priority (e.g., High, Medium, Low)
 - `assignee` (string, optional) - Assignee (email, display name, or "me")
-- `assignedGuild` (string, optional) - Custom guild field
-- `assignedPod` (string, optional) - Custom pod field
 
 **Example:**
 
@@ -206,8 +206,6 @@ Update fields on an existing Jira ticket.
 - `priority` (string, optional) - New priority
 - `issueType` (string, optional) - New issue type
 - `assignee` (string, optional) - New assignee (email, display name, or "me")
-- `assignedGuild` (string, optional) - New assigned guild
-- `assignedPod` (string, optional) - New assigned pod
 
 **Example:**
 
@@ -224,15 +222,6 @@ Update fields on an existing Jira ticket.
   }
 }
 ```
-
-#### jira_fields
-
-List available values for Jira custom fields.
-
-**Parameters:**
-
-- `project` (string, optional) - Project key (default: PROD)
-- `field` (string, optional) - Specific field to display (assigned-guild or assigned-pod)
 
 #### jira_query_list
 
@@ -721,6 +710,197 @@ Clear all UI annotations from the dev server.
 }
 ```
 
+### PDF Tools
+
+#### pdf_toc
+
+Parse a PDF document and return its table of contents as a navigable tree with section IDs, headings, content previews, image counts, and page ranges.
+
+**Parameters:**
+
+- `path` (string, required) - Absolute path to the PDF file
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "pdf_toc",
+    "arguments": {
+      "path": "/absolute/path/to/document.pdf"
+    }
+  }
+}
+```
+
+#### pdf_read
+
+Read section content as rendered Markdown with image references. Omit `sectionId` to read the entire document.
+
+**Parameters:**
+
+- `path` (string, required) - Absolute path to the PDF file
+- `sectionId` (string, optional) - Section ID from `pdf_toc` (e.g., `s-1-0`). Omit for whole document.
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "pdf_read",
+    "arguments": {
+      "path": "/absolute/path/to/document.pdf",
+      "sectionId": "s-1-0"
+    }
+  }
+}
+```
+
+#### pdf_peek
+
+Sample a text snippet from a section without reading the full content. Returns the snippet, position, and total character count.
+
+**Parameters:**
+
+- `path` (string, required) - Absolute path to the PDF file
+- `sectionId` (string, optional) - Section ID from `pdf_toc`. Omit for whole document.
+- `position` (string, optional) - Where to sample: "beginning" (default), "middle", "ending", "random"
+- `limit` (number, optional) - Maximum characters to return (default: 500)
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "pdf_peek",
+    "arguments": {
+      "path": "/absolute/path/to/document.pdf",
+      "sectionId": "s-1-0",
+      "position": "middle",
+      "limit": 300
+    }
+  }
+}
+```
+
+#### pdf_images
+
+List images in a section or the entire document. Returns image IDs, formats, and alt text.
+
+**Parameters:**
+
+- `path` (string, required) - Absolute path to the PDF file
+- `sectionId` (string, optional) - Section ID from `pdf_toc`. Omit for all images.
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "pdf_images",
+    "arguments": {
+      "path": "/absolute/path/to/document.pdf",
+      "sectionId": "s-1-0"
+    }
+  }
+}
+```
+
+#### pdf_image
+
+Extract a specific image by ID or pick a random one. Returns base64-encoded image data with format and size.
+
+**Parameters:**
+
+- `path` (string, required) - Absolute path to the PDF file
+- `imageId` (string, optional) - Image ID (XObject name). Required unless `random` is true.
+- `sectionId` (string, optional) - Section ID to scope image selection (used with `random`)
+- `random` (boolean, optional) - Pick a random image. Cannot be used with `imageId`.
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "pdf_image",
+    "arguments": {
+      "path": "/absolute/path/to/document.pdf",
+      "imageId": "Im1"
+    }
+  }
+}
+```
+
+#### pdf_info
+
+Get document metadata including title, author, page count, and creator.
+
+**Parameters:**
+
+- `path` (string, required) - Absolute path to the PDF file
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "pdf_info",
+    "arguments": {
+      "path": "/absolute/path/to/document.pdf"
+    }
+  }
+}
+```
+
+### Strand Tools
+
+#### generate_code
+
+Generate Rust code via a local Ollama model. The model outputs raw Rust code without markdown fences or explanations.
+
+**Parameters:**
+
+- `instruction` (string, required) - What code to generate
+- `context` (string, optional) - Additional context for code generation
+- `files` (array of strings, optional) - File paths to include as context
+- `ollama_url` (string, optional) - Ollama API base URL (default: `http://localhost:11434`)
+- `model` (string, optional) - Model name (default: `strand-rust-coder`)
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "generate_code",
+    "arguments": {
+      "instruction": "Write a function that adds two numbers",
+      "files": ["src/lib.rs", "src/types.rs"]
+    }
+  }
+}
+```
+
 ## MCP Protocol Implementation
 
 This server implements the Model Context Protocol specification with the following methods:
@@ -907,6 +1087,24 @@ mcptools atlassian jira fields --project PROJ
 
 # Output as JSON
 mcptools atlassian jira search "project = PROJ" --json
+
+# Save a query
+mcptools atlassian jira search 'project = "PM" AND status = Open' --save --query devops
+
+# Execute a saved query
+mcptools atlassian jira search --query devops
+
+# List all saved queries
+mcptools atlassian jira search --list
+
+# View query contents
+mcptools atlassian jira search --load --query devops
+
+# Update existing query
+mcptools atlassian jira search 'project = "PM"' --save --query devops --update
+
+# Delete a query
+mcptools atlassian jira search --delete --query devops
 ```
 
 #### Confluence
@@ -1023,6 +1221,58 @@ mcptools md toc https://example.com --selector "article" --strategy first
 mcptools md toc https://docs.example.com --json > toc.json
 # Use char_offset and char_limit from toc.json
 mcptools md fetch https://docs.example.com --offset 1234 --limit 580
+```
+
+### PDF
+
+```bash
+# Get document table of contents
+mcptools pdf toc document.pdf
+
+# Read a specific section
+mcptools pdf read document.pdf s-1-0
+
+# Read the whole document
+mcptools pdf read document.pdf
+
+# Peek at a section (quick preview)
+mcptools pdf peek document.pdf s-1-0
+
+# Peek at middle of document with custom limit
+mcptools pdf peek document.pdf --position middle --limit 300
+
+# List all images in the document
+mcptools pdf images document.pdf
+
+# List images in a specific section
+mcptools pdf images document.pdf s-1-0
+
+# Extract an image by ID
+mcptools pdf image document.pdf Im1 --output photo.jpg
+
+# Pick a random image
+mcptools pdf image document.pdf --random
+
+# Random image from a specific section
+mcptools pdf image document.pdf --random --section s-1-0
+
+# Get document metadata
+mcptools pdf info document.pdf
+```
+
+### Strand
+
+```bash
+# Basic code generation
+mcptools strand generate "Write a function that adds two numbers"
+
+# With file context
+mcptools strand generate "Add error handling" --files src/lib.rs src/types.rs
+
+# Custom model/URL
+mcptools strand generate "Write a hello world" \
+  --model codellama \
+  --ollama-url http://localhost:11434
 ```
 
 ## Best Practices for Web Fetching with Claude Code

@@ -66,6 +66,19 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 | `MD_LIMIT` | Characters per page |
 | `MD_PAGE` | Page number |
 
+## Strand Variables
+
+| Variable | Description |
+|----------|-------------|
+| `OLLAMA_URL` | Ollama API base URL (default: `http://localhost:11434`) |
+| `STRAND_MODEL` | Model name for code generation (default: `strand-rust-coder`) |
+
+## UI Annotations Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CALENDSYNC_DEV_URL` | Dev server base URL (default: `http://localhost:3000`) |
+
 ## Usage Examples
 
 ### Scripting

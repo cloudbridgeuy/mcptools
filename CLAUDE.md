@@ -97,7 +97,14 @@ mcptools hn list --story-type top
 ```bash
 mcptools pdf toc document.pdf
 mcptools pdf read document.pdf s-1-0
+mcptools pdf read document.pdf                              # whole document
+mcptools pdf peek document.pdf s-1-0
+mcptools pdf peek document.pdf --position middle --limit 300
+mcptools pdf images document.pdf
+mcptools pdf images document.pdf s-1-0
 mcptools pdf image document.pdf Im1 --output photo.jpg
+mcptools pdf image document.pdf --random
+mcptools pdf image document.pdf --random --section s-1-0
 mcptools pdf info document.pdf
 ```
 
@@ -106,6 +113,13 @@ mcptools pdf info document.pdf
 ```bash
 mcptools md toc https://docs.example.com
 mcptools md fetch https://docs.example.com --selector "main"
+```
+
+### Strand
+
+```bash
+mcptools strand generate "Write a function that adds two numbers"
+mcptools strand generate "Add error handling" --files src/lib.rs src/types.rs
 ```
 
 ### MCP Server
