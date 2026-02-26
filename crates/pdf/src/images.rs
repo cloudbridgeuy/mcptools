@@ -1,6 +1,41 @@
+use std::io::Cursor;
+
 use crate::parser::backend::LopdfBackend;
 use crate::types::{ImageData, ImageFormat, ImageId, ImageRef};
 use crate::PdfError;
+
+// ---------------------------------------------------------------------------
+// Pure types for raw image handling
+// ---------------------------------------------------------------------------
+
+/// Parsed color space from a PDF image stream dictionary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorSpace {
+    Gray,
+    Rgb,
+    Cmyk,
+}
+
+/// Parsed image metadata from a PDF stream dictionary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RawImageMeta {
+    width: u32,
+    height: u32,
+    bits_per_component: u8,
+    channels: u8,
+    color_space: ColorSpace,
+}
+
+impl RawImageMeta {
+    /// Expected raw byte count for this image's pixel data.
+    /// Accounts for sub-byte pixel packing with per-row byte alignment.
+    fn expected_byte_count(&self) -> usize {
+        let bits_per_row =
+            self.width as usize * self.channels as usize * self.bits_per_component as usize;
+        let bytes_per_row = bits_per_row.div_ceil(8);
+        bytes_per_row * self.height as usize
+    }
+}
 
 /// Detect the image format from raw bytes using magic byte signatures.
 ///
@@ -92,6 +127,213 @@ pub fn build_image_data(id: ImageId, raw_bytes: Vec<u8>, filter: Option<&str>) -
     }
 }
 
+// ---------------------------------------------------------------------------
+// Pure image conversion functions
+// ---------------------------------------------------------------------------
+
+/// Parse image metadata from a PDF stream dictionary.
+fn extract_image_meta(dict: &lopdf::Dictionary) -> Option<RawImageMeta> {
+    let width = dict.get(b"Width").ok()?.as_i64().ok()? as u32;
+    let height = dict.get(b"Height").ok()?.as_i64().ok()? as u32;
+
+    let bits_per_component = dict
+        .get(b"BitsPerComponent")
+        .ok()
+        .and_then(|obj| obj.as_i64().ok())
+        .map(|v| v as u8)
+        .unwrap_or(8);
+
+    let color_space_name = dict.get(b"ColorSpace").ok()?.as_name().ok()?;
+    let (color_space, channels) = match color_space_name {
+        b"DeviceRGB" => (ColorSpace::Rgb, 3),
+        b"DeviceGray" => (ColorSpace::Gray, 1),
+        b"DeviceCMYK" => (ColorSpace::Cmyk, 4),
+        _ => return None,
+    };
+
+    Some(RawImageMeta {
+        width,
+        height,
+        bits_per_component,
+        channels,
+        color_space,
+    })
+}
+
+/// Re-encode raw pixel data as PNG.
+fn encode_raw_as_png(meta: &RawImageMeta, raw_bytes: &[u8]) -> Option<Vec<u8>> {
+    if raw_bytes.len() != meta.expected_byte_count() {
+        return None;
+    }
+
+    let expanded = if meta.bits_per_component < 8 {
+        expand_sub_byte_pixels(raw_bytes, meta)
+    } else {
+        raw_bytes.to_vec()
+    };
+
+    let dyn_image = match meta.color_space {
+        ColorSpace::Gray => {
+            let img = image::GrayImage::from_raw(meta.width, meta.height, expanded)?;
+            image::DynamicImage::ImageLuma8(img)
+        }
+        ColorSpace::Rgb => {
+            let img = image::RgbImage::from_raw(meta.width, meta.height, expanded)?;
+            image::DynamicImage::ImageRgb8(img)
+        }
+        ColorSpace::Cmyk => {
+            let rgb_pixels = cmyk_to_rgb(&expanded);
+            let img = image::RgbImage::from_raw(meta.width, meta.height, rgb_pixels)?;
+            image::DynamicImage::ImageRgb8(img)
+        }
+    };
+
+    let mut buf = Vec::new();
+    dyn_image
+        .write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)
+        .ok()?;
+    Some(buf)
+}
+
+/// Expand sub-byte packed pixels (1-bit, 2-bit, 4-bit) to 8-bit per component.
+fn expand_sub_byte_pixels(raw_bytes: &[u8], meta: &RawImageMeta) -> Vec<u8> {
+    let pixels_per_row = meta.width as usize * meta.channels as usize;
+    let bits_per_row = pixels_per_row * meta.bits_per_component as usize;
+    let bytes_per_row = bits_per_row.div_ceil(8);
+    let bpc = meta.bits_per_component;
+    let max_val = (1u16 << bpc) - 1;
+
+    let mut result = Vec::with_capacity(pixels_per_row * meta.height as usize);
+
+    for row in 0..meta.height as usize {
+        let row_start = row * bytes_per_row;
+        let row_bytes = &raw_bytes[row_start..row_start + bytes_per_row];
+        let mut pixel_count = 0;
+
+        for &byte in row_bytes {
+            let pixels_in_byte = 8 / bpc as usize;
+            for i in 0..pixels_in_byte {
+                if pixel_count >= pixels_per_row {
+                    break;
+                }
+                let shift = 8 - bpc * (i as u8 + 1);
+                let val = (byte >> shift) & (max_val as u8);
+                let scaled = (val as u16 * 255 / max_val) as u8;
+                result.push(scaled);
+                pixel_count += 1;
+            }
+        }
+    }
+
+    result
+}
+
+/// Convert CMYK pixel bytes to RGB.
+fn cmyk_to_rgb(cmyk_bytes: &[u8]) -> Vec<u8> {
+    let mut rgb = Vec::with_capacity(cmyk_bytes.len() / 4 * 3);
+    for pixel in cmyk_bytes.chunks_exact(4) {
+        let (c, m, y, k) = (
+            pixel[0] as u16,
+            pixel[1] as u16,
+            pixel[2] as u16,
+            pixel[3] as u16,
+        );
+        let r = 255u16.saturating_sub((c + k).min(255)) as u8;
+        let g = 255u16.saturating_sub((m + k).min(255)) as u8;
+        let b = 255u16.saturating_sub((y + k).min(255)) as u8;
+        rgb.extend_from_slice(&[r, g, b]);
+    }
+    rgb
+}
+
+/// Decode CCITT Group 4 fax data into a PNG image.
+fn decode_ccitt(dict: &lopdf::Dictionary, raw_bytes: &[u8]) -> Option<Vec<u8>> {
+    let decode_parms = extract_decode_parms(dict)?;
+
+    let width = decode_parms.get(b"Columns").ok()?.as_i64().ok()? as u16;
+    let height = decode_parms
+        .get(b"Rows")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .map(|v| v as u16);
+
+    let k = decode_parms
+        .get(b"K")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .unwrap_or(0);
+
+    if k >= 0 {
+        return None;
+    }
+
+    let bytes_per_row = (width as usize).div_ceil(8);
+    let mut rows: Vec<Vec<u8>> = Vec::new();
+
+    fax::decoder::decode_g4(raw_bytes.iter().copied(), width, height, |transitions| {
+        let mut row = pack_row_bits(transitions, width);
+        row.resize(bytes_per_row, 0);
+        rows.push(row);
+    })?;
+
+    if rows.is_empty() {
+        return None;
+    }
+
+    let pixel_data: Vec<u8> = rows.into_iter().flatten().collect();
+
+    let meta = RawImageMeta {
+        width: width as u32,
+        height: pixel_data.len() as u32 / bytes_per_row as u32,
+        bits_per_component: 1,
+        channels: 1,
+        color_space: ColorSpace::Gray,
+    };
+
+    encode_raw_as_png(&meta, &pixel_data)
+}
+
+/// Extract the DecodeParms dictionary from a stream dictionary.
+fn extract_decode_parms(dict: &lopdf::Dictionary) -> Option<&lopdf::Dictionary> {
+    let obj = dict.get(b"DecodeParms").ok()?;
+    match obj {
+        lopdf::Object::Dictionary(d) => Some(d),
+        lopdf::Object::Array(arr) => arr.first().and_then(|o| o.as_dict().ok()),
+        _ => None,
+    }
+}
+
+/// Convert fax transition positions into a packed 1-bit byte array.
+fn pack_row_bits(transitions: &[u16], width: u16) -> Vec<u8> {
+    let bytes_per_row = (width as usize).div_ceil(8);
+    let mut row = vec![0u8; bytes_per_row];
+
+    let mut set_black_run = |start: u16, end: u16| {
+        for col in start..end.min(width) {
+            let byte_idx = col as usize / 8;
+            let bit_idx = 7 - (col as usize % 8);
+            row[byte_idx] |= 1 << bit_idx;
+        }
+    };
+
+    let mut is_black = false;
+    let mut prev_pos: u16 = 0;
+
+    for &pos in transitions {
+        if is_black {
+            set_black_run(prev_pos, pos);
+        }
+        prev_pos = pos;
+        is_black = !is_black;
+    }
+
+    if is_black {
+        set_black_run(prev_pos, width);
+    }
+
+    row
+}
+
 /// Extract a single image XObject from the PDF by its name.
 ///
 /// Walks all pages in the document, inspecting each page's
@@ -115,51 +357,53 @@ pub fn extract_image(backend: &LopdfBackend, id: &ImageId) -> Result<ImageData, 
             Err(_) => continue,
         };
 
-        // Get the Resources dictionary, resolving a reference if needed.
-        let resources_obj = match page_dict.get(b"Resources") {
-            Ok(obj) => obj,
-            Err(_) => continue,
-        };
-
-        let resources_dict = match resolve_dict(doc, resources_obj) {
+        let xobject_dict = match resolve_xobject_dict(doc, page_dict) {
             Some(d) => d,
             None => continue,
         };
 
-        // Get the XObject dictionary from Resources.
-        let xobject_obj = match resources_dict.get(b"XObject") {
-            Ok(obj) => obj,
-            Err(_) => continue,
-        };
-
-        let xobject_dict = match resolve_dict(doc, xobject_obj) {
-            Some(d) => d,
-            None => continue,
-        };
-
-        // Look for our target name in the XObject dictionary.
         let stream_obj = match xobject_dict.get(target_name) {
             Ok(obj) => obj,
             Err(_) => continue,
         };
 
-        // Resolve reference if needed and extract the stream.
         let resolved = resolve_object(doc, stream_obj);
-        if let Some(stream) = as_stream(resolved) {
-            // Get the filter name for format detection.
-            let filter_name = extract_filter_name(&stream.dict);
+        let Some(stream) = as_stream(resolved) else {
+            continue;
+        };
 
-            // Get the decompressed content. Try to decode the stream first;
-            // fall back to the raw content if decoding fails.
-            let bytes = stream
-                .decompressed_content()
-                .unwrap_or_else(|_| stream.content.clone());
+        let filter_name = extract_filter_name(&stream.dict);
 
-            let image_data =
-                build_image_data(ImageId::new(id.as_str()), bytes, filter_name.as_deref());
-
-            return Ok(image_data);
+        // CCITTFaxDecode: lopdf cannot decompress this -- decode from raw stream
+        if filter_name.as_deref() == Some("CCITTFaxDecode") {
+            if let Some(png_bytes) = decode_ccitt(&stream.dict, &stream.content) {
+                return Ok(ImageData {
+                    id: ImageId::new(id.as_str()),
+                    format: ImageFormat::Png,
+                    bytes: png_bytes,
+                });
+            }
         }
+
+        let bytes = stream
+            .decompressed_content()
+            .unwrap_or_else(|_| stream.content.clone());
+        let image_data = build_image_data(ImageId::new(id.as_str()), bytes, filter_name.as_deref());
+
+        // Raw pixel data fallback: try re-encoding as PNG
+        if image_data.format == ImageFormat::Unknown {
+            if let Some(meta) = extract_image_meta(&stream.dict) {
+                if let Some(png_bytes) = encode_raw_as_png(&meta, &image_data.bytes) {
+                    return Ok(ImageData {
+                        id: image_data.id,
+                        format: ImageFormat::Png,
+                        bytes: png_bytes,
+                    });
+                }
+            }
+        }
+
+        return Ok(image_data);
     }
 
     Err(PdfError::ImageNotFound(id.as_str().to_string()))
@@ -184,55 +428,43 @@ pub fn list_page_images(
         .as_dict()
         .map_err(|e| PdfError::Parse(format!("page object is not a dictionary: {}", e)))?;
 
-    // Get the Resources dictionary.
-    let resources_obj = match page_dict.get(b"Resources") {
-        Ok(obj) => obj,
-        Err(_) => return Ok(images),
-    };
-
-    let resources_dict = match resolve_dict(doc, resources_obj) {
+    let xobject_dict = match resolve_xobject_dict(doc, page_dict) {
         Some(d) => d,
         None => return Ok(images),
     };
 
-    // Get the XObject dictionary from Resources.
-    let xobject_obj = match resources_dict.get(b"XObject") {
-        Ok(obj) => obj,
-        Err(_) => return Ok(images),
-    };
-
-    let xobject_dict = match resolve_dict(doc, xobject_obj) {
-        Some(d) => d,
-        None => return Ok(images),
-    };
-
-    // Iterate over all entries in the XObject dictionary.
     for (name, obj) in xobject_dict.iter() {
         let resolved = resolve_object(doc, obj);
+        let Some(stream) = as_stream(resolved) else {
+            continue;
+        };
 
-        // Check if this XObject is an Image subtype.
-        if let Some(stream) = as_stream(resolved) {
-            let is_image = stream
-                .dict
-                .get(b"Subtype")
-                .ok()
-                .and_then(|o| o.as_name().ok())
-                .is_some_and(|n| n == b"Image");
+        let is_image = stream
+            .dict
+            .get(b"Subtype")
+            .ok()
+            .and_then(|o| o.as_name().ok())
+            .is_some_and(|n| n == b"Image");
 
-            if !is_image {
-                continue;
-            }
-
-            let filter_name = extract_filter_name(&stream.dict);
-            let format = resolve_format(&stream.content, filter_name.as_deref());
-
-            let id_str = String::from_utf8_lossy(name).into_owned();
-            images.push(ImageRef {
-                id: ImageId::new(id_str),
-                format,
-                alt_text: None,
-            });
+        if !is_image {
+            continue;
         }
+
+        let filter_name = extract_filter_name(&stream.dict);
+        let mut format = resolve_format(&stream.content, filter_name.as_deref());
+
+        if format == ImageFormat::Unknown
+            && can_reencode_as_png(filter_name.as_deref(), &stream.dict)
+        {
+            format = ImageFormat::Png;
+        }
+
+        let id_str = String::from_utf8_lossy(name).into_owned();
+        images.push(ImageRef {
+            id: ImageId::new(id_str),
+            format,
+            alt_text: None,
+        });
     }
 
     Ok(images)
@@ -266,6 +498,18 @@ fn resolve_dict<'a>(
     }
 }
 
+/// Resolve the XObject dictionary from a page dictionary, following references
+/// through Resources -> XObject.
+fn resolve_xobject_dict<'a>(
+    doc: &'a lopdf::Document,
+    page_dict: &'a lopdf::Dictionary,
+) -> Option<&'a lopdf::Dictionary> {
+    let resources_obj = page_dict.get(b"Resources").ok()?;
+    let resources_dict = resolve_dict(doc, resources_obj)?;
+    let xobject_obj = resources_dict.get(b"XObject").ok()?;
+    resolve_dict(doc, xobject_obj)
+}
+
 /// Extract the stream from an object, if it is a `Stream`.
 fn as_stream(obj: &lopdf::Object) -> Option<&lopdf::Stream> {
     match obj {
@@ -288,6 +532,15 @@ fn extract_filter_name(dict: &lopdf::Dictionary) -> Option<String> {
         }),
         _ => None,
     }
+}
+
+/// Check whether raw pixel data can be re-encoded as PNG.
+///
+/// Returns true when the stream has either a CCITTFaxDecode filter (fax
+/// image) or parseable image metadata (DeviceRGB/Gray/CMYK with known
+/// dimensions).
+fn can_reencode_as_png(filter_name: Option<&str>, dict: &lopdf::Dictionary) -> bool {
+    filter_name == Some("CCITTFaxDecode") || extract_image_meta(dict).is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -449,5 +702,277 @@ mod tests {
         let bytes = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00];
         let data = build_image_data(id, bytes, Some("DCTDecode"));
         assert_eq!(data.format, ImageFormat::Jpeg);
+    }
+
+    // -- extract_image_meta -------------------------------------------------
+
+    #[test]
+    fn extract_meta_rgb() {
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("Width", lopdf::Object::Integer(100));
+        dict.set("Height", lopdf::Object::Integer(50));
+        dict.set("BitsPerComponent", lopdf::Object::Integer(8));
+        dict.set("ColorSpace", lopdf::Object::Name(b"DeviceRGB".to_vec()));
+        let meta = extract_image_meta(&dict).unwrap();
+        assert_eq!(meta.width, 100);
+        assert_eq!(meta.height, 50);
+        assert_eq!(meta.bits_per_component, 8);
+        assert_eq!(meta.channels, 3);
+        assert_eq!(meta.color_space, ColorSpace::Rgb);
+    }
+
+    #[test]
+    fn extract_meta_gray() {
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("Width", lopdf::Object::Integer(200));
+        dict.set("Height", lopdf::Object::Integer(100));
+        dict.set("ColorSpace", lopdf::Object::Name(b"DeviceGray".to_vec()));
+        let meta = extract_image_meta(&dict).unwrap();
+        assert_eq!(meta.channels, 1);
+        assert_eq!(meta.color_space, ColorSpace::Gray);
+    }
+
+    #[test]
+    fn extract_meta_cmyk() {
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("Width", lopdf::Object::Integer(50));
+        dict.set("Height", lopdf::Object::Integer(50));
+        dict.set("ColorSpace", lopdf::Object::Name(b"DeviceCMYK".to_vec()));
+        let meta = extract_image_meta(&dict).unwrap();
+        assert_eq!(meta.channels, 4);
+        assert_eq!(meta.color_space, ColorSpace::Cmyk);
+    }
+
+    #[test]
+    fn extract_meta_missing_width() {
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("Height", lopdf::Object::Integer(50));
+        dict.set("ColorSpace", lopdf::Object::Name(b"DeviceRGB".to_vec()));
+        assert!(extract_image_meta(&dict).is_none());
+    }
+
+    #[test]
+    fn extract_meta_missing_height() {
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("Width", lopdf::Object::Integer(100));
+        dict.set("ColorSpace", lopdf::Object::Name(b"DeviceRGB".to_vec()));
+        assert!(extract_image_meta(&dict).is_none());
+    }
+
+    #[test]
+    fn extract_meta_unsupported_colorspace() {
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("Width", lopdf::Object::Integer(100));
+        dict.set("Height", lopdf::Object::Integer(50));
+        dict.set("ColorSpace", lopdf::Object::Name(b"ICCBased".to_vec()));
+        assert!(extract_image_meta(&dict).is_none());
+    }
+
+    #[test]
+    fn extract_meta_default_bits() {
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("Width", lopdf::Object::Integer(100));
+        dict.set("Height", lopdf::Object::Integer(50));
+        dict.set("ColorSpace", lopdf::Object::Name(b"DeviceRGB".to_vec()));
+        let meta = extract_image_meta(&dict).unwrap();
+        assert_eq!(meta.bits_per_component, 8);
+    }
+
+    // -- expected_byte_count ------------------------------------------------
+
+    #[test]
+    fn byte_count_8bit_rgb() {
+        let meta = RawImageMeta {
+            width: 10,
+            height: 5,
+            bits_per_component: 8,
+            channels: 3,
+            color_space: ColorSpace::Rgb,
+        };
+        assert_eq!(meta.expected_byte_count(), 150);
+    }
+
+    #[test]
+    fn byte_count_1bit_gray() {
+        let meta = RawImageMeta {
+            width: 8,
+            height: 1,
+            bits_per_component: 1,
+            channels: 1,
+            color_space: ColorSpace::Gray,
+        };
+        assert_eq!(meta.expected_byte_count(), 1);
+    }
+
+    #[test]
+    fn byte_count_1bit_gray_with_padding() {
+        let meta = RawImageMeta {
+            width: 10,
+            height: 1,
+            bits_per_component: 1,
+            channels: 1,
+            color_space: ColorSpace::Gray,
+        };
+        assert_eq!(meta.expected_byte_count(), 2);
+    }
+
+    #[test]
+    fn byte_count_4bit_gray() {
+        let meta = RawImageMeta {
+            width: 3,
+            height: 2,
+            bits_per_component: 4,
+            channels: 1,
+            color_space: ColorSpace::Gray,
+        };
+        assert_eq!(meta.expected_byte_count(), 4);
+    }
+
+    // -- encode_raw_as_png --------------------------------------------------
+
+    const PNG_MAGIC: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+    #[test]
+    fn encode_rgb_png() {
+        let meta = RawImageMeta {
+            width: 2,
+            height: 2,
+            bits_per_component: 8,
+            channels: 3,
+            color_space: ColorSpace::Rgb,
+        };
+        let raw = vec![0u8; 12];
+        let png = encode_raw_as_png(&meta, &raw).unwrap();
+        assert_eq!(png[..8], PNG_MAGIC);
+    }
+
+    #[test]
+    fn encode_gray_png() {
+        let meta = RawImageMeta {
+            width: 2,
+            height: 2,
+            bits_per_component: 8,
+            channels: 1,
+            color_space: ColorSpace::Gray,
+        };
+        let raw = vec![0u8; 4];
+        let png = encode_raw_as_png(&meta, &raw).unwrap();
+        assert_eq!(png[..8], PNG_MAGIC);
+    }
+
+    #[test]
+    fn encode_cmyk_png() {
+        let meta = RawImageMeta {
+            width: 2,
+            height: 2,
+            bits_per_component: 8,
+            channels: 4,
+            color_space: ColorSpace::Cmyk,
+        };
+        let raw = vec![0u8; 16];
+        let png = encode_raw_as_png(&meta, &raw).unwrap();
+        assert_eq!(png[..8], PNG_MAGIC);
+    }
+
+    #[test]
+    fn encode_1bit_png() {
+        let meta = RawImageMeta {
+            width: 8,
+            height: 1,
+            bits_per_component: 1,
+            channels: 1,
+            color_space: ColorSpace::Gray,
+        };
+        let raw = vec![0xFFu8];
+        let png = encode_raw_as_png(&meta, &raw).unwrap();
+        assert_eq!(png[..8], PNG_MAGIC);
+    }
+
+    #[test]
+    fn encode_size_mismatch_returns_none() {
+        let meta = RawImageMeta {
+            width: 2,
+            height: 2,
+            bits_per_component: 8,
+            channels: 3,
+            color_space: ColorSpace::Rgb,
+        };
+        let raw = vec![0u8; 10]; // expects 12
+        assert!(encode_raw_as_png(&meta, &raw).is_none());
+    }
+
+    #[test]
+    fn encode_empty_bytes_returns_none() {
+        let meta = RawImageMeta {
+            width: 2,
+            height: 2,
+            bits_per_component: 8,
+            channels: 3,
+            color_space: ColorSpace::Rgb,
+        };
+        assert!(encode_raw_as_png(&meta, &[]).is_none());
+    }
+
+    // -- cmyk_to_rgb --------------------------------------------------------
+
+    #[test]
+    fn cmyk_all_zeros_gives_white() {
+        let cmyk = vec![0, 0, 0, 0];
+        let rgb = cmyk_to_rgb(&cmyk);
+        assert_eq!(rgb, vec![255, 255, 255]);
+    }
+
+    #[test]
+    fn cmyk_full_black() {
+        let cmyk = vec![0, 0, 0, 255];
+        let rgb = cmyk_to_rgb(&cmyk);
+        assert_eq!(rgb, vec![0, 0, 0]);
+    }
+
+    #[test]
+    fn cmyk_pure_cyan() {
+        let cmyk = vec![255, 0, 0, 0];
+        let rgb = cmyk_to_rgb(&cmyk);
+        assert_eq!(rgb, vec![0, 255, 255]);
+    }
+
+    // -- pack_row_bits ------------------------------------------------------
+
+    #[test]
+    fn pack_all_white() {
+        let row = pack_row_bits(&[], 8);
+        assert_eq!(row, vec![0x00]);
+    }
+
+    #[test]
+    fn pack_all_black() {
+        let row = pack_row_bits(&[0], 8);
+        assert_eq!(row, vec![0xFF]);
+    }
+
+    #[test]
+    fn pack_half_and_half() {
+        // First 4 pixels white, last 4 black
+        let row = pack_row_bits(&[4], 8);
+        assert_eq!(row, vec![0x0F]);
+    }
+
+    // -- decode_ccitt -------------------------------------------------------
+
+    #[test]
+    fn decode_ccitt_missing_decode_parms() {
+        let dict = lopdf::Dictionary::new();
+        assert!(decode_ccitt(&dict, &[]).is_none());
+    }
+
+    #[test]
+    fn decode_ccitt_group3_returns_none() {
+        let mut parms = lopdf::Dictionary::new();
+        parms.set("Columns", lopdf::Object::Integer(100));
+        parms.set("Rows", lopdf::Object::Integer(10));
+        parms.set("K", lopdf::Object::Integer(0));
+        let mut dict = lopdf::Dictionary::new();
+        dict.set("DecodeParms", lopdf::Object::Dictionary(parms));
+        assert!(decode_ccitt(&dict, &[0x00]).is_none());
     }
 }

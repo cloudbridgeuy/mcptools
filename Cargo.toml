@@ -48,3 +48,5 @@ lopdf = "0.39"
 unicode-normalization = "0.1"
 pdf = { version = "0.1.0", path = "crates/pdf" }
 rand = "0.8"
+image = { version = "0.25", default-features = false, features = ["png"] }
+fax = "0.2"
