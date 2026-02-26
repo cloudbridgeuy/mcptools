@@ -152,7 +152,15 @@ pub struct SectionContent {
 pub struct ImageRef {
     pub id: ImageId,
     pub format: ImageFormat,
-    pub alt_text: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct EnrichedImageRef {
+    pub id: ImageId,
+    pub format: ImageFormat,
+    pub section_id: SectionId,
+    pub section_title: String,
+    pub page: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +217,17 @@ pub enum ClassifiedBlock {
         id: String,
         page: usize,
     },
+}
+
+impl ClassifiedBlock {
+    pub fn page(&self) -> usize {
+        match self {
+            Self::Heading { page, .. }
+            | Self::Paragraph { page, .. }
+            | Self::Table { page, .. }
+            | Self::Image { page, .. } => *page,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,5 +368,34 @@ mod tests {
             let s = format!("{}", pos);
             assert_eq!(s.parse::<PeekPosition>().unwrap(), *pos);
         }
+    }
+
+    #[test]
+    fn test_classified_block_page_accessor() {
+        let heading = ClassifiedBlock::Heading {
+            level: 2,
+            title: "Title".to_string(),
+            page: 5,
+        };
+        assert_eq!(heading.page(), 5);
+
+        let paragraph = ClassifiedBlock::Paragraph {
+            text: "Text".to_string(),
+            page: 7,
+        };
+        assert_eq!(paragraph.page(), 7);
+
+        let table = ClassifiedBlock::Table {
+            headers: vec!["Header1".to_string()],
+            rows: vec![vec!["Row1".to_string()]],
+            page: 3,
+        };
+        assert_eq!(table.page(), 3);
+
+        let image = ClassifiedBlock::Image {
+            id: "img1".to_string(),
+            page: 8,
+        };
+        assert_eq!(image.page(), 8);
     }
 }

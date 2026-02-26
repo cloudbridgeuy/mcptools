@@ -411,8 +411,8 @@ pub fn extract_image(backend: &LopdfBackend, id: &ImageId) -> Result<ImageData, 
 
 /// List all image XObjects on a given page.
 ///
-/// Returns a `Vec<ImageRef>` with each image's name as its id, its detected
-/// format, and `alt_text` set to `None`.
+/// Returns a `Vec<ImageRef>` with each image's name as its id and its detected
+/// format.
 pub fn list_page_images(
     backend: &LopdfBackend,
     page_id: (u32, u16),
@@ -463,7 +463,6 @@ pub fn list_page_images(
         images.push(ImageRef {
             id: ImageId::new(id_str),
             format,
-            alt_text: None,
         });
     }
 

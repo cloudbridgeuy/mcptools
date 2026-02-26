@@ -614,7 +614,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "pdf_images".to_string(),
-            description: "List all images in a PDF section or the whole document. Returns image IDs, formats, and alt text. Use with pdf_image to extract specific images.".to_string(),
+            description: "List all images in a PDF section or the whole document. Returns image IDs, formats, section IDs, section titles, and page numbers. Use with pdf_image to extract specific images.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
