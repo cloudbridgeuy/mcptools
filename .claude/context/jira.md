@@ -59,9 +59,7 @@ mcptools atlassian jira create "Implement feature" \
   --project PROJ \
   --issue-type Story \
   --priority High \
-  --assignee me \
-  --assigned-guild DevOps \
-  --assigned-pod Platform
+  --assignee me
 ```
 
 ### Update Tickets
@@ -75,16 +73,6 @@ mcptools atlassian jira update PROJ-123 --assignee me
 
 # Update multiple fields
 mcptools atlassian jira update PROJ-123 --status Done --priority Low --issue-type Bug
-```
-
-### List Field Values
-
-```bash
-# List available guild/pod values
-mcptools atlassian jira fields
-
-# For a specific project
-mcptools atlassian jira fields --project MYPROJECT --field assigned-guild
 ```
 
 ## MCP Tools
@@ -146,18 +134,6 @@ mcptools atlassian jira fields --project MYPROJECT --field assigned-guild
       "status": "In Progress",
       "assignee": "me"
     }
-  }
-}
-```
-
-### jira_fields
-
-```json
-{
-  "method": "tools/call",
-  "params": {
-    "name": "jira_fields",
-    "arguments": { "project": "PROD" }
   }
 }
 ```

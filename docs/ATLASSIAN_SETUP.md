@@ -289,7 +289,6 @@ The Atlassian module is also available as MCP tools that Claude can use:
 - **`jira_get`** - Get detailed information about a Jira ticket
 - **`jira_create`** - Create a new Jira ticket
 - **`jira_update`** - Update fields on a Jira ticket
-- **`jira_fields`** - List available custom field values
 - **`confluence_search`** - Search Confluence pages using CQL
 - **`bitbucket_pr_list`** - List pull requests in a repository
 - **`bitbucket_pr_read`** - Read PR details including diff and comments
