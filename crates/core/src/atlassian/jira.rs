@@ -958,6 +958,84 @@ fn find_single_star_close(chars: &[char], from: usize) -> Option<usize> {
     None
 }
 
+/// Representation of a single sprint from the Jira Agile API
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct JiraSprintResponse {
+    pub id: u64,
+    pub name: String,
+    pub state: String,
+    #[serde(rename = "startDate", default)]
+    pub start_date: Option<String>,
+    #[serde(rename = "endDate", default)]
+    pub end_date: Option<String>,
+    #[serde(rename = "completeDate", default)]
+    pub complete_date: Option<String>,
+}
+
+/// Container for a paginated list of sprints
+#[derive(Debug, Deserialize, Clone)]
+pub struct JiraSprintListResponse {
+    #[serde(rename = "maxResults")]
+    pub max_results: u64,
+    #[serde(rename = "startAt")]
+    pub start_at: u64,
+    #[serde(rename = "isLast")]
+    pub is_last: bool,
+    pub values: Vec<JiraSprintResponse>,
+}
+
+/// Output structure for a sprint after transformation
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct SprintOutput {
+    pub id: u64,
+    pub name: String,
+    pub state: String,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub complete_date: Option<String>,
+}
+
+/// Output structure for a list of sprints
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct SprintListOutput {
+    pub sprints: Vec<SprintOutput>,
+    pub total: usize,
+    pub has_more: bool,
+}
+
+/// Convert raw sprint list response to the clean domain model.
+pub fn transform_sprint_list_response(response: JiraSprintListResponse) -> SprintListOutput {
+    let sprints: Vec<SprintOutput> = response
+        .values
+        .into_iter()
+        .map(|s| SprintOutput {
+            id: s.id,
+            name: s.name,
+            state: s.state,
+            start_date: s.start_date,
+            end_date: s.end_date,
+            complete_date: s.complete_date,
+        })
+        .collect();
+
+    let total = sprints.len();
+
+    SprintListOutput {
+        sprints,
+        total,
+        has_more: !response.is_last,
+    }
+}
+
+/// Find a sprint by name (case-insensitive) in the provided list.
+/// Returns the sprint ID if found.
+pub fn find_sprint_by_name(sprints: &[JiraSprintResponse], target_name: &str) -> Option<u64> {
+    sprints
+        .iter()
+        .find(|s| s.name.eq_ignore_ascii_case(target_name))
+        .map(|s| s.id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2092,5 +2170,117 @@ mod tests {
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["type"], "paragraph");
         assert_eq!(content[0]["content"][0]["text"], "#hashtag");
+    }
+
+    #[test]
+    fn test_transform_sprint_list_response_basic() {
+        let response = JiraSprintListResponse {
+            max_results: 50,
+            start_at: 0,
+            is_last: true,
+            values: vec![JiraSprintResponse {
+                id: 42,
+                name: "Sprint 30".to_string(),
+                state: "active".to_string(),
+                start_date: Some("2026-02-10T00:00:00.000Z".to_string()),
+                end_date: Some("2026-02-24T00:00:00.000Z".to_string()),
+                complete_date: None,
+            }],
+        };
+        let output = transform_sprint_list_response(response);
+        assert_eq!(output.sprints.len(), 1);
+        assert_eq!(output.total, 1);
+        assert!(!output.has_more);
+        assert_eq!(output.sprints[0].id, 42);
+        assert_eq!(output.sprints[0].name, "Sprint 30");
+    }
+
+    #[test]
+    fn test_transform_sprint_list_response_empty() {
+        let response = JiraSprintListResponse {
+            max_results: 50,
+            start_at: 0,
+            is_last: true,
+            values: vec![],
+        };
+        let output = transform_sprint_list_response(response);
+        assert!(output.sprints.is_empty());
+        assert_eq!(output.total, 0);
+        assert!(!output.has_more);
+    }
+
+    #[test]
+    fn test_transform_sprint_list_response_has_more() {
+        let response = JiraSprintListResponse {
+            max_results: 50,
+            start_at: 0,
+            is_last: false,
+            values: vec![JiraSprintResponse {
+                id: 1,
+                name: "Sprint 1".to_string(),
+                state: "closed".to_string(),
+                start_date: None,
+                end_date: None,
+                complete_date: Some("2026-01-15T00:00:00.000Z".to_string()),
+            }],
+        };
+        let output = transform_sprint_list_response(response);
+        assert!(output.has_more);
+        assert_eq!(output.total, 1);
+    }
+
+    #[test]
+    fn test_find_sprint_by_name_exact() {
+        let sprints = vec![
+            JiraSprintResponse {
+                id: 155,
+                name: "Sprint 29".to_string(),
+                state: "active".to_string(),
+                start_date: None,
+                end_date: None,
+                complete_date: None,
+            },
+            JiraSprintResponse {
+                id: 156,
+                name: "Sprint 30".to_string(),
+                state: "future".to_string(),
+                start_date: None,
+                end_date: None,
+                complete_date: None,
+            },
+        ];
+        assert_eq!(find_sprint_by_name(&sprints, "Sprint 30"), Some(156));
+    }
+
+    #[test]
+    fn test_find_sprint_by_name_case_insensitive() {
+        let sprints = vec![JiraSprintResponse {
+            id: 156,
+            name: "Sprint 30".to_string(),
+            state: "future".to_string(),
+            start_date: None,
+            end_date: None,
+            complete_date: None,
+        }];
+        assert_eq!(find_sprint_by_name(&sprints, "sprint 30"), Some(156));
+    }
+
+    #[test]
+    fn test_find_sprint_by_name_not_found() {
+        let sprints = vec![JiraSprintResponse {
+            id: 156,
+            name: "Sprint 30".to_string(),
+            state: "future".to_string(),
+            start_date: None,
+            end_date: None,
+            complete_date: None,
+        }];
+        assert_eq!(find_sprint_by_name(&sprints, "Sprint 99"), None);
+    }
+
+    #[test]
+    fn test_find_sprint_by_name_empty_list() {
+        let sprints: Vec<JiraSprintResponse> = vec![];
+        assert_eq!(find_sprint_by_name(&sprints, "Sprint 30"), None);
     }
 }
