@@ -86,6 +86,10 @@ pub struct LintArgs {
     #[arg(long)]
     pub no_machete: bool,
 
+    /// Skip typos check
+    #[arg(long)]
+    pub no_typos: bool,
+
     /// Auto-fix where possible (fmt applies formatting, clippy applies fixes)
     #[arg(long)]
     pub fix: bool,

@@ -18,6 +18,7 @@ enum CheckId {
     Clippy,
     Test,
     Machete,
+    Typos,
 }
 
 /// A lint check to execute.
@@ -83,6 +84,13 @@ const CHECKS: &[Check] = &[
         args: &["machete"],
         optional: true,
     },
+    Check {
+        id: CheckId::Typos,
+        name: "typos",
+        program: "typos",
+        args: &[],
+        optional: false,
+    },
 ];
 
 /// Determine whether a check should be skipped based on the user's skip flags.
@@ -93,6 +101,7 @@ fn should_skip(id: CheckId, args: &LintArgs) -> bool {
         CheckId::Clippy => args.no_clippy,
         CheckId::Test => args.no_test,
         CheckId::Machete => args.no_machete,
+        CheckId::Typos => args.no_typos,
     }
 }
 
@@ -391,6 +400,7 @@ mod tests {
             no_clippy: false,
             no_test: false,
             no_machete: false,
+            no_typos: false,
             fix: false,
             staged_only: false,
             install_hooks: false,
@@ -410,6 +420,7 @@ mod tests {
         assert!(!should_skip(CheckId::Clippy, &args));
         assert!(!should_skip(CheckId::Test, &args));
         assert!(!should_skip(CheckId::Machete, &args));
+        assert!(!should_skip(CheckId::Typos, &args));
 
         // Each flag skips only its corresponding check.
         args.no_fmt = true;
@@ -427,6 +438,9 @@ mod tests {
 
         args.no_machete = true;
         assert!(should_skip(CheckId::Machete, &args));
+
+        args.no_typos = true;
+        assert!(should_skip(CheckId::Typos, &args));
     }
 
     #[test]
@@ -451,6 +465,7 @@ mod tests {
         assert!(fix_args(CheckId::Check).is_none());
         assert!(fix_args(CheckId::Test).is_none());
         assert!(fix_args(CheckId::Machete).is_none());
+        assert!(fix_args(CheckId::Typos).is_none());
     }
 
     #[test]
@@ -505,5 +520,15 @@ mod tests {
             ),
             "cargo clippy --all-targets --fix --allow-dirty -- -D warnings"
         );
+    }
+
+    #[test]
+    fn test_typos_check_configuration() {
+        let typos_check = CHECKS.iter().find(|c| c.id == CheckId::Typos);
+        assert!(typos_check.is_some(), "typos check should exist");
+        let check = typos_check.unwrap();
+        assert_eq!(check.program, "typos");
+        assert_eq!(check.args, &[] as &[&str]);
+        assert!(!check.optional, "typos should not be optional");
     }
 }
