@@ -33,12 +33,12 @@ impl Colors {
     }
 }
 
-/// Get project root directory
+/// Get project root directory.
+///
+/// Assumes `cargo xtask` is invoked from the workspace root.
+/// Git repo validation is done separately by `check_git_repo()`.
 fn get_project_root() -> Result<PathBuf> {
-    let current_dir = env::current_dir()?;
-    // When running via `cargo xtask`, the current dir is already the workspace root
-    // Just verify this is a git repo and return it
-    Ok(current_dir)
+    Ok(env::current_dir()?)
 }
 
 /// Check if we're in a git repository
@@ -137,7 +137,7 @@ fn install_hook(hook_name: &str, hooks_dir: &Path, git_hooks_dir: &Path) -> Resu
 
     println!(
         "{}",
-        Colors::success(&format!("✅ {hook_name} hook installed"))
+        Colors::success(&format!("{hook_name} hook installed"))
     );
     Ok(true)
 }
@@ -182,12 +182,12 @@ pub fn install_hooks() -> Result<()> {
     println!("{}", Colors::info("Installation summary:"));
     println!(
         "{}",
-        Colors::success(&format!("  • Installed: {installed_count} hooks"))
+        Colors::success(&format!("  Installed: {installed_count} hooks"))
     );
     if failed_count > 0 {
         println!(
             "{}",
-            Colors::warning(&format!("  • Failed: {failed_count} hooks"))
+            Colors::warning(&format!("  Failed: {failed_count} hooks"))
         );
     }
 
@@ -196,20 +196,20 @@ pub fn install_hooks() -> Result<()> {
         println!();
         println!(
             "{}",
-            Colors::success("🎉 Git hooks installation completed successfully!")
+            Colors::success("Git hooks installation completed successfully!")
         );
         println!();
         println!("{}", Colors::info("The following hooks are now active:"));
         println!(
             "{}",
-            Colors::info("  • pre-commit: Runs cargo fmt, check, and clippy")
+            Colors::info("  pre-commit: Runs code quality checks via cargo xtask lint")
         );
         println!();
         println!(
             "{}",
             Colors::info("You can check hook status anytime with:")
         );
-        println!("{}", Colors::info("  cargo xtask hooks status"));
+        println!("{}", Colors::info("  cargo xtask lint --hooks-status"));
     } else {
         return Err(eyre!("Some hooks failed to install properly"));
     }
@@ -243,13 +243,13 @@ pub fn uninstall_hooks() -> Result<()> {
                 if target == source_hook {
                     println!("{}", Colors::info(&format!("Removing {hook} hook...")));
                     fs::remove_file(&hook_path)?;
-                    println!("{}", Colors::success(&format!("✅ {hook} hook removed")));
+                    println!("{}", Colors::success(&format!("{hook} hook removed")));
                     removed_count += 1;
                 } else {
                     println!(
                         "{}",
                         Colors::warning(&format!(
-                            "❓ {hook} exists but points to different source (skipping)"
+                            "{hook} exists but points to different source (skipping)"
                         ))
                     );
                 }
@@ -258,7 +258,7 @@ pub fn uninstall_hooks() -> Result<()> {
             println!(
                 "{}",
                 Colors::warning(&format!(
-                    "❓ {hook} exists but is not our symlink (skipping)"
+                    "{hook} exists but is not our symlink (skipping)"
                 ))
             );
         }
@@ -296,17 +296,17 @@ pub fn show_status() -> Result<()> {
         if hook_path.is_symlink() {
             if let Ok(target) = fs::read_link(&hook_path) {
                 if target == source_hook {
-                    println!("\x1b[0;32m✅ Installed\x1b[0m");
+                    println!("{}", Colors::success("Installed"));
                 } else {
-                    println!("\x1b[1;33m⚠️  Installed (different source)\x1b[0m");
+                    println!("{}", Colors::warning("Installed (different source)"));
                 }
             } else {
-                println!("\x1b[0;31m❌ Broken symlink\x1b[0m");
+                println!("{}", Colors::error("Broken symlink"));
             }
         } else if hook_path.exists() {
-            println!("\x1b[1;33m❓ Exists (not our hook)\x1b[0m");
+            println!("{}", Colors::warning("Exists (not our hook)"));
         } else {
-            println!("\x1b[0;31m❌ Not installed\x1b[0m");
+            println!("{}", Colors::error("Not installed"));
         }
     }
 
@@ -314,12 +314,12 @@ pub fn show_status() -> Result<()> {
     println!("{}", Colors::info("Available hooks:"));
     println!(
         "{}",
-        Colors::info("  • pre-commit: Runs cargo fmt, check, and clippy before each commit")
+        Colors::info("  pre-commit: Runs code quality checks via cargo xtask lint")
     );
-    println!(
-        "{}",
-        Colors::info("                Supports --force flag to check all Rust files")
-    );
+    println!();
+    println!("{}", Colors::info("Manage hooks with:"));
+    println!("{}", Colors::info("  cargo xtask lint --install-hooks"));
+    println!("{}", Colors::info("  cargo xtask lint --uninstall-hooks"));
 
     Ok(())
 }
@@ -339,45 +339,45 @@ pub fn test_hooks() -> Result<()> {
         println!("{}", Colors::info("Testing pre-commit hook..."));
         println!();
 
-        println!("{}", Colors::info("Hook supports the following options:"));
-        println!(
-            "{}",
-            Colors::info("  • Normal mode: Only checks staged .rs files")
-        );
-        println!(
-            "{}",
-            Colors::info("  • --force mode: Checks all .rs files in project")
-        );
-        println!("{}", Colors::info("  • --help: Shows usage information"));
+        println!("{}", Colors::info("Hook delegates to: cargo xtask lint --staged-only"));
         println!();
 
-        println!("{}", Colors::info("Running pre-commit hook with --help:"));
-        println!();
-
-        match cmd!(&pre_commit_hook, "--help").run() {
-            Ok(_) => {
-                println!();
-                println!(
-                    "{}",
-                    Colors::success("✅ Pre-commit hook is executable and responsive")
-                );
+        match cmd!(&pre_commit_hook, "--help").unchecked().run() {
+            Ok(output) => {
+                if output.status.success() {
+                    println!();
+                    println!(
+                        "{}",
+                        Colors::success("Pre-commit hook is executable and responsive")
+                    );
+                } else {
+                    println!();
+                    println!(
+                        "{}",
+                        Colors::success("Pre-commit hook is executable")
+                    );
+                }
             }
             Err(e) => {
                 println!();
                 println!(
                     "{}",
-                    Colors::warning(&format!("⚠️  Pre-commit hook test had issues: {e}"))
+                    Colors::warning(&format!("Pre-commit hook test had issues: {e}"))
                 );
                 println!(
                     "{}",
-                    Colors::info("This might indicate code quality issues that need to be fixed")
+                    Colors::info("This might indicate the hook script is not executable")
                 );
             }
         }
     } else {
         println!(
             "{}",
-            Colors::error("❌ Pre-commit hook not found or not executable")
+            Colors::error("Pre-commit hook not found or not a symlink")
+        );
+        println!(
+            "{}",
+            Colors::info("Install with: cargo xtask lint --install-hooks")
         );
     }
 

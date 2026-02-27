@@ -12,12 +12,12 @@ pub struct App {
 pub enum Commands {
     /// Builds a binary and installs it at the given path
     Install(InstallArgs),
-    /// Manage git hooks (install, uninstall, status, test)
-    Hooks(HooksArgs),
     /// Create and manage releases
     Release(ReleaseArgs),
     /// Download and install binary from GitHub releases
     InstallBinary(InstallBinaryArgs),
+    /// Run all code quality checks (fmt, check, clippy, test, machete)
+    Lint(LintArgs),
 }
 
 #[derive(Args, Debug)]
@@ -29,24 +29,6 @@ pub struct InstallArgs {
     /// Directory to install the binary to (defaults to ~/.local/bin)
     #[arg(short, long)]
     pub path: Option<String>,
-}
-
-#[derive(Args, Debug)]
-pub struct HooksArgs {
-    #[command(subcommand)]
-    pub command: HooksCommands,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum HooksCommands {
-    /// Install git hooks
-    Install,
-    /// Uninstall git hooks
-    Uninstall,
-    /// Show git hooks status
-    Status,
-    /// Test git hooks
-    Test,
 }
 
 #[derive(Args, Debug)]
@@ -76,4 +58,55 @@ pub struct InstallBinaryArgs {
     /// Specific version to install (defaults to latest)
     #[arg(short, long)]
     pub version: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct LintArgs {
+    /// Print all output, not just errors
+    #[arg(long)]
+    pub verbose: bool,
+
+    /// Skip cargo fmt check
+    #[arg(long)]
+    pub no_fmt: bool,
+
+    /// Skip cargo check
+    #[arg(long)]
+    pub no_check: bool,
+
+    /// Skip cargo clippy
+    #[arg(long)]
+    pub no_clippy: bool,
+
+    /// Skip cargo test
+    #[arg(long)]
+    pub no_test: bool,
+
+    /// Skip cargo machete
+    #[arg(long)]
+    pub no_machete: bool,
+
+    /// Auto-fix where possible (fmt applies formatting, clippy applies fixes)
+    #[arg(long)]
+    pub fix: bool,
+
+    /// Run in pre-commit hook mode (implies --fix, re-stages .rs files)
+    #[arg(long, hide = true)]
+    pub staged_only: bool,
+
+    /// Install git pre-commit hook
+    #[arg(long, conflicts_with_all = ["uninstall_hooks", "hooks_status", "test_hooks"])]
+    pub install_hooks: bool,
+
+    /// Uninstall git pre-commit hook
+    #[arg(long, conflicts_with_all = ["install_hooks", "hooks_status", "test_hooks"])]
+    pub uninstall_hooks: bool,
+
+    /// Show git hook installation status
+    #[arg(long, conflicts_with_all = ["install_hooks", "uninstall_hooks", "test_hooks"])]
+    pub hooks_status: bool,
+
+    /// Test git hook executability
+    #[arg(long, conflicts_with_all = ["install_hooks", "uninstall_hooks", "hooks_status"])]
+    pub test_hooks: bool,
 }
