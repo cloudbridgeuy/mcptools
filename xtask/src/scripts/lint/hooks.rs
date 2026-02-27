@@ -257,9 +257,7 @@ pub fn uninstall_hooks() -> Result<()> {
         } else if hook_path.exists() {
             println!(
                 "{}",
-                Colors::warning(&format!(
-                    "{hook} exists but is not our symlink (skipping)"
-                ))
+                Colors::warning(&format!("{hook} exists but is not our symlink (skipping)"))
             );
         }
     }
@@ -339,7 +337,10 @@ pub fn test_hooks() -> Result<()> {
         println!("{}", Colors::info("Testing pre-commit hook..."));
         println!();
 
-        println!("{}", Colors::info("Hook delegates to: cargo xtask lint --staged-only"));
+        println!(
+            "{}",
+            Colors::info("Hook delegates to: cargo xtask lint --staged-only")
+        );
         println!();
 
         match cmd!(&pre_commit_hook, "--help").unchecked().run() {
@@ -352,10 +353,7 @@ pub fn test_hooks() -> Result<()> {
                     );
                 } else {
                     println!();
-                    println!(
-                        "{}",
-                        Colors::success("Pre-commit hook is executable")
-                    );
+                    println!("{}", Colors::success("Pre-commit hook is executable"));
                 }
             }
             Err(e) => {
