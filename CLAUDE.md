@@ -9,6 +9,12 @@ This codebase follows the Functional Core / Imperative Shell pattern:
 
 Based on Gary Bernhardt's original talk on the concept.
 
+## Code Quality
+
+Agents must use `cargo xtask lint` for all code quality checks. Never call `cargo fmt`, `cargo check`, `cargo clippy`, `cargo test`, or `cargo machete` directly.
+
+On failure, actionable errors are printed to stdout. Full verbose output is stored in `target/xtask-lint.log`. See **[Lint](.claude/context/lint.md)** for flags and hook management.
+
 ## Quick Reference
 
 ### Installation
@@ -60,6 +66,7 @@ For detailed usage of each feature, see the context files:
 - **[MCP Server](.claude/context/mcp-server.md)** - Server configuration; available tools
 - **[Upgrade](.claude/context/upgrade.md)** - Self-update mechanism; platform support
 - **[Testing & Env Vars](.claude/context/testing.md)** - All environment variables; scripting
+- **[Lint](.claude/context/lint.md)** - Unified lint pipeline; skip flags; git hook management
 
 ## Common Commands
 
