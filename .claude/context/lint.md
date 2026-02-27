@@ -1,6 +1,6 @@
 # Code Quality: cargo xtask lint
 
-Unified lint pipeline for all code quality checks. Runs fmt, check, clippy, test, and machete in sequence. Stops at the first failure.
+Unified lint pipeline for all code quality checks. Runs fmt, check, clippy, test, machete, and typos in sequence. Stops at the first failure.
 
 ## Agent Usage
 
@@ -25,6 +25,7 @@ cargo xtask lint --no-check     # Skip cargo check
 cargo xtask lint --no-clippy    # Skip cargo clippy
 cargo xtask lint --no-test      # Skip cargo test
 cargo xtask lint --no-machete   # Skip cargo machete
+cargo xtask lint --no-typos     # Skip typos check
 ```
 
 ## Git Hook Management
@@ -47,6 +48,7 @@ The pre-commit hook runs `cargo xtask lint --staged-only`, which implies `--fix`
 3. `cargo clippy --all-targets -- -D warnings` (or with `--fix --allow-dirty`)
 4. `cargo test --all-targets`
 5. `cargo machete` (optional: skipped if not installed)
+6. `typos` (checks all files for spelling errors)
 
 ## Architecture
 

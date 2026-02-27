@@ -11,7 +11,7 @@ Based on Gary Bernhardt's original talk on the concept.
 
 ## Code Quality
 
-Agents must use `cargo xtask lint` for all code quality checks. Never call `cargo fmt`, `cargo check`, `cargo clippy`, `cargo test`, or `cargo machete` directly.
+Agents must use `cargo xtask lint` for all code quality checks. Never call `cargo fmt`, `cargo check`, `cargo clippy`, `cargo test`, `cargo machete`, or `typos` directly.
 
 On failure, actionable errors are printed to stdout. Full verbose output is stored in `target/xtask-lint.log`. See **[Lint](.claude/context/lint.md)** for flags and hook management.
 
