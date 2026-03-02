@@ -10,10 +10,10 @@ use serde::Serialize;
 
 use super::{extract_item_id, fetch_item, truncate_text};
 
-#[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, clap::Args, serde::Deserialize, Clone)]
 pub struct ReadOptions {
     /// HackerNews item ID or full URL (e.g., "45440028" or "https://news.ycombinator.com/item?id=45440028")
-    #[clap(env = "HN_ITEM")]
+    #[arg(env = "HN_ITEM")]
     pub item: String,
 
     /// Number of top-level comments per page

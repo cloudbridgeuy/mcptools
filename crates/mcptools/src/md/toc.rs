@@ -6,10 +6,10 @@ use std::io::IsTerminal;
 
 use super::{fetch_and_convert_data, SelectionStrategy};
 
-#[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, clap::Args, serde::Deserialize, Clone)]
 pub struct TocOptions {
     /// URL to fetch
-    #[clap(env = "MD_URL")]
+    #[arg(env = "MD_URL")]
     pub url: String,
 
     /// Timeout in seconds (default: 30)
@@ -37,7 +37,7 @@ pub struct TocOptions {
     pub json: bool,
 }
 
-#[derive(Debug, Clone, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, clap::ValueEnum, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
     /// Indented text format (2 spaces per level)

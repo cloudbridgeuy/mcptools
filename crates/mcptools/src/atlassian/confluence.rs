@@ -1,6 +1,6 @@
 use super::{create_confluence_client, ConfluenceConfig};
 use crate::prelude::{eprintln, println, *};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 // Import domain models and pure functions from core crate
 use mcptools_core::atlassian::confluence::transform_search_results;
@@ -17,10 +17,10 @@ pub enum Commands {
 }
 
 /// Options for searching Confluence pages
-#[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
+#[derive(Debug, clap::Args, Deserialize, Clone)]
 pub struct SearchOptions {
     /// CQL query (e.g., "space = SPACE AND text ~ 'keyword'")
-    #[clap(env = "CONFLUENCE_QUERY")]
+    #[arg(env = "CONFLUENCE_QUERY")]
     pub query: String,
 
     /// Maximum number of results to return
@@ -95,7 +95,6 @@ async fn search_handler(options: SearchOptions) -> Result<()> {
         let mut table = crate::prelude::new_table();
         table.add_row(prettytable::row!["Title", "Type", "URL"]);
 
-        let num_pages = data.pages.len();
         for page in data.pages {
             let url = page.url.unwrap_or_else(|| "N/A".to_string());
             table.add_row(prettytable::row![page.title, page.page_type, url]);

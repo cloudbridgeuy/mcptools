@@ -1,16 +1,16 @@
 use mcptools_core::atlassian::jira::{
-    transform_ticket_response, JiraComment, JiraExtendedIssueResponse, TicketOutput,
+    transform_ticket_response, JiraExtendedIssueResponse, TicketOutput,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::atlassian::{create_jira_client, JiraConfig};
 use crate::prelude::{println, *};
 
 /// Options for getting a Jira ticket
-#[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
+#[derive(Debug, clap::Args, Deserialize, Clone)]
 pub struct GetOptions {
     /// Issue key (e.g., "PROJ-123")
-    #[clap(env = "JIRA_ISSUE_KEY")]
+    #[arg(env = "JIRA_ISSUE_KEY")]
     pub issue_key: String,
 
     /// Output as JSON

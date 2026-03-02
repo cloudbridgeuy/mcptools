@@ -7,7 +7,7 @@ use mcptools_core::hn::{
 
 use super::{fetch_item, get_api_base};
 
-#[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, clap::Args, serde::Deserialize, Clone)]
 pub struct ListOptions {
     /// Story type: top, new, best, ask, show, job
     #[arg(value_name = "TYPE", default_value = "top")]

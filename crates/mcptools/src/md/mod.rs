@@ -7,7 +7,7 @@ use std::time::Instant;
 
 pub use mcptools_core::md::{FetchOutput, MdPaginationInfo};
 
-#[derive(Debug, Clone, clap::ValueEnum, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, clap::ValueEnum, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SelectionStrategy {
     /// Select the first matching element (default)

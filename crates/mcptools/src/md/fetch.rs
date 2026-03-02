@@ -4,10 +4,10 @@ use std::io::IsTerminal;
 
 use super::{fetch_and_convert_data, FetchOutput, SelectionStrategy};
 
-#[derive(Debug, clap::Args, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, clap::Args, serde::Deserialize, Clone)]
 pub struct FetchOptions {
     /// URL to fetch
-    #[clap(env = "MD_URL")]
+    #[arg(env = "MD_URL")]
     pub url: String,
 
     /// Timeout in seconds (default: 30)

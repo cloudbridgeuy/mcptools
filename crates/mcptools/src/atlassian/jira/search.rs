@@ -1,5 +1,5 @@
 use crate::prelude::{eprintln, println, *};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::path::PathBuf;
 
 // Import domain models and pure functions from core crate
@@ -7,7 +7,7 @@ use mcptools_core::atlassian::jira::transform_search_response;
 pub use mcptools_core::atlassian::jira::{IssueOutput, JiraSearchResponse, SearchOutput};
 
 /// Options for searching Jira issues
-#[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
+#[derive(Debug, clap::Args, Deserialize, Clone)]
 #[command(after_help = "EXAMPLES:
   # Get all tickets assigned to the current user:
   mcptools atlassian jira search \"assignee = currentUser()\"
@@ -60,7 +60,7 @@ NOTES:
   - Saved queries are stored in ~/.config/mcptools/queries/")]
 pub struct SearchOptions {
     /// JQL query (e.g., "project = PROJ AND status = Open"), optional when using --query, --list, --load, or --delete
-    #[clap(env = "JIRA_QUERY")]
+    #[arg(env = "JIRA_QUERY")]
     pub jql_query: Option<String>,
 
     /// Maximum number of results to return per page
