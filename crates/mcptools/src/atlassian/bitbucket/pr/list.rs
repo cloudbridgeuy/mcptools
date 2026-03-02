@@ -5,18 +5,18 @@ use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlassian::bitbucket::{
     transform_pr_list_response, BitbucketPRListResponse, PRListOutput,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// Options for listing Bitbucket PRs
-#[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
+#[derive(Debug, clap::Args, Deserialize, Clone)]
 pub struct ListOptions {
     /// Repository in workspace/repo_slug format (e.g., "myworkspace/myrepo")
-    #[clap(long, short = 'r')]
+    #[arg(long, short = 'r')]
     pub repo: String,
 
     /// Filter by PR state (can be repeated: --state OPEN --state MERGED)
     /// Valid values: OPEN, MERGED, DECLINED, SUPERSEDED
-    #[clap(long, value_name = "STATE")]
+    #[arg(long, value_name = "STATE")]
     pub state: Option<Vec<String>>,
 
     /// Maximum number of results to return per page
@@ -28,7 +28,7 @@ pub struct ListOptions {
     pub next_page: Option<String>,
 
     /// Bitbucket API base URL (overrides BITBUCKET_BASE_URL env var)
-    #[clap(long)]
+    #[arg(long)]
     pub base_url: Option<String>,
 
     /// Output as JSON
@@ -51,13 +51,6 @@ pub struct ListPRParams {
     pub base_url_override: Option<String>,
     /// Override for app password
     pub app_password_override: Option<String>,
-}
-
-/// Helper to set spinner message if spinner is present
-fn set_spinner_msg(spinner: Option<&ProgressBar>, msg: impl Into<String>) {
-    if let Some(s) = spinner {
-        s.set_message(msg.into());
-    }
 }
 
 /// Fetch PR list from Bitbucket API
@@ -102,7 +95,7 @@ pub async fn list_pr_data(
         }
     };
 
-    set_spinner_msg(spinner, format!("Fetching PRs from {}...", repo));
+    super::set_spinner_msg(spinner, format!("Fetching PRs from {}...", repo));
     let response = client
         .get(&url)
         .send()
@@ -187,13 +180,11 @@ pub async fn handler(options: ListOptions, global: crate::Global) -> Result<()> 
     ]);
 
     for pr in &data.pull_requests {
-        let branch_info = format!("{} → {}", pr.source_branch, pr.destination_branch);
-
         table.add_row(prettytable::row![
             pr.id.to_string().bright_yellow(),
             pr.title.bright_white(),
             pr.author.bright_magenta(),
-            format_state(&pr.state),
+            super::format_state(&pr.state),
             format!(
                 "{} → {}",
                 pr.source_branch.bright_green(),
@@ -218,15 +209,4 @@ pub async fn handler(options: ListOptions, global: crate::Global) -> Result<()> 
     }
 
     Ok(())
-}
-
-/// Format PR state with appropriate color
-fn format_state(state: &str) -> String {
-    match state.to_uppercase().as_str() {
-        "OPEN" => state.bright_green().to_string(),
-        "MERGED" => state.bright_magenta().to_string(),
-        "DECLINED" => state.bright_red().to_string(),
-        "SUPERSEDED" => state.bright_yellow().to_string(),
-        _ => state.to_string(),
-    }
 }

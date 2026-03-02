@@ -6,21 +6,21 @@ use mcptools_core::atlassian::bitbucket::{
     transform_pr_response, BitbucketComment, BitbucketCommentsResponse, BitbucketDiffstat,
     BitbucketDiffstatResponse, BitbucketPRResponse, PROutput,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// Options for reading a Bitbucket PR
-#[derive(Debug, clap::Args, Serialize, Deserialize, Clone)]
+#[derive(Debug, clap::Args, Deserialize, Clone)]
 pub struct ReadOptions {
     /// Repository in workspace/repo_slug format (e.g., "myworkspace/myrepo")
-    #[clap(long, short = 'r')]
+    #[arg(long, short = 'r')]
     pub repo: String,
 
     /// Pull request number
-    #[clap(value_name = "PR_NUMBER")]
+    #[arg(value_name = "PR_NUMBER")]
     pub pr_number: u64,
 
     /// Bitbucket API base URL (overrides BITBUCKET_BASE_URL env var)
-    #[clap(long)]
+    #[arg(long)]
     pub base_url: Option<String>,
 
     /// Maximum number of comments per page (default: 100)
@@ -75,13 +75,6 @@ pub struct ReadPRParams {
     pub no_diff: bool,
 }
 
-/// Helper to set spinner message if spinner is present
-fn set_spinner_msg(spinner: Option<&ProgressBar>, msg: impl Into<String>) {
-    if let Some(s) = spinner {
-        s.set_message(msg.into());
-    }
-}
-
 /// Fetch PR data from Bitbucket API
 ///
 /// This function fetches PR details, comments, diffstats, and optionally diff content.
@@ -104,7 +97,7 @@ pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -
     let base_url = config.base_url.trim_end_matches('/');
 
     // Fetch PR details
-    set_spinner_msg(
+    super::set_spinner_msg(
         spinner,
         format!("Fetching PR #{} from {}...", pr_number, repo),
     );
@@ -145,7 +138,7 @@ pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -
         .ok_or_else(|| eyre!("PR response missing destination commit hash"))?;
 
     // Fetch diffstats (auto-paginate by default)
-    set_spinner_msg(spinner, "Fetching diffstats...");
+    super::set_spinner_msg(spinner, "Fetching diffstats...");
     let diffstats = fetch_all_diffstats(
         &client,
         base_url,
@@ -162,12 +155,12 @@ pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -
     let diff_content = if no_diff {
         None
     } else {
-        set_spinner_msg(spinner, "Fetching diff content...");
+        super::set_spinner_msg(spinner, "Fetching diff content...");
         Some(fetch_diff_content(&client, base_url, &repo, pr_number).await?)
     };
 
     // Fetch ALL comments (auto-paginate by default)
-    set_spinner_msg(spinner, "Fetching comments...");
+    super::set_spinner_msg(spinner, "Fetching comments...");
     let comments = fetch_all_comments(
         &client,
         base_url,
@@ -245,7 +238,7 @@ async fn fetch_all_diffstats(
     let mut page = 1;
     while let Some(url) = next_url {
         if page > 1 {
-            set_spinner_msg(spinner, format!("Fetching diffstats (page {})...", page));
+            super::set_spinner_msg(spinner, format!("Fetching diffstats (page {})...", page));
         }
         let response = client
             .get(&url)
@@ -299,7 +292,7 @@ async fn fetch_all_comments(
     let mut page = 1;
     while let Some(url) = next_url {
         if page > 1 {
-            set_spinner_msg(
+            super::set_spinner_msg(
                 spinner,
                 format!(
                     "Fetching comments (page {}, {} found)...",
@@ -389,7 +382,7 @@ pub async fn handler(options: ReadOptions, global: crate::Global) -> Result<()> 
     let mut table = crate::prelude::new_table();
     table.add_row(prettytable::row![
         "State".bold().cyan(),
-        format_state(&pr.state)
+        super::format_state(&pr.state)
     ]);
     table.add_row(prettytable::row![
         "Author".bold().cyan(),
@@ -600,14 +593,4 @@ fn render_change_bar(additions: u32, deletions: u32) -> String {
     let del_bar = "-".repeat(del_chars).bright_red().to_string();
 
     format!("{}{}", add_bar, del_bar)
-}
-
-fn format_state(state: &str) -> String {
-    match state.to_uppercase().as_str() {
-        "OPEN" => state.bright_green().to_string(),
-        "MERGED" => state.bright_magenta().to_string(),
-        "DECLINED" => state.bright_red().to_string(),
-        "SUPERSEDED" => state.bright_yellow().to_string(),
-        _ => state.to_string(),
-    }
 }
