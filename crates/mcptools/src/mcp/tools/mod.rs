@@ -548,6 +548,40 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            name: "bitbucket_pr_create".to_string(),
+            description: "Create a new pull request in a Bitbucket repository. Requires repo, title, and source branch. Optionally specify destination branch (defaults to repo's main branch), description, and whether to close the source branch after merge. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository in workspace/repo_slug format (e.g., 'myworkspace/myrepo')"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Title of the pull request"
+                    },
+                    "sourceBranch": {
+                        "type": "string",
+                        "description": "Source branch name"
+                    },
+                    "destinationBranch": {
+                        "type": "string",
+                        "description": "Destination branch name (defaults to repo's main branch if omitted)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description of the pull request"
+                    },
+                    "closeSourceBranch": {
+                        "type": "boolean",
+                        "description": "Whether to close the source branch after merge (default: false)"
+                    }
+                },
+                "required": ["repo", "title", "sourceBranch"]
+            }),
+        },
+        Tool {
             name: "generate_code".to_string(),
             description: "Generate Rust code using a local Ollama model. Accepts an instruction, optional context, and optional file paths for context. Returns raw Rust source code. Requires a running Ollama instance with the specified model.".to_string(),
             input_schema: serde_json::json!({
@@ -807,6 +841,9 @@ pub async fn handle_tools_call(
         "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
         "bitbucket_pr_list" => atlassian::handle_bitbucket_pr_list(params.arguments, global).await,
         "bitbucket_pr_read" => atlassian::handle_bitbucket_pr_read(params.arguments, global).await,
+        "bitbucket_pr_create" => {
+            atlassian::handle_bitbucket_pr_create(params.arguments, global).await
+        }
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,

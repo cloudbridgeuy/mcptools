@@ -846,6 +846,82 @@ pub async fn handle_bitbucket_pr_read(
     })
 }
 
+/// Handle Bitbucket PR creation command via MCP
+pub async fn handle_bitbucket_pr_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{create_pr_data, CreatePRParams};
+
+    #[derive(Deserialize)]
+    struct BitbucketPRCreateArgs {
+        repo: String,
+        title: String,
+        #[serde(rename = "sourceBranch")]
+        source_branch: String,
+        #[serde(rename = "destinationBranch")]
+        destination_branch: Option<String>,
+        description: Option<String>,
+        #[serde(rename = "closeSourceBranch")]
+        close_source_branch: Option<bool>,
+    }
+
+    let args: BitbucketPRCreateArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_pr_create: repo={}, title={}, sourceBranch={}, destinationBranch={:?}, description={:?}, closeSourceBranch={:?}",
+            args.repo, args.title, args.source_branch, args.destination_branch, args.description, args.close_source_branch
+        );
+    }
+
+    // Build CreatePRParams from MCP arguments (source_branch always present — Parse Don't Validate)
+    let params = CreatePRParams {
+        repo: args.repo,
+        title: args.title,
+        source_branch: args.source_branch,
+        destination_branch: args.destination_branch,
+        description: args.description,
+        close_source_branch: args.close_source_branch.unwrap_or(false),
+        base_url_override: None,
+        app_password_override: global.bitbucket_app_password.clone(),
+    };
+
+    // Call the Bitbucket module's data function (no spinner for MCP)
+    let pr_data = create_pr_data(params, None)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    // Convert to JSON and wrap in MCP result format
+    let json_string = serde_json::to_string_pretty(&pr_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
 /// Handle Jira attachment list command via MCP
 pub async fn handle_jira_attachment_list(
     arguments: Option<serde_json::Value>,

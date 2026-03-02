@@ -98,6 +98,7 @@ mcptools atlassian confluence search "text ~ 'deployment'"
 ```bash
 mcptools atlassian bitbucket pr list --repo "workspace/repo"
 mcptools atlassian bitbucket pr read --repo "workspace/repo" 123
+mcptools atlassian bitbucket pr create --repo "workspace/repo" "Fix login bug" --source feature-branch
 ```
 
 ### HackerNews

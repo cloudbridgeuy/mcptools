@@ -301,6 +301,28 @@ pub fn transform_pr_response(
     }
 }
 
+/// Transform Bitbucket PR creation response to output domain model
+///
+/// Simplifies the complex BitbucketPRResponse into a clean confirmation structure.
+///
+/// # Arguments
+/// * `pr` - The raw PR response from Bitbucket API after creation
+///
+/// # Returns
+/// * `PRCreateOutput` - Cleaned and simplified output for display
+pub fn transform_create_pr_response(pr: BitbucketPRResponse) -> PRCreateOutput {
+    PRCreateOutput {
+        id: pr.id,
+        title: pr.title,
+        description: pr.description.filter(|d| !d.is_empty()),
+        state: pr.state,
+        author: pr.author.display_name,
+        source_branch: pr.source.branch.name,
+        destination_branch: pr.destination.branch.name,
+        html_link: pr.links.html.href,
+    }
+}
+
 /// Transform diffstat entries to output domain model
 ///
 /// # Arguments
@@ -422,6 +444,23 @@ pub struct PRListOutput {
     pub pull_requests: Vec<PRListItem>,
     pub next_page: Option<String>,
     pub total_count: Option<u32>,
+}
+
+// =============================================================================
+// PR Create Types
+// =============================================================================
+
+/// Output structure for PR create command
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct PRCreateOutput {
+    pub id: u64,
+    pub title: String,
+    pub description: Option<String>,
+    pub state: String,
+    pub author: String,
+    pub source_branch: String,
+    pub destination_branch: String,
+    pub html_link: String,
 }
 
 /// Transform Bitbucket PR list response to output domain model
@@ -748,5 +787,35 @@ mod tests {
         assert_eq!(output.diffstat.total_files, 1);
         assert_eq!(output.diffstat.total_insertions, 10);
         assert_eq!(output.diffstat.total_deletions, 5);
+    }
+
+    #[test]
+    fn test_transform_create_pr_response_basic() {
+        let pr = sample_pr();
+        let output = transform_create_pr_response(pr);
+
+        assert_eq!(output.id, 123);
+        assert_eq!(output.title, "Add new feature");
+        assert_eq!(
+            output.description,
+            Some("This PR adds a new feature".to_string())
+        );
+        assert_eq!(output.state, "OPEN");
+        assert_eq!(output.author, "John Doe");
+        assert_eq!(output.source_branch, "feature-branch");
+        assert_eq!(output.destination_branch, "main");
+        assert_eq!(
+            output.html_link,
+            "https://bitbucket.org/workspace/repo/pull-requests/123"
+        );
+    }
+
+    #[test]
+    fn test_transform_create_pr_response_empty_description() {
+        let mut pr = sample_pr();
+        pr.description = Some("".to_string());
+        let output = transform_create_pr_response(pr);
+
+        assert_eq!(output.description, None);
     }
 }

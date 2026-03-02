@@ -52,6 +52,37 @@ mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --line-limi
 - `--limit`: Maximum comments per page (default: 100)
 - `--diff-limit`: Maximum diffstat entries per page (default: 500)
 
+### Create Pull Request
+
+```bash
+# Create a PR (source branch auto-detected from current git branch)
+mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bug"
+
+# Specify source branch explicitly
+mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bug" --source feature-branch
+
+# Specify destination branch (defaults to repo's main branch)
+mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bug" --source feature-branch --destination develop
+
+# With description
+mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bug" -d "Fixes the login timeout issue"
+
+# Close source branch after merge
+mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bug" --close-source-branch
+
+# Output as JSON
+mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bug" --json
+```
+
+**Create Options:**
+
+- `--repo` / `-r`: Repository in workspace/repo_slug format (required)
+- `--source` / `-s`: Source branch name (defaults to current git branch)
+- `--destination`: Destination branch (defaults to repo's main branch)
+- `--description` / `-d`: PR description
+- `--close-source-branch`: Close source branch after merge
+- `--json`: Output as JSON
+
 ## MCP Tools
 
 ### bitbucket_pr_list
@@ -102,6 +133,32 @@ mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --line-limi
 
 **Note:** MCP defaults to 500 lines for diff to prevent overwhelming responses.
 
+### bitbucket_pr_create
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_pr_create",
+    "arguments": {
+      "repo": "myworkspace/myrepo",
+      "title": "Fix login bug",
+      "sourceBranch": "feature/fix-login"
+    }
+  }
+}
+```
+
+**Arguments:**
+- `repo` (required): Repository in workspace/repo_slug format
+- `title` (required): Title of the pull request
+- `sourceBranch` (required): Source branch name
+- `destinationBranch` (optional): Destination branch (defaults to repo's main branch)
+- `description` (optional): Description of the pull request
+- `closeSourceBranch` (optional): Close source branch after merge (default: false)
+
+**Note:** Unlike the CLI, MCP requires `sourceBranch` explicitly (no git detection).
+
 ## Environment Variables
 
 | Variable | Description |
@@ -114,4 +171,4 @@ mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --line-limi
 
 Required permissions:
 - Repositories: Read
-- Pull requests: Read
+- Pull requests: Read, Write
