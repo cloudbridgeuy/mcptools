@@ -85,6 +85,7 @@ mcptools atlassian jira sprint list --board 1
 mcptools atlassian jira sprint list --board 1 --state active,future,closed
 mcptools atlassian jira update PROJ-123 --sprint "Sprint 30" --board 1
 mcptools atlassian jira create "New task" --sprint "Sprint 30" --board 1
+mcptools atlassian jira comment PROJ-123 "This is my comment"
 ```
 
 ### Confluence

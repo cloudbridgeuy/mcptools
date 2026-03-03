@@ -78,6 +78,19 @@ mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issu
 mcptools atlassian jira update PROJ-123 --status Done --priority Low --issue-type Bug
 ```
 
+### Add Comment
+
+```bash
+# Add a plain text comment
+mcptools atlassian jira comment PROJ-123 "This is my comment"
+
+# Add a comment with markdown formatting
+mcptools atlassian jira comment PROJ-123 "## Status Update\nFixed the **login** issue"
+
+# Output as JSON
+mcptools atlassian jira comment PROJ-123 "Done!" --json
+```
+
 ### Attachments
 
 ```bash
@@ -184,6 +197,21 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
       "ticketKey": "PROJ-123",
       "status": "In Progress",
       "assignee": "me"
+    }
+  }
+}
+```
+
+### jira_comment
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_comment",
+    "arguments": {
+      "issueKey": "PROJ-123",
+      "comment": "This is my comment with **markdown** support"
     }
   }
 }
