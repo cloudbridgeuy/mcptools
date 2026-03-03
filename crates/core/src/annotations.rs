@@ -7,16 +7,19 @@ use serde::{Deserialize, Serialize};
 pub struct DevAnnotation {
     pub id: String,
     pub timestamp: String,
+    #[serde(rename = "element_path")]
     pub selector: String,
     #[serde(default)]
     pub component_name: Option<String>,
     pub tag_name: String,
     pub text_content: String,
+    #[serde(rename = "comment")]
     pub note: String,
     pub bounding_box: BoundingBox,
     pub computed_styles: ComputedStyles,
     #[serde(default)]
     pub screenshot: Option<String>,
+    #[serde(rename = "is_fixed")]
     pub resolved: bool,
     #[serde(default)]
     pub resolution_summary: Option<String>,
@@ -54,8 +57,18 @@ pub struct ListAnnotationsResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct AnnotationSummary {
     pub total: usize,
+    pub pending: usize,
+    #[serde(default)]
+    pub acknowledged: usize,
     pub resolved: usize,
-    pub unresolved: usize,
+    #[serde(default)]
+    pub dismissed: usize,
+}
+
+impl AnnotationSummary {
+    pub fn unresolved(&self) -> usize {
+        self.total.saturating_sub(self.resolved)
+    }
 }
 
 /// Formats a single annotation as a concise markdown line for list output.
@@ -95,7 +108,8 @@ pub fn format_annotations_list(
 
     let mut output = format!(
         "## UI Annotations ({} total, {} unresolved)\n\n",
-        summary.total, summary.unresolved,
+        summary.total,
+        summary.unresolved(),
     );
 
     for (i, annotation) in annotations.iter().enumerate() {
@@ -207,11 +221,28 @@ mod tests {
         }
     }
 
+    fn sample_computed_styles_json() -> serde_json::Value {
+        serde_json::json!({
+            "color": "rgb(0, 0, 0)",
+            "background_color": "rgb(255, 255, 255)",
+            "font_size": "16px",
+            "font_family": "Inter",
+            "padding": "8px",
+            "margin": "0px",
+            "width": "200px",
+            "height": "40px",
+            "display": "flex",
+            "position": "relative"
+        })
+    }
+
     fn sample_summary(total: usize, resolved: usize) -> AnnotationSummary {
         AnnotationSummary {
             total,
+            pending: total - resolved,
+            acknowledged: 0,
             resolved,
-            unresolved: total - resolved,
+            dismissed: 0,
         }
     }
 
@@ -294,5 +325,72 @@ mod tests {
         a.text_content = String::new();
         let result = format_annotation_detail(&a);
         assert!(!result.contains("**Text:**"));
+    }
+
+    #[test]
+    fn test_deserialize_annotation_from_api() {
+        let json = serde_json::json!({
+            "id": "abc-123",
+            "timestamp": "2026-03-03T17:40:15Z",
+            "tag_name": "div",
+            "text_content": "Hello",
+            "element_path": "div.grid > div.entry",
+            "comment": "Fix the font",
+            "is_fixed": false,
+            "component_name": "Entry",
+            "bounding_box": { "top": 10.0, "left": 20.0, "width": 100.0, "height": 50.0 },
+            "computed_styles": sample_computed_styles_json(),
+            "session_id": "sess-1",
+            "url": "http://localhost:3000/calendar/x",
+            "intent": "fix",
+            "severity": "important",
+            "status": "pending",
+            "css_classes": [],
+            "thread": []
+        });
+        let a: DevAnnotation = serde_json::from_value(json).unwrap();
+        assert_eq!(a.selector, "div.grid > div.entry");
+        assert_eq!(a.note, "Fix the font");
+        assert!(!a.resolved);
+    }
+
+    #[test]
+    fn test_deserialize_list_response_from_api() {
+        let json = serde_json::json!({
+            "annotations": [{
+                "id": "a1",
+                "timestamp": "2026-03-03T17:40:15Z",
+                "tag_name": "span",
+                "text_content": "Click me",
+                "element_path": "button > span",
+                "comment": "Button text unclear",
+                "is_fixed": true,
+                "component_name": "ActionButton",
+                "bounding_box": { "top": 0.0, "left": 0.0, "width": 80.0, "height": 32.0 },
+                "computed_styles": sample_computed_styles_json(),
+                "session_id": "sess-2",
+                "url": "http://localhost:3000",
+                "intent": "clarify",
+                "severity": "minor",
+                "status": "resolved",
+                "css_classes": ["btn"],
+                "thread": []
+            }],
+            "summary": {
+                "total": 3,
+                "pending": 1,
+                "acknowledged": 1,
+                "resolved": 1,
+                "dismissed": 0
+            }
+        });
+        let resp: ListAnnotationsResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.annotations.len(), 1);
+        assert_eq!(resp.annotations[0].selector, "button > span");
+        assert_eq!(resp.summary.total, 3);
+        assert_eq!(resp.summary.pending, 1);
+        assert_eq!(resp.summary.acknowledged, 1);
+        assert_eq!(resp.summary.resolved, 1);
+        assert_eq!(resp.summary.unresolved(), 2);
     }
 }
