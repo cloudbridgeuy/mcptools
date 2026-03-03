@@ -78,17 +78,24 @@ mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issu
 mcptools atlassian jira update PROJ-123 --status Done --priority Low --issue-type Bug
 ```
 
-### Add Comment
+### Comments
 
 ```bash
-# Add a plain text comment
-mcptools atlassian jira comment PROJ-123 "This is my comment"
+# Add a comment
+mcptools atlassian jira comment add PROJ-123 "This is my comment"
 
 # Add a comment with markdown formatting
-mcptools atlassian jira comment PROJ-123 "## Status Update\nFixed the **login** issue"
+mcptools atlassian jira comment add PROJ-123 "## Status Update\nFixed the **login** issue"
 
-# Output as JSON
-mcptools atlassian jira comment PROJ-123 "Done!" --json
+# List all comments on a ticket
+mcptools atlassian jira comment list PROJ-123
+mcptools atlassian jira comment list PROJ-123 --json
+
+# Update a comment by ID
+mcptools atlassian jira comment update PROJ-123 12345 "Updated comment body"
+
+# Delete a comment by ID
+mcptools atlassian jira comment delete PROJ-123 12345
 ```
 
 ### Attachments
@@ -202,16 +209,59 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
 }
 ```
 
-### jira_comment
+### jira_comment_add
 
 ```json
 {
   "method": "tools/call",
   "params": {
-    "name": "jira_comment",
+    "name": "jira_comment_add",
     "arguments": {
       "issueKey": "PROJ-123",
       "comment": "This is my comment with **markdown** support"
+    }
+  }
+}
+```
+
+### jira_comment_list
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_comment_list",
+    "arguments": { "issueKey": "PROJ-123" }
+  }
+}
+```
+
+### jira_comment_update
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_comment_update",
+    "arguments": {
+      "issueKey": "PROJ-123",
+      "commentId": "12345",
+      "comment": "Updated comment body"
+    }
+  }
+}
+```
+
+### jira_comment_delete
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_comment_delete",
+    "arguments": {
+      "issueKey": "PROJ-123",
+      "commentId": "12345"
     }
   }
 }
