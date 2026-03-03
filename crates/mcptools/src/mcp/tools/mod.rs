@@ -355,6 +355,24 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            name: "jira_comment".to_string(),
+            description: "Post a comment on a Jira ticket. Comment body accepts markdown which is converted to Atlassian Document Format (ADF). Supports headings, bold, italic, lists, code blocks, inline code, and links. Returns the created comment details. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "issueKey": {
+                        "type": "string",
+                        "description": "The Jira issue key (e.g., 'PROJ-123')"
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "Comment body text (supports markdown: headings, bold, italic, lists, code blocks, inline code, links)"
+                    }
+                },
+                "required": ["issueKey", "comment"]
+            }),
+        },
+        Tool {
             name: "jira_sprint_list".to_string(),
             description: "List sprints for a Jira board. Returns sprint metadata including ID, name, state, and dates. Use this to discover sprint IDs and names before assigning issues to sprints via jira_update or jira_create. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -824,6 +842,7 @@ pub async fn handle_tools_call(
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
         "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
+        "jira_comment" => atlassian::handle_jira_comment(params.arguments, global).await,
         "jira_sprint_list" => atlassian::handle_jira_sprint_list(params.arguments, global).await,
         "jira_attachment_list" => {
             atlassian::handle_jira_attachment_list(params.arguments, global).await

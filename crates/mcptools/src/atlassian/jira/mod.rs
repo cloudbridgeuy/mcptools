@@ -1,4 +1,5 @@
 pub mod attachment;
+pub mod comment;
 pub mod create;
 pub mod get;
 pub mod search;
@@ -29,6 +30,10 @@ pub enum Commands {
     #[clap(name = "update")]
     Update(update::UpdateOptions),
 
+    /// Add a comment to a Jira ticket
+    #[clap(name = "comment")]
+    Comment(comment::CommentOptions),
+
     /// Manage attachments on Jira tickets
     #[command(subcommand)]
     Attachment(attachment::AttachmentCommands),
@@ -49,6 +54,7 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
         Commands::Search(options) => search::handler(options).await,
         Commands::Get(options) => get::handler(options).await,
         Commands::Update(options) => update::handler(options).await,
+        Commands::Comment(options) => comment::handler(options).await,
         Commands::Attachment(cmd) => attachment::handler(cmd).await,
         Commands::Sprint(cmd) => sprint::handler(cmd).await,
     }
@@ -224,6 +230,7 @@ fn display_ticket(ticket: &TicketOutput) {
 
 // Re-export public data functions for external use (e.g., MCP)
 pub use attachment::{download_attachment_data, list_attachments_data, upload_attachment_data};
+pub use comment::add_comment_data;
 pub use create::create_ticket_data;
 pub use get::get_ticket_data;
 pub use search::search_issues_data;

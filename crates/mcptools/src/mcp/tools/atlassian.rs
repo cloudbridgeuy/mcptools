@@ -1097,3 +1097,64 @@ pub async fn handle_jira_attachment_upload(
         data: None,
     })
 }
+
+/// Handle Jira comment command via MCP
+pub async fn handle_jira_comment(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct JiraCommentArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        comment: String,
+    }
+
+    let args: JiraCommentArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        let comment_preview: String = args.comment.chars().take(50).collect();
+        eprintln!(
+            "Calling jira_comment: issueKey={}, comment={}",
+            args.issue_key, comment_preview
+        );
+    }
+
+    let comment_options = crate::atlassian::jira::comment::CommentOptions {
+        ticket_key: args.issue_key,
+        body: args.comment,
+        json: true,
+    };
+
+    let comment_data = crate::atlassian::jira::add_comment_data(comment_options)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    let json_string = serde_json::to_string_pretty(&comment_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
