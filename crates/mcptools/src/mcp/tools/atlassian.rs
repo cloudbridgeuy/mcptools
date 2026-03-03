@@ -1098,19 +1098,19 @@ pub async fn handle_jira_attachment_upload(
     })
 }
 
-/// Handle Jira comment command via MCP
-pub async fn handle_jira_comment(
+/// Handle Jira comment add command via MCP
+pub async fn handle_jira_comment_add(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     #[derive(Deserialize)]
-    struct JiraCommentArgs {
+    struct Args {
         #[serde(rename = "issueKey")]
         issue_key: String,
         comment: String,
     }
 
-    let args: JiraCommentArgs =
+    let args: Args =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
                 code: -32602,
@@ -1122,18 +1122,12 @@ pub async fn handle_jira_comment(
     if global.verbose {
         let comment_preview: String = args.comment.chars().take(50).collect();
         eprintln!(
-            "Calling jira_comment: issueKey={}, comment={}",
+            "Calling jira_comment_add: issueKey={}, comment={}",
             args.issue_key, comment_preview
         );
     }
 
-    let comment_options = crate::atlassian::jira::comment::CommentOptions {
-        ticket_key: args.issue_key,
-        body: args.comment,
-        json: true,
-    };
-
-    let comment_data = crate::atlassian::jira::add_comment_data(comment_options)
+    let output = crate::atlassian::jira::add_comment_data(args.issue_key, args.comment)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -1141,7 +1135,175 @@ pub async fn handle_jira_comment(
             data: None,
         })?;
 
-    let json_string = serde_json::to_string_pretty(&comment_data).map_err(|e| JsonRpcError {
+    let json_string = serde_json::to_string_pretty(&output).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira comment list command via MCP
+pub async fn handle_jira_comment_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct Args {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+    }
+
+    let args: Args =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!("Calling jira_comment_list: issueKey={}", args.issue_key);
+    }
+
+    let comments = crate::atlassian::jira::list_comments_data(args.issue_key)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    let json_string = serde_json::to_string_pretty(&comments).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira comment update command via MCP
+pub async fn handle_jira_comment_update(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct Args {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        #[serde(rename = "commentId")]
+        comment_id: String,
+        comment: String,
+    }
+
+    let args: Args =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        let comment_preview: String = args.comment.chars().take(50).collect();
+        eprintln!(
+            "Calling jira_comment_update: issueKey={}, commentId={}, comment={}",
+            args.issue_key, args.comment_id, comment_preview
+        );
+    }
+
+    let output =
+        crate::atlassian::jira::update_comment_data(args.issue_key, args.comment_id, args.comment)
+            .await
+            .map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Tool execution error: {e}"),
+                data: None,
+            })?;
+
+    let json_string = serde_json::to_string_pretty(&output).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Jira comment delete command via MCP
+pub async fn handle_jira_comment_delete(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct Args {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        #[serde(rename = "commentId")]
+        comment_id: String,
+    }
+
+    let args: Args =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling jira_comment_delete: issueKey={}, commentId={}",
+            args.issue_key, args.comment_id
+        );
+    }
+
+    crate::atlassian::jira::delete_comment_data(args.issue_key.clone(), args.comment_id.clone())
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    let json_string = serde_json::to_string_pretty(&serde_json::json!({
+        "deleted": true,
+        "issue_key": args.issue_key,
+        "comment_id": args.comment_id
+    }))
+    .map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Serialization error: {e}"),
         data: None,

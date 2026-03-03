@@ -11,6 +11,19 @@ use mcptools_core::atlassian::jira::TicketOutput;
 
 use crate::prelude::{println, *};
 
+/// Check that an HTTP response was successful, returning a descriptive error otherwise.
+pub(super) async fn check_response(
+    response: reqwest::Response,
+    context: &str,
+) -> Result<reqwest::Response> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    Err(eyre!("{context} [{status}]: {body}"))
+}
+
 /// Jira commands
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
@@ -30,9 +43,9 @@ pub enum Commands {
     #[clap(name = "update")]
     Update(update::UpdateOptions),
 
-    /// Add a comment to a Jira ticket
-    #[clap(name = "comment")]
-    Comment(comment::CommentOptions),
+    /// Manage comments on Jira tickets
+    #[command(subcommand)]
+    Comment(comment::CommentCommands),
 
     /// Manage attachments on Jira tickets
     #[command(subcommand)]
@@ -54,7 +67,7 @@ pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
         Commands::Search(options) => search::handler(options).await,
         Commands::Get(options) => get::handler(options).await,
         Commands::Update(options) => update::handler(options).await,
-        Commands::Comment(options) => comment::handler(options).await,
+        Commands::Comment(cmd) => comment::handler(cmd).await,
         Commands::Attachment(cmd) => attachment::handler(cmd).await,
         Commands::Sprint(cmd) => sprint::handler(cmd).await,
     }
@@ -230,7 +243,7 @@ fn display_ticket(ticket: &TicketOutput) {
 
 // Re-export public data functions for external use (e.g., MCP)
 pub use attachment::{download_attachment_data, list_attachments_data, upload_attachment_data};
-pub use comment::add_comment_data;
+pub use comment::{add_comment_data, delete_comment_data, list_comments_data, update_comment_data};
 pub use create::create_ticket_data;
 pub use get::get_ticket_data;
 pub use search::search_issues_data;

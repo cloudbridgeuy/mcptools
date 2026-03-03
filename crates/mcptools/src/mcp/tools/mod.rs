@@ -355,14 +355,14 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            name: "jira_comment".to_string(),
-            description: "Post a comment on a Jira ticket. Comment body accepts markdown which is converted to Atlassian Document Format (ADF). Supports headings, bold, italic, lists, code blocks, inline code, and links. Returns the created comment details. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            name: "jira_comment_add".to_string(),
+            description: "Post a comment on a Jira ticket. Supports markdown in the comment body (bold, italic, headings, lists, code blocks, links) which is automatically converted to Atlassian Document Format. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "issueKey": {
                         "type": "string",
-                        "description": "The Jira issue key (e.g., 'PROJ-123')"
+                        "description": "The Jira issue key (e.g., PROJ-123)"
                     },
                     "comment": {
                         "type": "string",
@@ -370,6 +370,60 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     }
                 },
                 "required": ["issueKey", "comment"]
+            }),
+        },
+        Tool {
+            name: "jira_comment_list".to_string(),
+            description: "List all comments on a Jira ticket. Returns comment details including ID, author, body text, and creation date. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "issueKey": {
+                        "type": "string",
+                        "description": "The Jira issue key (e.g., PROJ-123)"
+                    }
+                },
+                "required": ["issueKey"]
+            }),
+        },
+        Tool {
+            name: "jira_comment_update".to_string(),
+            description: "Update an existing comment on a Jira ticket. Supports markdown in the comment body. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "issueKey": {
+                        "type": "string",
+                        "description": "The Jira issue key (e.g., PROJ-123)"
+                    },
+                    "commentId": {
+                        "type": "string",
+                        "description": "The comment ID to update"
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "New comment body text (supports markdown)"
+                    }
+                },
+                "required": ["issueKey", "commentId", "comment"]
+            }),
+        },
+        Tool {
+            name: "jira_comment_delete".to_string(),
+            description: "Delete a comment from a Jira ticket by comment ID. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "issueKey": {
+                        "type": "string",
+                        "description": "The Jira issue key (e.g., PROJ-123)"
+                    },
+                    "commentId": {
+                        "type": "string",
+                        "description": "The comment ID to delete"
+                    }
+                },
+                "required": ["issueKey", "commentId"]
             }),
         },
         Tool {
@@ -842,7 +896,14 @@ pub async fn handle_tools_call(
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
         "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
-        "jira_comment" => atlassian::handle_jira_comment(params.arguments, global).await,
+        "jira_comment_add" => atlassian::handle_jira_comment_add(params.arguments, global).await,
+        "jira_comment_list" => atlassian::handle_jira_comment_list(params.arguments, global).await,
+        "jira_comment_update" => {
+            atlassian::handle_jira_comment_update(params.arguments, global).await
+        }
+        "jira_comment_delete" => {
+            atlassian::handle_jira_comment_delete(params.arguments, global).await
+        }
         "jira_sprint_list" => atlassian::handle_jira_sprint_list(params.arguments, global).await,
         "jira_attachment_list" => {
             atlassian::handle_jira_attachment_list(params.arguments, global).await
