@@ -45,5 +45,17 @@ The tools communicate with the dev server's annotation API:
 
 ## Architecture
 
-- **Core** (`crates/core/src/annotations.rs`): Types (`DevAnnotation`, `BoundingBox`, `ComputedStyles`) and pure formatting functions for list and detail views. Fully tested.
+- **Core** (`crates/core/src/annotations.rs`): Types (`DevAnnotation`, `BoundingBox`, `ComputedStyles`, `AnnotationSummary`) and pure formatting functions for list and detail views. Fully tested.
 - **Shell** (`crates/mcptools/src/mcp/tools/annotations.rs`): HTTP handlers that fetch from the dev server and delegate formatting to core.
+
+### Serde Field Mapping
+
+`DevAnnotation` uses `#[serde(rename)]` to map wire-format names to readable Rust names:
+
+| Rust field | API field | Note |
+|------------|-----------|------|
+| `selector` | `element_path` | CSS selector / DOM path |
+| `note` | `comment` | Freeform annotation text |
+| `resolved` | `is_fixed` | Resolution status |
+
+`AnnotationSummary` has `pending`, `acknowledged`, `resolved`, `dismissed` counts from the API. The `unresolved()` method computes `total - resolved` (the API does not provide this field directly).
