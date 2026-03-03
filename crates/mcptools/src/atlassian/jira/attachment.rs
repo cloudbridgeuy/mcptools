@@ -7,6 +7,7 @@ use mcptools_core::atlassian::jira::{
 };
 use serde::Deserialize;
 
+use super::check_response;
 use crate::atlassian::{create_jira_client, JiraConfig};
 use crate::prelude::*;
 
@@ -68,18 +69,6 @@ struct IssueWithAttachments {
 struct AttachmentFields {
     #[serde(default)]
     attachment: Vec<JiraAttachmentResponse>,
-}
-
-// --- Shared HTTP helpers ---
-
-/// Check that an HTTP response was successful, returning a descriptive error otherwise.
-async fn check_response(response: reqwest::Response, context: &str) -> Result<reqwest::Response> {
-    if response.status().is_success() {
-        return Ok(response);
-    }
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    Err(eyre!("{context} [{status}]: {body}"))
 }
 
 // --- Data functions (public, used by CLI and MCP) ---
