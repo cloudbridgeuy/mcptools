@@ -181,6 +181,16 @@ pub struct AttachmentOutput {
     pub created: String,
 }
 
+/// Output structure for adding a comment to a Jira ticket
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+pub struct AddCommentOutput {
+    pub ticket_key: String,
+    pub comment_id: String,
+    pub author: Option<String>,
+    pub body: Option<String>,
+    pub created_at: String,
+}
+
 /// Extract description from Jira field (handles both string and ADF)
 ///
 /// Jira descriptions can be either plain strings or ADF (Atlassian Document Format) JSON.
@@ -598,6 +608,21 @@ pub fn transform_attachment_response(raw: Vec<JiraAttachmentResponse>) -> Vec<At
             created: resp.created,
         })
         .collect()
+}
+
+/// Transform a raw Jira comment API response into the domain output model.
+pub fn transform_comment_response(ticket_key: &str, comment: JiraComment) -> AddCommentOutput {
+    let author = comment
+        .author
+        .and_then(|a| a.display_name.or(a.email_address));
+
+    AddCommentOutput {
+        ticket_key: ticket_key.to_string(),
+        comment_id: comment.comment_id,
+        author,
+        body: render_adf(&comment.body),
+        created_at: comment.created_at,
+    }
 }
 
 /// Convert markdown text to Atlassian Document Format (ADF) JSON.
@@ -2282,5 +2307,63 @@ mod tests {
     fn test_find_sprint_by_name_empty_list() {
         let sprints: Vec<JiraSprintResponse> = vec![];
         assert_eq!(find_sprint_by_name(&sprints, "Sprint 30"), None);
+    }
+
+    #[test]
+    fn test_transform_comment_response_basic() {
+        let raw = JiraComment {
+            comment_id: "1".to_string(),
+            body: serde_json::json!({
+                "type": "doc",
+                "content": [{
+                    "type": "paragraph",
+                    "content": [{ "type": "text", "text": "This is a test" }]
+                }]
+            }),
+            created_at: "2024-10-01T12:00:00Z".to_string(),
+            author: Some(JiraAssignee {
+                display_name: Some("John Doe".to_string()),
+                email_address: Some("john@example.com".to_string()),
+            }),
+        };
+        let output = transform_comment_response("PROJ-1", raw);
+        assert_eq!(output.ticket_key, "PROJ-1");
+        assert_eq!(output.comment_id, "1");
+        assert_eq!(output.author, Some("John Doe".to_string()));
+        assert_eq!(output.body, Some("This is a test".to_string()));
+        assert_eq!(output.created_at, "2024-10-01T12:00:00Z");
+    }
+
+    #[test]
+    fn test_transform_comment_response_no_author() {
+        let raw = JiraComment {
+            comment_id: "2".to_string(),
+            body: serde_json::json!({
+                "type": "doc",
+                "content": [{ "type": "paragraph", "content": [] }]
+            }),
+            created_at: "2024-10-02T13:00:00Z".to_string(),
+            author: None,
+        };
+        let output = transform_comment_response("PROJ-2", raw);
+        assert_eq!(output.author, None);
+    }
+
+    #[test]
+    fn test_transform_comment_response_email_fallback() {
+        let raw = JiraComment {
+            comment_id: "3".to_string(),
+            body: serde_json::json!({
+                "type": "doc",
+                "content": [{ "type": "paragraph", "content": [] }]
+            }),
+            created_at: "2024-10-03T14:00:00Z".to_string(),
+            author: Some(JiraAssignee {
+                display_name: None,
+                email_address: Some("jane@example.com".to_string()),
+            }),
+        };
+        let output = transform_comment_response("PROJ-3", raw);
+        assert_eq!(output.author, Some("jane@example.com".to_string()));
     }
 }
