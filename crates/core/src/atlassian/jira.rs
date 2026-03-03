@@ -181,9 +181,9 @@ pub struct AttachmentOutput {
     pub created: String,
 }
 
-/// Output structure for adding a comment to a Jira ticket
+/// Output structure for a Jira comment (used by add, list, update)
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
-pub struct AddCommentOutput {
+pub struct CommentOutput {
     pub ticket_key: String,
     pub comment_id: String,
     pub author: Option<String>,
@@ -611,18 +611,29 @@ pub fn transform_attachment_response(raw: Vec<JiraAttachmentResponse>) -> Vec<At
 }
 
 /// Transform a raw Jira comment API response into the domain output model.
-pub fn transform_comment_response(ticket_key: &str, comment: JiraComment) -> AddCommentOutput {
+pub fn transform_comment_response(ticket_key: &str, comment: JiraComment) -> CommentOutput {
     let author = comment
         .author
         .and_then(|a| a.display_name.or(a.email_address));
 
-    AddCommentOutput {
+    CommentOutput {
         ticket_key: ticket_key.to_string(),
         comment_id: comment.comment_id,
         author,
         body: render_adf(&comment.body),
         created_at: comment.created_at,
     }
+}
+
+/// Convert a vector of raw Jira comments into the domain output model.
+pub fn transform_comment_list_response(
+    ticket_key: &str,
+    comments: Vec<JiraComment>,
+) -> Vec<CommentOutput> {
+    comments
+        .into_iter()
+        .map(|c| transform_comment_response(ticket_key, c))
+        .collect()
 }
 
 /// Convert markdown text to Atlassian Document Format (ADF) JSON.
@@ -2365,5 +2376,53 @@ mod tests {
         };
         let output = transform_comment_response("PROJ-3", raw);
         assert_eq!(output.author, Some("jane@example.com".to_string()));
+    }
+
+    #[test]
+    fn test_transform_comment_list_response_empty() {
+        let result = transform_comment_list_response("PROJ-1", vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_transform_comment_list_response_multiple() {
+        let comments = vec![
+            JiraComment {
+                comment_id: "1".to_string(),
+                body: serde_json::json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": [{ "type": "text", "text": "First comment" }]
+                    }]
+                }),
+                created_at: "2024-10-01T12:00:00Z".to_string(),
+                author: Some(JiraAssignee {
+                    display_name: Some("John Doe".to_string()),
+                    email_address: None,
+                }),
+            },
+            JiraComment {
+                comment_id: "2".to_string(),
+                body: serde_json::json!({
+                    "type": "doc",
+                    "content": [{
+                        "type": "paragraph",
+                        "content": [{ "type": "text", "text": "Second comment" }]
+                    }]
+                }),
+                created_at: "2024-10-02T13:00:00Z".to_string(),
+                author: None,
+            },
+        ];
+
+        let result = transform_comment_list_response("PROJ-1", comments);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].comment_id, "1");
+        assert_eq!(result[0].ticket_key, "PROJ-1");
+        assert_eq!(result[0].author, Some("John Doe".to_string()));
+        assert_eq!(result[1].comment_id, "2");
+        assert_eq!(result[1].ticket_key, "PROJ-1");
+        assert_eq!(result[1].author, None);
     }
 }
