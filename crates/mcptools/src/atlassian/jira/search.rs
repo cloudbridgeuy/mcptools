@@ -123,6 +123,10 @@ pub async fn search_issues_data(
     let max_results_str = max_results.to_string();
     let fields_str = "key,summary,description,status,assignee";
 
+    // Strip invalid JQL backslash escapes that Claude Code's Bash tool may insert
+    // (e.g., `!` becomes `\!` to prevent history expansion, but `\!` is not valid JQL)
+    let query = query.replace("\\!", "!");
+
     let mut query_params = vec![
         ("jql", query.as_str()),
         ("maxResults", &max_results_str),
