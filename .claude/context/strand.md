@@ -8,8 +8,9 @@ Strand wraps a local Ollama model (Strand-Rust-Coder-14B) as a stateless, read-o
 # Basic
 mcptools strand generate "Write a function that adds two numbers"
 
-# With file context
+# With file context (space-separated or comma-separated)
 mcptools strand generate "Add error handling" --files src/lib.rs src/types.rs
+mcptools strand generate "Add error handling" --files src/lib.rs,src/types.rs
 
 # Custom model/URL
 mcptools strand generate "Write a hello world" \

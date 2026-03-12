@@ -41,7 +41,7 @@ pub struct GenerateOptions {
     pub context: Option<String>,
 
     /// File paths to include as context
-    #[clap(long)]
+    #[clap(long, value_delimiter = ',')]
     pub files: Vec<String>,
 
     /// Ollama base URL
