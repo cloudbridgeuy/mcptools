@@ -13,3 +13,5 @@
 # Claude Code settings
 .claude/*
 !.claude/context/
+docs/shaping
+.local/

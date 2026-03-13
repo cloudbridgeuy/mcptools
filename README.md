@@ -882,7 +882,8 @@ Generate Rust code via a local Ollama model. The model outputs raw Rust code wit
 - `context` (string, optional) - Additional context for code generation
 - `files` (array of strings, optional) - File paths to include as context
 - `ollama_url` (string, optional) - Ollama API base URL (default: `http://localhost:11434`)
-- `model` (string, optional) - Model name (default: `strand-rust-coder`)
+- `model` (string, optional) - Model name (default: `maternion/strand-rust-coder`)
+- `system_prompt` (string, optional) - Optional system prompt to override the model's default behavior
 
 **Example:**
 

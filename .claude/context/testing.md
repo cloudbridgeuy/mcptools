@@ -71,7 +71,8 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 | Variable | Description |
 |----------|-------------|
 | `OLLAMA_URL` | Ollama API base URL (default: `http://localhost:11434`) |
-| `STRAND_MODEL` | Model name for code generation (default: `strand-rust-coder`) |
+| `STRAND_MODEL` | Model name for code generation (default: `maternion/strand-rust-coder`) |
+| `STRAND_SYSTEM_PROMPT` | Optional system prompt to override the model's default behavior |
 
 ## UI Annotations Variables
 
