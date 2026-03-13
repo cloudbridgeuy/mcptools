@@ -140,7 +140,14 @@ mcptools md fetch https://docs.example.com --selector "main"
 ```bash
 mcptools strand generate "Write a function that adds two numbers"
 mcptools strand generate "Add error handling" --files src/lib.rs src/types.rs
+mcptools strand generate "Refactor this" --system-prompt "Focus on readability"
 ```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
+| `STRAND_MODEL` | `maternion/strand-rust-coder` | Default model name |
+| `STRAND_SYSTEM_PROMPT` | — | Optional system prompt override |
 
 ### MCP Server
 
