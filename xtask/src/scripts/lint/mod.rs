@@ -80,8 +80,8 @@ const CHECKS: &[Check] = &[
     Check {
         id: CheckId::Machete,
         name: "cargo machete",
-        program: "cargo",
-        args: &["machete"],
+        program: "cargo-machete",
+        args: &[],
         optional: true,
     },
     Check {
