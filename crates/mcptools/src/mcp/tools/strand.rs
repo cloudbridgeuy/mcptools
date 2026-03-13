@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 use super::{CallToolResult, Content, JsonRpcError};
+use crate::strand::DEFAULT_MODEL;
 
 pub async fn handle_generate_code(
     arguments: Option<serde_json::Value>,
@@ -13,6 +14,7 @@ pub async fn handle_generate_code(
         files: Option<Vec<String>>,
         ollama_url: Option<String>,
         model: Option<String>,
+        system_prompt: Option<String>,
     }
 
     let args: GenerateCodeArgs =
@@ -38,8 +40,8 @@ pub async fn handle_generate_code(
         args.files.unwrap_or_default(),
         args.ollama_url
             .unwrap_or_else(|| "http://localhost:11434".to_string()),
-        args.model
-            .unwrap_or_else(|| "strand-rust-coder".to_string()),
+        args.model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+        args.system_prompt,
     )
     .await
     .map_err(|e| JsonRpcError {

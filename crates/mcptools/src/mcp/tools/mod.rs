@@ -678,7 +678,11 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     },
                     "model": {
                         "type": "string",
-                        "description": "Model name for code generation (default: strand-rust-coder)"
+                        "description": "Model name for code generation (default: maternion/strand-rust-coder)"
+                    },
+                    "system_prompt": {
+                        "type": "string",
+                        "description": "Optional system prompt to override the model's default behavior"
                     }
                 },
                 "required": ["instruction"]

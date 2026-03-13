@@ -4,17 +4,7 @@ use rig::client::CompletionClient;
 use rig::completion::Prompt;
 use rig::providers::ollama;
 
-const SYSTEM_PREAMBLE: &str = "\
-You are a Rust code generator. You receive file context and an instruction.
-You output ONLY valid Rust source code.
-
-Rules:
-- Output raw Rust code only. No markdown fences. No explanations. No commentary.
-- Include appropriate code comments where the logic is not self-evident.
-- Follow Rust conventions: snake_case for functions, CamelCase for types, SCREAMING_CASE for constants.
-- Use the provided file context to understand existing types, traits, and module structure.
-- If the instruction asks to modify existing code, output the complete modified file.
-- If the instruction asks to create new code, output the complete new file.";
+pub const DEFAULT_MODEL: &str = "maternion/strand-rust-coder";
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "strand")]
@@ -49,8 +39,12 @@ pub struct GenerateOptions {
     pub ollama_url: String,
 
     /// Model name for code generation
-    #[clap(long, env = "STRAND_MODEL", default_value = "strand-rust-coder")]
+    #[clap(long, env = "STRAND_MODEL", default_value = DEFAULT_MODEL)]
     pub model: String,
+
+    /// Optional system prompt to prepend to the model's built-in instructions
+    #[clap(long, env = "STRAND_SYSTEM_PROMPT")]
+    pub system_prompt: Option<String>,
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
@@ -98,16 +92,17 @@ async fn generate(options: GenerateOptions, global: crate::Global) -> Result<()>
 
     // Create rig Ollama client and agent
     let client = create_client(&options.ollama_url)?;
-    let agent = client
-        .agent(&options.model)
-        .preamble(SYSTEM_PREAMBLE)
-        .build();
+    let mut builder = client.agent(&options.model);
+    if let Some(ref preamble) = options.system_prompt {
+        builder = builder.preamble(preamble);
+    }
+    let agent = builder.build();
 
     // Call the model
     let response = agent
         .prompt(&prompt)
         .await
-        .map_err(|e| eyre!("Model generation failed: {}", e))?;
+        .map_err(|e| eyre!("{}", check_model_error(&e.to_string(), &options.model)))?;
 
     // Extract clean code from response
     let code = extract_code(&response);
@@ -118,6 +113,18 @@ async fn generate(options: GenerateOptions, global: crate::Global) -> Result<()>
     Ok(())
 }
 
+fn check_model_error(error: &str, model: &str) -> String {
+    let lower = error.to_lowercase();
+    if lower.contains("not found") || lower.contains("pull") {
+        format!(
+            "Model '{}' not found. Run:\n\n  ollama pull {}\n\nOr specify a different model with --model or STRAND_MODEL.",
+            model, model
+        )
+    } else {
+        format!("Model generation failed: {}", error)
+    }
+}
+
 /// Generate code and return the raw string (for MCP reuse).
 pub async fn generate_code_data(
     instruction: String,
@@ -125,6 +132,7 @@ pub async fn generate_code_data(
     file_paths: Vec<String>,
     ollama_url: String,
     model: String,
+    system_prompt: Option<String>,
 ) -> Result<String> {
     // Read file contents
     let mut files = Vec::new();
@@ -148,13 +156,17 @@ pub async fn generate_code_data(
 
     // Create rig Ollama client and agent
     let client = create_client(&ollama_url)?;
-    let agent = client.agent(&model).preamble(SYSTEM_PREAMBLE).build();
+    let mut builder = client.agent(&model);
+    if let Some(ref preamble) = system_prompt {
+        builder = builder.preamble(preamble);
+    }
+    let agent = builder.build();
 
     // Call the model
     let response = agent
         .prompt(&prompt)
         .await
-        .map_err(|e| eyre!("Model generation failed: {}", e))?;
+        .map_err(|e| eyre!("{}", check_model_error(&e.to_string(), &model)))?;
 
     // Extract clean code from response
     Ok(extract_code(&response))
