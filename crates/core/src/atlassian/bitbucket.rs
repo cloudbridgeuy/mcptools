@@ -492,6 +492,178 @@ pub fn transform_pr_list_response(response: BitbucketPRListResponse) -> PRListOu
 }
 
 // =============================================================================
+// Workspace List Types
+// =============================================================================
+
+/// Paginated response from Bitbucket workspaces endpoint
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketWorkspaceListResponse {
+    pub values: Vec<BitbucketWorkspace>,
+    #[serde(default)]
+    pub size: Option<u32>,
+    #[serde(default)]
+    pub page: Option<u32>,
+    #[serde(default)]
+    pub pagelen: Option<u32>,
+    #[serde(default)]
+    pub next: Option<String>,
+    #[serde(default)]
+    pub previous: Option<String>,
+}
+
+/// A single workspace in Bitbucket
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketWorkspace {
+    pub slug: String,
+    pub name: String,
+    #[serde(default)]
+    pub uuid: Option<String>,
+}
+
+/// Output structure for workspace list command
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct WorkspaceListOutput {
+    pub workspaces: Vec<WorkspaceItem>,
+    pub next_page: Option<String>,
+    pub total_count: Option<u32>,
+}
+
+/// Simplified workspace info for list display
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct WorkspaceItem {
+    pub slug: String,
+    pub name: String,
+}
+
+/// Transform Bitbucket workspace list response to output domain model
+///
+/// # Arguments
+/// * `response` - The paginated workspace list response from Bitbucket API
+///
+/// # Returns
+/// * `WorkspaceListOutput` - Cleaned and transformed workspace list with pagination info
+pub fn transform_workspace_list_response(
+    response: BitbucketWorkspaceListResponse,
+) -> WorkspaceListOutput {
+    let workspaces: Vec<WorkspaceItem> = response
+        .values
+        .into_iter()
+        .map(|w| WorkspaceItem {
+            slug: w.slug,
+            name: w.name,
+        })
+        .collect();
+
+    WorkspaceListOutput {
+        workspaces,
+        next_page: response.next,
+        total_count: response.size,
+    }
+}
+
+// =============================================================================
+// Repository List Types
+// =============================================================================
+
+/// Paginated response from Bitbucket repository list endpoint
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketRepoListResponse {
+    pub values: Vec<BitbucketRepoEntry>,
+    #[serde(default)]
+    pub size: Option<u32>,
+    #[serde(default)]
+    pub page: Option<u32>,
+    #[serde(default)]
+    pub pagelen: Option<u32>,
+    #[serde(default)]
+    pub next: Option<String>,
+    #[serde(default)]
+    pub previous: Option<String>,
+}
+
+/// Repository entry from Bitbucket API
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketRepoEntry {
+    pub slug: String,
+    pub name: String,
+    pub full_name: String,
+    #[serde(default)]
+    pub links: BitbucketRepoLinks,
+}
+
+/// Links in repository response
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct BitbucketRepoLinks {
+    #[serde(default, rename = "clone")]
+    pub clone_urls: Vec<BitbucketCloneLink>,
+}
+
+/// A single clone link (SSH or HTTPS)
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketCloneLink {
+    pub name: String,
+    pub href: String,
+}
+
+/// Output structure for repository list command
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct RepoListOutput {
+    pub repositories: Vec<RepoItem>,
+    pub next_page: Option<String>,
+    pub total_count: Option<u32>,
+}
+
+/// Simplified repository info for list display
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct RepoItem {
+    pub name: String,
+    pub full_name: String,
+    pub ssh_url: Option<String>,
+    pub https_url: Option<String>,
+}
+
+/// Transform Bitbucket repository list response to output domain model
+///
+/// # Arguments
+/// * `response` - The paginated repo list response from Bitbucket API
+///
+/// # Returns
+/// * `RepoListOutput` - Cleaned and transformed repo list with pagination info
+pub fn transform_repo_list_response(response: BitbucketRepoListResponse) -> RepoListOutput {
+    let repositories: Vec<RepoItem> = response
+        .values
+        .into_iter()
+        .map(|repo| {
+            let ssh_url = repo
+                .links
+                .clone_urls
+                .iter()
+                .find(|l| l.name == "ssh")
+                .map(|l| l.href.clone());
+            let https_url = repo
+                .links
+                .clone_urls
+                .iter()
+                .find(|l| l.name == "https")
+                .map(|l| l.href.clone());
+
+            RepoItem {
+                name: repo.name,
+                full_name: repo.full_name,
+                ssh_url,
+                https_url,
+            }
+        })
+        .collect();
+
+    RepoListOutput {
+        repositories,
+        next_page: response.next,
+        total_count: response.size,
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -817,5 +989,188 @@ mod tests {
         let output = transform_create_pr_response(pr);
 
         assert_eq!(output.description, None);
+    }
+
+    fn sample_workspace(slug: &str, name: &str) -> BitbucketWorkspace {
+        BitbucketWorkspace {
+            slug: slug.to_string(),
+            name: name.to_string(),
+            uuid: None,
+        }
+    }
+
+    #[test]
+    fn test_transform_workspace_list_response_basic() {
+        let response = BitbucketWorkspaceListResponse {
+            values: vec![
+                sample_workspace("ws1", "Workspace One"),
+                sample_workspace("ws2", "Workspace Two"),
+            ],
+            size: Some(2),
+            page: Some(1),
+            pagelen: Some(10),
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_workspace_list_response(response);
+
+        assert_eq!(output.workspaces.len(), 2);
+        assert_eq!(output.workspaces[0].slug, "ws1");
+        assert_eq!(output.workspaces[0].name, "Workspace One");
+        assert_eq!(output.workspaces[1].slug, "ws2");
+        assert_eq!(output.workspaces[1].name, "Workspace Two");
+        assert_eq!(output.total_count, Some(2));
+        assert!(output.next_page.is_none());
+    }
+
+    #[test]
+    fn test_transform_workspace_list_response_empty() {
+        let response = BitbucketWorkspaceListResponse {
+            values: vec![],
+            size: Some(0),
+            page: None,
+            pagelen: None,
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_workspace_list_response(response);
+
+        assert!(output.workspaces.is_empty());
+        assert!(output.next_page.is_none());
+        assert_eq!(output.total_count, Some(0));
+    }
+
+    #[test]
+    fn test_transform_workspace_list_response_pagination() {
+        let response = BitbucketWorkspaceListResponse {
+            values: vec![sample_workspace("ws", "Name")],
+            size: Some(10),
+            page: Some(1),
+            pagelen: Some(5),
+            next: Some("https://api.bitbucket.org/2.0/workspaces?page=2".to_string()),
+            previous: None,
+        };
+
+        let output = transform_workspace_list_response(response);
+
+        assert_eq!(output.total_count, Some(10));
+        assert_eq!(
+            output.next_page,
+            Some("https://api.bitbucket.org/2.0/workspaces?page=2".to_string())
+        );
+    }
+
+    fn sample_repo_entry(name: &str, full_name: &str) -> BitbucketRepoEntry {
+        BitbucketRepoEntry {
+            slug: name.to_string(),
+            name: name.to_string(),
+            full_name: full_name.to_string(),
+            links: BitbucketRepoLinks {
+                clone_urls: vec![
+                    BitbucketCloneLink {
+                        name: "ssh".to_string(),
+                        href: format!("git@bitbucket.org:{}.git", full_name),
+                    },
+                    BitbucketCloneLink {
+                        name: "https".to_string(),
+                        href: format!("https://bitbucket.org/{}.git", full_name),
+                    },
+                ],
+            },
+        }
+    }
+
+    fn sample_repo_entry_no_links(name: &str, full_name: &str) -> BitbucketRepoEntry {
+        BitbucketRepoEntry {
+            slug: name.to_string(),
+            name: name.to_string(),
+            full_name: full_name.to_string(),
+            links: BitbucketRepoLinks { clone_urls: vec![] },
+        }
+    }
+
+    #[test]
+    fn test_transform_repo_list_response_basic() {
+        let response = BitbucketRepoListResponse {
+            values: vec![
+                sample_repo_entry("repo1", "workspace/repo1"),
+                sample_repo_entry("repo2", "workspace/repo2"),
+            ],
+            size: Some(2),
+            page: None,
+            pagelen: None,
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_repo_list_response(response);
+
+        assert_eq!(output.repositories.len(), 2);
+        assert_eq!(output.repositories[0].name, "repo1");
+        assert_eq!(output.repositories[0].full_name, "workspace/repo1");
+        assert_eq!(
+            output.repositories[0].ssh_url,
+            Some("git@bitbucket.org:workspace/repo1.git".to_string())
+        );
+        assert_eq!(
+            output.repositories[0].https_url,
+            Some("https://bitbucket.org/workspace/repo1.git".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_repo_list_response_missing_links() {
+        let response = BitbucketRepoListResponse {
+            values: vec![sample_repo_entry_no_links("repo1", "workspace/repo1")],
+            size: Some(1),
+            page: None,
+            pagelen: None,
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_repo_list_response(response);
+
+        assert_eq!(output.repositories[0].ssh_url, None);
+        assert_eq!(output.repositories[0].https_url, None);
+    }
+
+    #[test]
+    fn test_transform_repo_list_response_empty() {
+        let response = BitbucketRepoListResponse {
+            values: vec![],
+            size: Some(0),
+            page: None,
+            pagelen: None,
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_repo_list_response(response);
+
+        assert!(output.repositories.is_empty());
+        assert_eq!(output.total_count, Some(0));
+    }
+
+    #[test]
+    fn test_transform_repo_list_response_pagination() {
+        let response = BitbucketRepoListResponse {
+            values: vec![sample_repo_entry("repo1", "workspace/repo1")],
+            size: Some(20),
+            page: Some(1),
+            pagelen: Some(10),
+            next: Some("https://api.bitbucket.org/2.0/repositories/workspace?page=2".to_string()),
+            previous: None,
+        };
+
+        let output = transform_repo_list_response(response);
+
+        assert_eq!(output.total_count, Some(20));
+        assert_eq!(
+            output.next_page,
+            Some("https://api.bitbucket.org/2.0/repositories/workspace?page=2".to_string())
+        );
     }
 }
