@@ -1448,3 +1448,74 @@ pub async fn handle_bitbucket_repo_list(
         data: None,
     })
 }
+
+/// Handle Bitbucket repo branches command via MCP
+pub async fn handle_bitbucket_repo_branches(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{list_branches_data, ListBranchesParams};
+
+    #[derive(Deserialize)]
+    struct BitbucketRepoBranchesArgs {
+        workspace: String,
+        repo: String,
+        limit: Option<usize>,
+        #[serde(rename = "nextPage")]
+        next_page: Option<String>,
+        query: Option<String>,
+        sort: Option<String>,
+    }
+
+    let args: BitbucketRepoBranchesArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_repo_branches: workspace={}, repo={}, limit={:?}, query={:?}, sort={:?}",
+            args.workspace, args.repo, args.limit, args.query, args.sort
+        );
+    }
+
+    let params = ListBranchesParams {
+        workspace: args.workspace,
+        repo: args.repo,
+        limit: args.limit.unwrap_or(10),
+        next_page: args.next_page,
+        query: args.query,
+        sort: args.sort,
+        base_url_override: None,
+        app_password_override: global.bitbucket_app_password.clone(),
+    };
+
+    let list_data = list_branches_data(params, None)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}

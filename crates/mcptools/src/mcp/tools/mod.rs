@@ -694,6 +694,40 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            name: "bitbucket_repo_branches".to_string(),
+            description: "List branches in a Bitbucket repository. Returns branch names, latest commit hash, date, message, and author. Supports filtering and sorting. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "workspace": {
+                        "type": "string",
+                        "description": "Workspace slug (e.g., 'my-workspace')"
+                    },
+                    "repo": {
+                        "type": "string",
+                        "description": "Repository slug (e.g., 'my-repo')"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of results per page (default: 10)"
+                    },
+                    "nextPage": {
+                        "type": "string",
+                        "description": "Pagination URL for fetching the next page of results"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Bitbucket query filter (e.g., 'name ~ \"feature\"')"
+                    },
+                    "sort": {
+                        "type": "string",
+                        "description": "Sort field (e.g., '-target.date' for newest first)"
+                    }
+                },
+                "required": ["workspace", "repo"]
+            }),
+        },
+        Tool {
             name: "generate_code".to_string(),
             description: "Generate Rust code using a local Ollama model. Accepts an instruction, optional context, and optional file paths for context. Returns raw Rust source code. Requires a running Ollama instance with the specified model.".to_string(),
             input_schema: serde_json::json!({
@@ -973,6 +1007,9 @@ pub async fn handle_tools_call(
         }
         "bitbucket_repo_list" => {
             atlassian::handle_bitbucket_repo_list(params.arguments, global).await
+        }
+        "bitbucket_repo_branches" => {
+            atlassian::handle_bitbucket_repo_branches(params.arguments, global).await
         }
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
