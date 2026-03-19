@@ -62,5 +62,6 @@ pub use pr::create::{create_pr_data, CreatePRParams};
 pub use pr::list::{list_pr_data, ListPRParams};
 pub use pr::read::{read_pr_data, ReadPRParams};
 
+pub use repo::branches::{list_branches_data, ListBranchesParams};
 pub use repo::list::{list_repo_data, ListRepoParams};
 pub use workspace::list::{list_workspace_data, ListWorkspaceParams};
