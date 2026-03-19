@@ -133,26 +133,29 @@ mcptools atlassian bitbucket repo list -w "myworkspace" --format csv
 ### List Branches
 
 ```bash
-# List branches in a repo
+# List branches in a repo (positional workspace/repo format)
+mcptools atlassian bitbucket repo branches myworkspace/myrepo
+
+# Same with flags
 mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo"
 
 # Fetch all branches (auto-paginate)
-mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --all
+mcptools atlassian bitbucket repo branches myworkspace/myrepo --all
 
 # Filter by name
-mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" -q 'name ~ "feature"'
+mcptools atlassian bitbucket repo branches myworkspace/myrepo -q 'name ~ "feature"'
 
 # Sort by newest commit
-mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --sort "-target.date"
+mcptools atlassian bitbucket repo branches myworkspace/myrepo --sort "-target.date"
 
 # Limit results per page
-mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --limit 20
+mcptools atlassian bitbucket repo branches myworkspace/myrepo --limit 20
 
 # Output as JSON
-mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --format json
+mcptools atlassian bitbucket repo branches myworkspace/myrepo --format json
 
 # Output as CSV
-mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --format csv
+mcptools atlassian bitbucket repo branches myworkspace/myrepo --format csv
 ```
 
 ## MCP Tools

@@ -11,13 +11,17 @@ use serde::Deserialize;
 /// Options for listing branches in a repository
 #[derive(Debug, clap::Args, Deserialize, Clone)]
 pub struct ListBranchesOptions {
-    /// Workspace slug (e.g., "myworkspace")
-    #[arg(long, short = 'w')]
-    pub workspace: String,
+    /// Repository in workspace/repo_slug format (e.g., "myworkspace/myrepo")
+    #[arg(index = 1)]
+    pub repo_path: Option<String>,
 
-    /// Repository slug (e.g., "myrepo")
+    /// Workspace slug (e.g., "myworkspace") — overridden by positional arg
+    #[arg(long, short = 'w')]
+    pub workspace: Option<String>,
+
+    /// Repository slug (e.g., "myrepo") — overridden by positional arg
     #[arg(long, short = 'r')]
-    pub repo: String,
+    pub repo: Option<String>,
 
     /// Maximum number of results to return per page
     #[arg(short, long, default_value = "10")]
@@ -67,6 +71,29 @@ pub struct ListBranchesParams {
     pub base_url_override: Option<String>,
     /// Override for app password
     pub app_password_override: Option<String>,
+}
+
+/// Resolve workspace and repo from options.
+///
+/// Accepts either a positional `workspace/repo_slug` argument or separate `--workspace` and `--repo` flags.
+fn resolve_workspace_repo(options: &ListBranchesOptions) -> Result<(String, String)> {
+    if let Some(ref path) = options.repo_path {
+        let parts: Vec<&str> = path.splitn(2, '/').collect();
+        if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+            return Err(eyre!(
+                "Invalid repo path '{}'. Expected format: workspace/repo_slug",
+                path
+            ));
+        }
+        Ok((parts[0].to_string(), parts[1].to_string()))
+    } else {
+        match (&options.workspace, &options.repo) {
+            (Some(ws), Some(repo)) => Ok((ws.clone(), repo.clone())),
+            _ => Err(eyre!(
+                "Either provide a positional 'workspace/repo_slug' argument or both --workspace and --repo flags"
+            )),
+        }
+    }
 }
 
 /// Fetch branch list from Bitbucket API
@@ -138,6 +165,8 @@ pub async fn list_branches_data(
 }
 
 pub async fn handler(options: ListBranchesOptions, global: crate::Global) -> Result<()> {
+    let (workspace, repo) = resolve_workspace_repo(&options)?;
+
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -161,8 +190,8 @@ pub async fn handler(options: ListBranchesOptions, global: crate::Global) -> Res
             }
 
             let params = ListBranchesParams {
-                workspace: options.workspace.clone(),
-                repo: options.repo.clone(),
+                workspace: workspace.clone(),
+                repo: repo.clone(),
                 limit: 100,
                 next_page,
                 query: options.query.clone(),
@@ -197,8 +226,8 @@ pub async fn handler(options: ListBranchesOptions, global: crate::Global) -> Res
         }
     } else {
         let params = ListBranchesParams {
-            workspace: options.workspace.clone(),
-            repo: options.repo.clone(),
+            workspace: workspace.clone(),
+            repo: repo.clone(),
             limit: options.limit,
             next_page: options.next_page,
             query: options.query,
@@ -301,8 +330,8 @@ pub async fn handler(options: ListBranchesOptions, global: crate::Global) -> Res
                     "More results available. To fetch the next page, run:".cyan()
                 );
                 eprintln!(
-                    "  mcptools atlassian bitbucket repo branches -w {} -r {} --limit {} --next-page '{}'",
-                    options.workspace, options.repo, options.limit, next_url
+                    "  mcptools atlassian bitbucket repo branches {}/{} --limit {} --next-page '{}'",
+                    workspace, repo, options.limit, next_url
                 );
             }
         }
