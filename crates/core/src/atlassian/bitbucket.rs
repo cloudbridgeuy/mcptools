@@ -664,6 +664,109 @@ pub fn transform_repo_list_response(response: BitbucketRepoListResponse) -> Repo
 }
 
 // =============================================================================
+// Branch List Types
+// =============================================================================
+
+/// Paginated response from Bitbucket branch list endpoint
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketBranchListResponse {
+    pub values: Vec<BitbucketBranchEntry>,
+    #[serde(default)]
+    pub size: Option<u32>,
+    #[serde(default)]
+    pub page: Option<u32>,
+    #[serde(default)]
+    pub pagelen: Option<u32>,
+    #[serde(default)]
+    pub next: Option<String>,
+    #[serde(default)]
+    pub previous: Option<String>,
+}
+
+/// A single branch entry from Bitbucket API
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketBranchEntry {
+    pub name: String,
+    #[serde(default)]
+    pub target: Option<BitbucketBranchTarget>,
+}
+
+/// The target commit of a branch
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketBranchTarget {
+    pub hash: String,
+    #[serde(default)]
+    pub date: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub author: Option<BitbucketBranchAuthor>,
+}
+
+/// Author info on a branch target commit
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketBranchAuthor {
+    #[serde(default)]
+    pub raw: Option<String>,
+}
+
+/// Output structure for branch list command
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct BranchListOutput {
+    pub branches: Vec<BranchItem>,
+    pub next_page: Option<String>,
+    pub total_count: Option<u32>,
+}
+
+/// Simplified branch info for list display
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct BranchItem {
+    pub name: String,
+    pub commit_hash: Option<String>,
+    pub commit_date: Option<String>,
+    pub commit_message: Option<String>,
+    pub author: Option<String>,
+}
+
+/// Transform Bitbucket branch list response to output domain model
+///
+/// # Arguments
+/// * `response` - The paginated branch list response from Bitbucket API
+///
+/// # Returns
+/// * `BranchListOutput` - Cleaned and transformed branch list with pagination info
+pub fn transform_branch_list_response(response: BitbucketBranchListResponse) -> BranchListOutput {
+    let branches: Vec<BranchItem> = response
+        .values
+        .into_iter()
+        .map(|b| {
+            let (commit_hash, commit_date, commit_message, author) = match b.target {
+                Some(target) => (
+                    Some(target.hash),
+                    target.date,
+                    target.message.map(|m| m.trim().to_string()),
+                    target.author.and_then(|a| a.raw),
+                ),
+                None => (None, None, None, None),
+            };
+            BranchItem {
+                name: b.name,
+                commit_hash,
+                commit_date,
+                commit_message,
+                author,
+            }
+        })
+        .collect();
+
+    BranchListOutput {
+        branches,
+        next_page: response.next,
+        total_count: response.size,
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -1171,6 +1274,153 @@ mod tests {
         assert_eq!(
             output.next_page,
             Some("https://api.bitbucket.org/2.0/repositories/workspace?page=2".to_string())
+        );
+    }
+
+    fn sample_branch_entry(name: &str, hash: &str) -> BitbucketBranchEntry {
+        BitbucketBranchEntry {
+            name: name.to_string(),
+            target: Some(BitbucketBranchTarget {
+                hash: hash.to_string(),
+                date: Some("2026-03-18T10:00:00+00:00".to_string()),
+                message: Some("Fix something\n".to_string()),
+                author: Some(BitbucketBranchAuthor {
+                    raw: Some("User <user@example.com>".to_string()),
+                }),
+            }),
+        }
+    }
+
+    fn sample_branch_entry_no_target(name: &str) -> BitbucketBranchEntry {
+        BitbucketBranchEntry {
+            name: name.to_string(),
+            target: None,
+        }
+    }
+
+    #[test]
+    fn test_transform_branch_list_response_basic() {
+        let response = BitbucketBranchListResponse {
+            values: vec![
+                sample_branch_entry("main", "abc123"),
+                sample_branch_entry("develop", "def456"),
+            ],
+            size: Some(2),
+            page: Some(1),
+            pagelen: Some(10),
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_branch_list_response(response);
+
+        assert_eq!(output.branches.len(), 2);
+        assert_eq!(output.branches[0].name, "main");
+        assert_eq!(output.branches[0].commit_hash, Some("abc123".to_string()));
+        assert_eq!(
+            output.branches[0].commit_date,
+            Some("2026-03-18T10:00:00+00:00".to_string())
+        );
+        assert_eq!(
+            output.branches[0].commit_message,
+            Some("Fix something".to_string())
+        );
+        assert_eq!(
+            output.branches[0].author,
+            Some("User <user@example.com>".to_string())
+        );
+        assert_eq!(output.branches[1].name, "develop");
+        assert_eq!(output.total_count, Some(2));
+        assert!(output.next_page.is_none());
+    }
+
+    #[test]
+    fn test_transform_branch_list_response_empty() {
+        let response = BitbucketBranchListResponse {
+            values: vec![],
+            size: Some(0),
+            page: None,
+            pagelen: None,
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_branch_list_response(response);
+
+        assert!(output.branches.is_empty());
+        assert_eq!(output.total_count, Some(0));
+    }
+
+    #[test]
+    fn test_transform_branch_list_response_no_target() {
+        let response = BitbucketBranchListResponse {
+            values: vec![sample_branch_entry_no_target("orphan")],
+            size: Some(1),
+            page: None,
+            pagelen: None,
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_branch_list_response(response);
+
+        assert_eq!(output.branches[0].name, "orphan");
+        assert_eq!(output.branches[0].commit_hash, None);
+        assert!(output.branches[0].commit_date.is_none());
+        assert!(output.branches[0].commit_message.is_none());
+        assert!(output.branches[0].author.is_none());
+    }
+
+    #[test]
+    fn test_transform_branch_list_response_pagination() {
+        let response = BitbucketBranchListResponse {
+            values: vec![sample_branch_entry("main", "abc")],
+            size: Some(50),
+            page: Some(1),
+            pagelen: Some(10),
+            next: Some(
+                "https://api.bitbucket.org/2.0/repositories/ws/repo/refs/branches?page=2"
+                    .to_string(),
+            ),
+            previous: None,
+        };
+
+        let output = transform_branch_list_response(response);
+
+        assert_eq!(output.total_count, Some(50));
+        assert_eq!(
+            output.next_page,
+            Some(
+                "https://api.bitbucket.org/2.0/repositories/ws/repo/refs/branches?page=2"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_transform_branch_list_trims_commit_message() {
+        let response = BitbucketBranchListResponse {
+            values: vec![BitbucketBranchEntry {
+                name: "main".to_string(),
+                target: Some(BitbucketBranchTarget {
+                    hash: "abc".to_string(),
+                    date: None,
+                    message: Some("  Trailing whitespace  \n".to_string()),
+                    author: None,
+                }),
+            }],
+            size: None,
+            page: None,
+            pagelen: None,
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_branch_list_response(response);
+
+        assert_eq!(
+            output.branches[0].commit_message,
+            Some("Trailing whitespace".to_string())
         );
     }
 }
