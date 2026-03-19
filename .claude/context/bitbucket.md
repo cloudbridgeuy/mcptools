@@ -83,6 +83,53 @@ mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bu
 - `--close-source-branch`: Close source branch after merge
 - `--json`: Output as JSON
 
+### List Workspaces
+
+```bash
+# List all accessible workspaces
+mcptools atlassian bitbucket workspace list
+
+# Fetch all workspaces (auto-paginate)
+mcptools atlassian bitbucket workspace list --all
+
+# Limit results per page
+mcptools atlassian bitbucket workspace list --limit 20
+
+# Pagination
+mcptools atlassian bitbucket workspace list --next-page "https://api.bitbucket.org/2.0/..."
+
+# Output as JSON
+mcptools atlassian bitbucket workspace list --format json
+
+# Output as CSV
+mcptools atlassian bitbucket workspace list --format csv
+```
+
+### List Repositories
+
+```bash
+# List repos in a workspace
+mcptools atlassian bitbucket repo list --workspace "myworkspace"
+
+# Short flag
+mcptools atlassian bitbucket repo list -w "myworkspace"
+
+# Fetch all repos (auto-paginate)
+mcptools atlassian bitbucket repo list -w "myworkspace" --all
+
+# Limit results per page
+mcptools atlassian bitbucket repo list -w "myworkspace" --limit 20
+
+# Pagination
+mcptools atlassian bitbucket repo list -w "myworkspace" --next-page "https://api.bitbucket.org/2.0/..."
+
+# Output as JSON
+mcptools atlassian bitbucket repo list -w "myworkspace" --format json
+
+# Output as CSV
+mcptools atlassian bitbucket repo list -w "myworkspace" --format csv
+```
+
 ## MCP Tools
 
 ### bitbucket_pr_list
@@ -159,6 +206,44 @@ mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bu
 
 **Note:** Unlike the CLI, MCP requires `sourceBranch` explicitly (no git detection).
 
+### bitbucket_workspace_list
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_workspace_list",
+    "arguments": {
+      "limit": 10
+    }
+  }
+}
+```
+
+**Arguments:**
+- `limit` (optional): Max results per page (default: 10)
+- `nextPage` (optional): Pagination URL for next page
+
+### bitbucket_repo_list
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_repo_list",
+    "arguments": {
+      "workspace": "myworkspace",
+      "limit": 10
+    }
+  }
+}
+```
+
+**Arguments:**
+- `workspace` (required): Workspace slug
+- `limit` (optional): Max results per page (default: 10)
+- `nextPage` (optional): Pagination URL for next page
+
 ## Environment Variables
 
 | Variable | Description |
@@ -172,3 +257,4 @@ mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bu
 Required permissions:
 - Repositories: Read
 - Pull requests: Read, Write
+- Workspaces: Read (for workspace listing)
