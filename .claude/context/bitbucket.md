@@ -130,6 +130,31 @@ mcptools atlassian bitbucket repo list -w "myworkspace" --format json
 mcptools atlassian bitbucket repo list -w "myworkspace" --format csv
 ```
 
+### List Branches
+
+```bash
+# List branches in a repo
+mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo"
+
+# Fetch all branches (auto-paginate)
+mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --all
+
+# Filter by name
+mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" -q 'name ~ "feature"'
+
+# Sort by newest commit
+mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --sort "-target.date"
+
+# Limit results per page
+mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --limit 20
+
+# Output as JSON
+mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --format json
+
+# Output as CSV
+mcptools atlassian bitbucket repo branches -w "myworkspace" -r "myrepo" --format csv
+```
+
 ## MCP Tools
 
 ### bitbucket_pr_list
@@ -243,6 +268,30 @@ mcptools atlassian bitbucket repo list -w "myworkspace" --format csv
 - `workspace` (required): Workspace slug
 - `limit` (optional): Max results per page (default: 10)
 - `nextPage` (optional): Pagination URL for next page
+
+### bitbucket_repo_branches
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_repo_branches",
+    "arguments": {
+      "workspace": "myworkspace",
+      "repo": "myrepo",
+      "limit": 10
+    }
+  }
+}
+```
+
+**Arguments:**
+- `workspace` (required): Workspace slug
+- `repo` (required): Repository slug
+- `limit` (optional): Max results per page (default: 10)
+- `nextPage` (optional): Pagination URL for next page
+- `query` (optional): Bitbucket query filter (e.g., `name ~ "feature"`)
+- `sort` (optional): Sort field (e.g., `-target.date` for newest first)
 
 ## Environment Variables
 

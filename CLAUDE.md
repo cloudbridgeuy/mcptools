@@ -55,7 +55,7 @@ For detailed usage of each feature, see the context files:
 ### Integrations
 - **[Jira](.claude/context/jira.md)** - Search, create, update tickets; saved queries; MCP tools
 - **[Confluence](.claude/context/confluence.md)** - Search pages; CQL queries
-- **[Bitbucket](.claude/context/bitbucket.md)** - List and read pull requests
+- **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, and branches
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
 - **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
@@ -105,6 +105,7 @@ mcptools atlassian bitbucket pr read --repo "workspace/repo" 123
 mcptools atlassian bitbucket pr create --repo "workspace/repo" "Fix login bug" --source feature-branch
 mcptools atlassian bitbucket workspace list
 mcptools atlassian bitbucket repo list -w "my-workspace" --all
+mcptools atlassian bitbucket repo branches -w "my-workspace" -r "my-repo" --all
 ```
 
 ### HackerNews
