@@ -654,6 +654,46 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            name: "bitbucket_workspace_list".to_string(),
+            description: "List Bitbucket workspaces accessible to the authenticated user. Returns workspace slugs and names. Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of results per page (default: 10)"
+                    },
+                    "nextPage": {
+                        "type": "string",
+                        "description": "Pagination URL for fetching the next page of results"
+                    }
+                },
+                "required": []
+            }),
+        },
+        Tool {
+            name: "bitbucket_repo_list".to_string(),
+            description: "List repositories in a Bitbucket workspace. Returns repository names, full names, and clone URLs (SSH and HTTPS). Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "workspace": {
+                        "type": "string",
+                        "description": "Workspace slug (e.g., 'my-workspace')"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Maximum number of results per page (default: 10)"
+                    },
+                    "nextPage": {
+                        "type": "string",
+                        "description": "Pagination URL for fetching the next page of results"
+                    }
+                },
+                "required": ["workspace"]
+            }),
+        },
+        Tool {
             name: "generate_code".to_string(),
             description: "Generate Rust code using a local Ollama model. Accepts an instruction, optional context, and optional file paths for context. Returns raw Rust source code. Requires a running Ollama instance with the specified model.".to_string(),
             input_schema: serde_json::json!({
@@ -927,6 +967,12 @@ pub async fn handle_tools_call(
         "bitbucket_pr_read" => atlassian::handle_bitbucket_pr_read(params.arguments, global).await,
         "bitbucket_pr_create" => {
             atlassian::handle_bitbucket_pr_create(params.arguments, global).await
+        }
+        "bitbucket_workspace_list" => {
+            atlassian::handle_bitbucket_workspace_list(params.arguments, global).await
+        }
+        "bitbucket_repo_list" => {
+            atlassian::handle_bitbucket_repo_list(params.arguments, global).await
         }
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,

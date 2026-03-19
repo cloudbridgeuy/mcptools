@@ -1320,3 +1320,131 @@ pub async fn handle_jira_comment_delete(
         data: None,
     })
 }
+
+/// Handle Bitbucket workspace list command via MCP
+pub async fn handle_bitbucket_workspace_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{list_workspace_data, ListWorkspaceParams};
+
+    #[derive(Deserialize)]
+    struct BitbucketWorkspaceListArgs {
+        limit: Option<usize>,
+        #[serde(rename = "nextPage")]
+        next_page: Option<String>,
+    }
+
+    let args: BitbucketWorkspaceListArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_workspace_list: limit={:?}, nextPage={:?}",
+            args.limit, args.next_page
+        );
+    }
+
+    let params = ListWorkspaceParams {
+        limit: args.limit.unwrap_or(10),
+        next_page: args.next_page,
+        base_url_override: None,
+        app_password_override: global.bitbucket_app_password.clone(),
+    };
+
+    let list_data = list_workspace_data(params, None)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
+
+/// Handle Bitbucket repo list command via MCP
+pub async fn handle_bitbucket_repo_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{list_repo_data, ListRepoParams};
+
+    #[derive(Deserialize)]
+    struct BitbucketRepoListArgs {
+        workspace: String,
+        limit: Option<usize>,
+        #[serde(rename = "nextPage")]
+        next_page: Option<String>,
+    }
+
+    let args: BitbucketRepoListArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_repo_list: workspace={}, limit={:?}, nextPage={:?}",
+            args.workspace, args.limit, args.next_page
+        );
+    }
+
+    let params = ListRepoParams {
+        workspace: args.workspace,
+        limit: args.limit.unwrap_or(10),
+        next_page: args.next_page,
+        base_url_override: None,
+        app_password_override: global.bitbucket_app_password.clone(),
+    };
+
+    let list_data = list_repo_data(params, None)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+
+    let result = CallToolResult {
+        content: vec![Content::Text { text: json_string }],
+        is_error: None,
+    };
+
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
+}
