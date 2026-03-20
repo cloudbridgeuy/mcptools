@@ -616,6 +616,7 @@ pub struct RepoListOutput {
 /// Simplified repository info for list display
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct RepoItem {
+    pub slug: String,
     pub name: String,
     pub full_name: String,
     pub ssh_url: Option<String>,
@@ -648,6 +649,7 @@ pub fn transform_repo_list_response(response: BitbucketRepoListResponse) -> Repo
                 .map(|l| l.href.clone());
 
             RepoItem {
+                slug: repo.slug,
                 name: repo.name,
                 full_name: repo.full_name,
                 ssh_url,
@@ -761,6 +763,117 @@ pub fn transform_branch_list_response(response: BitbucketBranchListResponse) -> 
 
     BranchListOutput {
         branches,
+        next_page: response.next,
+        total_count: response.size,
+    }
+}
+
+// =============================================================================
+// Deploy Key API Response Types
+// =============================================================================
+
+/// A single deploy key from Bitbucket API
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketDeployKeyResponse {
+    pub id: u64,
+    pub key: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub comment: Option<String>,
+    pub created_on: String,
+    pub repository: BitbucketRepository,
+    pub links: BitbucketDeployKeyLinks,
+}
+
+/// Paginated list of deploy keys from Bitbucket API
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketDeployKeyListResponse {
+    pub values: Vec<BitbucketDeployKeyResponse>,
+    #[serde(default)]
+    pub size: Option<u32>,
+    #[serde(default)]
+    pub page: Option<u32>,
+    #[serde(default)]
+    pub pagelen: Option<u32>,
+    #[serde(default)]
+    pub next: Option<String>,
+    #[serde(default)]
+    pub previous: Option<String>,
+}
+
+/// Links for a deploy key
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketDeployKeyLinks {
+    #[serde(rename = "self")]
+    pub self_link: BitbucketLink,
+}
+
+// =============================================================================
+// Deploy Key Output Domain Types
+// =============================================================================
+
+/// Simplified deploy key info for display
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct DeployKeyItem {
+    pub id: u64,
+    pub label: String,
+    pub key: String,
+    pub comment: Option<String>,
+    pub created_on: String,
+}
+
+/// Output structure for deploy key list command
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct DeployKeyListOutput {
+    pub keys: Vec<DeployKeyItem>,
+    pub next_page: Option<String>,
+    pub total_count: Option<u32>,
+}
+
+/// Output structure for adding a deploy key
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct DeployKeyAddOutput {
+    pub repo_name: String,
+    pub key_id: u64,
+    pub label: String,
+}
+
+/// Output structure for removing a deploy key
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct DeployKeyRemoveOutput {
+    pub repo_name: String,
+    pub key_id: u64,
+    pub success: bool,
+}
+
+// =============================================================================
+// Deploy Key Transform Functions
+// =============================================================================
+
+/// Transform a single deploy key API response to output domain model
+pub fn transform_deploy_key_response(response: BitbucketDeployKeyResponse) -> DeployKeyItem {
+    DeployKeyItem {
+        id: response.id,
+        label: response.label,
+        key: response.key,
+        comment: response.comment,
+        created_on: response.created_on,
+    }
+}
+
+/// Transform deploy key list API response to output domain model
+pub fn transform_deploy_key_list_response(
+    response: BitbucketDeployKeyListResponse,
+) -> DeployKeyListOutput {
+    let keys = response
+        .values
+        .into_iter()
+        .map(transform_deploy_key_response)
+        .collect();
+
+    DeployKeyListOutput {
+        keys,
         next_page: response.next,
         total_count: response.size,
     }
@@ -1422,5 +1535,135 @@ mod tests {
             output.branches[0].commit_message,
             Some("Trailing whitespace".to_string())
         );
+    }
+
+    #[test]
+    fn test_transform_deploy_key_response() {
+        let raw = BitbucketDeployKeyResponse {
+            id: 123,
+            key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test".to_string(),
+            label: "escrow_key".to_string(),
+            comment: Some("Escrow company key".to_string()),
+            created_on: "2026-03-20T10:30:00.000000+00:00".to_string(),
+            repository: BitbucketRepository {
+                full_name: "workspace/repo".to_string(),
+                name: "repo".to_string(),
+            },
+            links: BitbucketDeployKeyLinks {
+                self_link: BitbucketLink {
+                    href: "https://api.bitbucket.org/2.0/repositories/ws/repo/deploy-keys/123"
+                        .to_string(),
+                },
+            },
+        };
+
+        let output = transform_deploy_key_response(raw);
+
+        assert_eq!(output.id, 123);
+        assert_eq!(output.label, "escrow_key");
+        assert_eq!(output.key, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 test");
+        assert_eq!(output.comment, Some("Escrow company key".to_string()));
+        assert_eq!(output.created_on, "2026-03-20T10:30:00.000000+00:00");
+    }
+
+    #[test]
+    fn test_transform_deploy_key_response_no_comment() {
+        let raw = BitbucketDeployKeyResponse {
+            id: 456,
+            key: "ssh-rsa AAAAB3 test".to_string(),
+            label: "ci_key".to_string(),
+            comment: None,
+            created_on: "2026-01-01T00:00:00.000000+00:00".to_string(),
+            repository: BitbucketRepository {
+                full_name: "ws/repo".to_string(),
+                name: "repo".to_string(),
+            },
+            links: BitbucketDeployKeyLinks {
+                self_link: BitbucketLink {
+                    href: "".to_string(),
+                },
+            },
+        };
+
+        let output = transform_deploy_key_response(raw);
+
+        assert_eq!(output.id, 456);
+        assert_eq!(output.comment, None);
+    }
+
+    #[test]
+    fn test_transform_deploy_key_list_response() {
+        let response = BitbucketDeployKeyListResponse {
+            values: vec![
+                BitbucketDeployKeyResponse {
+                    id: 1,
+                    key: "ssh-ed25519 key1".to_string(),
+                    label: "Key 1".to_string(),
+                    comment: None,
+                    created_on: "2026-01-01T00:00:00+00:00".to_string(),
+                    repository: BitbucketRepository {
+                        full_name: "ws/repo1".to_string(),
+                        name: "repo1".to_string(),
+                    },
+                    links: BitbucketDeployKeyLinks {
+                        self_link: BitbucketLink {
+                            href: "".to_string(),
+                        },
+                    },
+                },
+                BitbucketDeployKeyResponse {
+                    id: 2,
+                    key: "ssh-ed25519 key2".to_string(),
+                    label: "Key 2".to_string(),
+                    comment: Some("second key".to_string()),
+                    created_on: "2026-02-01T00:00:00+00:00".to_string(),
+                    repository: BitbucketRepository {
+                        full_name: "ws/repo2".to_string(),
+                        name: "repo2".to_string(),
+                    },
+                    links: BitbucketDeployKeyLinks {
+                        self_link: BitbucketLink {
+                            href: "".to_string(),
+                        },
+                    },
+                },
+            ],
+            size: Some(10),
+            page: Some(1),
+            pagelen: Some(10),
+            next: Some("https://api.bitbucket.org/2.0/next-page".to_string()),
+            previous: None,
+        };
+
+        let output = transform_deploy_key_list_response(response);
+
+        assert_eq!(output.keys.len(), 2);
+        assert_eq!(output.keys[0].id, 1);
+        assert_eq!(output.keys[0].label, "Key 1");
+        assert_eq!(output.keys[1].id, 2);
+        assert_eq!(output.keys[1].comment, Some("second key".to_string()));
+        assert_eq!(output.total_count, Some(10));
+        assert_eq!(
+            output.next_page,
+            Some("https://api.bitbucket.org/2.0/next-page".to_string())
+        );
+    }
+
+    #[test]
+    fn test_transform_deploy_key_list_response_empty() {
+        let response = BitbucketDeployKeyListResponse {
+            values: vec![],
+            size: Some(0),
+            page: None,
+            pagelen: None,
+            next: None,
+            previous: None,
+        };
+
+        let output = transform_deploy_key_list_response(response);
+
+        assert_eq!(output.keys.len(), 0);
+        assert_eq!(output.total_count, Some(0));
+        assert_eq!(output.next_page, None);
     }
 }
