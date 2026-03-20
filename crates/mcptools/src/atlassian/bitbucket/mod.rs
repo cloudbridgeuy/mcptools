@@ -63,5 +63,8 @@ pub use pr::list::{list_pr_data, ListPRParams};
 pub use pr::read::{read_pr_data, ReadPRParams};
 
 pub use repo::branches::{list_branches_data, ListBranchesParams};
+pub use repo::deploy_key::add::{add_deploy_key_data, AddDeployKeyParams};
+pub use repo::deploy_key::list::{list_deploy_keys_data, ListDeployKeysParams};
+pub use repo::deploy_key::remove::{remove_deploy_key_data, RemoveDeployKeyParams};
 pub use repo::list::{list_repo_data, ListRepoParams};
 pub use workspace::list::{list_workspace_data, ListWorkspaceParams};
