@@ -55,7 +55,7 @@ For detailed usage of each feature, see the context files:
 ### Integrations
 - **[Jira](.claude/context/jira.md)** - Search, create, update tickets; saved queries; MCP tools
 - **[Confluence](.claude/context/confluence.md)** - Search pages; CQL queries
-- **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, and branches
+- **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
 - **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
@@ -106,6 +106,9 @@ mcptools atlassian bitbucket pr create --repo "workspace/repo" "Fix login bug" -
 mcptools atlassian bitbucket workspace list
 mcptools atlassian bitbucket repo list -w "my-workspace" --all
 mcptools atlassian bitbucket repo branches "my-workspace/my-repo" --all
+mcptools atlassian bitbucket repo deploy-key list -w "my-workspace" -r "my-repo"
+mcptools atlassian bitbucket repo deploy-key add -w "my-workspace" -r "my-repo" -l "ci-key" --key-file ~/.ssh/id_ed25519.pub
+mcptools atlassian bitbucket repo deploy-key remove -w "my-workspace" -r "my-repo" --key-id 123
 ```
 
 ### HackerNews

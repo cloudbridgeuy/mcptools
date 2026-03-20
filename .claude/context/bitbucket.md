@@ -158,6 +158,42 @@ mcptools atlassian bitbucket repo branches myworkspace/myrepo --format json
 mcptools atlassian bitbucket repo branches myworkspace/myrepo --format csv
 ```
 
+### Deploy Keys
+
+```bash
+# List deploy keys on a repository
+mcptools atlassian bitbucket repo deploy-key list -w "myworkspace" -r "myrepo"
+
+# Fetch all deploy keys (auto-paginate)
+mcptools atlassian bitbucket repo deploy-key list -w "myworkspace" -r "myrepo" --all
+
+# Output as JSON
+mcptools atlassian bitbucket repo deploy-key list -w "myworkspace" -r "myrepo" --format json
+
+# Add a deploy key from a file
+mcptools atlassian bitbucket repo deploy-key add -w "myworkspace" -r "myrepo" -l "ci-key" --key-file ~/.ssh/id_ed25519.pub
+
+# Add a deploy key inline
+mcptools atlassian bitbucket repo deploy-key add -w "myworkspace" -r "myrepo" -l "ci-key" -k "ssh-ed25519 AAAA..."
+
+# Add a deploy key to ALL repos in a workspace
+mcptools atlassian bitbucket repo deploy-key add -w "myworkspace" --all -l "escrow-key" --key-file key.pub
+
+# Add a deploy key to all repos across multiple workspaces
+mcptools atlassian bitbucket repo deploy-key add -w "ws1" -w "ws2" --all -l "shared-key" --key-file key.pub
+
+# Remove a deploy key by ID
+mcptools atlassian bitbucket repo deploy-key remove -w "myworkspace" -r "myrepo" --key-id 123
+```
+
+**Add Options:**
+- `-w` / `--workspace`: Workspace slug (can be specified multiple times)
+- `-r` / `--repo`: Repository slug (required unless `--all`)
+- `--all`: Add key to all repositories in the workspace(s)
+- `-l` / `--label`: Label for the deploy key (required)
+- `-k` / `--key`: SSH public key content inline (conflicts with `--key-file`)
+- `--key-file`: Path to SSH public key file (conflicts with `--key`)
+
 ## MCP Tools
 
 ### bitbucket_pr_list
@@ -307,6 +343,6 @@ mcptools atlassian bitbucket repo branches myworkspace/myrepo --format csv
 **Important:** Bitbucket uses App Passwords (not API tokens). Generate at: https://bitbucket.org/account/settings/app-passwords/
 
 Required permissions:
-- Repositories: Read
+- Repositories: Read, Admin (for deploy keys)
 - Pull requests: Read, Write
 - Workspaces: Read (for workspace listing)
