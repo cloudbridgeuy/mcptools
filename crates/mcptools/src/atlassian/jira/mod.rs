@@ -36,7 +36,7 @@ pub enum Commands {
     Search(search::SearchOptions),
 
     /// Get detailed information about a Jira ticket
-    #[clap(name = "get")]
+    #[clap(name = "get", alias = "read")]
     Get(get::GetOptions),
 
     /// Update Jira ticket fields

@@ -74,7 +74,7 @@ For detailed usage of each feature, see the context files:
 
 ```bash
 mcptools atlassian jira search "assignee = currentUser() AND status NOT IN (Done, Closed)"
-mcptools atlassian jira get PROJ-123
+mcptools atlassian jira get PROJ-123                # alias: `jira read`
 mcptools atlassian jira create "Fix bug" --issue-type Bug
 mcptools atlassian jira update PROJ-123 --status "In Progress"
 mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issue"

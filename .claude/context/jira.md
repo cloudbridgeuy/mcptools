@@ -43,7 +43,7 @@ mcptools atlassian jira search --delete --query devops
 ### Get Ticket Details
 
 ```bash
-mcptools atlassian jira get PROJ-123
+mcptools atlassian jira get PROJ-123          # alias: `jira read`
 mcptools atlassian jira get PROJ-123 --json
 ```
 
