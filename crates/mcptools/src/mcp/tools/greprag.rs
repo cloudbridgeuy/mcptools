@@ -10,8 +10,7 @@ pub async fn handle_greprag_retrieve(
     #[derive(Deserialize)]
     struct GrepRagArgs {
         local_context: String,
-        #[serde(rename = "repo_path")]
-        _repo_path: Option<String>,
+        repo_path: Option<String>,
         #[serde(rename = "token_budget")]
         _token_budget: Option<usize>,
         ollama_url: Option<String>,
@@ -29,12 +28,13 @@ pub async fn handle_greprag_retrieve(
         anstream::eprintln!(
             "Calling greprag_retrieve: local_context='{}', repo_path='{}'",
             &args.local_context[..std::cmp::min(50, args.local_context.len())],
-            args._repo_path.as_deref().unwrap_or("(not specified)")
+            args.repo_path.as_deref().unwrap_or(".")
         );
     }
 
     let result_text = crate::greprag::greprag_data(
         args.local_context,
+        args.repo_path.unwrap_or_else(|| ".".to_string()),
         args.ollama_url
             .unwrap_or_else(|| "http://localhost:11434".to_string()),
         args.model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),

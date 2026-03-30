@@ -67,7 +67,13 @@ async fn retrieve(options: RetrieveOptions, global: crate::Global) -> Result<()>
         anstream::eprintln!("Token budget: {}", options.token_budget);
     }
 
-    let result = greprag_data(options.local_context, options.ollama_url, options.model).await?;
+    let result = greprag_data(
+        options.local_context,
+        options.repo_path,
+        options.ollama_url,
+        options.model,
+    )
+    .await?;
 
     print!("{}", result);
 
@@ -89,6 +95,7 @@ fn check_model_error(error: &str, model: &str) -> String {
 /// Retrieve rg commands for the given local context and return them joined by newlines.
 pub async fn greprag_data(
     local_context: String,
+    repo_path: String,
     ollama_url: String,
     model: String,
 ) -> Result<String> {
@@ -100,7 +107,7 @@ pub async fn greprag_data(
         .await
         .map_err(|e| eyre!("{}", check_model_error(&e.to_string(), &model)))?;
 
-    let commands = parse_rg_commands(&response);
+    let commands = parse_rg_commands(&response, &repo_path);
 
     Ok(commands.join("\n"))
 }
