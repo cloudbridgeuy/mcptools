@@ -1,11 +1,11 @@
 # GrepRAG: Code Context Retrieval via Ripgrep
 
-GrepRAG uses a fine-tuned local model (greprag-0.6b, Qwen3 architecture) to generate regex patterns from code context, wrapping them into runnable `rg` commands targeting a repository. Designed for retrieving cross-file references relevant to a given code snippet.
+GrepRAG uses a fine-tuned local model (greprag-0.6b, Qwen3 architecture) to generate regex patterns from code context, execute them as ripgrep commands, and return relevant code snippets from a repository. Designed for retrieving cross-file references relevant to a given code snippet.
 
 ## CLI Usage
 
 ```bash
-# Basic — generate rg commands for a code snippet
+# Basic — retrieve code snippets matching a code context
 mcptools grep-rag retrieve "self.deck.draw()" --repo-path ./my-project
 
 # With custom model/URL
@@ -15,7 +15,7 @@ mcptools grep-rag retrieve "fn process(input: &str)" \
   --ollama-url http://localhost:11434
 ```
 
-Output: one `rg -n 'PATTERN' <repo-path>` command per line, directly copy-pasteable.
+Output: code snippets with file paths and line numbers (`// path:start-end` headers).
 
 ## MCP Tool
 
@@ -33,8 +33,8 @@ Tool name: `greprag_retrieve`
 
 Follows the Functional Core - Imperative Shell pattern:
 
-- **Core** (`crates/core/src/greprag/`): Pure functions — `parse_rg_commands()`, types (`Snippet`, `RankedSnippet`, `MergedSnippet`)
-- **Shell** (`crates/mcptools/src/greprag/`): Ollama client via `rig-core`, CLI
+- **Core** (`crates/core/src/greprag/`): Pure functions — `parse_rg_commands()`, `parse_rg_output()`, types (`Snippet`, `RankedSnippet`, `MergedSnippet`)
+- **Shell** (`crates/mcptools/src/greprag/`): Ollama client via `rig-core`, command execution via `tokio::process::Command`, CLI
 - **MCP** (`crates/mcptools/src/mcp/tools/greprag.rs`): Tool handler bridging MCP to greprag module
 
 ## Model Details
@@ -60,13 +60,16 @@ See [GrepRAG Setup](../../docs/GREPRAG_SETUP.md) for model installation.
 ## Dependencies
 
 - `rig-core` — Ollama provider via `CompletionClient` trait
+- `shlex` — Shell-like command string splitting for rg command execution
 - Requires a running Ollama instance with the greprag model imported
 - Modelfile at `models/greprag/Modelfile`
 
-## V1 Scope
+## Pipeline (V1 + V2)
 
-V1 generates and prints rg commands only. Future versions will:
-- **V2**: Execute the rg commands against `repo_path`
+1. **V1 — Query generation**: Calls Ollama model to produce regex patterns from local context, wraps into `rg` commands via `parse_rg_commands()`
+2. **V2 — Command execution**: Runs rg commands as subprocesses via `execute_rg_commands()`, parses output into `Vec<Snippet>` via `parse_rg_output()`, formats with `format_snippets_raw()`
+
+Future versions will:
 - **V3**: Rank results with BM25 scoring
 - **V4**: Deduplicate and merge overlapping snippets
 - **V5**: Apply token budget truncation
