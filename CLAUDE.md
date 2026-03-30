@@ -59,6 +59,7 @@ For detailed usage of each feature, see the context files:
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
 - **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
+- **[GrepRAG](.claude/context/greprag.md)** - Code context retrieval via local model + ripgrep
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
 
@@ -155,6 +156,17 @@ mcptools strand generate "Refactor this" --system-prompt "Focus on readability"
 | `STRAND_MODEL` | `maternion/strand-rust-coder` | Default model name |
 | `STRAND_SYSTEM_PROMPT` | — | Optional system prompt override |
 
+### GrepRAG
+
+```bash
+mcptools grep-rag retrieve "self.deck.draw()" --repo-path ./my-project
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
+| `GREPRAG_MODEL` | `greprag` | Default model name |
+
 ### MCP Server
 
 ```bash
@@ -166,3 +178,4 @@ mcptools mcp sse     # For web clients
 
 - [Atlassian Setup](docs/ATLASSIAN_SETUP.md) - Detailed setup instructions
 - [Atlassian Quick Start](docs/ATLASSIAN_QUICK_START.md) - Quick reference
+- [GrepRAG Setup](docs/GREPRAG_SETUP.md) - Model download and Ollama import
