@@ -765,21 +765,21 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         },
         Tool {
             name: "greprag_retrieve".to_string(),
-            description: "Generate ripgrep (rg) commands to find relevant code in a repository based on local context. Uses a local Ollama model to analyze the context and produce targeted search commands. Requires a running Ollama instance with the specified model.".to_string(),
+            description: "Retrieve relevant cross-file code context from a repository. Pass a code snippet you're working with and get back the most relevant code from across the repo — function definitions, type declarations, usages, and related logic. Use this when you need to understand how a symbol is defined or used elsewhere, find related code before making changes, or gather context for a code review. Powered by a local Ollama model + ripgrep + BM25 ranking. Requires a running Ollama instance with the greprag model.".to_string(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "local_context": {
                         "type": "string",
-                        "description": "The local context (e.g., code snippet, error message, task description) to generate rg commands for"
+                        "description": "The code snippet to find cross-file references for. Paste the actual code you're looking at — function calls, type usages, imports, etc."
                     },
                     "repo_path": {
                         "type": "string",
-                        "description": "Path to the repository to search in (reserved for future use)"
+                        "description": "Path to the repository to search (default: current directory)"
                     },
                     "token_budget": {
                         "type": "integer",
-                        "description": "Maximum token budget for retrieved context (reserved for future use)"
+                        "description": "Maximum token budget for returned context. Use lower values (1000-2000) for focused results, higher (4000-8000) for broader context (default: 4096)"
                     },
                     "ollama_url": {
                         "type": "string",
@@ -787,7 +787,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     },
                     "model": {
                         "type": "string",
-                        "description": "Model name for command generation (default: greprag)"
+                        "description": "Model name for query generation (default: greprag)"
                     }
                 },
                 "required": ["local_context"]
