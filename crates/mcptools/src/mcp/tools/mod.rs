@@ -1,5 +1,6 @@
 mod annotations;
 mod atlassian;
+mod greprag;
 mod hn;
 mod md;
 mod pdf;
@@ -763,6 +764,36 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            name: "greprag_retrieve".to_string(),
+            description: "Generate ripgrep (rg) commands to find relevant code in a repository based on local context. Uses a local Ollama model to analyze the context and produce targeted search commands. Requires a running Ollama instance with the specified model.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "local_context": {
+                        "type": "string",
+                        "description": "The local context (e.g., code snippet, error message, task description) to generate rg commands for"
+                    },
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to search in (reserved for future use)"
+                    },
+                    "token_budget": {
+                        "type": "integer",
+                        "description": "Maximum token budget for retrieved context (reserved for future use)"
+                    },
+                    "ollama_url": {
+                        "type": "string",
+                        "description": "Ollama base URL (default: http://localhost:11434)"
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name for command generation (default: greprag)"
+                    }
+                },
+                "required": ["local_context"]
+            }),
+        },
+        Tool {
             name: "ui_annotations_list".to_string(),
             description: "List all UI annotations from the calendsync dev server. Returns selector, component name, note, and resolution status for each annotation.".to_string(),
             input_schema: serde_json::json!({
@@ -1016,6 +1047,7 @@ pub async fn handle_tools_call(
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
         "md_toc" => md::handle_md_toc(params.arguments, global).await,
         "generate_code" => strand::handle_generate_code(params.arguments, global).await,
+        "greprag_retrieve" => greprag::handle_greprag_retrieve(params.arguments, global).await,
         "ui_annotations_list" => {
             annotations::handle_ui_annotations_list(params.arguments, global).await
         }
