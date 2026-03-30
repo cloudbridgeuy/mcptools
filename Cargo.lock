@@ -1927,6 +1927,7 @@ dependencies = [
  "rig-core",
  "serde",
  "serde_json",
+ "shlex",
  "thiserror 2.0.18",
  "tokio",
  "tower-http",

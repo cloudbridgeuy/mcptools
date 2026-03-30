@@ -38,5 +38,7 @@ indicatif = { workspace = true }
 rig-core = { workspace = true }
 rand = { workspace = true }
 
+shlex = { workspace = true }
+
 [package.metadata.cargo-machete]
 ignored = ["rig-core"]

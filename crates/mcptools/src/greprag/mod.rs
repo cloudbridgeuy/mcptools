@@ -1,8 +1,9 @@
 use crate::prelude::*;
-use mcptools_core::greprag::parse_rg_commands;
+use mcptools_core::greprag::{parse_rg_commands, parse_rg_output, Snippet};
 use rig::client::CompletionClient;
 use rig::completion::Prompt;
 use rig::providers::ollama;
+use tokio::process::Command;
 
 pub const DEFAULT_MODEL: &str = "greprag";
 
@@ -92,22 +93,94 @@ fn check_model_error(error: &str, model: &str) -> String {
     }
 }
 
-/// Retrieve rg commands for the given local context and return them joined by newlines.
+/// Retrieve relevant code context for the given local context.
+///
+/// V1: Query generation — calls Ollama to produce rg commands.
+/// V2: Command execution — runs the rg commands and collects snippets.
 pub async fn greprag_data(
     local_context: String,
     repo_path: String,
     ollama_url: String,
     model: String,
 ) -> Result<String> {
-    let client = create_client(&ollama_url)?;
-    let agent = client.agent(&model).build();
+    // V1: Query generation
+    let raw_output = call_ollama(&local_context, &ollama_url, &model).await?;
+    let commands = parse_rg_commands(&raw_output, &repo_path);
 
-    let response = agent
-        .prompt(&local_context)
+    // V2: Command execution
+    let snippets = execute_rg_commands(&commands, &repo_path).await?;
+
+    // Format snippets for output (temporary — V3/V4 will refine)
+    Ok(format_snippets_raw(&snippets))
+}
+
+/// Call Ollama to generate rg commands from local context.
+async fn call_ollama(local_context: &str, ollama_url: &str, model: &str) -> Result<String> {
+    let client = create_client(ollama_url)?;
+    let agent = client.agent(model).build();
+
+    agent
+        .prompt(local_context)
         .await
-        .map_err(|e| eyre!("{}", check_model_error(&e.to_string(), &model)))?;
+        .map_err(|e| eyre!("{}", check_model_error(&e.to_string(), model)))
+}
 
-    let commands = parse_rg_commands(&response, &repo_path);
+/// Execute a list of rg commands against repo_path.
+/// Returns the combined snippets of all commands.
+///
+/// Each command string is split into args and run as a subprocess
+/// with working directory set to repo_path.
+/// Commands that fail (no matches, bad pattern) are silently skipped.
+async fn execute_rg_commands(commands: &[String], repo_path: &str) -> Result<Vec<Snippet>> {
+    let mut all_snippets = Vec::new();
 
-    Ok(commands.join("\n"))
+    for cmd in commands {
+        let args = match shlex::split(cmd).filter(|a| !a.is_empty()) {
+            Some(args) => args,
+            None => continue,
+        };
+
+        if args[0] != "rg" {
+            continue;
+        }
+
+        let Ok(output) = Command::new(&args[0])
+            .args(&args[1..])
+            .current_dir(repo_path)
+            .output()
+            .await
+        else {
+            continue;
+        };
+
+        if !output.status.success() {
+            continue;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        all_snippets.extend(parse_rg_output(&stdout));
+    }
+
+    Ok(all_snippets)
+}
+
+/// Temporary formatting function for snippets — V3/V4 will refine.
+fn format_snippets_raw(snippets: &[Snippet]) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::new();
+    for (i, s) in snippets.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n");
+        }
+        let _ = write!(
+            out,
+            "// {}:{}-{}\n{}",
+            s.file_path.display(),
+            s.start_line,
+            s.end_line,
+            s.content
+        );
+    }
+    out
 }

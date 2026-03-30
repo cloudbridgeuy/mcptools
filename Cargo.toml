@@ -50,3 +50,4 @@ pdf = { version = "0.1.0", path = "crates/pdf" }
 rand = "0.8"
 image = { version = "0.25", default-features = false, features = ["png"] }
 fax = "0.2"
+shlex = "1.3"
