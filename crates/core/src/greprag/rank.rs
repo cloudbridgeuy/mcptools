@@ -92,37 +92,6 @@ pub fn bm25_rank(
     ranked
 }
 
-/// Format ranked snippets with their BM25 scores, respecting a token budget.
-///
-/// Approximates tokens as bytes / 4. Stops adding snippets once the budget
-/// would be exceeded. Always includes at least one snippet if available.
-pub fn format_ranked_snippets(ranked: &[RankedSnippet], token_budget: usize) -> String {
-    use std::fmt::Write;
-    let byte_budget = token_budget * 4;
-    let mut out = String::new();
-    for (i, r) in ranked.iter().filter(|r| r.score > 0.0).enumerate() {
-        let mut entry = String::new();
-        if i > 0 {
-            entry.push_str("\n\n");
-        }
-        let _ = write!(
-            entry,
-            "// {}:{}-{} [score: {:.4}]\n{}",
-            r.snippet.file_path.display(),
-            r.snippet.start_line,
-            r.snippet.end_line,
-            r.score,
-            r.snippet.content
-        );
-
-        if i > 0 && out.len() + entry.len() > byte_budget {
-            break;
-        }
-        out.push_str(&entry);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,57 +230,5 @@ mod tests {
     fn empty_input_returns_empty() {
         let ranked = bm25_rank(&[], &[], &HashMap::new(), 0);
         assert!(ranked.is_empty());
-    }
-
-    // --- format_ranked_snippets tests ---
-
-    #[test]
-    fn format_empty_returns_empty_string() {
-        assert_eq!(format_ranked_snippets(&[], 4096), "");
-    }
-
-    #[test]
-    fn format_single_snippet_has_score_header() {
-        let ranked = vec![RankedSnippet {
-            snippet: snippet("fn main() {}"),
-            score: 1.5,
-        }];
-        let output = format_ranked_snippets(&ranked, 4096);
-        assert!(output.starts_with("// test.rs:1-1 [score: 1.5000]"));
-        assert!(output.contains("fn main() {}"));
-    }
-
-    #[test]
-    fn format_multiple_snippets_separated_by_double_newline() {
-        let ranked = vec![
-            RankedSnippet {
-                snippet: snippet("first"),
-                score: 2.0,
-            },
-            RankedSnippet {
-                snippet: snippet("second"),
-                score: 1.0,
-            },
-        ];
-        let output = format_ranked_snippets(&ranked, 4096);
-        assert!(output.contains("\n\n// test.rs:1-1 [score: 1.0000]"));
-    }
-
-    #[test]
-    fn format_respects_token_budget() {
-        let ranked = vec![
-            RankedSnippet {
-                snippet: snippet("first"),
-                score: 2.0,
-            },
-            RankedSnippet {
-                snippet: snippet("second"),
-                score: 1.0,
-            },
-        ];
-        // Budget of 10 tokens (40 bytes) — too small for both, but always includes first
-        let output = format_ranked_snippets(&ranked, 10);
-        assert!(output.contains("first"));
-        assert!(!output.contains("second"));
     }
 }

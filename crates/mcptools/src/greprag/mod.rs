@@ -1,10 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::prelude::*;
-use mcptools_core::greprag::{
-    bm25_rank, build_doc_frequencies, dedup_snippets, extract_query_identifiers,
-    format_ranked_snippets, parse_rg_commands, parse_rg_output, Snippet,
-};
+use mcptools_core::greprag::{parse_rg_output, Snippet};
 use rig::client::CompletionClient;
 use rig::completion::Prompt;
 use rig::providers::ollama;
@@ -104,6 +101,7 @@ fn check_model_error(error: &str, model: &str) -> String {
 /// V1: Query generation — calls Ollama to produce rg commands.
 /// V2: Command execution — runs the rg commands and collects snippets.
 /// V3: BM25 ranking — rank snippets by relevance using repo-wide IDF.
+/// V4: Dedup, select, format — structure-aware dedup, top-k selection, formatting.
 pub async fn greprag_data(
     local_context: String,
     repo_path: String,
@@ -111,22 +109,32 @@ pub async fn greprag_data(
     ollama_url: String,
     model: String,
 ) -> Result<String> {
-    // V1: Query generation
-    let raw_output = call_ollama(&local_context, &ollama_url, &model).await?;
-    let commands = parse_rg_commands(&raw_output, &repo_path);
+    use mcptools_core::greprag;
 
-    // V2: Command execution
-    let snippets = dedup_snippets(execute_rg_commands(&commands, &repo_path).await?);
+    // Run ollama + repo scan concurrently
+    let (raw_output, file_identifiers) = tokio::join!(
+        call_ollama(&local_context, &ollama_url, &model),
+        scan_repo_identifiers(std::path::Path::new(&repo_path)),
+    );
+    let raw_output = raw_output?;
+    let file_identifiers = file_identifiers?;
+
+    // V1: Parse commands
+    let commands = greprag::parse_rg_commands(&raw_output, &repo_path);
+
+    // V2: Execute commands
+    let snippets = execute_rg_commands(&commands, &repo_path).await?;
 
     // V3: BM25 ranking
-    let file_identifiers = scan_repo_identifiers(Path::new(&repo_path)).await?;
     let total_docs = file_identifiers.len();
-    let doc_freq_map = build_doc_frequencies(&file_identifiers);
-    let query_ids = extract_query_identifiers(&local_context);
-    let ranked = bm25_rank(&snippets, &query_ids, &doc_freq_map, total_docs);
+    let doc_freq_map = greprag::build_doc_frequencies(&file_identifiers);
+    let query_ids = greprag::extract_query_identifiers(&local_context);
+    let ranked = greprag::bm25_rank(&snippets, &query_ids, &doc_freq_map, total_docs);
 
-    // Format ranked snippets with scores, respecting token budget
-    Ok(format_ranked_snippets(&ranked, token_budget))
+    // V4: Dedup, select, format
+    let merged = greprag::dedup_overlapping(&ranked, 0.5);
+    let selected = greprag::select_top_k(&merged, token_budget);
+    Ok(greprag::format_context(&selected))
 }
 
 /// Call Ollama to generate rg commands from local context.

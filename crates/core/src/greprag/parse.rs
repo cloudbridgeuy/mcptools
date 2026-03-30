@@ -82,20 +82,6 @@ fn parse_rg_line(line: &str) -> Option<(PathBuf, usize, &str)> {
     None
 }
 
-/// Remove duplicate snippets that share the same (file_path, start_line, end_line).
-///
-/// When multiple rg commands match the same lines, identical snippets appear
-/// in the results. This keeps the first occurrence and drops the rest.
-pub fn dedup_snippets(snippets: Vec<Snippet>) -> Vec<Snippet> {
-    use std::collections::HashSet;
-
-    let mut seen = HashSet::new();
-    snippets
-        .into_iter()
-        .filter(|s| seen.insert((s.file_path.clone(), s.start_line, s.end_line)))
-        .collect()
-}
-
 /// Extract ripgrep commands from raw model output.
 ///
 /// The greprag model outputs one regex pattern per line (e.g., `self\.cards`,
@@ -282,41 +268,6 @@ src/a.rs:2:also valid";
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].content, "valid line");
         assert_eq!(result[1].content, "also valid");
-    }
-
-    // --- dedup_snippets tests ---
-
-    #[test]
-    fn dedup_removes_exact_location_duplicates() {
-        let snippets = vec![
-            Snippet {
-                file_path: PathBuf::from("a.rs"),
-                start_line: 10,
-                end_line: 10,
-                content: "let x = 1;".to_string(),
-            },
-            Snippet {
-                file_path: PathBuf::from("a.rs"),
-                start_line: 10,
-                end_line: 10,
-                content: "let x = 1;".to_string(),
-            },
-            Snippet {
-                file_path: PathBuf::from("b.rs"),
-                start_line: 10,
-                end_line: 10,
-                content: "let y = 2;".to_string(),
-            },
-        ];
-        let result = dedup_snippets(snippets);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].file_path, PathBuf::from("a.rs"));
-        assert_eq!(result[1].file_path, PathBuf::from("b.rs"));
-    }
-
-    #[test]
-    fn dedup_empty_returns_empty() {
-        assert!(dedup_snippets(vec![]).is_empty());
     }
 
     #[test]
