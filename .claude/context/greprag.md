@@ -20,7 +20,7 @@ mcptools grep-rag retrieve "fn process(input: &str)" \
   --ollama-url http://localhost:11434
 ```
 
-Output: code snippets ranked by BM25 relevance score (`// path:start-end [score: X.XXXX]` headers), truncated to token budget.
+Output: code snippets with file/line headers (`// file: path/to/file.rs (lines N-M)`), deduplicated, selected within token budget.
 
 ## MCP Tool
 
@@ -38,7 +38,7 @@ Tool name: `greprag_retrieve`
 
 Follows the Functional Core - Imperative Shell pattern:
 
-- **Core** (`crates/core/src/greprag/`): Pure functions — parsing (`parse_rg_commands`, `parse_rg_output`, `dedup_snippets`), IDF (`build_doc_frequencies`, `extract_query_identifiers`), ranking (`bm25_rank`, `format_ranked_snippets`), types (`Snippet`, `RankedSnippet`, `MergedSnippet`)
+- **Core** (`crates/core/src/greprag/`): Pure functions — parsing (`parse_rg_commands`, `parse_rg_output`), IDF (`build_doc_frequencies`, `extract_query_identifiers`), ranking (`bm25_rank`), dedup (`dedup_overlapping`), selection (`select_top_k`), formatting (`format_context`), types (`Snippet`, `RankedSnippet`, `MergedSnippet`)
 - **Shell** (`crates/mcptools/src/greprag/`): Ollama client via `rig-core`, command execution via `tokio::process::Command`, repo scanning via `tree-sitter` + `ignore` crate, CLI
 - **MCP** (`crates/mcptools/src/mcp/tools/greprag.rs`): Tool handler bridging MCP to greprag module
 
@@ -47,9 +47,12 @@ Follows the Functional Core - Imperative Shell pattern:
 | Module | Purpose |
 |--------|---------|
 | `types.rs` | `Snippet`, `RankedSnippet`, `MergedSnippet` types |
-| `parse.rs` | `parse_rg_output`, `parse_rg_commands`, `dedup_snippets` |
+| `parse.rs` | `parse_rg_output`, `parse_rg_commands` |
 | `idf.rs` | `DocFreqMap`, `build_doc_frequencies`, `extract_query_identifiers` |
-| `rank.rs` | `bm25_rank`, `format_ranked_snippets` |
+| `rank.rs` | `bm25_rank` |
+| `dedup.rs` | `dedup_overlapping` — merge overlapping/adjacent snippets |
+| `select.rs` | `select_top_k` — token-budget selection |
+| `format.rs` | `format_context` — LLM-ready context formatting |
 
 ## Model Details
 
@@ -80,11 +83,14 @@ See [GrepRAG Setup](../../docs/GREPRAG_SETUP.md) for model installation.
 - Requires a running Ollama instance with the greprag model imported
 - Modelfile at `models/greprag/Modelfile`
 
-## Pipeline (V1 + V2 + V3)
+## Pipeline (V1 + V2 + V3 + V4)
 
 1. **V1 — Query generation**: Calls Ollama model to produce regex patterns from local context, wraps into `rg` commands via `parse_rg_commands()`
-2. **V2 — Command execution**: Runs rg commands as subprocesses via `execute_rg_commands()`, parses output into `Vec<Snippet>` via `parse_rg_output()`, deduplicates via `dedup_snippets()`
-3. **V3 — BM25 ranking**: Scans repo with tree-sitter to build identifier document frequencies (`scan_repo_identifiers` → `build_doc_frequencies`), extracts query terms from local context (`extract_query_identifiers`), scores snippets with BM25 (`bm25_rank`), formats with score headers and token budget truncation (`format_ranked_snippets`)
+2. **V2 — Command execution**: Runs rg commands as subprocesses via `execute_rg_commands()`, parses output into `Vec<Snippet>` via `parse_rg_output()`
+3. **V3 — BM25 ranking**: Scans repo with tree-sitter to build identifier document frequencies (`scan_repo_identifiers` → `build_doc_frequencies`), extracts query terms from local context (`extract_query_identifiers`), scores snippets with BM25 (`bm25_rank`)
+4. **V4 — Dedup, select, format**: Merges overlapping/adjacent snippets (`dedup_overlapping`), selects top-K within token budget (`select_top_k`), formats for LLM context (`format_context`)
+
+Note: Ollama call and repo scan run concurrently via `tokio::join!`.
 
 ### BM25 Details
 
@@ -92,8 +98,7 @@ See [GrepRAG Setup](../../docs/GREPRAG_SETUP.md) for model installation.
 - IDF formula: `ln((N - df + 0.5) / (df + 0.5) + 1)` (non-negative variant)
 - Average document length computed across snippet set (not whole repo)
 - Repo scan extracts `identifier` and `type_identifier` tree-sitter nodes from `.rs` files
-- Token budget approximation: bytes / 4; zero-score snippets filtered
+- Token budget approximation: (content bytes + ~60 header overhead) / 4; zero-score snippets filtered
 
 Future versions:
-- **V4**: Merge overlapping snippets into contiguous blocks
 - **V5**: Stopword filtering for common identifiers
