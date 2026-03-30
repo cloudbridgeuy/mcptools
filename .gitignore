@@ -10,6 +10,9 @@
 
 .DS_Store
 
+# Large model files
+*.gguf
+
 # Claude Code settings
 .claude/*
 !.claude/context/
