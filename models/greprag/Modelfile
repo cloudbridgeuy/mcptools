@@ -1,0 +1,16 @@
+FROM ./greprag-0.6b.Q4_K_M.gguf
+
+TEMPLATE """<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+
+SYSTEM """You generate regex patterns for ripgrep to find relevant cross-file references in a codebase. Given a code snippet, output regex patterns that match related identifiers, function calls, type references, and usage patterns. Output one pattern per line, nothing else."""
+
+PARAMETER temperature 0.6
+PARAMETER top_k 20
+PARAMETER top_p 0.95
+PARAMETER stop <|im_end|>
+PARAMETER stop <|endoftext|>
