@@ -1,5 +1,10 @@
+use std::path::{Path, PathBuf};
+
 use crate::prelude::*;
-use mcptools_core::greprag::{parse_rg_commands, parse_rg_output, Snippet};
+use mcptools_core::greprag::{
+    bm25_rank, build_doc_frequencies, dedup_snippets, extract_query_identifiers,
+    format_ranked_snippets, parse_rg_commands, parse_rg_output, Snippet,
+};
 use rig::client::CompletionClient;
 use rig::completion::Prompt;
 use rig::providers::ollama;
@@ -71,6 +76,7 @@ async fn retrieve(options: RetrieveOptions, global: crate::Global) -> Result<()>
     let result = greprag_data(
         options.local_context,
         options.repo_path,
+        options.token_budget,
         options.ollama_url,
         options.model,
     )
@@ -97,9 +103,11 @@ fn check_model_error(error: &str, model: &str) -> String {
 ///
 /// V1: Query generation — calls Ollama to produce rg commands.
 /// V2: Command execution — runs the rg commands and collects snippets.
+/// V3: BM25 ranking — rank snippets by relevance using repo-wide IDF.
 pub async fn greprag_data(
     local_context: String,
     repo_path: String,
+    token_budget: usize,
     ollama_url: String,
     model: String,
 ) -> Result<String> {
@@ -108,10 +116,17 @@ pub async fn greprag_data(
     let commands = parse_rg_commands(&raw_output, &repo_path);
 
     // V2: Command execution
-    let snippets = execute_rg_commands(&commands, &repo_path).await?;
+    let snippets = dedup_snippets(execute_rg_commands(&commands, &repo_path).await?);
 
-    // Format snippets for output (temporary — V3/V4 will refine)
-    Ok(format_snippets_raw(&snippets))
+    // V3: BM25 ranking
+    let file_identifiers = scan_repo_identifiers(Path::new(&repo_path)).await?;
+    let total_docs = file_identifiers.len();
+    let doc_freq_map = build_doc_frequencies(&file_identifiers);
+    let query_ids = extract_query_identifiers(&local_context);
+    let ranked = bm25_rank(&snippets, &query_ids, &doc_freq_map, total_docs);
+
+    // Format ranked snippets with scores, respecting token budget
+    Ok(format_ranked_snippets(&ranked, token_budget))
 }
 
 /// Call Ollama to generate rg commands from local context.
@@ -164,23 +179,82 @@ async fn execute_rg_commands(commands: &[String], repo_path: &str) -> Result<Vec
     Ok(all_snippets)
 }
 
-/// Temporary formatting function for snippets — V3/V4 will refine.
-fn format_snippets_raw(snippets: &[Snippet]) -> String {
-    use std::fmt::Write;
+/// Walk repo files, parse with tree-sitter, extract identifiers per file.
+/// Returns a vec of (file_path, identifiers) pairs.
+///
+/// Respects .gitignore via the `ignore` crate (same crate ripgrep uses).
+/// Only processes files with known extensions (.rs for now).
+async fn scan_repo_identifiers(repo_path: &Path) -> Result<Vec<(PathBuf, Vec<String>)>> {
+    let repo_path = repo_path.to_path_buf();
 
-    let mut out = String::new();
-    for (i, s) in snippets.iter().enumerate() {
-        if i > 0 {
-            out.push_str("\n\n");
+    tokio::task::spawn_blocking(move || {
+        use ignore::WalkBuilder;
+        use std::collections::HashSet;
+        use tree_sitter::Parser;
+
+        let mut parser = Parser::new();
+        let language = tree_sitter_rust::LANGUAGE;
+        parser
+            .set_language(&language.into())
+            .map_err(|e| eyre!("Failed to set tree-sitter language: {}", e))?;
+
+        let mut results: Vec<(PathBuf, Vec<String>)> = Vec::new();
+
+        for entry in WalkBuilder::new(&repo_path).build() {
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+
+            // Only process .rs files for now.
+            if path.extension().and_then(|e| e.to_str()) != Some("rs") || !path.is_file() {
+                continue;
+            }
+
+            let Ok(source) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let Some(tree) = parser.parse(&source, None) else {
+                continue;
+            };
+
+            let mut identifiers = HashSet::new();
+            let mut cursor = tree.walk();
+            collect_identifiers(&mut cursor, source.as_bytes(), &mut identifiers);
+
+            results.push((path.to_path_buf(), identifiers.into_iter().collect()));
         }
-        let _ = write!(
-            out,
-            "// {}:{}-{}\n{}",
-            s.file_path.display(),
-            s.start_line,
-            s.end_line,
-            s.content
-        );
+
+        Ok(results)
+    })
+    .await
+    .map_err(|e| eyre!("spawn_blocking join error: {}", e))?
+}
+
+/// Recursively walk the tree-sitter AST and collect identifier nodes.
+fn collect_identifiers(
+    cursor: &mut tree_sitter::TreeCursor,
+    source: &[u8],
+    identifiers: &mut std::collections::HashSet<String>,
+) {
+    loop {
+        let node = cursor.node();
+        let kind = node.kind();
+
+        if kind == "identifier" || kind == "type_identifier" {
+            if let Ok(text) = node.utf8_text(source) {
+                if text.len() >= 2 {
+                    identifiers.insert(text.to_string());
+                }
+            }
+        }
+
+        // Recurse into children.
+        if cursor.goto_first_child() {
+            collect_identifiers(cursor, source, identifiers);
+            cursor.goto_parent();
+        }
+
+        if !cursor.goto_next_sibling() {
+            break;
+        }
     }
-    out
 }

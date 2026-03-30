@@ -39,6 +39,9 @@ rig-core = { workspace = true }
 rand = { workspace = true }
 
 shlex = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-rust = { workspace = true }
+ignore = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = ["rig-core"]

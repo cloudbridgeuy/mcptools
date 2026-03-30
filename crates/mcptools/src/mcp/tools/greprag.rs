@@ -11,8 +11,7 @@ pub async fn handle_greprag_retrieve(
     struct GrepRagArgs {
         local_context: String,
         repo_path: Option<String>,
-        #[serde(rename = "token_budget")]
-        _token_budget: Option<usize>,
+        token_budget: Option<usize>,
         ollama_url: Option<String>,
         model: Option<String>,
     }
@@ -35,6 +34,7 @@ pub async fn handle_greprag_retrieve(
     let result_text = crate::greprag::greprag_data(
         args.local_context,
         args.repo_path.unwrap_or_else(|| ".".to_string()),
+        args.token_budget.unwrap_or(4096),
         args.ollama_url
             .unwrap_or_else(|| "http://localhost:11434".to_string()),
         args.model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
