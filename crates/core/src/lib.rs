@@ -75,6 +75,7 @@
 
 pub mod annotations;
 pub mod atlassian;
+pub mod greprag;
 pub mod hn;
 pub mod md;
 pub mod pagination;
