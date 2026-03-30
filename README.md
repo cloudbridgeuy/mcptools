@@ -13,6 +13,7 @@ Useful MCP Tools to use with LLM Coding Agents
 - **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
 - **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)
 - **Strand**: Generate Rust code via local Ollama model (`generate_code`)
+- **GrepRAG**: Retrieve relevant code context from a repository using a local model + ripgrep + BM25 ranking (`greprag_retrieve`)
 - **UI Annotations**: Query and manage UI annotations from a calendsync dev server (`ui_annotations_list`, `ui_annotations_get`, `ui_annotations_resolve`, `ui_annotations_clear`)
 
 ## Installation
@@ -902,6 +903,40 @@ Generate Rust code via a local Ollama model. The model outputs raw Rust code wit
 }
 ```
 
+### GrepRAG Tools
+
+#### greprag_retrieve
+
+Retrieve relevant code context from a repository. Uses a local Ollama model to generate regex patterns from a code snippet, executes them as ripgrep commands, ranks results with BM25, merges overlapping snippets, and returns the top results within a token budget.
+
+**Parameters:**
+
+- `local_context` (string, required) - The code snippet to find cross-file references for
+- `repo_path` (string, optional) - Path to the repository to search (default: `.`)
+- `token_budget` (integer, optional) - Maximum token budget for returned context (default: `4096`)
+- `ollama_url` (string, optional) - Ollama API base URL (default: `http://localhost:11434`)
+- `model` (string, optional) - Model name for query generation (default: `greprag`)
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "greprag_retrieve",
+    "arguments": {
+      "local_context": "let code = extract_code(&response);",
+      "repo_path": "./my-project",
+      "token_budget": 2048
+    }
+  }
+}
+```
+
+**Requires:** A running Ollama instance with the `greprag` model. See [docs/GREPRAG_SETUP.md](docs/GREPRAG_SETUP.md) for setup instructions.
+
 ## MCP Protocol Implementation
 
 This server implements the Model Context Protocol specification with the following methods:
@@ -1275,6 +1310,33 @@ mcptools strand generate "Write a hello world" \
   --model codellama \
   --ollama-url http://localhost:11434
 ```
+
+### GrepRAG
+
+```bash
+# Retrieve code context for a snippet
+mcptools grep-rag retrieve "self.deck.draw()" --repo-path ./my-project
+
+# With custom token budget
+mcptools grep-rag retrieve "fn process(input: &str)" \
+  --repo-path ./src \
+  --token-budget 2048
+
+# Custom model/URL
+mcptools grep-rag retrieve "let result = parse(&input);" \
+  --repo-path . \
+  --model greprag \
+  --ollama-url http://localhost:11434
+```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
+| `GREPRAG_MODEL` | `greprag` | Default model name |
+
+**Requires:** A running Ollama instance with the `greprag` model. See [docs/GREPRAG_SETUP.md](docs/GREPRAG_SETUP.md) for setup instructions.
 
 ## Best Practices for Web Fetching with Claude Code
 
