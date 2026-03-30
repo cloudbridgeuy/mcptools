@@ -36,8 +36,10 @@ pub fn bm25_rank(
     }
 
     // Tokenize every snippet and compute average document length.
-    let snippet_tokens: Vec<Vec<String>> =
-        snippets.iter().map(|s| extract_query_identifiers(&s.content)).collect();
+    let snippet_tokens: Vec<Vec<String>> = snippets
+        .iter()
+        .map(|s| extract_query_identifiers(&s.content))
+        .collect();
 
     let total_tokens: usize = snippet_tokens.iter().map(|t| t.len()).sum();
     let avg_doc_len = if total_tokens == 0 {
@@ -81,9 +83,44 @@ pub fn bm25_rank(
         .collect();
 
     // Stable sort preserves original order for equal scores.
-    ranked.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     ranked
+}
+
+/// Format ranked snippets with their BM25 scores, respecting a token budget.
+///
+/// Approximates tokens as bytes / 4. Stops adding snippets once the budget
+/// would be exceeded. Always includes at least one snippet if available.
+pub fn format_ranked_snippets(ranked: &[RankedSnippet], token_budget: usize) -> String {
+    use std::fmt::Write;
+    let byte_budget = token_budget * 4;
+    let mut out = String::new();
+    for (i, r) in ranked.iter().filter(|r| r.score > 0.0).enumerate() {
+        let mut entry = String::new();
+        if i > 0 {
+            entry.push_str("\n\n");
+        }
+        let _ = write!(
+            entry,
+            "// {}:{}-{} [score: {:.4}]\n{}",
+            r.snippet.file_path.display(),
+            r.snippet.start_line,
+            r.snippet.end_line,
+            r.score,
+            r.snippet.content
+        );
+
+        if i > 0 && out.len() + entry.len() > byte_budget {
+            break;
+        }
+        out.push_str(&entry);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -130,16 +167,9 @@ mod tests {
     /// Snippet matching multiple query terms scores higher than one matching a single term.
     #[test]
     fn multiple_matches_score_higher_than_single() {
-        let snippets = vec![
-            snippet("alpha only here"),
-            snippet("alpha beta gamma"),
-        ];
+        let snippets = vec![snippet("alpha only here"), snippet("alpha beta gamma")];
 
-        let query = vec![
-            "alpha".to_string(),
-            "beta".to_string(),
-            "gamma".to_string(),
-        ];
+        let query = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
 
         // All terms have moderate document frequency.
         let mut doc_freq: DocFreqMap = HashMap::new();
@@ -198,11 +228,7 @@ mod tests {
         assert_eq!(ranked.len(), 3);
         // All scores should be zero.
         for r in &ranked {
-            assert!(
-                r.score == 0.0,
-                "Expected score 0, got {}",
-                r.score,
-            );
+            assert!(r.score == 0.0, "Expected score 0, got {}", r.score,);
         }
         // Original order preserved (stable sort).
         assert_eq!(ranked[0].snippet.content, "aaa bbb ccc");
@@ -219,8 +245,15 @@ mod tests {
 
         let ranked = bm25_rank(&snippets, &query, &doc_freq, 0);
         assert_eq!(ranked.len(), 1);
-        assert!(ranked[0].score.is_finite(), "score should be finite, got {}", ranked[0].score);
-        assert!(ranked[0].score > 0.0, "score should be positive when term matches");
+        assert!(
+            ranked[0].score.is_finite(),
+            "score should be finite, got {}",
+            ranked[0].score
+        );
+        assert!(
+            ranked[0].score > 0.0,
+            "score should be positive when term matches"
+        );
     }
 
     /// Empty input returns empty output.
@@ -228,5 +261,57 @@ mod tests {
     fn empty_input_returns_empty() {
         let ranked = bm25_rank(&[], &[], &HashMap::new(), 0);
         assert!(ranked.is_empty());
+    }
+
+    // --- format_ranked_snippets tests ---
+
+    #[test]
+    fn format_empty_returns_empty_string() {
+        assert_eq!(format_ranked_snippets(&[], 4096), "");
+    }
+
+    #[test]
+    fn format_single_snippet_has_score_header() {
+        let ranked = vec![RankedSnippet {
+            snippet: snippet("fn main() {}"),
+            score: 1.5,
+        }];
+        let output = format_ranked_snippets(&ranked, 4096);
+        assert!(output.starts_with("// test.rs:1-1 [score: 1.5000]"));
+        assert!(output.contains("fn main() {}"));
+    }
+
+    #[test]
+    fn format_multiple_snippets_separated_by_double_newline() {
+        let ranked = vec![
+            RankedSnippet {
+                snippet: snippet("first"),
+                score: 2.0,
+            },
+            RankedSnippet {
+                snippet: snippet("second"),
+                score: 1.0,
+            },
+        ];
+        let output = format_ranked_snippets(&ranked, 4096);
+        assert!(output.contains("\n\n// test.rs:1-1 [score: 1.0000]"));
+    }
+
+    #[test]
+    fn format_respects_token_budget() {
+        let ranked = vec![
+            RankedSnippet {
+                snippet: snippet("first"),
+                score: 2.0,
+            },
+            RankedSnippet {
+                snippet: snippet("second"),
+                score: 1.0,
+            },
+        ];
+        // Budget of 10 tokens (40 bytes) — too small for both, but always includes first
+        let output = format_ranked_snippets(&ranked, 10);
+        assert!(output.contains("first"));
+        assert!(!output.contains("second"));
     }
 }
