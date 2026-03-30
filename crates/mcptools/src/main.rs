@@ -5,6 +5,7 @@ use clap::Parser;
 
 mod atlassian;
 mod error;
+mod greprag;
 mod hn;
 mod mcp;
 mod md;
@@ -56,6 +57,9 @@ pub enum SubCommands {
     /// Atlassian (Jira, Confluence) operations
     Atlassian(crate::atlassian::App),
 
+    /// Retrieve relevant code context from a repository using GrepRAG
+    GrepRag(crate::greprag::App),
+
     /// HackerNews (news.ycombinator.com) operations
     HN(crate::hn::App),
 
@@ -84,6 +88,7 @@ async fn main() -> Result<()> {
 
     match app.command {
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(sub_app, app.global).await,
+        SubCommands::GrepRag(sub_app) => crate::greprag::run(sub_app, app.global).await,
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
         SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,
         SubCommands::MD(sub_app) => crate::md::run(sub_app, app.global).await,
