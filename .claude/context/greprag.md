@@ -1,12 +1,17 @@
 # GrepRAG: Code Context Retrieval via Ripgrep
 
-GrepRAG uses a fine-tuned local model (greprag-0.6b, Qwen3 architecture) to generate regex patterns from code context, execute them as ripgrep commands, and return relevant code snippets from a repository. Designed for retrieving cross-file references relevant to a given code snippet.
+GrepRAG uses a fine-tuned local model (greprag-0.6b, Qwen3 architecture) to generate regex patterns from code context, execute them as ripgrep commands, rank results by BM25 relevance, and return the most relevant code snippets from a repository. Designed for retrieving cross-file references relevant to a given code snippet.
 
 ## CLI Usage
 
 ```bash
 # Basic — retrieve code snippets matching a code context
 mcptools grep-rag retrieve "self.deck.draw()" --repo-path ./my-project
+
+# With custom token budget
+mcptools grep-rag retrieve "fn process(input: &str)" \
+  --repo-path ./src \
+  --token-budget 2048
 
 # With custom model/URL
 mcptools grep-rag retrieve "fn process(input: &str)" \
@@ -15,7 +20,7 @@ mcptools grep-rag retrieve "fn process(input: &str)" \
   --ollama-url http://localhost:11434
 ```
 
-Output: code snippets with file paths and line numbers (`// path:start-end` headers).
+Output: code snippets ranked by BM25 relevance score (`// path:start-end [score: X.XXXX]` headers), truncated to token budget.
 
 ## MCP Tool
 
@@ -25,7 +30,7 @@ Tool name: `greprag_retrieve`
 |----------|------|----------|---------|
 | `local_context` | string | yes | — |
 | `repo_path` | string | no | `.` |
-| `token_budget` | integer | no | reserved for future use |
+| `token_budget` | integer | no | `4096` |
 | `ollama_url` | string | no | `http://localhost:11434` |
 | `model` | string | no | `greprag` |
 
@@ -33,9 +38,18 @@ Tool name: `greprag_retrieve`
 
 Follows the Functional Core - Imperative Shell pattern:
 
-- **Core** (`crates/core/src/greprag/`): Pure functions — `parse_rg_commands()`, `parse_rg_output()`, types (`Snippet`, `RankedSnippet`, `MergedSnippet`)
-- **Shell** (`crates/mcptools/src/greprag/`): Ollama client via `rig-core`, command execution via `tokio::process::Command`, CLI
+- **Core** (`crates/core/src/greprag/`): Pure functions — parsing (`parse_rg_commands`, `parse_rg_output`, `dedup_snippets`), IDF (`build_doc_frequencies`, `extract_query_identifiers`), ranking (`bm25_rank`, `format_ranked_snippets`), types (`Snippet`, `RankedSnippet`, `MergedSnippet`)
+- **Shell** (`crates/mcptools/src/greprag/`): Ollama client via `rig-core`, command execution via `tokio::process::Command`, repo scanning via `tree-sitter` + `ignore` crate, CLI
 - **MCP** (`crates/mcptools/src/mcp/tools/greprag.rs`): Tool handler bridging MCP to greprag module
+
+### Core Modules
+
+| Module | Purpose |
+|--------|---------|
+| `types.rs` | `Snippet`, `RankedSnippet`, `MergedSnippet` types |
+| `parse.rs` | `parse_rg_output`, `parse_rg_commands`, `dedup_snippets` |
+| `idf.rs` | `DocFreqMap`, `build_doc_frequencies`, `extract_query_identifiers` |
+| `rank.rs` | `bm25_rank`, `format_ranked_snippets` |
 
 ## Model Details
 
@@ -61,15 +75,25 @@ See [GrepRAG Setup](../../docs/GREPRAG_SETUP.md) for model installation.
 
 - `rig-core` — Ollama provider via `CompletionClient` trait
 - `shlex` — Shell-like command string splitting for rg command execution
+- `tree-sitter` + `tree-sitter-rust` — AST parsing for identifier extraction (repo scan)
+- `ignore` — .gitignore-aware file walking (same crate ripgrep uses)
 - Requires a running Ollama instance with the greprag model imported
 - Modelfile at `models/greprag/Modelfile`
 
-## Pipeline (V1 + V2)
+## Pipeline (V1 + V2 + V3)
 
 1. **V1 — Query generation**: Calls Ollama model to produce regex patterns from local context, wraps into `rg` commands via `parse_rg_commands()`
-2. **V2 — Command execution**: Runs rg commands as subprocesses via `execute_rg_commands()`, parses output into `Vec<Snippet>` via `parse_rg_output()`, formats with `format_snippets_raw()`
+2. **V2 — Command execution**: Runs rg commands as subprocesses via `execute_rg_commands()`, parses output into `Vec<Snippet>` via `parse_rg_output()`, deduplicates via `dedup_snippets()`
+3. **V3 — BM25 ranking**: Scans repo with tree-sitter to build identifier document frequencies (`scan_repo_identifiers` → `build_doc_frequencies`), extracts query terms from local context (`extract_query_identifiers`), scores snippets with BM25 (`bm25_rank`), formats with score headers and token budget truncation (`format_ranked_snippets`)
 
-Future versions will:
-- **V3**: Rank results with BM25 scoring
-- **V4**: Deduplicate and merge overlapping snippets
-- **V5**: Apply token budget truncation
+### BM25 Details
+
+- Constants: K1=1.2, B=0.75
+- IDF formula: `ln((N - df + 0.5) / (df + 0.5) + 1)` (non-negative variant)
+- Average document length computed across snippet set (not whole repo)
+- Repo scan extracts `identifier` and `type_identifier` tree-sitter nodes from `.rs` files
+- Token budget approximation: bytes / 4; zero-score snippets filtered
+
+Future versions:
+- **V4**: Merge overlapping snippets into contiguous blocks
+- **V5**: Stopword filtering for common identifiers
