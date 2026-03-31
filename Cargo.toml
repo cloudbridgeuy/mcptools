@@ -60,3 +60,4 @@ tree-sitter-go = "0.23"
 ignore = "0.4"
 rusqlite = { version = "0.34", features = ["bundled"] }
 sha2 = "0.10"
+toml = "0.8"

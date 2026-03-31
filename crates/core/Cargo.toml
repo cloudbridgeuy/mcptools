@@ -24,6 +24,8 @@ html2md = { workspace = true }
 scraper = { workspace = true }
 md5 = "0.7"
 sha2 = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
 tree-sitter = { workspace = true }
 
 [dev-dependencies]
