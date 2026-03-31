@@ -21,7 +21,7 @@ pub async fn run(_opts: IndexOptions, _global: crate::Global) -> Result<()> {
     let mut file_count = 0u32;
     let mut symbol_count = 0u32;
 
-    let indexed_at = iso8601_now();
+    let indexed_at = epoch_now();
 
     for result in walk_repo(&root) {
         let (path, bytes) = result?;
@@ -69,8 +69,8 @@ pub fn ensure_parent_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Produce a rough ISO 8601 timestamp from `SystemTime::now()`.
-fn iso8601_now() -> String {
+/// Produce an epoch-seconds timestamp from `SystemTime::now()`.
+fn epoch_now() -> String {
     let duration = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
