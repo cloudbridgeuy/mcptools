@@ -38,6 +38,7 @@ indicatif = { workspace = true }
 rig-core = { workspace = true }
 rand = { workspace = true }
 
+rusqlite = { workspace = true }
 shlex = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-rust = { workspace = true }

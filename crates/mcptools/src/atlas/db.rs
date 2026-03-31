@@ -1,0 +1,385 @@
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use color_eyre::eyre::{self, Context, Result};
+use mcptools_core::atlas::{
+    ContentHash, FileEntry, PeekView, Symbol, SymbolKind, TreeEntry, Visibility,
+};
+use rusqlite::{params, Connection};
+
+pub struct Database {
+    conn: Connection,
+}
+
+impl Database {
+    /// Open or create database at the given path. Creates tables if needed.
+    pub fn open(path: &Path) -> Result<Self> {
+        let conn =
+            Connection::open(path).wrap_err_with(|| format!("opening database: {}", path.display()))?;
+
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS symbols (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_path TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                signature TEXT,
+                visibility TEXT NOT NULL,
+                start_line INTEGER NOT NULL,
+                end_line INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS files (
+                path TEXT PRIMARY KEY,
+                content_hash TEXT NOT NULL,
+                tree_sitter_hash TEXT,
+                short_description TEXT,
+                long_description TEXT,
+                indexed_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS directories (
+                path TEXT PRIMARY KEY,
+                short_description TEXT
+            );
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_symbols_file ON symbols(file_path);
+            CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
+            ",
+        )
+        .wrap_err("creating schema")?;
+
+        Ok(Self { conn })
+    }
+
+    /// Insert or replace a file entry and ensure its parent directories exist.
+    pub fn insert_file(&self, entry: &FileEntry) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO files (path, content_hash, tree_sitter_hash, short_description, long_description, indexed_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    entry.path.to_string_lossy().as_ref(),
+                    entry.content_hash.hex(),
+                    entry.tree_sitter_hash.as_ref().map(|h| h.hex()),
+                    entry.short_description,
+                    entry.long_description,
+                    entry.indexed_at,
+                ],
+            )
+            .wrap_err("inserting file")?;
+
+        // Ensure parent directories exist so tree_entries works.
+        let mut current = entry.path.as_path();
+        while let Some(parent) = current.parent() {
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO directories (path, short_description) VALUES (?1, NULL)",
+                    params![parent.to_string_lossy().as_ref()],
+                )
+                .wrap_err("inserting parent directory")?;
+            current = parent;
+        }
+
+        Ok(())
+    }
+
+    /// Delete existing symbols for the file and insert all new ones in a single transaction.
+    pub fn insert_symbols(&self, symbols: &[Symbol]) -> Result<()> {
+        if symbols.is_empty() {
+            return Ok(());
+        }
+
+        let file_path = symbols[0].file_path.to_string_lossy().to_string();
+
+        let tx = self.conn.unchecked_transaction().wrap_err("begin transaction")?;
+
+        tx.execute(
+            "DELETE FROM symbols WHERE file_path = ?1",
+            params![file_path],
+        )
+        .wrap_err("deleting old symbols")?;
+
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO symbols (file_path, name, kind, signature, visibility, start_line, end_line)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )
+            .wrap_err("preparing symbol insert")?;
+
+        for sym in symbols {
+            stmt.execute(params![
+                sym.file_path.to_string_lossy().as_ref(),
+                sym.name,
+                sym.kind.to_string(),
+                sym.signature,
+                sym.visibility.to_string(),
+                sym.start_line,
+                sym.end_line,
+            ])
+            .wrap_err("inserting symbol")?;
+        }
+
+        drop(stmt);
+        tx.commit().wrap_err("committing symbols")?;
+
+        Ok(())
+    }
+
+    /// Delete all data from every table.
+    pub fn clear_all(&self) -> Result<()> {
+        self.conn
+            .execute_batch(
+                "
+                DELETE FROM symbols;
+                DELETE FROM files;
+                DELETE FROM directories;
+                DELETE FROM metadata;
+                ",
+            )
+            .wrap_err("clearing all tables")?;
+        Ok(())
+    }
+
+    /// Query files and directories under the given path up to the specified depth.
+    ///
+    /// Returns directories first, then files, both sorted alphabetically.
+    pub fn tree_entries(&self, path: &Path, depth: u32) -> Result<Vec<TreeEntry>> {
+        let prefix = path.to_string_lossy().to_string();
+
+        let mut entries = Vec::new();
+
+        // Query directories.
+        {
+            let mut stmt = self
+                .conn
+                .prepare(
+                    "SELECT path, short_description FROM directories
+                     WHERE path LIKE ?1
+                     ORDER BY path",
+                )
+                .wrap_err("preparing directory query")?;
+
+            let like_pattern = if prefix.is_empty() {
+                "%".to_string()
+            } else {
+                format!("{prefix}/%")
+            };
+
+            let rows = stmt
+                .query_map(params![like_pattern], |row| {
+                    let p: String = row.get(0)?;
+                    let desc: Option<String> = row.get(1)?;
+                    Ok((p, desc))
+                })
+                .wrap_err("querying directories")?;
+
+            for row in rows {
+                let (p, desc) = row.wrap_err("reading directory row")?;
+                let entry_path = PathBuf::from(&p);
+
+                // Depth filtering: count components relative to the base path.
+                let relative_depth = relative_depth(&prefix, &p);
+                if relative_depth > depth {
+                    continue;
+                }
+
+                let name = entry_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                entries.push(TreeEntry {
+                    name,
+                    path: entry_path,
+                    is_dir: true,
+                    short_description: desc,
+                });
+            }
+        }
+
+        // Query files.
+        {
+            let mut stmt = self
+                .conn
+                .prepare(
+                    "SELECT path, short_description FROM files
+                     WHERE path LIKE ?1
+                     ORDER BY path",
+                )
+                .wrap_err("preparing file query")?;
+
+            let like_pattern = if prefix.is_empty() {
+                "%".to_string()
+            } else {
+                format!("{prefix}/%")
+            };
+
+            let rows = stmt
+                .query_map(params![like_pattern], |row| {
+                    let p: String = row.get(0)?;
+                    let desc: Option<String> = row.get(1)?;
+                    Ok((p, desc))
+                })
+                .wrap_err("querying files")?;
+
+            for row in rows {
+                let (p, desc) = row.wrap_err("reading file row")?;
+                let entry_path = PathBuf::from(&p);
+
+                let relative_depth = relative_depth(&prefix, &p);
+                if relative_depth > depth {
+                    continue;
+                }
+
+                let name = entry_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                entries.push(TreeEntry {
+                    name,
+                    path: entry_path,
+                    is_dir: false,
+                    short_description: desc,
+                });
+            }
+        }
+
+        Ok(entries)
+    }
+
+    /// Query a file entry and its symbols, returning a display-optimized `PeekView`.
+    pub fn peek_file(&self, path: &Path) -> Result<Option<PeekView>> {
+        let path_str = path.to_string_lossy().to_string();
+
+        let file_row: Option<(Option<String>, Option<String>)> = self
+            .conn
+            .query_row(
+                "SELECT short_description, long_description FROM files WHERE path = ?1",
+                params![path_str],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .wrap_err("querying file for peek")?;
+
+        let (short_description, long_description) = match file_row {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+
+        // Query symbols for this file.
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT name, kind, signature, visibility, start_line, end_line
+                 FROM symbols WHERE file_path = ?1
+                 ORDER BY start_line",
+            )
+            .wrap_err("preparing symbol query")?;
+
+        let symbols = stmt
+            .query_map(params![path_str], |row| {
+                let name: String = row.get(0)?;
+                let kind_str: String = row.get(1)?;
+                let signature: Option<String> = row.get(2)?;
+                let visibility_str: String = row.get(3)?;
+                let start_line: u32 = row.get(4)?;
+                let end_line: u32 = row.get(5)?;
+                Ok((name, kind_str, signature, visibility_str, start_line, end_line))
+            })
+            .wrap_err("querying symbols for peek")?
+            .map(|row| {
+                let (name, kind_str, signature, visibility_str, start_line, end_line) =
+                    row.wrap_err("reading symbol row")?;
+
+                let kind: SymbolKind = kind_str
+                    .parse()
+                    .map_err(|e: String| eyre::eyre!(e))
+                    .wrap_err("parsing symbol kind")?;
+                let visibility: Visibility = visibility_str
+                    .parse()
+                    .map_err(|e: String| eyre::eyre!(e))
+                    .wrap_err("parsing visibility")?;
+
+                Ok(Symbol {
+                    file_path: path.to_path_buf(),
+                    name,
+                    kind,
+                    signature,
+                    visibility,
+                    start_line,
+                    end_line,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Some(PeekView {
+            path: path.to_path_buf(),
+            short_description,
+            long_description,
+            symbols,
+        }))
+    }
+
+    /// Return all file paths and their content hashes (for incremental updates).
+    pub fn file_hashes(&self) -> Result<HashMap<PathBuf, ContentHash>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, content_hash FROM files")
+            .wrap_err("preparing file_hashes query")?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let path: String = row.get(0)?;
+                let hash_hex: String = row.get(1)?;
+                Ok((path, hash_hex))
+            })
+            .wrap_err("querying file hashes")?;
+
+        let mut map = HashMap::new();
+        for row in rows {
+            let (path, hash_hex) = row.wrap_err("reading file hash row")?;
+            let hash = ContentHash::from_hex(&hash_hex)
+                .map_err(|e| eyre::eyre!(e))
+                .wrap_err("parsing content hash")?;
+            map.insert(PathBuf::from(path), hash);
+        }
+
+        Ok(map)
+    }
+}
+
+/// Compute how many path components deep `child` is relative to `base`.
+///
+/// If `base` is empty (repo root), returns the number of components in `child`.
+fn relative_depth(base: &str, child: &str) -> u32 {
+    if base.is_empty() {
+        return child.matches('/').count() as u32 + 1;
+    }
+    let suffix = child
+        .strip_prefix(base)
+        .and_then(|s| s.strip_prefix('/'))
+        .unwrap_or(child);
+    suffix.matches('/').count() as u32 + 1
+}
+
+/// Extension trait to make `rusqlite::OptionalExtension` available.
+trait OptionalExt<T> {
+    fn optional(self) -> Result<Option<T>, rusqlite::Error>;
+}
+
+impl<T> OptionalExt<T> for std::result::Result<T, rusqlite::Error> {
+    fn optional(self) -> Result<Option<T>, rusqlite::Error> {
+        match self {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+}
