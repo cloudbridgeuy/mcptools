@@ -59,6 +59,7 @@ For detailed usage of each feature, see the context files:
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
 - **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
+- **[Atlas](.claude/context/atlas.md)** - Codebase navigation for AI agents; symbol index, tree view, peek
 - **[GrepRAG](.claude/context/greprag.md)** - Code context retrieval via local model + ripgrep
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
@@ -70,6 +71,14 @@ For detailed usage of each feature, see the context files:
 - **[Lint](.claude/context/lint.md)** - Unified lint pipeline; skip flags; git hook management
 
 ## Common Commands
+
+### Atlas
+
+```bash
+mcptools atlas index                  # Build symbol index for current repo
+mcptools atlas tree [path]            # Show annotated directory tree (--json)
+mcptools atlas peek <path>            # Show file summary + symbols (--json)
+```
 
 ### Jira
 

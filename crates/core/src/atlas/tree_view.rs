@@ -85,17 +85,18 @@ fn format_peek_human(peek: &PeekView) -> String {
 }
 
 fn format_symbol_line(sym: &Symbol) -> String {
-    let vis_prefix = match sym.visibility {
-        Visibility::Public | Visibility::Export => "pub ",
-        Visibility::PublicCrate => "pub(crate) ",
-        Visibility::Private => "",
-    };
-
     let range = format!("[{}-{}]", sym.start_line, sym.end_line);
 
     if let Some(sig) = &sym.signature {
-        format!("{vis_prefix}{sig}    {range}")
+        // Signatures already include visibility keywords (e.g., "pub fn foo()"),
+        // so don't prepend a redundant visibility prefix.
+        format!("{sig}    {range}")
     } else {
+        let vis_prefix = match sym.visibility {
+            Visibility::Public | Visibility::Export => "pub ",
+            Visibility::PublicCrate => "pub(crate) ",
+            Visibility::Private => "",
+        };
         format!("{vis_prefix}{} {}    {range}", sym.kind, sym.name)
     }
 }
@@ -239,12 +240,10 @@ src/
         assert!(result.contains("src/atlas/symbols.rs"));
         assert!(result.contains("Symbol extraction utilities"));
         assert!(result.contains("Symbols:"));
-        assert!(result.contains("pub fn extract_symbols"));
+        assert!(result.contains("fn extract_symbols"));
         assert!(result.contains("[1-45]"));
         assert!(result.contains("fn extract_rust_symbols"));
         assert!(result.contains("[47-120]"));
-        // Private symbol should NOT have "pub " prefix.
-        assert!(!result.contains("pub fn extract_rust_symbols"));
     }
 
     #[test]
@@ -358,6 +357,6 @@ src/
         };
 
         let result = format_peek(&peek, false);
-        assert!(result.contains("pub function greet(name: string): string"));
+        assert!(result.contains("function greet(name: string): string"));
     }
 }
