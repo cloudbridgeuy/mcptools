@@ -74,6 +74,7 @@
 //! For implementation details, see the `REFACTORING-PLAN.md` in the project root.
 
 pub mod annotations;
+pub mod atlas;
 pub mod atlassian;
 pub mod greprag;
 pub mod hn;
