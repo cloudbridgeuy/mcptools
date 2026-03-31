@@ -14,8 +14,8 @@ pub struct Database {
 impl Database {
     /// Open or create database at the given path. Creates tables if needed.
     pub fn open(path: &Path) -> Result<Self> {
-        let conn =
-            Connection::open(path).wrap_err_with(|| format!("opening database: {}", path.display()))?;
+        let conn = Connection::open(path)
+            .wrap_err_with(|| format!("opening database: {}", path.display()))?;
 
         conn.execute_batch(
             "
@@ -97,7 +97,10 @@ impl Database {
 
         let file_path = symbols[0].file_path.to_string_lossy().to_string();
 
-        let tx = self.conn.unchecked_transaction().wrap_err("begin transaction")?;
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .wrap_err("begin transaction")?;
 
         tx.execute(
             "DELETE FROM symbols WHERE file_path = ?1",
@@ -291,7 +294,14 @@ impl Database {
                 let visibility_str: String = row.get(3)?;
                 let start_line: u32 = row.get(4)?;
                 let end_line: u32 = row.get(5)?;
-                Ok((name, kind_str, signature, visibility_str, start_line, end_line))
+                Ok((
+                    name,
+                    kind_str,
+                    signature,
+                    visibility_str,
+                    start_line,
+                    end_line,
+                ))
             })
             .wrap_err("querying symbols for peek")?
             .map(|row| {

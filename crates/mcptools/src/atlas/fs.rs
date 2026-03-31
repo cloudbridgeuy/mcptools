@@ -4,14 +4,21 @@ use color_eyre::eyre::{self, Context};
 use ignore::WalkBuilder;
 
 /// Directories to always skip, beyond what `.gitignore` handles.
-const SKIP_DIRS: &[&str] = &[".git", ".mcptools", "node_modules", "target", "__pycache__", ".venv"];
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    ".mcptools",
+    "node_modules",
+    "target",
+    "__pycache__",
+    ".venv",
+];
 
 /// Number of leading bytes to inspect for the binary heuristic.
 const BINARY_CHECK_LEN: usize = 8192;
 
 /// Walk a repository root and yield `(relative_path, file_bytes)` for each indexable file.
 /// Respects `.gitignore`. Skips binary files and known skip patterns.
-pub fn walk_repo(root: &Path) -> impl Iterator<Item = eyre::Result<(PathBuf, Vec<u8>)>> {
+pub fn walk_repo(root: &Path) -> impl Iterator<Item = eyre::Result<(PathBuf, Vec<u8>)>> + use<'_> {
     WalkBuilder::new(root)
         .hidden(false) // don't skip dot-files globally; .gitignore still applies
         .filter_entry(|entry| {
@@ -47,10 +54,9 @@ pub fn walk_repo(root: &Path) -> impl Iterator<Item = eyre::Result<(PathBuf, Vec
             let bytes = match std::fs::read(&abs_path) {
                 Ok(b) => b,
                 Err(err) => {
-                    return Some(
-                        Err(eyre::eyre!(err)
-                            .wrap_err(format!("reading file: {}", abs_path.display()))),
-                    );
+                    return Some(Err(
+                        eyre::eyre!(err).wrap_err(format!("reading file: {}", abs_path.display()))
+                    ));
                 }
             };
 

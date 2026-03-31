@@ -3,6 +3,7 @@
 use crate::prelude::*;
 use clap::Parser;
 
+mod atlas;
 mod atlassian;
 mod error;
 mod greprag;
@@ -54,6 +55,9 @@ pub struct Global {
 
 #[derive(Debug, clap::Parser)]
 pub enum SubCommands {
+    /// Code-aware repository index (symbol tree, peek, search)
+    Atlas(crate::atlas::App),
+
     /// Atlassian (Jira, Confluence) operations
     Atlassian(crate::atlassian::App),
 
@@ -87,6 +91,7 @@ async fn main() -> Result<()> {
     let app = App::parse();
 
     match app.command {
+        SubCommands::Atlas(sub_app) => crate::atlas::run(sub_app, app.global).await,
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(sub_app, app.global).await,
         SubCommands::GrepRag(sub_app) => crate::greprag::run(sub_app, app.global).await,
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
