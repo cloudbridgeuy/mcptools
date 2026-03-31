@@ -24,6 +24,13 @@ html2md = { workspace = true }
 scraper = { workspace = true }
 md5 = "0.7"
 sha2 = { workspace = true }
+tree-sitter = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.8"
+tree-sitter = { workspace = true }
+tree-sitter-rust = { workspace = true }
+tree-sitter-go = { workspace = true }
+tree-sitter-javascript = { workspace = true }
+tree-sitter-python = { workspace = true }
+tree-sitter-typescript = { workspace = true }

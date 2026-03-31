@@ -1,7 +1,9 @@
 pub mod hash;
+pub mod symbols;
 pub mod types;
 
 pub use hash::content_hash;
+pub use symbols::extract_symbols;
 pub use types::{
     ContentHash, FileEntry, IndexTier, Language, PeekView, Symbol, SymbolKind, TreeEntry,
     Visibility,
