@@ -1,0 +1,14 @@
+FROM ./atlas-9b.Q4_K_M.gguf
+
+TEMPLATE """<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+
+PARAMETER temperature 0.3
+PARAMETER top_k 20
+PARAMETER top_p 0.9
+PARAMETER stop <|im_end|>
+PARAMETER stop <|endoftext|>
