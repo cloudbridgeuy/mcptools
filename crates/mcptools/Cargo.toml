@@ -46,7 +46,9 @@ tree-sitter-javascript = { workspace = true }
 tree-sitter-typescript = { workspace = true }
 tree-sitter-python = { workspace = true }
 tree-sitter-go = { workspace = true }
+async-channel = { workspace = true }
 ignore = { workspace = true }
+terminal_size = { workspace = true }
 tempfile = "3.8"
 
 [package.metadata.cargo-machete]
