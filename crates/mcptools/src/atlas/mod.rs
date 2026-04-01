@@ -21,6 +21,8 @@ pub enum Commands {
     Tree(cli::tree::TreeOptions),
     /// Show file summary and symbols
     Peek(cli::peek::PeekOptions),
+    /// Create project primer (mental model)
+    Init(cli::init::InitOptions),
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
@@ -28,5 +30,6 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
         Commands::Index(opts) => cli::index::run(opts, global).await,
         Commands::Tree(opts) => cli::tree::run(opts, global).await,
         Commands::Peek(opts) => cli::peek::run(opts, global).await,
+        Commands::Init(opts) => cli::init::run(opts, global).await,
     }
 }
