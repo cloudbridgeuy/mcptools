@@ -47,6 +47,7 @@ tree-sitter-typescript = { workspace = true }
 tree-sitter-python = { workspace = true }
 tree-sitter-go = { workspace = true }
 ignore = { workspace = true }
+tempfile = "3.8"
 
 [package.metadata.cargo-machete]
 ignored = ["rig-core"]
