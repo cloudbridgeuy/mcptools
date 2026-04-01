@@ -48,6 +48,17 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | Confluence | `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN` | `ATLASSIAN_*` |
 | Bitbucket | `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` | None (required) |
 
+**Atlas**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ATLAS_DB_PATH` | `.mcptools/atlas/index.db` | Database location |
+| `ATLAS_PRIMER_PATH` | `.mcptools/atlas/primer.md` | Primer file location |
+| `ATLAS_MAX_FILE_TOKENS` | `10000` | Max tokens per file for LLM |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
+| `ATLAS_FILE_MODEL` | `atlas` | Model for file descriptions |
+| `ATLAS_DIR_MODEL` | `haiku` | Model for directory descriptions |
+
 ## Detailed Documentation
 
 For detailed usage of each feature, see the context files:
@@ -75,7 +86,9 @@ For detailed usage of each feature, see the context files:
 ### Atlas
 
 ```bash
-mcptools atlas index                  # Build symbol index for current repo
+mcptools atlas init                   # Create primer (mental model)
+mcptools atlas index                  # Build full index (symbols + descriptions)
+mcptools atlas index --parallel 4     # Parallel LLM workers for faster indexing
 mcptools atlas tree [path]            # Show annotated directory tree (--json)
 mcptools atlas peek <path>            # Show file summary + symbols (--json)
 ```
