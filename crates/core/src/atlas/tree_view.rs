@@ -1,6 +1,14 @@
 use std::fmt::Write;
 
-use crate::atlas::types::{PeekView, Symbol, TreeEntry, Visibility};
+use crate::atlas::types::{DirectoryPeekView, PeekView, Symbol, TreeEntry, Visibility};
+
+/// Remove a single trailing newline, if present.
+fn trim_trailing_newline(mut s: String) -> String {
+    if s.ends_with('\n') {
+        s.pop();
+    }
+    s
+}
 
 /// Format a tree view from a list of entries.
 /// Returns human-readable text or JSON depending on the format flag.
@@ -20,6 +28,62 @@ pub fn format_peek(peek: &PeekView, json: bool) -> String {
     } else {
         format_peek_human(peek)
     }
+}
+
+/// Format a peek view for a directory.
+/// Returns human-readable text or JSON depending on the format flag.
+pub fn format_directory_peek(peek: &DirectoryPeekView, json: bool) -> String {
+    if json {
+        serde_json::to_string_pretty(peek).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        format_directory_peek_human(peek)
+    }
+}
+
+fn format_directory_peek_human(peek: &DirectoryPeekView) -> String {
+    if peek.path.as_os_str().is_empty() && peek.children.is_empty() && peek.symbols.is_empty() {
+        return String::from("(empty)");
+    }
+
+    let mut out = String::new();
+
+    let _ = writeln!(out, "{}/", peek.path.display());
+
+    if let Some(desc) = &peek.short_description {
+        let _ = writeln!(out, "{desc}");
+    }
+
+    if let Some(long) = &peek.long_description {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{long}");
+    }
+
+    if !peek.children.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "Contents:");
+        for child in &peek.children {
+            let slash = if child.is_dir { "/" } else { "" };
+            match &child.short_description {
+                Some(desc) => {
+                    let _ = writeln!(out, "  {}{slash} \u{2014} {desc}", child.name);
+                }
+                None => {
+                    let _ = writeln!(out, "  {}{slash}", child.name);
+                }
+            }
+        }
+    }
+
+    if !peek.symbols.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "Symbols:");
+        for sym in &peek.symbols {
+            let line = format_symbol_line(sym);
+            let _ = writeln!(out, "  {line}");
+        }
+    }
+
+    trim_trailing_newline(out)
 }
 
 fn format_tree_human(entries: &[TreeEntry]) -> String {
@@ -43,11 +107,7 @@ fn format_tree_human(entries: &[TreeEntry]) -> String {
         }
     }
 
-    // Remove trailing newline for clean output.
-    if out.ends_with('\n') {
-        out.pop();
-    }
-    out
+    trim_trailing_newline(out)
 }
 
 fn format_peek_human(peek: &PeekView) -> String {
@@ -77,11 +137,7 @@ fn format_peek_human(peek: &PeekView) -> String {
         }
     }
 
-    // Remove trailing newline.
-    if out.ends_with('\n') {
-        out.pop();
-    }
-    out
+    trim_trailing_newline(out)
 }
 
 fn format_symbol_line(sym: &Symbol) -> String {
@@ -106,7 +162,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::atlas::types::{SymbolKind, Visibility};
+    use crate::atlas::types::{DirectoryPeekView, SymbolKind, Visibility};
 
     fn make_tree_entry(name: &str, path: &str, is_dir: bool, desc: Option<&str>) -> TreeEntry {
         TreeEntry {
@@ -358,5 +414,130 @@ src/
 
         let result = format_peek(&peek, false);
         assert!(result.contains("function greet(name: string): string"));
+    }
+
+    // ---- format_directory_peek tests ----
+
+    fn make_directory_peek(
+        path: &str,
+        short: Option<&str>,
+        long: Option<&str>,
+        children: Vec<TreeEntry>,
+        symbols: Vec<Symbol>,
+    ) -> DirectoryPeekView {
+        DirectoryPeekView {
+            path: PathBuf::from(path),
+            short_description: short.map(String::from),
+            long_description: long.map(String::from),
+            children,
+            symbols,
+        }
+    }
+
+    #[test]
+    fn format_directory_peek_with_children_and_descriptions() {
+        let peek = make_directory_peek(
+            "src/atlas",
+            Some("Atlas codebase navigation module"),
+            Some("Detailed long description here."),
+            vec![
+                make_tree_entry("mod.rs", "src/atlas/mod.rs", false, Some("re-exports")),
+                make_tree_entry(
+                    "types.rs",
+                    "src/atlas/types.rs",
+                    false,
+                    Some("domain types"),
+                ),
+                make_tree_entry(
+                    "symbols",
+                    "src/atlas/symbols",
+                    true,
+                    Some("symbol extraction"),
+                ),
+            ],
+            vec![make_symbol(
+                "extract_symbols",
+                SymbolKind::Function,
+                Some("fn extract_symbols(...)"),
+                Visibility::Public,
+                1,
+                45,
+            )],
+        );
+
+        let result = format_directory_peek(&peek, false);
+        assert!(result.contains("src/atlas/"));
+        assert!(result.contains("Atlas codebase navigation module"));
+        assert!(result.contains("Detailed long description here."));
+        assert!(result.contains("Contents:"));
+        assert!(result.contains("  mod.rs \u{2014} re-exports"));
+        assert!(result.contains("  types.rs \u{2014} domain types"));
+        assert!(result.contains("  symbols/ \u{2014} symbol extraction"));
+        assert!(result.contains("Symbols:"));
+        assert!(result.contains("fn extract_symbols(...)"));
+        assert!(result.contains("[1-45]"));
+    }
+
+    #[test]
+    fn format_directory_peek_json_produces_valid_json() {
+        let peek = make_directory_peek(
+            "src/atlas",
+            Some("Atlas module"),
+            None,
+            vec![make_tree_entry(
+                "mod.rs",
+                "src/atlas/mod.rs",
+                false,
+                Some("re-exports"),
+            )],
+            vec![make_symbol(
+                "foo",
+                SymbolKind::Function,
+                Some("fn foo()"),
+                Visibility::Public,
+                1,
+                10,
+            )],
+        );
+
+        let result = format_directory_peek(&peek, true);
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert!(parsed.is_object());
+        assert_eq!(parsed["path"], "src/atlas");
+        assert_eq!(parsed["short_description"], "Atlas module");
+        assert!(parsed["children"].is_array());
+        assert_eq!(parsed["children"].as_array().unwrap().len(), 1);
+        assert!(parsed["symbols"].is_array());
+        assert_eq!(parsed["symbols"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn format_directory_peek_empty() {
+        let peek = make_directory_peek("", None, None, vec![], vec![]);
+        let result = format_directory_peek(&peek, false);
+        assert_eq!(result, "(empty)");
+    }
+
+    #[test]
+    fn format_directory_peek_no_symbols() {
+        let peek = make_directory_peek(
+            "docs",
+            Some("Documentation"),
+            None,
+            vec![make_tree_entry(
+                "README.md",
+                "docs/README.md",
+                false,
+                Some("readme"),
+            )],
+            vec![],
+        );
+
+        let result = format_directory_peek(&peek, false);
+        assert!(result.contains("docs/"));
+        assert!(result.contains("Documentation"));
+        assert!(result.contains("Contents:"));
+        assert!(result.contains("  README.md \u{2014} readme"));
+        assert!(!result.contains("Symbols:"));
     }
 }

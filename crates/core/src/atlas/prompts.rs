@@ -1,6 +1,17 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::atlas::types::Symbol;
+
+/// Format a single symbol as a bullet-point line for LLM prompts.
+fn format_symbol(sym: &Symbol) -> String {
+    match &sym.signature {
+        Some(sig) => format!(
+            "- [{} {}] {}: {}\n",
+            sym.visibility, sym.kind, sym.name, sig
+        ),
+        None => format!("- [{} {}] {}\n", sym.visibility, sym.kind, sym.name),
+    }
+}
 
 /// System prompt instructing the LLM to output SHORT:/LONG: format.
 pub fn file_system_prompt() -> &'static str {
@@ -47,20 +58,7 @@ pub fn build_file_prompt(
         prompt.push_str("(no symbols extracted)\n");
     } else {
         for sym in symbols {
-            match &sym.signature {
-                Some(sig) => {
-                    prompt.push_str(&format!(
-                        "- [{} {}] {}: {}\n",
-                        sym.visibility, sym.kind, sym.name, sig
-                    ));
-                }
-                None => {
-                    prompt.push_str(&format!(
-                        "- [{} {}] {}\n",
-                        sym.visibility, sym.kind, sym.name
-                    ));
-                }
-            }
+            prompt.push_str(&format_symbol(sym));
         }
     }
     prompt.push('\n');
@@ -75,6 +73,66 @@ pub fn build_file_prompt(
     prompt.push_str("\n\n");
 
     prompt.push_str("Describe this file.");
+
+    prompt
+}
+
+/// System prompt for directory descriptions. Static string.
+pub fn directory_system_prompt() -> &'static str {
+    "You are a code documentation assistant. \
+     You MUST output exactly two sections:\n\n\
+     SHORT: A brief one-line description of the directory (under 80 characters).\n\
+     LONG: A detailed description covering the directory's role, what it contains, \
+     and how its contents relate to each other.\n\n\
+     Be factual, not creative. Do not invent information beyond what the contents show."
+}
+
+/// Build the user prompt for a directory description.
+pub fn build_directory_prompt(
+    primer: &str,
+    dir_path: &Path,
+    children: &[(PathBuf, bool, Option<&str>)],
+    aggregated_symbols: &[Symbol],
+) -> String {
+    let mut prompt = String::new();
+
+    // Project context
+    prompt.push_str("# Project Context\n");
+    prompt.push_str(primer);
+    prompt.push_str("\n\n");
+
+    // Directory
+    prompt.push_str("# Directory: ");
+    prompt.push_str(&dir_path.display().to_string());
+    prompt.push_str("\n\n");
+
+    // Contents
+    prompt.push_str("# Contents\n");
+    if children.is_empty() {
+        prompt.push_str("(empty directory)\n");
+    } else {
+        for (name, is_dir, desc) in children {
+            let kind = if *is_dir { "dir" } else { "file" };
+            match desc {
+                Some(d) => prompt.push_str(&format!("- [{}] {} — {}\n", kind, name.display(), d)),
+                None => prompt.push_str(&format!("- [{}] {}\n", kind, name.display())),
+            }
+        }
+    }
+    prompt.push('\n');
+
+    // Key Symbols
+    prompt.push_str("# Key Symbols\n");
+    if aggregated_symbols.is_empty() {
+        prompt.push_str("(no public symbols)\n");
+    } else {
+        for sym in aggregated_symbols {
+            prompt.push_str(&format_symbol(sym));
+        }
+    }
+    prompt.push('\n');
+
+    prompt.push_str("Describe this directory.");
 
     prompt
 }
@@ -232,5 +290,78 @@ mod tests {
         let result = build_primer_refinement_prompt(raw);
         assert!(result.contains(raw));
         assert!(result.contains("restructure"));
+    }
+
+    #[test]
+    fn directory_system_prompt_mentions_short_long_format() {
+        let prompt = directory_system_prompt();
+        assert!(!prompt.is_empty());
+        assert!(prompt.contains("SHORT:"));
+        assert!(prompt.contains("LONG:"));
+        assert!(prompt.contains("directory"));
+    }
+
+    #[test]
+    fn build_directory_prompt_includes_primer_children_and_symbols() {
+        let children = vec![
+            (PathBuf::from("mod.rs"), false, Some("module root")),
+            (PathBuf::from("utils"), true, Some("utility helpers")),
+        ];
+        let symbols = vec![make_symbol(
+            "process",
+            SymbolKind::Function,
+            Some("fn process(input: &str) -> Result<()>"),
+        )];
+        let result =
+            build_directory_prompt("A CLI tool", Path::new("src/core"), &children, &symbols);
+
+        assert!(result.contains("A CLI tool"));
+        assert!(result.contains("src/core"));
+        assert!(result.contains("[file] mod.rs — module root"));
+        assert!(result.contains("[dir] utils — utility helpers"));
+        assert!(result.contains("process"));
+        assert!(result.contains("fn process(input: &str) -> Result<()>"));
+        assert!(result.contains("Describe this directory."));
+    }
+
+    #[test]
+    fn build_directory_prompt_with_no_children_produces_valid_prompt() {
+        let result = build_directory_prompt("primer text", Path::new("empty_dir"), &[], &[]);
+
+        assert!(result.contains("primer text"));
+        assert!(result.contains("empty_dir"));
+        assert!(result.contains("(empty directory)"));
+        assert!(result.contains("(no public symbols)"));
+        assert!(result.contains("Describe this directory."));
+    }
+
+    #[test]
+    fn format_symbol_with_signature() {
+        let sym = make_symbol("foo", SymbolKind::Function, Some("fn foo() -> bool"));
+        let result = format_symbol(&sym);
+        assert_eq!(result, "- [public function] foo: fn foo() -> bool\n");
+    }
+
+    #[test]
+    fn format_symbol_without_signature() {
+        let sym = make_symbol("Bar", SymbolKind::Struct, None);
+        let result = format_symbol(&sym);
+        assert_eq!(result, "- [public struct] Bar\n");
+    }
+
+    #[test]
+    fn build_directory_prompt_with_mixed_files_and_dirs() {
+        let children = vec![
+            (PathBuf::from("README.md"), false, None),
+            (PathBuf::from("src"), true, Some("source code")),
+            (PathBuf::from("lib.rs"), false, Some("library entry")),
+            (PathBuf::from("tests"), true, None),
+        ];
+        let result = build_directory_prompt("project", Path::new("root"), &children, &[]);
+
+        assert!(result.contains("[file] README.md\n"));
+        assert!(result.contains("[dir] src — source code"));
+        assert!(result.contains("[file] lib.rs — library entry"));
+        assert!(result.contains("[dir] tests\n"));
     }
 }

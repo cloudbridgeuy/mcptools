@@ -192,6 +192,25 @@ pub struct PeekView {
     pub symbols: Vec<Symbol>,
 }
 
+/// A directory entry in the index (write model).
+#[derive(Debug, Clone)]
+pub struct DirectoryEntry {
+    pub path: PathBuf,
+    pub short_description: Option<String>,
+    pub long_description: Option<String>,
+    pub indexed_at: String,
+}
+
+/// Peek view for a directory (read model).
+#[derive(Debug, Clone, Serialize)]
+pub struct DirectoryPeekView {
+    pub path: PathBuf,
+    pub short_description: Option<String>,
+    pub long_description: Option<String>,
+    pub children: Vec<TreeEntry>,
+    pub symbols: Vec<Symbol>,
+}
+
 /// Which language a file belongs to (for tree-sitter grammar selection).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
