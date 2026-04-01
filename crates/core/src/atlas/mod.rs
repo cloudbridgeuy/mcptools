@@ -13,8 +13,8 @@ pub use config::{
 pub use hash::content_hash;
 pub use parse::{parse_description, FileDescription, ParseDescriptionError};
 pub use prompts::{
-    build_file_prompt, build_primer_refinement_prompt, estimate_tokens, file_system_prompt,
-    truncate_to_tokens,
+    build_directory_prompt, build_file_prompt, build_primer_refinement_prompt,
+    directory_system_prompt, estimate_tokens, file_system_prompt, truncate_to_tokens,
 };
 pub use symbols::extract_symbols;
 pub use tree_view::{format_directory_peek, format_peek, format_tree};

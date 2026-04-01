@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -9,15 +10,17 @@ use crate::atlas::llm::RigProvider;
 use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
-use mcptools_core::atlas::{content_hash, FileEntry};
+use mcptools_core::atlas::{
+    build_directory_prompt, content_hash, directory_system_prompt, DirectoryEntry, FileEntry,
+};
 
 #[derive(Debug, clap::Parser)]
 pub struct IndexOptions {
-    /// Process files in a single pass (no-op in V2, used in V3)
+    /// Skip the second-pass file descriptions (Phase 4) that incorporate directory context
     #[clap(long)]
     pub single_pass: bool,
 
-    /// Number of parallel LLM workers for generating descriptions
+    /// Number of parallel LLM workers for file descriptions (directory descriptions run sequentially)
     #[clap(long, default_value = "1")]
     pub parallel: usize,
 }
@@ -111,7 +114,116 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         &mcptools_core::atlas::content_hash(primer.as_bytes()).hex(),
     )?;
 
+    // Phase 3: Directory descriptions (bottom-up)
+    let dir_provider = match crate::atlas::llm::create_directory_provider(&config) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            crate::prelude::eprintln!(
+                "Directory LLM provider unavailable: {e}. Skipping directory descriptions."
+            );
+            None
+        }
+    };
+
+    if let Some(dir_provider) = dir_provider {
+        let directories = collect_directories_bottom_up(&db)?;
+        let dir_total = directories.len() as u64;
+
+        let dir_progress = progress_bar(dir_total, "Generating directory descriptions...");
+
+        let dir_system = directory_system_prompt();
+        let mut dir_desc_count = 0u32;
+        let mut dir_fail_count = 0u32;
+
+        for dir_path in &directories {
+            let children = db.directory_children(dir_path)?;
+            let aggregated_symbols = db.aggregated_symbols_for(dir_path)?;
+
+            let children_tuples: Vec<(PathBuf, bool, Option<&str>)> = children
+                .iter()
+                .map(|c| (c.path.clone(), c.is_dir, c.short_description.as_deref()))
+                .collect();
+
+            let prompt =
+                build_directory_prompt(&primer, dir_path, &children_tuples, &aggregated_symbols);
+
+            match dir_provider.generate(dir_system, &prompt).await {
+                Ok(response) => match mcptools_core::atlas::parse_description(&response) {
+                    Ok(desc) => {
+                        db.insert_directory(&DirectoryEntry {
+                            path: dir_path.clone(),
+                            short_description: Some(desc.short),
+                            long_description: Some(desc.long),
+                            indexed_at: epoch_now(),
+                        })?;
+                        dir_desc_count += 1;
+                        dir_progress.set_message(truncate_for_display(
+                            &dir_path.display().to_string(),
+                            msg_width(),
+                        ));
+                    }
+                    Err(e) => {
+                        dir_progress.suspend(|| {
+                            crate::prelude::eprintln!(
+                                "warning: failed to parse directory description for {}: {e}",
+                                dir_path.display()
+                            );
+                        });
+                        dir_fail_count += 1;
+                    }
+                },
+                Err(e) => {
+                    dir_progress.suspend(|| {
+                        crate::prelude::eprintln!(
+                            "warning: LLM call failed for directory {}: {e}",
+                            dir_path.display()
+                        );
+                    });
+                    dir_fail_count += 1;
+                }
+            }
+            dir_progress.inc(1);
+        }
+
+        dir_progress.finish_with_message(finish_message(
+            dir_desc_count,
+            dir_fail_count,
+            "directory descriptions",
+        ));
+
+        // Phase 4: Second pass file descriptions (with directory context)
+        if !opts.single_pass {
+            let file_provider = match crate::atlas::llm::create_file_provider(&config) {
+                Ok(p) => p,
+                Err(e) => {
+                    crate::prelude::eprintln!(
+                        "LLM provider unavailable for second pass: {e}. Skipping."
+                    );
+                    return Ok(());
+                }
+            };
+            generate_descriptions(
+                &db,
+                &root,
+                &config,
+                &primer,
+                file_provider,
+                &indexed_paths,
+                parallel,
+            )
+            .await?;
+        }
+    }
+
     Ok(())
+}
+
+/// Collect directory paths bottom-up (leaf directories first).
+fn collect_directories_bottom_up(db: &Database) -> Result<Vec<PathBuf>> {
+    let dirs = db.all_directories()?;
+    let mut paths: Vec<PathBuf> = dirs.into_iter().map(|d| d.path).collect();
+    paths.sort_by_key(|p| Reverse(p.components().count()));
+    Ok(paths)
 }
 
 /// Result of a single LLM description attempt.
@@ -147,15 +259,7 @@ async fn generate_descriptions(
 
     let total = indexed_paths.len() as u64;
 
-    let progress = ProgressBar::new(total);
-    progress.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.cyan} [{bar:30.cyan/dim}] {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("━╸─"),
-    );
-    progress.set_message("Preparing prompts...");
-    progress.enable_steady_tick(std::time::Duration::from_millis(80));
+    let progress = progress_bar(total, "Preparing prompts...");
 
     // Pre-build all prompts sequentially (needs DB for tree_path and symbols).
     let system = mcptools_core::atlas::file_system_prompt();
@@ -247,7 +351,10 @@ async fn generate_descriptions(
             DescResult::Ok { path, short, long } => {
                 db.update_file_description(&path, &short, &long)?;
                 desc_count += 1;
-                progress.set_message(truncate_for_display(&f!("{}", path.display()), msg_width()));
+                progress.set_message(truncate_for_display(
+                    &path.display().to_string(),
+                    msg_width(),
+                ));
             }
             DescResult::ParseErr { path, error } => {
                 progress.suspend(|| {
@@ -279,12 +386,7 @@ async fn generate_descriptions(
         handle.await.map_err(|e| eyre!("worker panicked: {e}"))?;
     }
 
-    let finish_msg = if fail_count > 0 {
-        f!("{desc_count} descriptions generated, {fail_count} failed")
-    } else {
-        f!("{desc_count} descriptions generated")
-    };
-    progress.finish_with_message(finish_msg);
+    progress.finish_with_message(finish_message(desc_count, fail_count, "descriptions"));
 
     Ok(())
 }
@@ -309,6 +411,29 @@ pub fn ensure_parent_dir(path: &Path) -> Result<()> {
             .wrap_err_with(|| f!("creating directory: {}", parent.display()))?;
     }
     Ok(())
+}
+
+/// Create a progress bar with the standard cyan bar style.
+fn progress_bar(total: u64, initial_message: &str) -> ProgressBar {
+    let pb = ProgressBar::new(total);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.cyan} [{bar:30.cyan/dim}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("━╸─"),
+    );
+    pb.set_message(initial_message.to_string());
+    pb.enable_steady_tick(std::time::Duration::from_millis(80));
+    pb
+}
+
+/// Build a finish message like "5 descriptions generated" or "5 descriptions generated, 2 failed".
+fn finish_message(success: u32, failed: u32, label: &str) -> String {
+    if failed > 0 {
+        f!("{success} {label} generated, {failed} failed")
+    } else {
+        f!("{success} {label} generated")
+    }
 }
 
 /// Truncate a display string to fit within the terminal width, leaving room
