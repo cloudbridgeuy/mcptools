@@ -50,8 +50,7 @@ fn check_model_error(error: &str, model: &str) -> String {
     let lower = error.to_lowercase();
     if lower.contains("not found") || lower.contains("pull") {
         format!(
-            "Model '{}' not found. Run:\n\n  ollama create {} -f models/atlas/Modelfile\n\nOr specify a different model with --model or ATLAS_FILE_MODEL.",
-            model, model
+            "Model '{model}' not found. Either:\n\n  1. Set up the atlas model (see docs/ATLAS_SETUP.md):\n     ollama create {model} -f models/atlas/Modelfile\n\n  2. Use an existing Ollama model:\n     export ATLAS_FILE_MODEL=qwen2.5:7b"
         )
     } else {
         format!("Model generation failed: {}", error)

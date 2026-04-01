@@ -7,38 +7,74 @@ use crate::prelude::*;
 use mcptools_core::atlas::build_primer_refinement_prompt;
 
 #[derive(Debug, clap::Parser)]
-pub struct InitOptions {}
+pub struct InitOptions {
+    /// Skip the primer editing and LLM refinement steps
+    #[clap(long)]
+    pub skip_primer: bool,
+}
 
-pub async fn run(_opts: InitOptions, _global: crate::Global) -> Result<()> {
+pub async fn run(opts: InitOptions, _global: crate::Global) -> Result<()> {
     let root = find_git_root()?;
+    crate::prelude::eprintln!("Repository root: {}", root.display());
+
     let config = load_config(&root)?;
     let primer_path = config.primer_path.resolve(&root);
+    crate::prelude::eprintln!("Primer path: {}", primer_path.display());
 
-    // 1. Write template to temp file, open $EDITOR
-    let template = primer_template();
-    let raw_input = open_editor_with(template)?;
+    if opts.skip_primer {
+        crate::prelude::eprintln!("Skipping primer editing (--skip-primer)");
+    } else {
+        run_primer_flow(&config, &primer_path).await?;
+    }
 
+    ensure_gitignore_entry(&root, ".mcptools/atlas/index.db")?;
+    crate::prelude::eprintln!("Ensured .mcptools/atlas/index.db is in .gitignore");
+
+    crate::prelude::println!("Init complete. Primer at {}", primer_path.display());
+    Ok(())
+}
+
+/// The interactive primer creation/refinement flow.
+///
+/// Pure orchestration of I/O steps — each step is a side effect
+/// (editor, LLM call, file write) sequenced in the imperative shell.
+async fn run_primer_flow(
+    config: &mcptools_core::atlas::AtlasConfig,
+    primer_path: &Path,
+) -> Result<()> {
+    let has_existing = primer_path.exists();
+
+    let initial_content = if has_existing {
+        crate::prelude::eprintln!("Loading existing primer from {}", primer_path.display());
+        std::fs::read_to_string(primer_path)?
+    } else {
+        crate::prelude::eprintln!("No existing primer found — starting from template");
+        primer_template().to_string()
+    };
+
+    crate::prelude::eprintln!("Opening editor for primer draft...");
+    let raw_input = open_editor_with(&initial_content)?;
     require_non_empty(&raw_input)?;
+    crate::prelude::eprintln!("Primer draft received ({} bytes)", raw_input.len());
 
-    // 2. Send to LLM for refinement
-    let provider = create_file_provider(&config)?;
+    crate::prelude::eprintln!(
+        "Refining primer with LLM (model: {})...",
+        config.file_llm.model
+    );
+    let provider = create_file_provider(config)?;
     let refinement_prompt = build_primer_refinement_prompt(&raw_input);
     let system = "You are helping a developer write a concise mental model of their codebase.";
     let refined = provider.generate(system, &refinement_prompt).await?;
+    crate::prelude::eprintln!("LLM refinement complete ({} bytes)", refined.len());
 
-    // 3. Open $EDITOR with refined draft
+    crate::prelude::eprintln!("Opening editor for final review...");
     let final_primer = open_editor_with(&refined)?;
-
     require_non_empty(&final_primer)?;
 
-    // 4. Save to primer path
-    ensure_parent_dir(&primer_path)?;
-    std::fs::write(&primer_path, &final_primer)?;
+    ensure_parent_dir(primer_path)?;
+    std::fs::write(primer_path, &final_primer)?;
+    crate::prelude::eprintln!("Primer saved to {}", primer_path.display());
 
-    // 5. Add index.db to .gitignore if not already there
-    ensure_gitignore_entry(&root, ".mcptools/atlas/index.db")?;
-
-    crate::prelude::println!("Primer saved to {}", primer_path.display());
     Ok(())
 }
 
@@ -89,7 +125,6 @@ fn ensure_gitignore_entry(repo_root: &Path, pattern: &str) -> Result<()> {
         if content.lines().any(|line| line.trim() == pattern) {
             return Ok(());
         }
-        // Append with a newline separator if the file doesn't end with one
         let separator = if content.ends_with('\n') { "" } else { "\n" };
         std::fs::write(&gitignore_path, f!("{content}{separator}{pattern}\n"))?;
     } else {
