@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{self, Context, Result};
 use mcptools_core::atlas::{
-    ContentHash, FileEntry, PeekView, Symbol, SymbolKind, TreeEntry, Visibility,
+    ContentHash, DirectoryEntry, DirectoryPeekView, FileEntry, PeekView, Symbol, SymbolKind,
+    TreeEntry, Visibility,
 };
 use rusqlite::{params, Connection};
 
@@ -39,7 +40,9 @@ impl Database {
             );
             CREATE TABLE IF NOT EXISTS directories (
                 path TEXT PRIMARY KEY,
-                short_description TEXT
+                short_description TEXT,
+                long_description TEXT,
+                indexed_at TEXT
             );
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
@@ -79,7 +82,7 @@ impl Database {
             }
             self.conn
                 .execute(
-                    "INSERT OR IGNORE INTO directories (path, short_description) VALUES (?1, NULL)",
+                    "INSERT OR IGNORE INTO directories (path, short_description, long_description, indexed_at) VALUES (?1, NULL, NULL, NULL)",
                     params![parent.to_string_lossy().as_ref()],
                 )
                 .wrap_err("inserting parent directory")?;
@@ -168,14 +171,8 @@ impl Database {
                 )
                 .wrap_err("preparing directory query")?;
 
-            let like_pattern = if prefix.is_empty() {
-                "%".to_string()
-            } else {
-                format!("{prefix}/%")
-            };
-
             let rows = stmt
-                .query_map(params![like_pattern], |row| {
+                .query_map(params![like_pattern(&prefix)], |row| {
                     let p: String = row.get(0)?;
                     let desc: Option<String> = row.get(1)?;
                     Ok((p, desc))
@@ -217,14 +214,8 @@ impl Database {
                 )
                 .wrap_err("preparing file query")?;
 
-            let like_pattern = if prefix.is_empty() {
-                "%".to_string()
-            } else {
-                format!("{prefix}/%")
-            };
-
             let rows = stmt
-                .query_map(params![like_pattern], |row| {
+                .query_map(params![like_pattern(&prefix)], |row| {
                     let p: String = row.get(0)?;
                     let desc: Option<String> = row.get(1)?;
                     Ok((p, desc))
@@ -390,6 +381,154 @@ impl Database {
         Ok(())
     }
 
+    /// Insert or replace a directory entry.
+    pub fn insert_directory(&self, entry: &DirectoryEntry) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO directories (path, short_description, long_description, indexed_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    entry.path.to_string_lossy().as_ref(),
+                    entry.short_description,
+                    entry.long_description,
+                    entry.indexed_at,
+                ],
+            )
+            .wrap_err("inserting directory")?;
+        Ok(())
+    }
+
+    /// Update the short and long descriptions for a directory.
+    pub fn update_directory_description(&self, path: &Path, short: &str, long: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE directories SET short_description = ?1, long_description = ?2 WHERE path = ?3",
+                params![short, long, path.to_string_lossy().as_ref()],
+            )
+            .wrap_err("updating directory description")?;
+        Ok(())
+    }
+
+    /// Return direct children (depth 1) of the given directory as `TreeEntry` items.
+    pub fn directory_children(&self, path: &Path) -> Result<Vec<TreeEntry>> {
+        self.tree_entries(path, 1)
+    }
+
+    /// Query a directory entry and return a display-optimized `DirectoryPeekView`.
+    ///
+    /// Includes direct children and aggregated symbols from direct child files.
+    pub fn peek_directory(&self, path: &Path) -> Result<Option<DirectoryPeekView>> {
+        let path_str = path.to_string_lossy().to_string();
+
+        let dir_row: Option<(Option<String>, Option<String>)> = self
+            .conn
+            .query_row(
+                "SELECT short_description, long_description FROM directories WHERE path = ?1",
+                params![path_str],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .wrap_err("querying directory for peek")?;
+
+        let (short_description, long_description) = match dir_row {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+
+        let children = self.directory_children(path)?;
+        let symbols = self.aggregated_symbols_for(path)?;
+
+        Ok(Some(DirectoryPeekView {
+            path: path.to_path_buf(),
+            short_description,
+            long_description,
+            children,
+            symbols,
+        }))
+    }
+
+    /// Return all directory entries in the database.
+    pub fn all_directories(&self) -> Result<Vec<DirectoryEntry>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT path, short_description, long_description, indexed_at
+                 FROM directories ORDER BY path",
+            )
+            .wrap_err("preparing all_directories query")?;
+
+        let entries = stmt
+            .query_map([], |row| {
+                let path: String = row.get(0)?;
+                let short_description: Option<String> = row.get(1)?;
+                let long_description: Option<String> = row.get(2)?;
+                let indexed_at: Option<String> = row.get(3)?;
+                Ok((path, short_description, long_description, indexed_at))
+            })
+            .wrap_err("querying all directories")?
+            .map(|row| {
+                let (path, short_description, long_description, indexed_at) =
+                    row.wrap_err("reading directory row")?;
+                Ok(DirectoryEntry {
+                    path: PathBuf::from(path),
+                    short_description,
+                    long_description,
+                    indexed_at: indexed_at.unwrap_or_default(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(entries)
+    }
+
+    /// Peek a path as either a file or a directory.
+    ///
+    /// Tries the file table first; falls back to directories.
+    pub fn peek_file_or_dir(&self, path: &Path) -> Result<PeekResult> {
+        if let Some(file_peek) = self.peek_file(path)? {
+            return Ok(PeekResult::File(file_peek));
+        }
+        if let Some(dir_peek) = self.peek_directory(path)? {
+            return Ok(PeekResult::Directory(dir_peek));
+        }
+        eyre::bail!("no file or directory found at: {}", path.display())
+    }
+
+    /// Return all symbols from files that are direct children of the given directory.
+    pub fn aggregated_symbols_for(&self, dir_path: &Path) -> Result<Vec<Symbol>> {
+        let dir_str = dir_path.to_string_lossy().to_string();
+
+        // Get file paths that are direct children (depth 1).
+        let mut file_stmt = self
+            .conn
+            .prepare("SELECT path FROM files WHERE path LIKE ?1 ORDER BY path")
+            .wrap_err("preparing aggregated symbols file query")?;
+
+        let file_paths: Vec<PathBuf> = file_stmt
+            .query_map(params![like_pattern(&dir_str)], |row| {
+                let p: String = row.get(0)?;
+                Ok(p)
+            })
+            .wrap_err("querying files for aggregated symbols")?
+            .filter_map(|row| {
+                let p = row.ok()?;
+                // Only keep direct children (depth 1).
+                if relative_depth(&dir_str, &p) == 1 {
+                    Some(PathBuf::from(p))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut symbols = Vec::new();
+        for file_path in &file_paths {
+            symbols.extend(self.symbols_for(file_path)?);
+        }
+
+        Ok(symbols)
+    }
+
     /// Return all file paths and their content hashes (for incremental updates).
     pub fn file_hashes(&self) -> Result<HashMap<PathBuf, ContentHash>> {
         let mut stmt = self
@@ -415,6 +554,23 @@ impl Database {
         }
 
         Ok(map)
+    }
+}
+
+/// Result of peeking at a path that could be either a file or a directory.
+pub enum PeekResult {
+    File(PeekView),
+    Directory(DirectoryPeekView),
+}
+
+/// Build a SQL LIKE pattern for direct and nested children of `prefix`.
+///
+/// An empty prefix (repo root) yields `"%"`, otherwise `"{prefix}/%"`.
+fn like_pattern(prefix: &str) -> String {
+    if prefix.is_empty() {
+        "%".to_string()
+    } else {
+        format!("{prefix}/%")
     }
 }
 
