@@ -276,13 +276,62 @@ impl Database {
             None => return Ok(None),
         };
 
-        // Query symbols for this file.
+        let symbols = self.symbols_for(path)?;
+
+        Ok(Some(PeekView {
+            path: path.to_path_buf(),
+            short_description,
+            long_description,
+            symbols,
+        }))
+    }
+
+    /// Update the short and long descriptions for a file.
+    pub fn update_file_description(&self, path: &Path, short: &str, long: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE files SET short_description = ?1, long_description = ?2 WHERE path = ?3",
+                params![short, long, path.to_string_lossy().as_ref()],
+            )
+            .wrap_err("updating file description")?;
+        Ok(())
+    }
+
+    /// Get the tree path from root to the given file path.
+    /// Returns (directory_path, short_description) pairs.
+    pub fn tree_path_to(&self, file_path: &Path) -> Result<Vec<(PathBuf, Option<String>)>> {
+        let mut result = Vec::new();
+        let mut current = file_path.parent();
+        while let Some(dir) = current {
+            if dir.as_os_str().is_empty() {
+                break;
+            }
+            let dir_str = dir.to_string_lossy().to_string();
+            let desc: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT short_description FROM directories WHERE path = ?1",
+                    params![dir_str],
+                    |row| row.get(0),
+                )
+                .optional()
+                .wrap_err("querying directory description")?
+                .flatten();
+            result.push((dir.to_path_buf(), desc));
+            current = dir.parent();
+        }
+        result.reverse(); // Root first
+        Ok(result)
+    }
+
+    /// Get all symbols for a file path.
+    pub fn symbols_for(&self, file_path: &Path) -> Result<Vec<Symbol>> {
+        let path_str = file_path.to_string_lossy().to_string();
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT name, kind, signature, visibility, start_line, end_line
-                 FROM symbols WHERE file_path = ?1
-                 ORDER BY start_line",
+                 FROM symbols WHERE file_path = ?1 ORDER BY start_line",
             )
             .wrap_err("preparing symbol query")?;
 
@@ -303,11 +352,10 @@ impl Database {
                     end_line,
                 ))
             })
-            .wrap_err("querying symbols for peek")?
+            .wrap_err("querying symbols")?
             .map(|row| {
                 let (name, kind_str, signature, visibility_str, start_line, end_line) =
                     row.wrap_err("reading symbol row")?;
-
                 let kind: SymbolKind = kind_str
                     .parse()
                     .map_err(|e: String| eyre::eyre!(e))
@@ -316,9 +364,8 @@ impl Database {
                     .parse()
                     .map_err(|e: String| eyre::eyre!(e))
                     .wrap_err("parsing visibility")?;
-
                 Ok(Symbol {
-                    file_path: path.to_path_buf(),
+                    file_path: file_path.to_path_buf(),
                     name,
                     kind,
                     signature,
@@ -329,12 +376,18 @@ impl Database {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        Ok(Some(PeekView {
-            path: path.to_path_buf(),
-            short_description,
-            long_description,
-            symbols,
-        }))
+        Ok(symbols)
+    }
+
+    /// Insert or update a metadata key-value pair.
+    pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )
+            .wrap_err("setting metadata")?;
+        Ok(())
     }
 
     /// Return all file paths and their content hashes (for incremental updates).
