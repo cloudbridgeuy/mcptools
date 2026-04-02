@@ -1,3 +1,4 @@
+pub mod changes;
 pub mod config;
 pub mod hash;
 pub mod parse;
@@ -6,6 +7,7 @@ pub mod symbols;
 pub mod tree_view;
 pub mod types;
 
+pub use changes::{affected_directories, compute_change_set, ChangeSet};
 pub use config::{
     parse_config, AtlasConfig, BaseUrl, ConfigError, DbPath, LlmProviderConfig, LlmProviderKind,
     ModelName, PrimerPath,
