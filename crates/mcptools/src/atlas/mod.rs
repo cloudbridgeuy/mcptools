@@ -21,7 +21,7 @@ pub enum Commands {
     Tree(cli::tree::TreeOptions),
     /// Show file summary and symbols
     Peek(cli::peek::PeekOptions),
-    /// Create project primer (mental model)
+    /// Create project primer (mental model) and run initial index
     Init(cli::init::InitOptions),
 }
 
