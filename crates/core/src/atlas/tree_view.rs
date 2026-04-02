@@ -1,4 +1,6 @@
+use std::collections::BTreeSet;
 use std::fmt::Write;
+use std::path::Path;
 
 use crate::atlas::types::{DirectoryPeekView, PeekView, Symbol, TreeEntry, Visibility};
 
@@ -8,6 +10,38 @@ fn trim_trailing_newline(mut s: String) -> String {
         s.pop();
     }
     s
+}
+
+/// Sort tree entries so directories appear immediately before their children.
+///
+/// Directories sort before sibling files at the same path level by appending
+/// a `/` separator to directory paths during comparison.
+pub fn sort_tree_entries(entries: &mut [TreeEntry]) {
+    entries.sort_by(|a, b| {
+        let a_path = a.path.to_string_lossy();
+        let b_path = b.path.to_string_lossy();
+        // Primary: sort by path. Tiebreak: directories before files.
+        a_path.cmp(&b_path).then_with(|| b.is_dir.cmp(&a.is_dir))
+    });
+}
+
+/// Extract all unique parent directory paths from a set of file paths.
+///
+/// Walks each file path upward, collecting every non-empty ancestor. Returns
+/// a sorted, deduplicated list.
+pub fn extract_parent_paths(file_paths: &[impl AsRef<Path>]) -> Vec<String> {
+    let mut parents = BTreeSet::new();
+    for file_path in file_paths {
+        let mut current: &Path = file_path.as_ref();
+        while let Some(parent) = current.parent() {
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            parents.insert(parent.to_string_lossy().to_string());
+            current = parent;
+        }
+    }
+    parents.into_iter().collect()
 }
 
 /// Format a tree view from a list of entries.
@@ -539,5 +573,76 @@ src/
         assert!(result.contains("Contents:"));
         assert!(result.contains("  README.md \u{2014} readme"));
         assert!(!result.contains("Symbols:"));
+    }
+
+    // ---- sort_tree_entries tests ----
+
+    #[test]
+    fn sort_tree_entries_interleaves_dirs_and_files() {
+        let mut entries = vec![
+            make_tree_entry("mod.rs", "src/atlas/mod.rs", false, Some("re-exports")),
+            make_tree_entry("atlas", "src/atlas", true, None),
+            make_tree_entry("Cargo.toml", "Cargo.toml", false, Some("manifest")),
+            make_tree_entry("src", "src", true, None),
+            make_tree_entry("types.rs", "src/atlas/types.rs", false, Some("types")),
+        ];
+
+        sort_tree_entries(&mut entries);
+
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Cargo.toml", "src", "atlas", "mod.rs", "types.rs"]
+        );
+    }
+
+    #[test]
+    fn sort_tree_entries_dir_before_same_name_file() {
+        let mut entries = vec![
+            make_tree_entry("utils", "utils", false, None),
+            make_tree_entry("utils", "utils", true, None),
+        ];
+
+        sort_tree_entries(&mut entries);
+
+        assert!(entries[0].is_dir);
+        assert!(!entries[1].is_dir);
+    }
+
+    #[test]
+    fn sort_tree_entries_empty() {
+        let mut entries: Vec<TreeEntry> = vec![];
+        sort_tree_entries(&mut entries);
+        assert!(entries.is_empty());
+    }
+
+    // ---- extract_parent_paths tests ----
+
+    #[test]
+    fn extract_parent_paths_from_nested_files() {
+        let files = vec!["src/atlas/mod.rs", "src/atlas/types.rs", "src/lib.rs"];
+        let parents = extract_parent_paths(&files);
+        assert_eq!(parents, vec!["src", "src/atlas"]);
+    }
+
+    #[test]
+    fn extract_parent_paths_deduplicates() {
+        let files = vec!["a/b/c.rs", "a/b/d.rs", "a/e.rs"];
+        let parents = extract_parent_paths(&files);
+        assert_eq!(parents, vec!["a", "a/b"]);
+    }
+
+    #[test]
+    fn extract_parent_paths_root_level_files() {
+        let files = vec!["Cargo.toml", "README.md"];
+        let parents = extract_parent_paths(&files);
+        assert!(parents.is_empty());
+    }
+
+    #[test]
+    fn extract_parent_paths_empty_input() {
+        let files: Vec<&str> = vec![];
+        let parents = extract_parent_paths(&files);
+        assert!(parents.is_empty());
     }
 }

@@ -17,7 +17,9 @@ pub use prompts::{
     directory_system_prompt, estimate_tokens, file_system_prompt, truncate_to_tokens,
 };
 pub use symbols::extract_symbols;
-pub use tree_view::{format_directory_peek, format_peek, format_tree};
+pub use tree_view::{
+    extract_parent_paths, format_directory_peek, format_peek, format_tree, sort_tree_entries,
+};
 pub use types::{
     ContentHash, DirectoryEntry, DirectoryPeekView, FileEntry, IndexTier, Language, PeekView,
     Symbol, SymbolKind, TreeEntry, Visibility,
