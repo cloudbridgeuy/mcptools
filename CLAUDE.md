@@ -57,7 +57,7 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | `ATLAS_MAX_FILE_TOKENS` | `10000` | Max tokens per file for LLM |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
 | `ATLAS_FILE_MODEL` | `atlas` | Model for file descriptions |
-| `ATLAS_DIR_MODEL` | `haiku` | Model for directory descriptions |
+| `ATLAS_DIR_MODEL` | `atlas` | Model for directory descriptions |
 
 ## Detailed Documentation
 
@@ -86,11 +86,12 @@ For detailed usage of each feature, see the context files:
 ### Atlas
 
 ```bash
-mcptools atlas init                   # Create primer (mental model)
-mcptools atlas index                  # Build full index (symbols + descriptions)
-mcptools atlas index --parallel 4     # Parallel LLM workers for faster indexing
+mcptools atlas init                   # Create primer (mental model) and run initial index
+mcptools atlas index                  # Build full index (symbols + descriptions, bottom-up)
+mcptools atlas index --parallel 4     # Parallel LLM workers for file descriptions
+mcptools atlas index --incremental    # Skip files/dirs that already have descriptions
 mcptools atlas tree [path]            # Show annotated directory tree (--json)
-mcptools atlas peek <path>            # Show file summary + symbols (--json)
+mcptools atlas peek <path>            # Show file or directory summary + symbols (--json)
 ```
 
 ### Jira

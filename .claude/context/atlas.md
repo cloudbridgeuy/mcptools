@@ -11,21 +11,24 @@ Atlas scans a repository, extracts symbols using tree-sitter, and stores them in
 
 ## V2 Scope (Implemented)
 
-- **Project primer**: `atlas init` creates a mental model document via editor + LLM refinement
+- **Project primer**: `atlas init` creates a mental model document via editor + LLM refinement, then runs the initial index
 - **LLM file descriptions**: `atlas index` generates one-line descriptions for indexed files using a local Ollama model
+- **LLM directory descriptions**: Directory summaries generated from child descriptions (uses Ollama provider)
+- **Single bottom-up pass**: Directories are processed deepest-first; for each directory, files are described first (Ollama), then the directory itself (Ollama), so parents always see their children's descriptions
 - **Config file**: `.mcptools/config.toml` for per-project settings (db path, primer path, models, token limits)
 - **Environment variables**: Override config via `ATLAS_*` and `OLLAMA_URL` env vars
 
 ## CLI Commands
 
 ```bash
-mcptools atlas init                   # Create primer (mental model) via $EDITOR + LLM
-mcptools atlas index                  # Full repo scan, stores in .mcptools/atlas/index.db
-mcptools atlas index --parallel 4     # Parallel LLM workers for faster indexing
-mcptools atlas tree [path]            # Directory tree (optional: filter by path)
+mcptools atlas init                   # Create primer (mental model) via $EDITOR + LLM, then run index
+mcptools atlas index                  # Build index with bottom-up LLM descriptions
+mcptools atlas index --parallel 4     # Parallel LLM workers for file descriptions
+mcptools atlas index --incremental    # Skip files/dirs that already have descriptions
+mcptools atlas tree [path]            # Directory tree with descriptions (optional: filter by path)
 mcptools atlas tree --depth 2         # Limit depth
 mcptools atlas tree --json            # JSON output
-mcptools atlas peek <path>            # File symbols with signatures
+mcptools atlas peek <path>            # File or directory summary with symbols/children
 mcptools atlas peek <path> --json     # JSON output
 ```
 
@@ -36,6 +39,20 @@ mcptools atlas peek <path> --json     # JSON output
 3. Opens editor again with the refined draft for final edits
 4. Saves to `.mcptools/atlas/primer.md` (configurable)
 5. Adds `index.db` to `.gitignore` if not already present
+6. Runs the full index automatically
+
+### Bottom-Up Enrichment (`atlas index`)
+
+After the tree-sitter scan, `atlas index` performs a single bottom-up pass over all directories (deepest first). For each directory:
+
+1. **File descriptions**: Describes the files in that directory using the Ollama model (`ATLAS_FILE_MODEL`). Runs with `--parallel N` workers for concurrency.
+2. **Directory description**: Describes the directory itself using the Ollama provider (`ATLAS_DIR_MODEL`, default `atlas`), which has access to all children's descriptions (both files and subdirectories).
+
+Because directories are processed deepest-first, parent directories always see their children's descriptions. The Ollama provider requires a running Ollama server (`ollama serve`) and the model to be available.
+
+### `atlas peek` for Files and Directories
+
+`atlas peek <path>` accepts either a file or directory path. For files it shows the file summary and symbol signatures. For directories it shows the directory description, child entries with their descriptions, and aggregated symbols.
 
 ## Configuration
 
@@ -48,7 +65,7 @@ primer_path = ".mcptools/atlas/primer.md"
 max_file_tokens = 10000
 ollama_url = "http://localhost:11434"
 file_model = "atlas"
-dir_model = "haiku"
+dir_model = "atlas"
 ```
 
 All fields are optional and fall back to defaults. Environment variables override config file values.
@@ -62,7 +79,7 @@ All fields are optional and fall back to defaults. Environment variables overrid
 | `ATLAS_MAX_FILE_TOKENS` | `10000` | Max tokens per file for LLM |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
 | `ATLAS_FILE_MODEL` | `atlas` | Model for file descriptions |
-| `ATLAS_DIR_MODEL` | `haiku` | Model for directory descriptions |
+| `ATLAS_DIR_MODEL` | `atlas` | Model for directory descriptions |
 
 ### LLM Setup
 
@@ -113,7 +130,7 @@ See [Atlas Setup](../../docs/ATLAS_SETUP.md) for Ollama model download and Model
 | `cli/init.rs` | `atlas init` handler: primer creation via editor + LLM refinement |
 | `cli/index.rs` | `atlas index` handler: full repo scan, progress reporting, LLM descriptions |
 | `cli/tree.rs` | `atlas tree` handler: path filtering, depth, JSON output |
-| `cli/peek.rs` | `atlas peek` handler: file lookup, symbol display |
+| `cli/peek.rs` | `atlas peek` handler: file or directory lookup, symbol display |
 
 ## SQLite Schema
 
