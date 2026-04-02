@@ -30,6 +30,8 @@ mcptools atlas tree --depth 2         # Limit depth
 mcptools atlas tree --json            # JSON output
 mcptools atlas peek <path>            # File or directory summary with symbols/children
 mcptools atlas peek <path> --json     # JSON output
+mcptools atlas update                 # Incremental update (changed files only)
+mcptools atlas sync                   # Force full re-index
 ```
 
 ### `atlas init` Workflow
@@ -53,6 +55,14 @@ Because directories are processed deepest-first, parent directories always see t
 ### `atlas peek` for Files and Directories
 
 `atlas peek <path>` accepts either a file or directory path. For files it shows the file summary and symbol signatures. For directories it shows the directory description, child entries with their descriptions, and aggregated symbols.
+
+### `atlas update` — Incremental Update
+
+`atlas update` performs a hash-based change detection pass. It compares content hashes of files on disk against the stored hashes in the index. Only files whose content has changed are re-indexed (symbols re-extracted, LLM descriptions regenerated). Parent directories affected by changed files are also re-described to keep the bottom-up summaries consistent.
+
+### `atlas sync` — Force Full Re-Index
+
+`atlas sync` clears the existing index and performs a complete rebuild from scratch. This is equivalent to clearing the database and then running `atlas index`. Use this when the index is corrupt, after major refactors, or when you want a guaranteed-fresh index.
 
 ## Configuration
 
@@ -131,6 +141,8 @@ See [Atlas Setup](../../docs/ATLAS_SETUP.md) for Ollama model download and Model
 | `cli/index.rs` | `atlas index` handler: full repo scan, progress reporting, LLM descriptions |
 | `cli/tree.rs` | `atlas tree` handler: path filtering, depth, JSON output |
 | `cli/peek.rs` | `atlas peek` handler: file or directory lookup, symbol display |
+| `cli/update.rs` | `atlas update` handler: incremental update via hash-based change detection |
+| `cli/sync.rs` | `atlas sync` handler: clear index and force full re-index |
 
 ## SQLite Schema
 

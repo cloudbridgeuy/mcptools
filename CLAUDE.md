@@ -92,6 +92,8 @@ mcptools atlas index --parallel 4     # Parallel LLM workers for file descriptio
 mcptools atlas index --incremental    # Skip files/dirs that already have descriptions
 mcptools atlas tree [path]            # Show annotated directory tree (--json)
 mcptools atlas peek <path>            # Show file or directory summary + symbols (--json)
+mcptools atlas update                 # Incremental update (changed files only)
+mcptools atlas sync                   # Force full re-index
 ```
 
 ### Jira

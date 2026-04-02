@@ -23,6 +23,10 @@ pub enum Commands {
     Peek(cli::peek::PeekOptions),
     /// Create project primer (mental model) and run initial index
     Init(cli::init::InitOptions),
+    /// Incremental update (changed files only)
+    Update(cli::update::UpdateOptions),
+    /// Force full re-index
+    Sync(cli::sync::SyncOptions),
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
@@ -31,5 +35,7 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
         Commands::Tree(opts) => cli::tree::run(opts, global).await,
         Commands::Peek(opts) => cli::peek::run(opts, global).await,
         Commands::Init(opts) => cli::init::run(opts, global).await,
+        Commands::Update(opts) => cli::update::run(opts, global).await,
+        Commands::Sync(opts) => cli::sync::run(opts, global).await,
     }
 }

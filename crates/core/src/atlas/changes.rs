@@ -59,13 +59,21 @@ pub fn compute_change_set(
     }
 }
 
-/// Collect unique parent directories from a set of file paths.
-/// Pure: paths in, directory paths out.
+/// Collect all ancestor directories from a set of file paths.
+/// Walks up from each file to the root, deduplicating along the way.
+/// Pure: paths in, directory paths out (sorted).
 pub fn affected_directories(paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut dirs = BTreeSet::new();
     for path in paths {
-        if let Some(parent) = path.parent() {
-            dirs.insert(parent.to_path_buf());
+        let mut current = path.as_path();
+        while let Some(parent) = current.parent() {
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            if !dirs.insert(parent.to_path_buf()) {
+                break; // already visited this ancestor and all above it
+            }
+            current = parent;
         }
     }
     dirs.into_iter().collect()
@@ -191,10 +199,10 @@ mod tests {
     }
 
     #[test]
-    fn affected_directories_extracts_unique_parents() {
+    fn affected_directories_extracts_ancestors() {
         let paths = vec![p("src/atlas/types.rs"), p("src/atlas/changes.rs")];
         let dirs = affected_directories(&paths);
-        assert_eq!(dirs, vec![p("src/atlas")]);
+        assert_eq!(dirs, vec![p("src"), p("src/atlas")]);
     }
 
     #[test]
