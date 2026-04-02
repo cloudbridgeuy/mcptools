@@ -5,7 +5,6 @@ use std::sync::Arc;
 use crate::atlas::config::load_config;
 use crate::atlas::db::Database;
 use crate::atlas::fs::walk_repo;
-use crate::atlas::llm::RigProvider;
 use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
