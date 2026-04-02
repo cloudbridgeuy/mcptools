@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{self, Context, Result};
 use mcptools_core::atlas::{
-    ContentHash, DirectoryEntry, DirectoryPeekView, FileEntry, PeekView, Symbol, SymbolKind,
-    TreeEntry, Visibility,
+    extract_parent_paths, sort_tree_entries, ContentHash, DirectoryEntry, DirectoryPeekView,
+    FileEntry, PeekView, Symbol, SymbolKind, TreeEntry, Visibility,
 };
 use rusqlite::{params, Connection};
 
@@ -53,6 +53,32 @@ impl Database {
             ",
         )
         .wrap_err("creating schema")?;
+
+        // Self-healing migration: if the directories table is empty but files
+        // exist, reconstruct directory entries from file paths.  This repairs
+        // databases damaged by the former DROP TABLE bug.
+        let dir_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM directories", [], |row| row.get(0))
+            .wrap_err("counting directories")?;
+
+        if dir_count == 0 {
+            let mut stmt = conn
+                .prepare("SELECT path FROM files")
+                .wrap_err("preparing file paths for migration")?;
+            let file_paths: Vec<String> = stmt
+                .query_map([], |row| row.get(0))
+                .wrap_err("querying file paths")?
+                .collect::<std::result::Result<_, _>>()
+                .wrap_err("reading file paths")?;
+
+            for dir_path in extract_parent_paths(&file_paths) {
+                conn.execute(
+                    "INSERT OR IGNORE INTO directories (path, short_description, long_description, indexed_at) VALUES (?1, NULL, NULL, NULL)",
+                    params![dir_path],
+                )
+                .wrap_err("migrating parent directory")?;
+            }
+        }
 
         Ok(Self { conn })
     }
@@ -154,7 +180,7 @@ impl Database {
 
     /// Query files and directories under the given path up to the specified depth.
     ///
-    /// Returns directories first, then files, both sorted alphabetically.
+    /// Returns entries sorted by path so that directories appear before their children.
     pub fn tree_entries(&self, path: &Path, depth: u32) -> Result<Vec<TreeEntry>> {
         let prefix = path.to_string_lossy().to_string();
 
@@ -244,6 +270,8 @@ impl Database {
                 });
             }
         }
+
+        sort_tree_entries(&mut entries);
 
         Ok(entries)
     }
@@ -527,6 +555,44 @@ impl Database {
         }
 
         Ok(symbols)
+    }
+
+    /// Return file paths that have no short description yet.
+    pub fn files_needing_descriptions(&self) -> Result<Vec<PathBuf>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM files WHERE short_description IS NULL ORDER BY path")
+            .wrap_err("preparing files_needing_descriptions query")?;
+
+        let paths = stmt
+            .query_map([], |row| {
+                let p: String = row.get(0)?;
+                Ok(PathBuf::from(p))
+            })
+            .wrap_err("querying files needing descriptions")?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .wrap_err("reading file paths")?;
+
+        Ok(paths)
+    }
+
+    /// Return directory paths that have no short description yet.
+    pub fn directories_needing_descriptions(&self) -> Result<Vec<PathBuf>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM directories WHERE short_description IS NULL ORDER BY path")
+            .wrap_err("preparing directories_needing_descriptions query")?;
+
+        let paths = stmt
+            .query_map([], |row| {
+                let p: String = row.get(0)?;
+                Ok(PathBuf::from(p))
+            })
+            .wrap_err("querying directories needing descriptions")?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .wrap_err("reading directory paths")?;
+
+        Ok(paths)
     }
 
     /// Return all file paths and their content hashes (for incremental updates).
