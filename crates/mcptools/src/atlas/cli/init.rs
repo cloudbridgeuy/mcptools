@@ -11,9 +11,13 @@ pub struct InitOptions {
     /// Skip the primer editing and LLM refinement steps
     #[clap(long)]
     pub skip_primer: bool,
+
+    /// Number of parallel LLM workers for file descriptions
+    #[clap(long, default_value = "1")]
+    pub parallel: usize,
 }
 
-pub async fn run(opts: InitOptions, _global: crate::Global) -> Result<()> {
+pub async fn run(opts: InitOptions, global: crate::Global) -> Result<()> {
     let root = find_git_root()?;
     crate::prelude::eprintln!("Repository root: {}", root.display());
 
@@ -29,6 +33,16 @@ pub async fn run(opts: InitOptions, _global: crate::Global) -> Result<()> {
 
     ensure_gitignore_entry(&root, ".mcptools/atlas/index.db")?;
     crate::prelude::eprintln!("Ensured .mcptools/atlas/index.db is in .gitignore");
+
+    crate::prelude::eprintln!("Running initial index...");
+    crate::atlas::cli::index::run(
+        crate::atlas::cli::index::IndexOptions {
+            parallel: opts.parallel,
+            incremental: false,
+        },
+        global,
+    )
+    .await?;
 
     crate::prelude::println!("Init complete. Primer at {}", primer_path.display());
     Ok(())

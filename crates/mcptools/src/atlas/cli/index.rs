@@ -1,4 +1,5 @@
 use std::cmp::Reverse;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -16,13 +17,13 @@ use mcptools_core::atlas::{
 
 #[derive(Debug, clap::Parser)]
 pub struct IndexOptions {
-    /// Skip the second-pass file descriptions (Phase 4) that incorporate directory context
-    #[clap(long)]
-    pub single_pass: bool,
-
-    /// Number of parallel LLM workers for file descriptions (directory descriptions run sequentially)
+    /// Number of parallel LLM workers for file descriptions
     #[clap(long, default_value = "1")]
     pub parallel: usize,
+
+    /// Skip files and directories that already have descriptions
+    #[clap(long)]
+    pub incremental: bool,
 }
 
 pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
@@ -31,7 +32,13 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     let db_path = config.db_path.resolve(&root);
     ensure_parent_dir(&db_path)?;
     let db = Database::open(&db_path)?;
-    db.clear_all()?;
+
+    let existing_hashes = if opts.incremental {
+        db.file_hashes()?
+    } else {
+        db.clear_all()?;
+        HashMap::new()
+    };
 
     // Phase 1: Tree-sitter scan
     let spinner = ProgressBar::new_spinner();
@@ -45,6 +52,7 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
 
     let mut file_count = 0u32;
     let mut symbol_count = 0u32;
+    let mut skipped_count = 0u32;
     let indexed_at = epoch_now();
 
     let mut indexed_paths: Vec<PathBuf> = Vec::new();
@@ -52,6 +60,15 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     for result in walk_repo(&root) {
         let (path, bytes) = result?;
         let hash = content_hash(&bytes);
+
+        // In incremental mode, skip files whose content hasn't changed.
+        if let Some(existing_hash) = existing_hashes.get(&path) {
+            if *existing_hash == hash {
+                indexed_paths.push(path);
+                skipped_count += 1;
+                continue;
+            }
+        }
 
         db.insert_file(&FileEntry {
             path: path.clone(),
@@ -73,10 +90,18 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         ));
     }
 
-    spinner.finish_with_message(f!("Scanned {file_count} files, {symbol_count} symbols"));
+    let dir_count = db.all_directories()?.len() as u32;
+    let skip_msg = if skipped_count > 0 {
+        f!(", {skipped_count} unchanged")
+    } else {
+        String::new()
+    };
+    spinner.finish_with_message(f!(
+        "Scanned {file_count} files, {dir_count} directories, {symbol_count} symbols{skip_msg}"
+    ));
     db.set_metadata("last_full_sync", &epoch_now())?;
 
-    // Phase 2: LLM file descriptions
+    // Phase 2: Bottom-up LLM descriptions
     let primer_path = config.primer_path.resolve(&root);
     let primer = match std::fs::read_to_string(&primer_path) {
         Ok(p) => p,
@@ -89,33 +114,17 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         }
     };
 
-    let provider = match crate::atlas::llm::create_file_provider(&config) {
-        Ok(p) => p,
+    let file_provider_opt = match crate::atlas::llm::create_file_provider(&config) {
+        Ok(p) => Some(Arc::new(p)),
         Err(e) => {
-            crate::prelude::eprintln!("LLM provider unavailable: {e}. Skipping descriptions.");
-            return Ok(());
+            crate::prelude::eprintln!(
+                "File LLM provider unavailable: {e}. Skipping file descriptions."
+            );
+            None
         }
     };
 
-    let parallel = opts.parallel.max(1);
-    generate_descriptions(
-        &db,
-        &root,
-        &config,
-        &primer,
-        provider,
-        &indexed_paths,
-        parallel,
-    )
-    .await?;
-
-    db.set_metadata(
-        "primer_hash",
-        &mcptools_core::atlas::content_hash(primer.as_bytes()).hex(),
-    )?;
-
-    // Phase 3: Directory descriptions (bottom-up)
-    let dir_provider = match crate::atlas::llm::create_directory_provider(&config) {
+    let dir_provider_opt = match crate::atlas::llm::create_directory_provider(&config) {
         Ok(p) => Some(p),
         Err(e) => {
             crate::prelude::eprintln!(
@@ -125,95 +134,109 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         }
     };
 
-    if let Some(dir_provider) = dir_provider {
-        let directories = collect_directories_bottom_up(&db)?;
-        let dir_total = directories.len() as u64;
+    // In incremental mode, only describe files and directories that lack descriptions.
+    let files_to_describe: Vec<PathBuf> = if opts.incremental {
+        let needed: std::collections::HashSet<PathBuf> =
+            db.files_needing_descriptions()?.into_iter().collect();
+        indexed_paths
+            .into_iter()
+            .filter(|p| needed.contains(p))
+            .collect()
+    } else {
+        indexed_paths
+    };
 
-        let dir_progress = progress_bar(dir_total, "Generating directory descriptions...");
-
-        let dir_system = directory_system_prompt();
-        let mut dir_desc_count = 0u32;
-        let mut dir_fail_count = 0u32;
-
-        for dir_path in &directories {
-            let children = db.directory_children(dir_path)?;
-            let aggregated_symbols = db.aggregated_symbols_for(dir_path)?;
-
-            let children_tuples: Vec<(PathBuf, bool, Option<&str>)> = children
-                .iter()
-                .map(|c| (c.path.clone(), c.is_dir, c.short_description.as_deref()))
-                .collect();
-
-            let prompt =
-                build_directory_prompt(&primer, dir_path, &children_tuples, &aggregated_symbols);
-
-            match dir_provider.generate(dir_system, &prompt).await {
-                Ok(response) => match mcptools_core::atlas::parse_description(&response) {
-                    Ok(desc) => {
-                        db.insert_directory(&DirectoryEntry {
-                            path: dir_path.clone(),
-                            short_description: Some(desc.short),
-                            long_description: Some(desc.long),
-                            indexed_at: epoch_now(),
-                        })?;
-                        dir_desc_count += 1;
-                        dir_progress.set_message(truncate_for_display(
-                            &dir_path.display().to_string(),
-                            msg_width(),
-                        ));
-                    }
-                    Err(e) => {
-                        dir_progress.suspend(|| {
-                            crate::prelude::eprintln!(
-                                "warning: failed to parse directory description for {}: {e}",
-                                dir_path.display()
-                            );
-                        });
-                        dir_fail_count += 1;
-                    }
-                },
-                Err(e) => {
-                    dir_progress.suspend(|| {
-                        crate::prelude::eprintln!(
-                            "warning: LLM call failed for directory {}: {e}",
-                            dir_path.display()
-                        );
-                    });
-                    dir_fail_count += 1;
-                }
-            }
-            dir_progress.inc(1);
-        }
-
-        dir_progress.finish_with_message(finish_message(
-            dir_desc_count,
-            dir_fail_count,
-            "directory descriptions",
-        ));
-
-        // Phase 4: Second pass file descriptions (with directory context)
-        if !opts.single_pass {
-            let file_provider = match crate::atlas::llm::create_file_provider(&config) {
-                Ok(p) => p,
-                Err(e) => {
-                    crate::prelude::eprintln!(
-                        "LLM provider unavailable for second pass: {e}. Skipping."
-                    );
-                    return Ok(());
-                }
-            };
-            generate_descriptions(
-                &db,
-                &root,
-                &config,
-                &primer,
-                file_provider,
-                &indexed_paths,
-                parallel,
-            )
-            .await?;
-        }
+    // Group files by parent directory
+    let mut files_by_dir: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    for path in &files_to_describe {
+        let parent = path.parent().unwrap_or(Path::new("")).to_path_buf();
+        files_by_dir.entry(parent).or_default().push(path.clone());
     }
+
+    // Ensure the root directory ("") is in the table so root-level files get described.
+    if files_by_dir.contains_key(Path::new("")) {
+        db.insert_directory(&DirectoryEntry {
+            path: PathBuf::new(),
+            short_description: None,
+            long_description: None,
+            indexed_at: epoch_now(),
+        })?;
+    }
+
+    let directories: Vec<PathBuf> = if opts.incremental {
+        let needed: std::collections::HashSet<PathBuf> =
+            db.directories_needing_descriptions()?.into_iter().collect();
+        collect_directories_bottom_up(&db)?
+            .into_iter()
+            .filter(|p| needed.contains(p))
+            .collect()
+    } else {
+        collect_directories_bottom_up(&db)?
+    };
+    let parallel = opts.parallel.max(1);
+
+    // Progress tracking across both file and directory descriptions
+    let total_files = files_to_describe.len() as u64;
+    let total_dirs = directories.len() as u64;
+    let progress = progress_bar(
+        total_files + total_dirs,
+        "Generating descriptions (bottom-up)...",
+    );
+
+    let dir_system = directory_system_prompt();
+    let mut file_desc_count = 0u32;
+    let mut file_fail_count = 0u32;
+    let mut dir_desc_count = 0u32;
+    let mut dir_fail_count = 0u32;
+
+    for dir_path in &directories {
+        // Step A: Describe files in this directory
+        if let Some(file_paths) = files_by_dir.get(dir_path) {
+            if let Some(ref file_provider) = file_provider_opt {
+                let (success, failed) = generate_descriptions(
+                    &db,
+                    &root,
+                    &config,
+                    &primer,
+                    Arc::clone(file_provider),
+                    file_paths,
+                    parallel,
+                    &progress,
+                )
+                .await?;
+                file_desc_count += success;
+                file_fail_count += failed;
+            } else {
+                // No file provider — still advance progress for these files
+                progress.inc(file_paths.len() as u64);
+            }
+        }
+
+        // Step B: Describe this directory
+        if let Some(ref dir_provider) = dir_provider_opt {
+            match describe_directory(&db, dir_provider, &primer, dir_system, dir_path).await {
+                Ok(true) => {
+                    dir_desc_count += 1;
+                    progress.set_message(truncate_for_display(
+                        &dir_path.display().to_string(),
+                        msg_width(),
+                    ));
+                }
+                Ok(false) => dir_fail_count += 1,
+                Err(e) => return Err(e),
+            }
+        }
+        progress.inc(1);
+    }
+
+    let file_msg = finish_message(file_desc_count, file_fail_count, "file descriptions");
+    let dir_msg = finish_message(dir_desc_count, dir_fail_count, "directory descriptions");
+    progress.finish_with_message(f!("{file_msg}, {dir_msg}"));
+
+    db.set_metadata(
+        "primer_hash",
+        &mcptools_core::atlas::content_hash(primer.as_bytes()).hex(),
+    )?;
 
     Ok(())
 }
@@ -233,33 +256,80 @@ enum DescResult {
         short: String,
         long: String,
     },
-    ParseErr {
-        path: PathBuf,
-        error: String,
-    },
-    LlmErr {
+    Err {
         path: PathBuf,
         error: String,
     },
 }
 
+/// Describe a single directory via LLM. Returns `Ok(true)` on success, `Ok(false)` on
+/// a recoverable failure (parse error or LLM error), and `Err` for DB errors.
+async fn describe_directory(
+    db: &Database,
+    provider: &RigProvider,
+    primer: &str,
+    system: &str,
+    dir_path: &Path,
+) -> Result<bool> {
+    let children = db.directory_children(dir_path)?;
+    let aggregated_symbols = db.aggregated_symbols_for(dir_path)?;
+
+    let children_tuples: Vec<(PathBuf, bool, Option<&str>)> = children
+        .iter()
+        .map(|c| (c.path.clone(), c.is_dir, c.short_description.as_deref()))
+        .collect();
+
+    let prompt = build_directory_prompt(primer, dir_path, &children_tuples, &aggregated_symbols);
+
+    let response = match provider.generate(system, &prompt).await {
+        Ok(r) => r,
+        Err(e) => {
+            crate::prelude::eprintln!(
+                "warning: LLM call failed for directory {}: {e}",
+                dir_path.display()
+            );
+            db.update_directory_description(dir_path, "[description failed]", "")?;
+            return Ok(false);
+        }
+    };
+
+    match mcptools_core::atlas::parse_description(&response) {
+        Ok(desc) => {
+            db.update_directory_description(dir_path, &desc.short, &desc.long)?;
+            Ok(true)
+        }
+        Err(e) => {
+            crate::prelude::eprintln!(
+                "warning: failed to parse directory description for {}: {e}",
+                dir_path.display()
+            );
+            db.update_directory_description(dir_path, "[description failed]", "")?;
+            Ok(false)
+        }
+    }
+}
+
 /// Fan-out/fan-in: pre-build prompts (sequential, needs DB), dispatch LLM calls
 /// to N workers via a channel, collect results on a writer that updates the DB
 /// and progress bar.
+///
+/// Returns `(success_count, fail_count)`.
+#[allow(clippy::too_many_arguments)]
 async fn generate_descriptions(
     db: &Database,
     root: &Path,
     config: &mcptools_core::atlas::AtlasConfig,
     primer: &str,
-    provider: RigProvider,
+    provider: Arc<RigProvider>,
     indexed_paths: &[PathBuf],
     parallel: usize,
-) -> Result<()> {
+    progress: &ProgressBar,
+) -> Result<(u32, u32)> {
     use tokio::sync::mpsc;
 
-    let total = indexed_paths.len() as u64;
-
-    let progress = progress_bar(total, "Preparing prompts...");
+    if indexed_paths.is_empty() {
+        return Ok((0, 0));
+    }
 
     // Pre-build all prompts sequentially (needs DB for tree_path and symbols).
     let system = mcptools_core::atlas::file_system_prompt();
@@ -286,15 +356,12 @@ async fn generate_descriptions(
         work_items.push((file_path.clone(), prompt));
     }
 
-    progress.set_message("Generating descriptions...");
-
     // Fan-out: feed work items to N workers via a channel.
     let (work_tx, work_rx) = async_channel::bounded::<(PathBuf, String)>(parallel * 2);
     // Fan-in: workers send results back to the writer.
     let (result_tx, mut result_rx) = mpsc::channel::<DescResult>(parallel * 2);
 
     // Spawn N worker tasks.
-    let provider = Arc::new(provider);
     let system: Arc<str> = Arc::from(system);
     let mut worker_handles = Vec::with_capacity(parallel);
 
@@ -313,12 +380,12 @@ async fn generate_descriptions(
                             short: desc.short,
                             long: desc.long,
                         },
-                        Err(e) => DescResult::ParseErr {
+                        Err(e) => DescResult::Err {
                             path,
                             error: e.to_string(),
                         },
                     },
-                    Err(e) => DescResult::LlmErr {
+                    Err(e) => DescResult::Err {
                         path,
                         error: e.to_string(),
                     },
@@ -356,19 +423,11 @@ async fn generate_descriptions(
                     msg_width(),
                 ));
             }
-            DescResult::ParseErr { path, error } => {
+            DescResult::Err { path, error } => {
+                db.update_file_description(&path, "[description failed]", "")?;
                 progress.suspend(|| {
                     crate::prelude::eprintln!(
-                        "warning: failed to parse description for {}: {error}",
-                        path.display()
-                    );
-                });
-                fail_count += 1;
-            }
-            DescResult::LlmErr { path, error } => {
-                progress.suspend(|| {
-                    crate::prelude::eprintln!(
-                        "warning: LLM call failed for {}: {error}",
+                        "warning: description failed for {}: {error}",
                         path.display()
                     );
                 });
@@ -386,9 +445,7 @@ async fn generate_descriptions(
         handle.await.map_err(|e| eyre!("worker panicked: {e}"))?;
     }
 
-    progress.finish_with_message(finish_message(desc_count, fail_count, "descriptions"));
-
-    Ok(())
+    Ok((desc_count, fail_count))
 }
 
 /// Walk up from the current directory looking for a `.git` directory.
