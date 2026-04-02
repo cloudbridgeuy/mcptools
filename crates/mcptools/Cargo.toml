@@ -50,7 +50,6 @@ async-channel = { workspace = true }
 ignore = { workspace = true }
 terminal_size = { workspace = true }
 tempfile = "3.8"
-which = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = ["rig-core"]

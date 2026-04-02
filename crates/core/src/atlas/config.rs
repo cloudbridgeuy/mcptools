@@ -100,7 +100,6 @@ impl fmt::Display for BaseUrl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmProviderKind {
     Ollama,
-    ClaudeCli,
 }
 
 impl FromStr for LlmProviderKind {
@@ -109,7 +108,6 @@ impl FromStr for LlmProviderKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "ollama" => Ok(Self::Ollama),
-            "claude-cli" => Ok(Self::ClaudeCli),
             other => Err(ConfigError::InvalidProviderKind(other.to_string())),
         }
     }
@@ -119,7 +117,6 @@ impl fmt::Display for LlmProviderKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ollama => f.write_str("ollama"),
-            Self::ClaudeCli => f.write_str("claude-cli"),
         }
     }
 }
@@ -156,7 +153,7 @@ const DEFAULT_DB_PATH: &str = ".mcptools/atlas/index.db";
 const DEFAULT_MAX_FILE_TOKENS: usize = 10_000;
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 const DEFAULT_FILE_MODEL: &str = "atlas";
-const DEFAULT_DIR_MODEL: &str = "haiku";
+const DEFAULT_DIR_MODEL: &str = "atlas";
 
 fn default_file_llm() -> LlmProviderConfig {
     LlmProviderConfig {
@@ -168,9 +165,9 @@ fn default_file_llm() -> LlmProviderConfig {
 
 fn default_directory_llm() -> LlmProviderConfig {
     LlmProviderConfig {
-        kind: LlmProviderKind::ClaudeCli,
+        kind: LlmProviderKind::Ollama,
         model: ModelName(DEFAULT_DIR_MODEL.to_string()),
-        base_url: None,
+        base_url: Some(BaseUrl(DEFAULT_OLLAMA_URL.to_string())),
     }
 }
 
@@ -365,9 +362,12 @@ mod tests {
             DEFAULT_OLLAMA_URL
         );
 
-        assert_eq!(cfg.directory_llm.kind, LlmProviderKind::ClaudeCli);
-        assert_eq!(cfg.directory_llm.model.as_str(), "haiku");
-        assert!(cfg.directory_llm.base_url.is_none());
+        assert_eq!(cfg.directory_llm.kind, LlmProviderKind::Ollama);
+        assert_eq!(cfg.directory_llm.model.as_str(), "atlas");
+        assert_eq!(
+            cfg.directory_llm.base_url.as_ref().unwrap().as_str(),
+            DEFAULT_OLLAMA_URL
+        );
     }
 
     // -- TOML values override defaults --
@@ -381,8 +381,8 @@ mod tests {
             skip_patterns = ["*.log", "vendor/"]
 
             [file_llm]
-            kind = "claude-cli"
-            model = "sonnet"
+            kind = "ollama"
+            model = "custom-file"
 
             [directory_llm]
             kind = "ollama"
@@ -400,8 +400,8 @@ mod tests {
         assert_eq!(cfg.max_file_tokens, 5000);
         assert_eq!(cfg.skip_patterns, vec!["*.log", "vendor/"]);
 
-        assert_eq!(cfg.file_llm.kind, LlmProviderKind::ClaudeCli);
-        assert_eq!(cfg.file_llm.model.as_str(), "sonnet");
+        assert_eq!(cfg.file_llm.kind, LlmProviderKind::Ollama);
+        assert_eq!(cfg.file_llm.model.as_str(), "custom-file");
 
         assert_eq!(cfg.directory_llm.kind, LlmProviderKind::Ollama);
         assert_eq!(cfg.directory_llm.model.as_str(), "custom-dir");
@@ -466,7 +466,7 @@ mod tests {
         let cfg = parse_config(Some(""), &empty_env()).unwrap();
         assert_eq!(cfg.max_file_tokens, DEFAULT_MAX_FILE_TOKENS);
         assert_eq!(cfg.file_llm.model.as_str(), "atlas");
-        assert_eq!(cfg.directory_llm.model.as_str(), "haiku");
+        assert_eq!(cfg.directory_llm.model.as_str(), "atlas");
     }
 
     // -- LlmProviderKind parses from strings --
@@ -480,25 +480,16 @@ mod tests {
     }
 
     #[test]
-    fn llm_provider_kind_parses_claude_cli() {
-        assert_eq!(
-            "claude-cli".parse::<LlmProviderKind>().unwrap(),
-            LlmProviderKind::ClaudeCli
-        );
-    }
-
-    #[test]
     fn llm_provider_kind_rejects_unknown() {
         assert!("unknown".parse::<LlmProviderKind>().is_err());
     }
 
     #[test]
     fn llm_provider_kind_display_roundtrips() {
-        for kind in [LlmProviderKind::Ollama, LlmProviderKind::ClaudeCli] {
-            let s = kind.to_string();
-            let parsed: LlmProviderKind = s.parse().unwrap();
-            assert_eq!(parsed, kind);
-        }
+        let kind = LlmProviderKind::Ollama;
+        let s = kind.to_string();
+        let parsed: LlmProviderKind = s.parse().unwrap();
+        assert_eq!(parsed, kind);
     }
 
     // -- PrimerPath / DbPath resolve relative to repo root --
@@ -568,7 +559,7 @@ mod tests {
             PrimerPath(PathBuf::from(DEFAULT_PRIMER_PATH))
         );
         assert_eq!(cfg.file_llm.kind, LlmProviderKind::Ollama);
-        assert_eq!(cfg.directory_llm.kind, LlmProviderKind::ClaudeCli);
+        assert_eq!(cfg.directory_llm.kind, LlmProviderKind::Ollama);
     }
 
     // -- Empty model/base_url strings fall back to defaults --
@@ -638,14 +629,5 @@ mod tests {
             cfg.directory_llm.base_url.as_ref().unwrap().as_str(),
             "http://custom:9999"
         );
-    }
-
-    #[test]
-    fn ollama_url_does_not_propagate_to_directory_llm_when_claude_cli() {
-        let mut env = HashMap::new();
-        env.insert("OLLAMA_URL".into(), "http://custom:9999".into());
-        // Default directory_llm kind is ClaudeCli
-        let cfg = parse_config(None, &env).unwrap();
-        assert!(cfg.directory_llm.base_url.is_none());
     }
 }

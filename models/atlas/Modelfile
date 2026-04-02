@@ -7,7 +7,6 @@ TEMPLATE """<|im_start|>system
 <|im_start|>assistant
 <think>
 </think>
-
 """
 
 PARAMETER temperature 0.3
