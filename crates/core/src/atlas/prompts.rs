@@ -15,10 +15,14 @@ fn format_symbol(sym: &Symbol) -> String {
 
 /// System prompt instructing the LLM to output SHORT:/LONG: format.
 pub fn file_system_prompt() -> &'static str {
-    "You are a code documentation assistant. \
-     You MUST output exactly two sections:\n\n\
+    "You are a code documentation assistant.\n\
+     Your response MUST start with SHORT: on the very first line. No preamble.\n\
+     Output exactly two sections:\n\n\
      SHORT: A brief one-line description of the file (under 80 characters).\n\
      LONG: A detailed description weaving in patterns, dependencies, and relationships.\n\n\
+     Example format:\n\
+     SHORT: CLI argument parser and validation\n\
+     LONG: Defines the command-line interface using clap, validates input flags, and maps them to internal config types.\n\n\
      Be factual, not creative. Do not invent information beyond what the code shows."
 }
 
@@ -79,11 +83,15 @@ pub fn build_file_prompt(
 
 /// System prompt for directory descriptions. Static string.
 pub fn directory_system_prompt() -> &'static str {
-    "You are a code documentation assistant. \
-     You MUST output exactly two sections:\n\n\
+    "You are a code documentation assistant.\n\
+     Your response MUST start with SHORT: on the very first line. No preamble.\n\
+     Output exactly two sections:\n\n\
      SHORT: A brief one-line description of the directory (under 80 characters).\n\
      LONG: A detailed description covering the directory's role, what it contains, \
      and how its contents relate to each other.\n\n\
+     Example format:\n\
+     SHORT: Database access layer and query builders\n\
+     LONG: Contains the SQLite connection wrapper, CRUD methods for files and directories, and query helpers for tree and peek views.\n\n\
      Be factual, not creative. Do not invent information beyond what the contents show."
 }
 
