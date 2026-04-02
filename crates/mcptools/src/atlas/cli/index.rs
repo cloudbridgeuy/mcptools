@@ -242,7 +242,7 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
 }
 
 /// Collect directory paths bottom-up (leaf directories first).
-fn collect_directories_bottom_up(db: &Database) -> Result<Vec<PathBuf>> {
+pub(crate) fn collect_directories_bottom_up(db: &Database) -> Result<Vec<PathBuf>> {
     let dirs = db.all_directories()?;
     let mut paths: Vec<PathBuf> = dirs.into_iter().map(|d| d.path).collect();
     paths.sort_by_key(|p| Reverse(p.components().count()));
@@ -264,7 +264,7 @@ enum DescResult {
 
 /// Describe a single directory via LLM. Returns `Ok(true)` on success, `Ok(false)` on
 /// a recoverable failure (parse error or LLM error), and `Err` for DB errors.
-async fn describe_directory(
+pub(crate) async fn describe_directory(
     db: &Database,
     provider: &RigProvider,
     primer: &str,
@@ -315,7 +315,7 @@ async fn describe_directory(
 ///
 /// Returns `(success_count, fail_count)`.
 #[allow(clippy::too_many_arguments)]
-async fn generate_descriptions(
+pub(crate) async fn generate_descriptions(
     db: &Database,
     root: &Path,
     config: &mcptools_core::atlas::AtlasConfig,
@@ -449,7 +449,7 @@ async fn generate_descriptions(
 }
 
 /// Walk up from the current directory looking for a `.git` directory.
-pub fn find_git_root() -> Result<PathBuf> {
+pub(crate) fn find_git_root() -> Result<PathBuf> {
     let mut dir = std::env::current_dir().wrap_err("getting current directory")?;
     loop {
         if dir.join(".git").exists() {
@@ -462,7 +462,7 @@ pub fn find_git_root() -> Result<PathBuf> {
 }
 
 /// Create parent directories if they don't already exist.
-pub fn ensure_parent_dir(path: &Path) -> Result<()> {
+pub(crate) fn ensure_parent_dir(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .wrap_err_with(|| f!("creating directory: {}", parent.display()))?;
@@ -471,7 +471,7 @@ pub fn ensure_parent_dir(path: &Path) -> Result<()> {
 }
 
 /// Create a progress bar with the standard cyan bar style.
-fn progress_bar(total: u64, initial_message: &str) -> ProgressBar {
+pub(crate) fn progress_bar(total: u64, initial_message: &str) -> ProgressBar {
     let pb = ProgressBar::new(total);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -485,7 +485,7 @@ fn progress_bar(total: u64, initial_message: &str) -> ProgressBar {
 }
 
 /// Build a finish message like "5 descriptions generated" or "5 descriptions generated, 2 failed".
-fn finish_message(success: u32, failed: u32, label: &str) -> String {
+pub(crate) fn finish_message(success: u32, failed: u32, label: &str) -> String {
     if failed > 0 {
         f!("{success} {label} generated, {failed} failed")
     } else {
@@ -495,7 +495,7 @@ fn finish_message(success: u32, failed: u32, label: &str) -> String {
 
 /// Truncate a display string to fit within the terminal width, leaving room
 /// for progress bar chrome. Replaces the middle with "…" when too long.
-fn truncate_for_display(s: &str, max_width: usize) -> String {
+pub(crate) fn truncate_for_display(s: &str, max_width: usize) -> String {
     if s.len() <= max_width || max_width < 4 {
         return s.to_string();
     }
@@ -505,7 +505,7 @@ fn truncate_for_display(s: &str, max_width: usize) -> String {
 }
 
 /// Get available width for the progress bar message, accounting for chrome.
-fn msg_width() -> usize {
+pub(crate) fn msg_width() -> usize {
     let term_width = terminal_size::terminal_size()
         .map(|(w, _)| w.0 as usize)
         .unwrap_or(80);
@@ -514,7 +514,7 @@ fn msg_width() -> usize {
 }
 
 /// Produce an epoch-seconds timestamp from `SystemTime::now()`.
-fn epoch_now() -> String {
+pub(crate) fn epoch_now() -> String {
     let duration = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();

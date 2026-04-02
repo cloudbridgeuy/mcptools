@@ -595,6 +595,28 @@ impl Database {
         Ok(paths)
     }
 
+    /// Delete a file entry from the files table.
+    pub fn delete_file(&self, path: &Path) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM files WHERE path = ?1",
+                params![path.to_string_lossy().as_ref()],
+            )
+            .wrap_err("deleting file")?;
+        Ok(())
+    }
+
+    /// Delete all symbols associated with a file path.
+    pub fn delete_symbols_for(&self, path: &Path) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM symbols WHERE file_path = ?1",
+                params![path.to_string_lossy().as_ref()],
+            )
+            .wrap_err("deleting symbols for file")?;
+        Ok(())
+    }
+
     /// Return all file paths and their content hashes (for incremental updates).
     pub fn file_hashes(&self) -> Result<HashMap<PathBuf, ContentHash>> {
         let mut stmt = self
