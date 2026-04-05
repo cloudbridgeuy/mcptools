@@ -2,7 +2,22 @@ use std::collections::BTreeSet;
 use std::fmt::Write;
 use std::path::Path;
 
+use serde::Serialize;
+
 use crate::atlas::types::{DirectoryPeekView, PeekView, Symbol, TreeEntry, Visibility};
+
+/// Index health information (read model).
+#[derive(Debug, Clone, Serialize)]
+pub struct IndexStatus {
+    pub last_sync: Option<String>,
+    pub total_files: usize,
+    pub total_directories: usize,
+    pub total_symbols: usize,
+    pub files_with_descriptions: usize,
+    pub directories_with_descriptions: usize,
+    pub primer_hash: Option<String>,
+    pub primer_excerpt: Option<String>,
+}
 
 /// Remove a single trailing newline, if present.
 fn trim_trailing_newline(mut s: String) -> String {
@@ -72,6 +87,70 @@ pub fn format_directory_peek(peek: &DirectoryPeekView, json: bool) -> String {
     } else {
         format_directory_peek_human(peek)
     }
+}
+
+/// Format index status for display.
+/// Returns human-readable text or JSON depending on the format flag.
+pub fn format_status(status: &IndexStatus, json: bool) -> String {
+    if json {
+        serde_json::to_string_pretty(status).unwrap_or_default()
+    } else {
+        format_status_human(status)
+    }
+}
+
+fn format_status_human(status: &IndexStatus) -> String {
+    let mut out = String::new();
+
+    let _ = writeln!(out, "Atlas Index Status");
+    let _ = writeln!(out, "==================");
+
+    let last_sync = status.last_sync.as_deref().unwrap_or("(never)");
+    let _ = writeln!(out, "Last sync:       {last_sync}");
+
+    let _ = writeln!(
+        out,
+        "Files:           {} ({} with descriptions)",
+        format_number(status.total_files),
+        format_number(status.files_with_descriptions),
+    );
+    let _ = writeln!(
+        out,
+        "Directories:     {} ({} with descriptions)",
+        format_number(status.total_directories),
+        format_number(status.directories_with_descriptions),
+    );
+    let _ = writeln!(
+        out,
+        "Symbols:         {}",
+        format_number(status.total_symbols),
+    );
+
+    let primer_display = match &status.primer_excerpt {
+        Some(excerpt) if excerpt.chars().count() > 50 => {
+            let prefix: String = excerpt.chars().take(50).collect();
+            format!("{prefix}...")
+        }
+        Some(excerpt) => excerpt.clone(),
+        None => "(none)".to_string(),
+    };
+    let _ = writeln!(out, "Primer:          {primer_display}");
+
+    trim_trailing_newline(out)
+}
+
+/// Format a number with comma separators (e.g. 1247 -> "1,247").
+fn format_number(n: usize) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, &b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(b as char);
+    }
+    result
 }
 
 fn format_directory_peek_human(peek: &DirectoryPeekView) -> String {
@@ -644,5 +723,90 @@ src/
         let files: Vec<&str> = vec![];
         let parents = extract_parent_paths(&files);
         assert!(parents.is_empty());
+    }
+
+    // ---- format_status tests ----
+
+    fn make_full_status() -> IndexStatus {
+        IndexStatus {
+            last_sync: Some("2026-03-31T10:30:00Z".to_string()),
+            total_files: 142,
+            total_directories: 23,
+            total_symbols: 1247,
+            files_with_descriptions: 138,
+            directories_with_descriptions: 23,
+            primer_hash: Some("a1b2c3d4e5f6".to_string()),
+            primer_excerpt: Some("This codebase is a Rust CLI tool".to_string()),
+        }
+    }
+
+    #[test]
+    fn format_status_full_data_produces_expected_text() {
+        let status = make_full_status();
+        let result = format_status(&status, false);
+
+        assert!(result.contains("Atlas Index Status"));
+        assert!(result.contains("=================="));
+        assert!(result.contains("Last sync:       2026-03-31T10:30:00Z"));
+        assert!(result.contains("Files:           142 (138 with descriptions)"));
+        assert!(result.contains("Directories:     23 (23 with descriptions)"));
+        assert!(result.contains("Symbols:         1,247"));
+        assert!(result.contains("Primer:          This codebase is a Rust CLI tool"));
+    }
+
+    #[test]
+    fn format_status_json_produces_valid_json() {
+        let status = make_full_status();
+        let result = format_status(&status, true);
+
+        let parsed: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        assert!(parsed.is_object());
+        assert_eq!(parsed["total_files"], 142);
+        assert_eq!(parsed["total_symbols"], 1247);
+        assert_eq!(parsed["last_sync"], "2026-03-31T10:30:00Z");
+        assert_eq!(parsed["files_with_descriptions"], 138);
+        assert_eq!(parsed["directories_with_descriptions"], 23);
+        assert_eq!(parsed["primer_excerpt"], "This codebase is a Rust CLI tool");
+    }
+
+    #[test]
+    fn format_status_no_sync_yet() {
+        let status = IndexStatus {
+            last_sync: None,
+            total_files: 0,
+            total_directories: 0,
+            total_symbols: 0,
+            files_with_descriptions: 0,
+            directories_with_descriptions: 0,
+            primer_hash: None,
+            primer_excerpt: None,
+        };
+
+        let result = format_status(&status, false);
+
+        assert!(result.contains("Last sync:       (never)"));
+        assert!(result.contains("Files:           0 (0 with descriptions)"));
+        assert!(result.contains("Directories:     0 (0 with descriptions)"));
+        assert!(result.contains("Symbols:         0"));
+        assert!(result.contains("Primer:          (none)"));
+    }
+
+    #[test]
+    fn format_status_primer_excerpt_truncated() {
+        let long_excerpt = "A".repeat(80);
+        let status = IndexStatus {
+            last_sync: Some("2026-03-31T10:30:00Z".to_string()),
+            total_files: 10,
+            total_directories: 2,
+            total_symbols: 50,
+            files_with_descriptions: 8,
+            directories_with_descriptions: 2,
+            primer_hash: Some("abc123".to_string()),
+            primer_excerpt: Some(long_excerpt),
+        };
+
+        let result = format_status(&status, false);
+        let expected_truncated = format!("Primer:          {}...", "A".repeat(50));
+        assert!(result.contains(&expected_truncated));
     }
 }

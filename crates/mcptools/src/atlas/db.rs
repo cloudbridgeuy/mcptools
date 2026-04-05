@@ -617,6 +617,57 @@ impl Database {
         Ok(())
     }
 
+    fn count_query(&self, sql: &'static str, context: &'static str) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row(sql, [], |row| row.get(0))
+            .wrap_err(context)?;
+        Ok(count as usize)
+    }
+
+    /// Count total files in the index.
+    pub fn count_files(&self) -> Result<usize> {
+        self.count_query("SELECT COUNT(*) FROM files", "counting files")
+    }
+
+    /// Count total directories in the index.
+    pub fn count_directories(&self) -> Result<usize> {
+        self.count_query("SELECT COUNT(*) FROM directories", "counting directories")
+    }
+
+    /// Count total symbols in the index.
+    pub fn count_symbols(&self) -> Result<usize> {
+        self.count_query("SELECT COUNT(*) FROM symbols", "counting symbols")
+    }
+
+    /// Count files that have a short description.
+    pub fn count_files_with_descriptions(&self) -> Result<usize> {
+        self.count_query(
+            "SELECT COUNT(*) FROM files WHERE short_description IS NOT NULL",
+            "counting files with descriptions",
+        )
+    }
+
+    /// Count directories that have a short description.
+    pub fn count_directories_with_descriptions(&self) -> Result<usize> {
+        self.count_query(
+            "SELECT COUNT(*) FROM directories WHERE short_description IS NOT NULL",
+            "counting directories with descriptions",
+        )
+    }
+
+    /// Get a metadata value by key, returning None if not found.
+    pub fn get_metadata(&self, key: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT value FROM metadata WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+            .wrap_err("querying metadata")
+    }
+
     /// Return all file paths and their content hashes (for incremental updates).
     pub fn file_hashes(&self) -> Result<HashMap<PathBuf, ContentHash>> {
         let mut stmt = self

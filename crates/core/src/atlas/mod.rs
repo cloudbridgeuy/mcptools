@@ -20,7 +20,8 @@ pub use prompts::{
 };
 pub use symbols::extract_symbols;
 pub use tree_view::{
-    extract_parent_paths, format_directory_peek, format_peek, format_tree, sort_tree_entries,
+    extract_parent_paths, format_directory_peek, format_peek, format_status, format_tree,
+    sort_tree_entries, IndexStatus,
 };
 pub use types::{
     ContentHash, DirectoryEntry, DirectoryPeekView, FileEntry, IndexTier, Language, PeekView,
