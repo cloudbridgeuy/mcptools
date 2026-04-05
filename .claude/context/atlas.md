@@ -32,6 +32,8 @@ mcptools atlas peek <path>            # File or directory summary with symbols/c
 mcptools atlas peek <path> --json     # JSON output
 mcptools atlas update                 # Incremental update (changed files only)
 mcptools atlas sync                   # Force full re-index
+mcptools atlas status                 # Index health summary
+mcptools atlas status --json          # JSON output
 ```
 
 ### `atlas init` Workflow
@@ -124,7 +126,7 @@ See [Atlas Setup](../../docs/ATLAS_SETUP.md) for Ollama model download and Model
 | `config.rs` | `AtlasConfig`, `PrimerPath`, `DbPath`, `ModelName`, `BaseUrl`, `LlmProviderKind` — config parsing from TOML + env var overlay, defaults |
 | `hash.rs` | `content_hash(bytes) -> ContentHash` (SHA-256) |
 | `symbols.rs` | `extract_symbols(tree, source, language, path) -> Vec<Symbol>` |
-| `tree_view.rs` | `format_tree(entries, json)`, `format_peek(peek, json)` |
+| `tree_view.rs` | `format_tree(entries, json)`, `format_peek(peek, json)`, `format_status(status, json)`, `IndexStatus` |
 | `parse.rs` | `parse_description(response) -> FileDescription` — parse SHORT/LONG format from LLM output |
 | `prompts.rs` | `file_system_prompt`, `build_file_prompt`, `build_primer_refinement_prompt` — LLM prompt assembly |
 
@@ -143,14 +145,44 @@ See [Atlas Setup](../../docs/ATLAS_SETUP.md) for Ollama model download and Model
 | `cli/peek.rs` | `atlas peek` handler: file or directory lookup, symbol display |
 | `cli/update.rs` | `atlas update` handler: incremental update via hash-based change detection |
 | `cli/sync.rs` | `atlas sync` handler: clear index and force full re-index |
+| `cli/status.rs` | `atlas status` handler: index health display |
+| `data.rs` | Shared data functions: `atlas_tree_data`, `atlas_peek_data`, `atlas_status_data` (used by CLI + MCP) |
 
 ## SQLite Schema
 
 Four tables: `symbols`, `files`, `directories`, `metadata`. Indexes on `symbols(file_path)` and `files(path)`. Database at `.mcptools/atlas/index.db` relative to git root.
 
+## MCP Tools (V5)
+
+Atlas exposes three MCP tools and one MCP resource for AI agent access.
+
+### Tools
+
+| Tool | Description | Input |
+|------|-------------|-------|
+| `atlas_tree_view` | Browse annotated directory tree | `path` (optional), `depth` (optional, default 1) |
+| `atlas_peek` | Get file/directory summary + symbols | `path` (required) |
+| `atlas_status` | Check index health | (none) |
+
+All tools return JSON. They call the same shared data functions as the CLI commands.
+
+### Primer Resource
+
+The project primer is exposed as an MCP resource at `atlas://primer`. Clients can read it via `resources/list` and `resources/read` for automatic injection at session start.
+
+### Agent Navigation Workflow
+
+1. Read primer (MCP resource) — understand project purpose and architecture
+2. `atlas_tree_view` at root — pick a direction
+3. `atlas_tree_view` with path — drill into directories of interest
+4. `atlas_peek` with file path — get summary + symbols before reading
+5. Use grep/read to pull the actual code
+
 ## Planned Features
 
-- **V2**: ~~LLM-generated file descriptions~~ Implemented, incremental updates (content hash diffing) deferred to V3
-- **V3**: MCP tool integration for agent access
-- **V4**: Cross-file relationship tracking
-- **V5**: Semantic search over symbols and descriptions
+- **V2**: ~~LLM-generated file descriptions~~ Implemented
+- **V3**: ~~MCP tool integration~~ Implemented (V5)
+- **V4**: ~~Incremental updates~~ Implemented
+- **V5**: ~~MCP tools + status + primer resource~~ Implemented
+- **V6**: Cross-file relationship tracking
+- **V7**: Semantic search over symbols and descriptions
