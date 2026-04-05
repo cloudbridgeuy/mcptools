@@ -28,6 +28,8 @@ pub enum Commands {
     Update(cli::update::UpdateOptions),
     /// Force full re-index
     Sync(cli::sync::SyncOptions),
+    /// Show index status and statistics
+    Status(cli::status::StatusOptions),
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
@@ -38,5 +40,6 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
         Commands::Init(opts) => cli::init::run(opts, global).await,
         Commands::Update(opts) => cli::update::run(opts, global).await,
         Commands::Sync(opts) => cli::sync::run(opts, global).await,
+        Commands::Status(opts) => cli::status::run(opts, global).await,
     }
 }

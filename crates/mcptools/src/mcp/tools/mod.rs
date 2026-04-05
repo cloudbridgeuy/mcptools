@@ -1,4 +1,5 @@
 mod annotations;
+mod atlas;
 mod atlassian;
 mod greprag;
 mod hn;
@@ -21,10 +22,14 @@ pub struct ServerInfo {
 #[derive(Debug, Serialize)]
 pub struct ServerCapabilities {
     pub tools: Option<ToolsCapability>,
+    pub resources: Option<ResourcesCapability>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ToolsCapability {}
+
+#[derive(Debug, Serialize)]
+pub struct ResourcesCapability {}
 
 #[derive(Debug, Serialize)]
 pub struct InitializeResult {
@@ -65,6 +70,7 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
         protocol_version: "2024-11-05".to_string(),
         capabilities: ServerCapabilities {
             tools: Some(ToolsCapability {}),
+            resources: Some(ResourcesCapability {}),
         },
         server_info: ServerInfo {
             name: "mcptools".to_string(),
@@ -978,6 +984,36 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": ["path"]
             }),
         },
+        Tool {
+            name: "atlas_tree_view".to_string(),
+            description: "Browse an annotated directory tree of the codebase. Each entry includes a short description of what the file or directory contains. Use this to navigate unfamiliar codebases — start at the root, then drill into directories of interest.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Directory path relative to repo root. Default: repo root." },
+                    "depth": { "type": "integer", "description": "How many levels deep to show. Default: 1." }
+                }
+            }),
+        },
+        Tool {
+            name: "atlas_peek".to_string(),
+            description: "Get a detailed summary of a file or directory. For files: long description, extracted symbols with signatures. For directories: long description, children with descriptions, aggregated symbols. Use this after tree_view to understand a specific file before reading it.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "File or directory path relative to repo root." }
+                },
+                "required": ["path"]
+            }),
+        },
+        Tool {
+            name: "atlas_status".to_string(),
+            description: "Check the health of the Atlas codebase index. Shows when it was last updated, how many files are tracked, and whether descriptions are available.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -1066,6 +1102,9 @@ pub async fn handle_tools_call(
         "pdf_images" => pdf::handle_pdf_images(params.arguments, global).await,
         "pdf_image" => pdf::handle_pdf_image(params.arguments, global).await,
         "pdf_info" => pdf::handle_pdf_info(params.arguments, global).await,
+        "atlas_tree_view" => atlas::handle_atlas_tree_view(params.arguments, global).await,
+        "atlas_peek" => atlas::handle_atlas_peek(params.arguments, global).await,
+        "atlas_status" => atlas::handle_atlas_status(params.arguments, global).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),

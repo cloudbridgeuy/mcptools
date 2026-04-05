@@ -1,4 +1,5 @@
 mod cli;
+mod resources;
 mod sse;
 mod stdio;
 mod tools;
@@ -72,6 +73,8 @@ pub async fn handle_request(request_str: &str, global: &crate::Global) -> JsonRp
         "initialize" => tools::handle_initialize(),
         "tools/list" => tools::handle_tools_list(),
         "tools/call" => tools::handle_tools_call(request.params, global).await,
+        "resources/list" => resources::handle_resources_list(),
+        "resources/read" => resources::handle_resources_read(request.params),
         method => Err(JsonRpcError {
             code: -32601,
             message: format!("Method not found: {method}"),

@@ -4,6 +4,8 @@ use crate::prelude::*;
 use mcptools_core::atlas::format_tree;
 
 use crate::atlas::cli::index;
+use crate::atlas::config::load_config;
+use crate::atlas::data::atlas_tree_data;
 use crate::atlas::db::Database;
 
 #[derive(Debug, clap::Parser)]
@@ -22,10 +24,10 @@ pub struct TreeOptions {
 
 pub async fn run(opts: TreeOptions, _global: crate::Global) -> Result<()> {
     let root = index::find_git_root()?;
-    let db_path = root.join(".mcptools/atlas/index.db");
-    let db = Database::open(&db_path)?;
+    let config = load_config(&root)?;
+    let db = Database::open(&config.db_path.resolve(&root))?;
     let path = opts.path.unwrap_or_default();
-    let entries = db.tree_entries(&path, opts.depth)?;
+    let entries = atlas_tree_data(&db, Some(&path), Some(opts.depth))?;
     let output = format_tree(&entries, opts.json);
     crate::prelude::println!("{output}");
     Ok(())
