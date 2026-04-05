@@ -21,14 +21,18 @@ pub enum Commands {
 }
 
 /// Run deploy-key commands
-pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
-    if global.verbose {
+pub async fn run(
+    cmd: Commands,
+    config: &super::super::super::BitbucketConfig,
+    main_global: &crate::Global,
+) -> Result<()> {
+    if main_global.verbose {
         println!("Running Bitbucket Deploy Key command...");
     }
 
     match cmd {
-        Commands::Add(options) => add::handler(options, global).await,
-        Commands::List(options) => list::handler(options, global).await,
-        Commands::Remove(options) => remove::handler(options, global).await,
+        Commands::Add(options) => add::handler(options, config, main_global).await,
+        Commands::List(options) => list::handler(options, config, main_global).await,
+        Commands::Remove(options) => remove::handler(options, config, main_global).await,
     }
 }

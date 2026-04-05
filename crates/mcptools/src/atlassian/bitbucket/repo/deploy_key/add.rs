@@ -1,7 +1,7 @@
 use crate::atlassian::bitbucket::csv_escape;
 use crate::atlassian::bitbucket::repo::list::{list_repo_data, ListRepoParams};
 use crate::atlassian::bitbucket::{OutputFormat, MAX_AUTO_PAGES};
-use crate::atlassian::{create_bitbucket_client, BitbucketConfig};
+use crate::atlassian::{create_bitbucket_client, resolve_bitbucket_base_url, BitbucketConfig};
 use crate::prelude::{eprintln, println, *};
 use color_eyre::owo_colors::OwoColorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -55,12 +55,12 @@ pub struct AddDeployKeyParams {
     pub key: String,
     pub label: String,
     pub base_url_override: Option<String>,
-    pub app_password_override: Option<String>,
 }
 
 /// Add a deploy key to a single repository via Bitbucket API
 pub async fn add_deploy_key_data(
     params: AddDeployKeyParams,
+    config: &BitbucketConfig,
     spinner: Option<&ProgressBar>,
 ) -> Result<DeployKeyAddOutput> {
     let AddDeployKeyParams {
@@ -69,13 +69,12 @@ pub async fn add_deploy_key_data(
         key,
         label,
         base_url_override,
-        app_password_override,
     } = params;
 
-    let config =
-        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
-    let client = create_bitbucket_client(&config)?;
-    let base_url = config.base_url.trim_end_matches('/');
+    // Use provided config, with optional base_url override
+    let base_url = resolve_bitbucket_base_url(config, base_url_override.as_deref());
+
+    let client = create_bitbucket_client(config)?;
 
     let url = format!(
         "{}/repositories/{}/{}/deploy-keys",
@@ -122,7 +121,11 @@ pub async fn add_deploy_key_data(
     })
 }
 
-pub async fn handler(options: AddOptions, global: crate::Global) -> Result<()> {
+pub async fn handler(
+    options: AddOptions,
+    config: &super::super::super::super::BitbucketConfig,
+    _main_global: &crate::Global,
+) -> Result<()> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -157,9 +160,8 @@ pub async fn handler(options: AddOptions, global: crate::Global) -> Result<()> {
                     limit: 100,
                     next_page,
                     base_url_override: options.base_url.clone(),
-                    app_password_override: global.bitbucket_app_password.clone(),
                 };
-                let page_data = list_repo_data(params, Some(&spinner)).await?;
+                let page_data = list_repo_data(params, config, Some(&spinner)).await?;
                 for repo in &page_data.repositories {
                     targets.push((workspace.clone(), repo.slug.clone()));
                 }
@@ -206,10 +208,9 @@ pub async fn handler(options: AddOptions, global: crate::Global) -> Result<()> {
             key: key.clone(),
             label: options.label.clone(),
             base_url_override: options.base_url.clone(),
-            app_password_override: global.bitbucket_app_password.clone(),
         };
 
-        match add_deploy_key_data(params, None).await {
+        match add_deploy_key_data(params, config, None).await {
             Ok(result) => results.push(result),
             Err(e) => {
                 spinner.suspend(|| {

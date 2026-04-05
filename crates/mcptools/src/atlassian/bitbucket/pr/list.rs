@@ -1,4 +1,4 @@
-use crate::atlassian::{create_bitbucket_client, BitbucketConfig};
+use crate::atlassian::{create_bitbucket_client, resolve_bitbucket_base_url, BitbucketConfig};
 use crate::prelude::{eprintln, println, *};
 use color_eyre::owo_colors::OwoColorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -49,8 +49,6 @@ pub struct ListPRParams {
     pub next_page: Option<String>,
     /// Override for Bitbucket API base URL
     pub base_url_override: Option<String>,
-    /// Override for app password
-    pub app_password_override: Option<String>,
 }
 
 /// Fetch PR list from Bitbucket API
@@ -58,6 +56,7 @@ pub struct ListPRParams {
 /// This function fetches a paginated list of pull requests from the specified repository.
 pub async fn list_pr_data(
     params: ListPRParams,
+    config: &BitbucketConfig,
     spinner: Option<&ProgressBar>,
 ) -> Result<PRListOutput> {
     let ListPRParams {
@@ -66,14 +65,12 @@ pub async fn list_pr_data(
         limit,
         next_page,
         base_url_override,
-        app_password_override,
     } = params;
 
-    // Setup config and client with CLI overrides
-    let config =
-        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
-    let client = create_bitbucket_client(&config)?;
-    let base_url = config.base_url.trim_end_matches('/');
+    // Use provided config, with optional base_url override
+    let base_url = resolve_bitbucket_base_url(config, base_url_override.as_deref());
+
+    let client = create_bitbucket_client(config)?;
 
     // Build the request URL
     let url = match next_page {
@@ -121,7 +118,11 @@ pub async fn list_pr_data(
 }
 
 /// Handle the PR list command
-pub async fn handler(options: ListOptions, global: crate::Global) -> Result<()> {
+pub async fn handler(
+    options: ListOptions,
+    config: &super::super::super::BitbucketConfig,
+    main_global: &crate::Global,
+) -> Result<()> {
     // Create spinner for progress indication
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
@@ -137,10 +138,9 @@ pub async fn handler(options: ListOptions, global: crate::Global) -> Result<()> 
         limit: options.limit,
         next_page: options.next_page,
         base_url_override: options.base_url,
-        app_password_override: global.bitbucket_app_password,
     };
 
-    let data = list_pr_data(params, Some(&spinner)).await?;
+    let data = list_pr_data(params, config, Some(&spinner)).await?;
 
     // Clear the spinner before printing output
     spinner.finish_and_clear();

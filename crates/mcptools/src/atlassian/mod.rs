@@ -5,6 +5,22 @@ pub mod bitbucket;
 pub mod confluence;
 pub mod jira;
 
+/// Shared Atlassian configuration options
+#[derive(Debug, Clone, clap::Args)]
+pub struct Global {
+    /// Atlassian base URL (e.g., https://your-domain.atlassian.net)
+    #[clap(long, env = "ATLASSIAN_BASE_URL")]
+    pub atlassian_url: Option<String>,
+
+    /// Atlassian email
+    #[clap(long, env = "ATLASSIAN_EMAIL")]
+    pub atlassian_email: Option<String>,
+
+    /// Atlassian API token
+    #[clap(long, env = "ATLASSIAN_API_TOKEN", hide = true)]
+    pub atlassian_token: Option<String>,
+}
+
 /// Atlassian module app - root command
 #[derive(Debug, clap::Parser)]
 #[command(name = "atlassian")]
@@ -12,6 +28,9 @@ pub mod jira;
 pub struct App {
     #[command(subcommand)]
     pub command: Commands,
+
+    #[clap(flatten)]
+    pub global: Global,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -25,8 +44,7 @@ pub enum Commands {
     Confluence(confluence::Commands),
 
     /// Bitbucket operations
-    #[clap(subcommand)]
-    Bitbucket(bitbucket::Commands),
+    Bitbucket(bitbucket::App),
 }
 
 /// Atlassian configuration from environment variables
@@ -180,9 +198,38 @@ impl BitbucketConfig {
     /// Default Bitbucket Cloud API base URL
     pub const DEFAULT_BASE_URL: &'static str = "https://api.bitbucket.org/2.0";
 
+    /// Create configuration from CLI options with fallback to shared Atlassian options
+    /// Used by CLI path
+    pub fn new(bitbucket_global: &bitbucket::Global, _atlassian_global: &Global) -> Result<Self> {
+        let base_url = bitbucket_global
+            .bitbucket_url
+            .clone()
+            .unwrap_or_else(|| Self::DEFAULT_BASE_URL.to_string());
+
+        let username = bitbucket_global
+            .bitbucket_username
+            .as_ref()
+            .ok_or_else(|| {
+                eyre!(
+                "Bitbucket username not configured. Set --bitbucket-username or BITBUCKET_USERNAME"
+            )
+            })?;
+
+        let app_password = bitbucket_global.bitbucket_app_password
+            .as_ref()
+            .ok_or_else(|| eyre!(
+                "Bitbucket app password not configured. Set --bitbucket-app-password or BITBUCKET_APP_PASSWORD"
+            ))?;
+
+        Ok(Self {
+            base_url,
+            username: username.clone(),
+            app_password: app_password.clone(),
+        })
+    }
+
     /// Load configuration from environment variables
-    /// Uses BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD for authentication
-    /// Uses BITBUCKET_BASE_URL with default fallback
+    /// Used by MCP server path
     pub fn from_env() -> Result<Self> {
         let username = std::env::var("BITBUCKET_USERNAME")
             .map_err(|_| eyre!("BITBUCKET_USERNAME environment variable not set"))?;
@@ -197,20 +244,17 @@ impl BitbucketConfig {
             app_password,
         })
     }
+}
 
-    /// Apply CLI overrides to the configuration
-    pub fn with_overrides(
-        mut self,
-        base_url: Option<String>,
-        app_password: Option<String>,
-    ) -> Self {
-        if let Some(url) = base_url {
-            self.base_url = url;
-        }
-        if let Some(password) = app_password {
-            self.app_password = password;
-        }
-        self
+/// Resolve the effective base URL from config and optional override.
+/// Pure function - no side effects.
+pub fn resolve_bitbucket_base_url(
+    config: &BitbucketConfig,
+    base_url_override: Option<&str>,
+) -> String {
+    match base_url_override {
+        Some(override_url) => override_url.trim_end_matches('/').to_string(),
+        None => config.base_url.trim_end_matches('/').to_string(),
     }
 }
 
@@ -237,14 +281,16 @@ pub fn create_bitbucket_client(config: &BitbucketConfig) -> Result<reqwest::Clie
 }
 
 /// Module entry point
-pub async fn run(app: App, global: crate::Global) -> Result<()> {
-    if global.verbose {
+pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
+    if main_global.verbose {
         println!("Running Atlassian module...");
     }
 
     match app.command {
-        Commands::Jira(cmd) => jira::run(cmd, global).await,
-        Commands::Confluence(cmd) => confluence::run(cmd, global).await,
-        Commands::Bitbucket(cmd) => bitbucket::run(cmd, global).await,
+        Commands::Jira(cmd) => jira::run(cmd, main_global).await,
+        Commands::Confluence(cmd) => confluence::run(cmd, main_global).await,
+        Commands::Bitbucket(bitbucket_app) => {
+            bitbucket::run(bitbucket_app, app.global, main_global).await
+        }
     }
 }

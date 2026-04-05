@@ -1,4 +1,4 @@
-use crate::atlassian::{create_bitbucket_client, BitbucketConfig};
+use crate::atlassian::{create_bitbucket_client, resolve_bitbucket_base_url, BitbucketConfig};
 use crate::prelude::{println, *};
 use color_eyre::owo_colors::OwoColorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -60,8 +60,6 @@ pub struct CreatePRParams {
     pub close_source_branch: bool,
     /// Override for Bitbucket API base URL
     pub base_url_override: Option<String>,
-    /// Override for app password
-    pub app_password_override: Option<String>,
 }
 
 /// Resolve the source branch name.
@@ -103,6 +101,7 @@ fn resolve_source_branch(source: Option<String>) -> Result<String> {
 /// Handles HTTP POST to Bitbucket API, response parsing, and core transform.
 pub async fn create_pr_data(
     params: CreatePRParams,
+    config: &BitbucketConfig,
     spinner: Option<&ProgressBar>,
 ) -> Result<PRCreateOutput> {
     let CreatePRParams {
@@ -113,14 +112,12 @@ pub async fn create_pr_data(
         description,
         close_source_branch,
         base_url_override,
-        app_password_override,
     } = params;
 
-    // Setup config and client with CLI overrides
-    let config =
-        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
-    let client = create_bitbucket_client(&config)?;
-    let base_url = config.base_url.trim_end_matches('/');
+    // Use provided config, with optional base_url override
+    let base_url = resolve_bitbucket_base_url(config, base_url_override.as_deref());
+
+    let client = create_bitbucket_client(config)?;
 
     // Build the request body — omit optional fields when None
     let mut payload = serde_json::json!({
@@ -167,7 +164,11 @@ pub async fn create_pr_data(
 }
 
 /// Handle the pull request creation command.
-pub async fn handler(options: CreateOptions, global: crate::Global) -> Result<()> {
+pub async fn handler(
+    options: CreateOptions,
+    config: &super::super::super::BitbucketConfig,
+    _main_global: &crate::Global,
+) -> Result<()> {
     // Resolve the source branch first (Parse Don't Validate — at the boundary)
     let source_branch = resolve_source_branch(options.source)?;
 
@@ -188,10 +189,9 @@ pub async fn handler(options: CreateOptions, global: crate::Global) -> Result<()
         description: options.description,
         close_source_branch: options.close_source_branch,
         base_url_override: options.base_url,
-        app_password_override: global.bitbucket_app_password,
     };
 
-    let data = create_pr_data(params, Some(&spinner)).await?;
+    let data = create_pr_data(params, config, Some(&spinner)).await?;
 
     // Clear the spinner before printing output
     spinner.finish_and_clear();

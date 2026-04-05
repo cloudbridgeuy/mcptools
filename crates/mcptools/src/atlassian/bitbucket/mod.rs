@@ -4,6 +4,33 @@ pub mod workspace;
 
 use crate::prelude::{println, *};
 
+/// Bitbucket-specific configuration options
+#[derive(Debug, Clone, clap::Args)]
+pub struct Global {
+    /// Bitbucket API base URL
+    #[clap(long, env = "BITBUCKET_BASE_URL")]
+    pub bitbucket_url: Option<String>,
+
+    /// Bitbucket username
+    #[clap(long, env = "BITBUCKET_USERNAME")]
+    pub bitbucket_username: Option<String>,
+
+    /// Bitbucket app password for authentication
+    #[clap(long, env = "BITBUCKET_APP_PASSWORD", hide = true)]
+    pub bitbucket_app_password: Option<String>,
+}
+
+/// Bitbucket commands app
+#[derive(Debug, clap::Parser)]
+#[command(name = "bitbucket")]
+pub struct App {
+    #[command(subcommand)]
+    pub command: Commands,
+
+    #[clap(flatten)]
+    pub global: Global,
+}
+
 /// Output format for list commands
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum, serde::Deserialize)]
 pub enum OutputFormat {
@@ -45,15 +72,24 @@ pub enum Commands {
 }
 
 /// Run Bitbucket commands
-pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
-    if global.verbose {
+pub async fn run(
+    app: App,
+    atlassian_global: super::Global,
+    main_global: crate::Global,
+) -> Result<()> {
+    if main_global.verbose {
         println!("Running Bitbucket command...");
     }
 
-    match cmd {
-        Commands::Pr(pr_cmd) => pr::run(pr_cmd, global).await,
-        Commands::Workspace(workspace_cmd) => workspace::run(workspace_cmd, global).await,
-        Commands::Repo(repo_cmd) => repo::run(repo_cmd, global).await,
+    // Create config with fallback logic
+    let config = super::BitbucketConfig::new(&app.global, &atlassian_global)?;
+
+    match app.command {
+        Commands::Pr(pr_cmd) => pr::run(pr_cmd, &config, &main_global).await,
+        Commands::Workspace(workspace_cmd) => {
+            workspace::run(workspace_cmd, &config, &main_global).await
+        }
+        Commands::Repo(repo_cmd) => repo::run(repo_cmd, &config, &main_global).await,
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::atlassian::bitbucket::{csv_escape, OutputFormat};
-use crate::atlassian::{create_bitbucket_client, BitbucketConfig};
+use crate::atlassian::{create_bitbucket_client, resolve_bitbucket_base_url, BitbucketConfig};
 use crate::prelude::{println, *};
 use color_eyre::owo_colors::OwoColorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -37,12 +37,12 @@ pub struct RemoveDeployKeyParams {
     pub repo_slug: String,
     pub key_id: u64,
     pub base_url_override: Option<String>,
-    pub app_password_override: Option<String>,
 }
 
 /// Remove a deploy key from a repository via Bitbucket API
 pub async fn remove_deploy_key_data(
     params: RemoveDeployKeyParams,
+    config: &BitbucketConfig,
     spinner: Option<&ProgressBar>,
 ) -> Result<DeployKeyRemoveOutput> {
     let RemoveDeployKeyParams {
@@ -50,13 +50,12 @@ pub async fn remove_deploy_key_data(
         repo_slug,
         key_id,
         base_url_override,
-        app_password_override,
     } = params;
 
-    let config =
-        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
-    let client = create_bitbucket_client(&config)?;
-    let base_url = config.base_url.trim_end_matches('/');
+    // Use provided config, with optional base_url override
+    let base_url = resolve_bitbucket_base_url(config, base_url_override.as_deref());
+
+    let client = create_bitbucket_client(config)?;
 
     let url = format!(
         "{}/repositories/{}/{}/deploy-keys/{}",
@@ -96,7 +95,11 @@ pub async fn remove_deploy_key_data(
     })
 }
 
-pub async fn handler(options: RemoveOptions, global: crate::Global) -> Result<()> {
+pub async fn handler(
+    options: RemoveOptions,
+    config: &super::super::super::super::BitbucketConfig,
+    _main_global: &crate::Global,
+) -> Result<()> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -110,10 +113,9 @@ pub async fn handler(options: RemoveOptions, global: crate::Global) -> Result<()
         repo_slug: options.repo.clone(),
         key_id: options.key_id,
         base_url_override: options.base_url,
-        app_password_override: global.bitbucket_app_password,
     };
 
-    let result = remove_deploy_key_data(params, Some(&spinner)).await?;
+    let result = remove_deploy_key_data(params, config, Some(&spinner)).await?;
 
     spinner.finish_and_clear();
 

@@ -34,23 +34,7 @@ pub struct App {
 pub struct Global {
     /// Whether to display additional information.
     #[clap(long, env = "MCPTOOLS_VERBOSE", global = true, default_value = "false")]
-    verbose: bool,
-
-    /// Atlassian base URL (e.g., https://your-domain.atlassian.net)
-    #[clap(long, env = "ATLASSIAN_BASE_URL", global = true)]
-    pub atlassian_url: Option<String>,
-
-    /// Atlassian email
-    #[clap(long, env = "ATLASSIAN_EMAIL", global = true)]
-    pub atlassian_email: Option<String>,
-
-    /// Atlassian API token
-    #[clap(long, env = "ATLASSIAN_API_TOKEN", global = true, hide = true)]
-    pub atlassian_token: Option<String>,
-
-    /// Bitbucket app password for authentication
-    #[clap(long, env = "BITBUCKET_APP_PASSWORD", global = true, hide = true)]
-    pub bitbucket_app_password: Option<String>,
+    pub verbose: bool,
 }
 
 #[derive(Debug, clap::Parser)]

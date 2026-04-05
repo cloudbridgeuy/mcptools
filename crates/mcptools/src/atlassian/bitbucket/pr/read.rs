@@ -1,4 +1,4 @@
-use crate::atlassian::{create_bitbucket_client, BitbucketConfig};
+use crate::atlassian::{create_bitbucket_client, resolve_bitbucket_base_url, BitbucketConfig};
 use crate::prelude::{println, *};
 use color_eyre::owo_colors::OwoColorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -61,8 +61,6 @@ pub struct ReadPRParams {
     pub pr_number: u64,
     /// Override for Bitbucket API base URL
     pub base_url_override: Option<String>,
-    /// Override for app password
-    pub app_password_override: Option<String>,
     /// Maximum comments per page
     pub comment_limit: usize,
     /// Pagination URL for comments
@@ -78,23 +76,26 @@ pub struct ReadPRParams {
 /// Fetch PR data from Bitbucket API
 ///
 /// This function fetches PR details, comments, diffstats, and optionally diff content.
-pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -> Result<PROutput> {
+pub async fn read_pr_data(
+    params: ReadPRParams,
+    config: &BitbucketConfig,
+    spinner: Option<&ProgressBar>,
+) -> Result<PROutput> {
     let ReadPRParams {
         repo,
         pr_number,
         base_url_override,
-        app_password_override,
         comment_limit,
         comment_next_page,
         diff_limit,
         diff_next_page,
         no_diff,
     } = params;
-    // Setup config and client with CLI overrides
-    let config =
-        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
-    let client = create_bitbucket_client(&config)?;
-    let base_url = config.base_url.trim_end_matches('/');
+
+    // Use provided config, with optional base_url override
+    let base_url = resolve_bitbucket_base_url(config, base_url_override.as_deref());
+
+    let client = create_bitbucket_client(config)?;
 
     // Fetch PR details
     super::set_spinner_msg(
@@ -141,7 +142,7 @@ pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -
     super::set_spinner_msg(spinner, "Fetching diffstats...");
     let diffstats = fetch_all_diffstats(
         &client,
-        base_url,
+        &base_url,
         &repo,
         &source_commit,
         &destination_commit,
@@ -156,14 +157,14 @@ pub async fn read_pr_data(params: ReadPRParams, spinner: Option<&ProgressBar>) -
         None
     } else {
         super::set_spinner_msg(spinner, "Fetching diff content...");
-        Some(fetch_diff_content(&client, base_url, &repo, pr_number).await?)
+        Some(fetch_diff_content(&client, &base_url, &repo, pr_number).await?)
     };
 
     // Fetch ALL comments (auto-paginate by default)
     super::set_spinner_msg(spinner, "Fetching comments...");
     let comments = fetch_all_comments(
         &client,
-        base_url,
+        &base_url,
         &repo,
         pr_number,
         comment_limit,
@@ -332,7 +333,11 @@ async fn fetch_all_comments(
 }
 
 /// Handle the PR read command - human-readable output only
-pub async fn handler(options: ReadOptions, global: crate::Global) -> Result<()> {
+pub async fn handler(
+    options: ReadOptions,
+    config: &super::super::super::BitbucketConfig,
+    _main_global: &crate::Global,
+) -> Result<()> {
     // Create spinner for progress indication
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
@@ -346,14 +351,13 @@ pub async fn handler(options: ReadOptions, global: crate::Global) -> Result<()> 
         repo: options.repo.clone(),
         pr_number: options.pr_number,
         base_url_override: options.base_url,
-        app_password_override: global.bitbucket_app_password,
         comment_limit: options.limit,
         comment_next_page: options.next_page,
         diff_limit: options.diff_limit,
         diff_next_page: options.diff_next_page,
         no_diff: options.no_diff,
     };
-    let pr = read_pr_data(params, Some(&spinner)).await?;
+    let pr = read_pr_data(params, config, Some(&spinner)).await?;
 
     // Clear the spinner before printing output
     spinner.finish_and_clear();

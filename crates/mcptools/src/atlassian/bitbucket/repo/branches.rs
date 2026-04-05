@@ -1,5 +1,5 @@
 use crate::atlassian::bitbucket::{csv_escape, OutputFormat, MAX_AUTO_PAGES};
-use crate::atlassian::{create_bitbucket_client, BitbucketConfig};
+use crate::atlassian::{create_bitbucket_client, resolve_bitbucket_base_url, BitbucketConfig};
 use crate::prelude::{eprintln, println, *};
 use color_eyre::owo_colors::OwoColorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -69,8 +69,6 @@ pub struct ListBranchesParams {
     pub sort: Option<String>,
     /// Override for Bitbucket API base URL
     pub base_url_override: Option<String>,
-    /// Override for app password
-    pub app_password_override: Option<String>,
 }
 
 /// Resolve workspace and repo from options.
@@ -99,6 +97,7 @@ fn resolve_workspace_repo(options: &ListBranchesOptions) -> Result<(String, Stri
 /// Fetch branch list from Bitbucket API
 pub async fn list_branches_data(
     params: ListBranchesParams,
+    config: &BitbucketConfig,
     spinner: Option<&ProgressBar>,
 ) -> Result<BranchListOutput> {
     let ListBranchesParams {
@@ -109,13 +108,12 @@ pub async fn list_branches_data(
         query,
         sort,
         base_url_override,
-        app_password_override,
     } = params;
 
-    let config =
-        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
-    let client = create_bitbucket_client(&config)?;
-    let base_url = config.base_url.trim_end_matches('/');
+    // Use provided config, with optional base_url override
+    let base_url = resolve_bitbucket_base_url(config, base_url_override.as_deref());
+
+    let client = create_bitbucket_client(config)?;
 
     // Bitbucket API enforces a max pagelen of 100
     let pagelen = limit.min(100);
@@ -164,7 +162,11 @@ pub async fn list_branches_data(
     Ok(transform_branch_list_response(branch_list))
 }
 
-pub async fn handler(options: ListBranchesOptions, global: crate::Global) -> Result<()> {
+pub async fn handler(
+    options: ListBranchesOptions,
+    config: &super::super::super::BitbucketConfig,
+    _main_global: &crate::Global,
+) -> Result<()> {
     let (workspace, repo) = resolve_workspace_repo(&options)?;
 
     let spinner = ProgressBar::new_spinner();
@@ -197,10 +199,9 @@ pub async fn handler(options: ListBranchesOptions, global: crate::Global) -> Res
                 query: options.query.clone(),
                 sort: options.sort.clone(),
                 base_url_override: options.base_url.clone(),
-                app_password_override: global.bitbucket_app_password.clone(),
             };
 
-            let page_data = list_branches_data(params, Some(&spinner)).await?;
+            let page_data = list_branches_data(params, config, Some(&spinner)).await?;
             all_branches.extend(page_data.branches);
 
             match page_data.next_page {
@@ -233,9 +234,8 @@ pub async fn handler(options: ListBranchesOptions, global: crate::Global) -> Res
             query: options.query,
             sort: options.sort,
             base_url_override: options.base_url,
-            app_password_override: global.bitbucket_app_password,
         };
-        list_branches_data(params, Some(&spinner)).await?
+        list_branches_data(params, config, Some(&spinner)).await?
     };
 
     spinner.finish_and_clear();

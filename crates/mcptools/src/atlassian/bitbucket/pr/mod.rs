@@ -23,15 +23,19 @@ pub enum Commands {
 }
 
 /// Run PR commands
-pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
-    if global.verbose {
+pub async fn run(
+    cmd: Commands,
+    config: &super::super::BitbucketConfig,
+    main_global: &crate::Global,
+) -> Result<()> {
+    if main_global.verbose {
         println!("Running Bitbucket PR command...");
     }
 
     match cmd {
-        Commands::List(options) => list::handler(options, global).await,
-        Commands::Read(options) => read::handler(options, global).await,
-        Commands::Create(options) => create::handler(options, global).await,
+        Commands::List(options) => list::handler(options, config, main_global).await,
+        Commands::Read(options) => read::handler(options, config, main_global).await,
+        Commands::Create(options) => create::handler(options, config, main_global).await,
     }
 }
 

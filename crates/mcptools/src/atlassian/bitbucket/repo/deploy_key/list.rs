@@ -1,5 +1,5 @@
 use crate::atlassian::bitbucket::{csv_escape, OutputFormat, MAX_AUTO_PAGES};
-use crate::atlassian::{create_bitbucket_client, BitbucketConfig};
+use crate::atlassian::{create_bitbucket_client, resolve_bitbucket_base_url, BitbucketConfig};
 use crate::prelude::{eprintln, println, *};
 use color_eyre::owo_colors::OwoColorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -48,12 +48,12 @@ pub struct ListDeployKeysParams {
     pub limit: usize,
     pub next_page: Option<String>,
     pub base_url_override: Option<String>,
-    pub app_password_override: Option<String>,
 }
 
 /// Fetch deploy key list from Bitbucket API
 pub async fn list_deploy_keys_data(
     params: ListDeployKeysParams,
+    config: &BitbucketConfig,
     spinner: Option<&ProgressBar>,
 ) -> Result<DeployKeyListOutput> {
     let ListDeployKeysParams {
@@ -62,13 +62,12 @@ pub async fn list_deploy_keys_data(
         limit,
         next_page,
         base_url_override,
-        app_password_override,
     } = params;
 
-    let config =
-        BitbucketConfig::from_env()?.with_overrides(base_url_override, app_password_override);
-    let client = create_bitbucket_client(&config)?;
-    let base_url = config.base_url.trim_end_matches('/');
+    // Use provided config, with optional base_url override
+    let base_url = resolve_bitbucket_base_url(config, base_url_override.as_deref());
+
+    let client = create_bitbucket_client(config)?;
 
     let pagelen = limit.min(100);
 
@@ -107,7 +106,11 @@ pub async fn list_deploy_keys_data(
     Ok(transform_deploy_key_list_response(deploy_keys))
 }
 
-pub async fn handler(options: ListOptions, global: crate::Global) -> Result<()> {
+pub async fn handler(
+    options: ListOptions,
+    config: &super::super::super::super::BitbucketConfig,
+    _main_global: &crate::Global,
+) -> Result<()> {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -136,10 +139,9 @@ pub async fn handler(options: ListOptions, global: crate::Global) -> Result<()> 
                 limit: 100,
                 next_page,
                 base_url_override: options.base_url.clone(),
-                app_password_override: global.bitbucket_app_password.clone(),
             };
 
-            let page_data = list_deploy_keys_data(params, Some(&spinner)).await?;
+            let page_data = list_deploy_keys_data(params, config, Some(&spinner)).await?;
             all_keys.extend(page_data.keys);
 
             match page_data.next_page {
@@ -170,9 +172,8 @@ pub async fn handler(options: ListOptions, global: crate::Global) -> Result<()> 
             limit: options.limit,
             next_page: options.next_page,
             base_url_override: options.base_url,
-            app_password_override: global.bitbucket_app_password,
         };
-        list_deploy_keys_data(params, Some(&spinner)).await?
+        list_deploy_keys_data(params, config, Some(&spinner)).await?
     };
 
     spinner.finish_and_clear();

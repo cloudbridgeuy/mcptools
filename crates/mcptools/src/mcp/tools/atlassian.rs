@@ -724,15 +724,23 @@ pub async fn handle_bitbucket_pr_list(
         limit: args.limit.unwrap_or(10),
         next_page: args.next_page,
         base_url_override: None,
-        app_password_override: global.bitbucket_app_password.clone(),
     };
 
-    // Call the Bitbucket module's data function (no spinner for MCP)
-    let list_data = list_pr_data(params, None).await.map_err(|e| JsonRpcError {
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
-        message: format!("Tool execution error: {e}"),
+        message: format!("Configuration error: {e}"),
         data: None,
     })?;
+
+    // Call the Bitbucket module's data function (no spinner for MCP)
+    let list_data = list_pr_data(params, &config, None)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
 
     // Convert to JSON and wrap in MCP result format
     let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
@@ -795,7 +803,6 @@ pub async fn handle_bitbucket_pr_read(
         repo: args.repo,
         pr_number: args.pr_number,
         base_url_override: None,
-        app_password_override: global.bitbucket_app_password.clone(),
         comment_limit: args.limit.unwrap_or(100),
         comment_next_page: None,
         diff_limit: args.diff_limit.unwrap_or(500),
@@ -803,12 +810,21 @@ pub async fn handle_bitbucket_pr_read(
         no_diff: args.no_diff.unwrap_or(false),
     };
 
-    // Call the Bitbucket module's data function (no spinner for MCP)
-    let mut pr_data = read_pr_data(params, None).await.map_err(|e| JsonRpcError {
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
-        message: format!("Tool execution error: {e}"),
+        message: format!("Configuration error: {e}"),
         data: None,
     })?;
+
+    // Call the Bitbucket module's data function (no spinner for MCP)
+    let mut pr_data = read_pr_data(params, &config, None)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
 
     // Apply line limit to diff content if specified
     // Default to 500 lines, -1 means unlimited
@@ -891,11 +907,17 @@ pub async fn handle_bitbucket_pr_create(
         description: args.description,
         close_source_branch: args.close_source_branch.unwrap_or(false),
         base_url_override: None,
-        app_password_override: global.bitbucket_app_password.clone(),
     };
 
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     // Call the Bitbucket module's data function (no spinner for MCP)
-    let pr_data = create_pr_data(params, None)
+    let pr_data = create_pr_data(params, &config, None)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -1355,10 +1377,16 @@ pub async fn handle_bitbucket_workspace_list(
         limit: args.limit.unwrap_or(10),
         next_page: args.next_page,
         base_url_override: None,
-        app_password_override: global.bitbucket_app_password.clone(),
     };
 
-    let list_data = list_workspace_data(params, None)
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    let list_data = list_workspace_data(params, &config, None)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -1420,10 +1448,16 @@ pub async fn handle_bitbucket_repo_list(
         limit: args.limit.unwrap_or(10),
         next_page: args.next_page,
         base_url_override: None,
-        app_password_override: global.bitbucket_app_password.clone(),
     };
 
-    let list_data = list_repo_data(params, None)
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    let list_data = list_repo_data(params, &config, None)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -1491,10 +1525,16 @@ pub async fn handle_bitbucket_repo_branches(
         query: args.query,
         sort: args.sort,
         base_url_override: None,
-        app_password_override: global.bitbucket_app_password.clone(),
     };
 
-    let list_data = list_branches_data(params, None)
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    let list_data = list_branches_data(params, &config, None)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
