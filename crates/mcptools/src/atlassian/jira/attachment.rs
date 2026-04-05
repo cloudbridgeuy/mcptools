@@ -8,7 +8,7 @@ use mcptools_core::atlassian::jira::{
 use serde::Deserialize;
 
 use super::check_response;
-use crate::atlassian::{create_jira_client, JiraConfig};
+use crate::atlassian::create_jira_client;
 use crate::prelude::*;
 
 /// Attachment subcommands
@@ -98,9 +98,11 @@ async fn fetch_issue_attachments(
 }
 
 /// List all attachments on a Jira ticket.
-pub async fn list_attachments_data(issue_key: String) -> Result<Vec<AttachmentOutput>> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn list_attachments_data(
+    issue_key: String,
+    config: &super::super::JiraConfig,
+) -> Result<Vec<AttachmentOutput>> {
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let raw = fetch_issue_attachments(&client, base_url, &issue_key).await?;
@@ -112,9 +114,9 @@ pub async fn download_attachment_data(
     issue_key: String,
     attachment_id: String,
     output: Option<PathBuf>,
+    config: &super::super::JiraConfig,
 ) -> Result<PathBuf> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let all = fetch_issue_attachments(&client, base_url, &issue_key).await?;
@@ -149,8 +151,8 @@ pub async fn download_attachment_data(
 pub async fn upload_attachment_data(
     issue_key: String,
     files: Vec<PathBuf>,
+    config: &super::super::JiraConfig,
 ) -> Result<Vec<AttachmentOutput>> {
-    let config = JiraConfig::from_env()?;
     let base_url = config.base_url.trim_end_matches('/');
 
     if files.is_empty() {
@@ -259,10 +261,10 @@ fn mime_from_extension(filename: &str) -> &'static str {
 // --- CLI handler ---
 
 /// Handle attachment subcommands.
-pub async fn handler(cmd: AttachmentCommands) -> Result<()> {
+pub async fn handler(cmd: AttachmentCommands, config: &super::super::JiraConfig) -> Result<()> {
     match cmd {
         AttachmentCommands::List { issue_key, json } => {
-            let attachments = list_attachments_data(issue_key).await?;
+            let attachments = list_attachments_data(issue_key, config).await?;
 
             if json {
                 std::println!("{}", serde_json::to_string_pretty(&attachments)?);
@@ -296,7 +298,7 @@ pub async fn handler(cmd: AttachmentCommands) -> Result<()> {
             output,
             json,
         } => {
-            let path = download_attachment_data(issue_key, attachment_id, output).await?;
+            let path = download_attachment_data(issue_key, attachment_id, output, config).await?;
 
             if json {
                 std::println!(
@@ -315,7 +317,7 @@ pub async fn handler(cmd: AttachmentCommands) -> Result<()> {
             files,
             json,
         } => {
-            let uploads = upload_attachment_data(issue_key, files).await?;
+            let uploads = upload_attachment_data(issue_key, files, config).await?;
 
             if json {
                 std::println!("{}", serde_json::to_string_pretty(&uploads)?);

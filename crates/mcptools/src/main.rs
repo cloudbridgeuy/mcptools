@@ -43,7 +43,7 @@ pub enum SubCommands {
     Atlas(crate::atlas::App),
 
     /// Atlassian (Jira, Confluence) operations
-    Atlassian(crate::atlassian::App),
+    Atlassian(Box<crate::atlassian::App>),
 
     /// Retrieve relevant code context from a repository using GrepRAG
     GrepRag(crate::greprag::App),
@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
 
     match app.command {
         SubCommands::Atlas(sub_app) => crate::atlas::run(sub_app, app.global).await,
-        SubCommands::Atlassian(sub_app) => crate::atlassian::run(sub_app, app.global).await,
+        SubCommands::Atlassian(sub_app) => crate::atlassian::run(*sub_app, app.global).await,
         SubCommands::GrepRag(sub_app) => crate::greprag::run(sub_app, app.global).await,
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
         SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,

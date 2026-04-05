@@ -7,7 +7,7 @@ use mcptools_core::atlassian::jira::{
 };
 use serde::Deserialize;
 
-use crate::atlassian::{create_jira_client, JiraConfig};
+use crate::atlassian::create_jira_client;
 use crate::prelude::*;
 
 /// Create a new Jira ticket
@@ -58,15 +58,17 @@ pub type CreateOutput = TicketOutput;
 /// - Looking up assignee account ID from email/name
 /// - Building and sending create requests
 /// - Parsing the response
-pub async fn create_ticket_data(options: CreateOptions) -> Result<CreateOutput> {
+pub async fn create_ticket_data(
+    options: CreateOptions,
+    config: &super::super::JiraConfig,
+) -> Result<CreateOutput> {
     if options.sprint.is_some() && options.board.is_none() {
         return Err(eyre!(
             "--board is required when using --sprint (or set JIRA_BOARD_ID)"
         ));
     }
 
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     // Handle assignee lookup if provided
@@ -175,14 +177,16 @@ pub async fn create_ticket_data(options: CreateOptions) -> Result<CreateOutput> 
         .map_err(|e| eyre!("Failed to parse create response: {}", e))?;
 
     // Fetch the full ticket details using the get_ticket_data function
-    let ticket = super::get::get_ticket_data(create_response.key).await?;
+    let ticket = super::get::get_ticket_data(create_response.key.clone(), config).await?;
 
     // Assign to sprint if requested (post-creation, graceful degradation)
     if let Some(sprint_name) = &options.sprint {
         let board_id = options.board.unwrap(); // safe: validated above
-        match super::sprint::resolve_sprint_name(board_id, sprint_name).await {
+        match super::sprint::resolve_sprint_name(board_id, sprint_name, config).await {
             Ok(sprint_id) => {
-                if let Err(e) = super::sprint::move_issue_to_sprint(&ticket.key, sprint_id).await {
+                if let Err(e) =
+                    super::sprint::move_issue_to_sprint(&ticket.key, sprint_id, config).await
+                {
                     std::eprintln!("Warning: ticket created but sprint assignment failed: {e}");
                 }
             }
@@ -367,8 +371,8 @@ async fn get_current_user_account_id(client: &reqwest::Client, base_url: &str) -
 }
 
 /// CLI handler for create command
-pub async fn handler(options: CreateOptions) -> Result<()> {
-    let ticket = create_ticket_data(options.clone()).await?;
+pub async fn handler(options: CreateOptions, config: &super::super::JiraConfig) -> Result<()> {
+    let ticket = create_ticket_data(options.clone(), config).await?;
 
     if options.json {
         std::println!("{}", serde_json::to_string_pretty(&ticket)?);

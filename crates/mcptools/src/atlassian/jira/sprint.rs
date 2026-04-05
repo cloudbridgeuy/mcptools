@@ -6,7 +6,7 @@ use mcptools_core::atlassian::jira::{
     find_sprint_by_name, transform_sprint_list_response, JiraSprintListResponse, SprintListOutput,
 };
 
-use crate::atlassian::{create_jira_client, JiraConfig};
+use crate::atlassian::create_jira_client;
 use crate::prelude::*;
 
 /// Sprint subcommands
@@ -65,9 +65,12 @@ async fn fetch_board_sprints(
 // --- Data functions (public, used by CLI and MCP) ---
 
 /// List all sprints on a Jira board.
-pub async fn list_sprints_data(board_id: u64, state_filter: &str) -> Result<SprintListOutput> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn list_sprints_data(
+    board_id: u64,
+    state_filter: &str,
+    config: &super::super::JiraConfig,
+) -> Result<SprintListOutput> {
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let raw = fetch_board_sprints(&client, base_url, board_id, state_filter).await?;
@@ -75,9 +78,12 @@ pub async fn list_sprints_data(board_id: u64, state_filter: &str) -> Result<Spri
 }
 
 /// Resolve a sprint name to its ID by searching active+future sprints on the board.
-pub async fn resolve_sprint_name(board_id: u64, sprint_name: &str) -> Result<u64> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn resolve_sprint_name(
+    board_id: u64,
+    sprint_name: &str,
+    config: &super::super::JiraConfig,
+) -> Result<u64> {
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let raw = fetch_board_sprints(&client, base_url, board_id, "active,future").await?;
@@ -95,9 +101,12 @@ pub async fn resolve_sprint_name(board_id: u64, sprint_name: &str) -> Result<u64
 }
 
 /// Move an issue to a sprint via the Agile API.
-pub async fn move_issue_to_sprint(issue_key: &str, sprint_id: u64) -> Result<()> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn move_issue_to_sprint(
+    issue_key: &str,
+    sprint_id: u64,
+    config: &super::super::JiraConfig,
+) -> Result<()> {
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let url = format!("{base_url}/rest/agile/1.0/sprint/{sprint_id}/issue");
@@ -126,10 +135,10 @@ pub async fn move_issue_to_sprint(issue_key: &str, sprint_id: u64) -> Result<()>
 // --- CLI handler ---
 
 /// Handle sprint subcommands.
-pub async fn handler(cmd: SprintCommands) -> Result<()> {
+pub async fn handler(cmd: SprintCommands, config: &super::super::JiraConfig) -> Result<()> {
     match cmd {
         SprintCommands::List(options) => {
-            let sprints = list_sprints_data(options.board, &options.state).await?;
+            let sprints = list_sprints_data(options.board, &options.state, config).await?;
 
             if options.json {
                 std::println!("{}", serde_json::to_string_pretty(&sprints)?);

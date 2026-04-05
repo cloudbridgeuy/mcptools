@@ -3,7 +3,7 @@ use mcptools_core::atlassian::jira::{
 };
 use serde::Deserialize;
 
-use crate::atlassian::{create_jira_client, JiraConfig};
+use crate::atlassian::create_jira_client;
 use crate::prelude::{println, *};
 
 /// Options for getting a Jira ticket
@@ -19,9 +19,11 @@ pub struct GetOptions {
 }
 
 /// Get detailed ticket information from Jira
-pub async fn get_ticket_data(issue_key: String) -> Result<TicketOutput> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn get_ticket_data(
+    issue_key: String,
+    config: &super::super::JiraConfig,
+) -> Result<TicketOutput> {
+    let client = create_jira_client(config)?;
 
     let ticket_url = format!(
         "{}/rest/api/3/issue/{}?expand=changelog",
@@ -76,7 +78,7 @@ pub async fn get_ticket_data(issue_key: String) -> Result<TicketOutput> {
     };
 
     // Fetch attachments (gracefully degrade to empty if it fails)
-    let attachments = super::attachment::list_attachments_data(issue_key)
+    let attachments = super::attachment::list_attachments_data(issue_key.clone(), config)
         .await
         .unwrap_or_default();
 
@@ -84,8 +86,8 @@ pub async fn get_ticket_data(issue_key: String) -> Result<TicketOutput> {
 }
 
 /// Handle the get command
-pub async fn handler(options: GetOptions) -> Result<()> {
-    let ticket = get_ticket_data(options.issue_key).await?;
+pub async fn handler(options: GetOptions, config: &super::super::JiraConfig) -> Result<()> {
+    let ticket = get_ticket_data(options.issue_key.clone(), config).await?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&ticket)?);

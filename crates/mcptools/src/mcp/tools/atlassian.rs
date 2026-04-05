@@ -66,11 +66,19 @@ pub async fn handle_jira_search(
         );
     }
 
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     // Call the Jira module's data function
     let search_data = crate::atlassian::jira::search_issues_data(
         resolved_query,
         args.limit.unwrap_or(10),
         args.next_page_token,
+        &config,
     )
     .await
     .map_err(|e| JsonRpcError {
@@ -125,15 +133,25 @@ pub async fn handle_confluence_search(
         );
     }
 
+    // Create config from environment for MCP path
+    let config = crate::atlassian::ConfluenceConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     // Call the Confluence module's data function
-    let search_data =
-        crate::atlassian::confluence::search_pages_data(args.query, args.limit.unwrap_or(10))
-            .await
-            .map_err(|e| JsonRpcError {
-                code: -32603,
-                message: format!("Tool execution error: {e}"),
-                data: None,
-            })?;
+    let search_data = crate::atlassian::confluence::search_pages_data(
+        args.query,
+        args.limit.unwrap_or(10),
+        &config,
+    )
+    .await
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {e}"),
+        data: None,
+    })?;
 
     // Convert to JSON and wrap in MCP result format
     let json_string = serde_json::to_string_pretty(&search_data).map_err(|e| JsonRpcError {
@@ -176,8 +194,15 @@ pub async fn handle_jira_get(
         eprintln!("Calling jira_get: issueKey={}", args.issue_key);
     }
 
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     // Call the Jira module's data function
-    let ticket_data = crate::atlassian::jira::get_ticket_data(args.issue_key)
+    let ticket_data = crate::atlassian::jira::get_ticket_data(args.issue_key, &config)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -232,9 +257,17 @@ pub async fn handle_jira_sprint_list(
         );
     }
 
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     let sprints = crate::atlassian::jira::list_sprints_data(
         args.board_id,
         args.state.as_deref().unwrap_or("active,future"),
+        &config,
     )
     .await
     .map_err(|e| JsonRpcError {
@@ -315,8 +348,15 @@ pub async fn handle_jira_update(
         json: true, // MCP always returns JSON
     };
 
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     // Call the Jira module's data function
-    let update_data = crate::atlassian::jira::update_ticket_data(update_options)
+    let update_data = crate::atlassian::jira::update_ticket_data(update_options, &config)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -400,8 +440,15 @@ pub async fn handle_jira_create(
         json: true, // MCP always returns JSON
     };
 
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     // Call the Jira module's data function
-    let create_data = crate::atlassian::jira::create_ticket_data(create_options)
+    let create_data = crate::atlassian::jira::create_ticket_data(create_options, &config)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -968,7 +1015,14 @@ pub async fn handle_jira_attachment_list(
         eprintln!("Calling jira_attachment_list: issueKey={}", args.issue_key);
     }
 
-    let attachments = crate::atlassian::jira::list_attachments_data(args.issue_key)
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    let attachments = crate::atlassian::jira::list_attachments_data(args.issue_key, &config)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -1025,12 +1079,20 @@ pub async fn handle_jira_attachment_download(
         );
     }
 
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     let output = args.output_path.map(std::path::PathBuf::from);
 
     let path = crate::atlassian::jira::download_attachment_data(
         args.issue_key,
         args.attachment_id,
         output,
+        &config,
     )
     .await
     .map_err(|e| JsonRpcError {
@@ -1088,13 +1150,20 @@ pub async fn handle_jira_attachment_upload(
         );
     }
 
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
     let paths: Vec<std::path::PathBuf> = args
         .file_paths
         .into_iter()
         .map(std::path::PathBuf::from)
         .collect();
 
-    let uploads = crate::atlassian::jira::upload_attachment_data(args.issue_key, paths)
+    let uploads = crate::atlassian::jira::upload_attachment_data(args.issue_key, paths, &config)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -1149,7 +1218,14 @@ pub async fn handle_jira_comment_add(
         );
     }
 
-    let output = crate::atlassian::jira::add_comment_data(args.issue_key, args.comment)
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    let output = crate::atlassian::jira::add_comment_data(args.issue_key, args.comment, &config)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -1199,7 +1275,14 @@ pub async fn handle_jira_comment_list(
         eprintln!("Calling jira_comment_list: issueKey={}", args.issue_key);
     }
 
-    let comments = crate::atlassian::jira::list_comments_data(args.issue_key)
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    let comments = crate::atlassian::jira::list_comments_data(args.issue_key, &config)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,
@@ -1256,14 +1339,25 @@ pub async fn handle_jira_comment_update(
         );
     }
 
-    let output =
-        crate::atlassian::jira::update_comment_data(args.issue_key, args.comment_id, args.comment)
-            .await
-            .map_err(|e| JsonRpcError {
-                code: -32603,
-                message: format!("Tool execution error: {e}"),
-                data: None,
-            })?;
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    let output = crate::atlassian::jira::update_comment_data(
+        args.issue_key,
+        args.comment_id,
+        args.comment,
+        &config,
+    )
+    .await
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {e}"),
+        data: None,
+    })?;
 
     let json_string = serde_json::to_string_pretty(&output).map_err(|e| JsonRpcError {
         code: -32603,
@@ -1312,13 +1406,24 @@ pub async fn handle_jira_comment_delete(
         );
     }
 
-    crate::atlassian::jira::delete_comment_data(args.issue_key.clone(), args.comment_id.clone())
-        .await
-        .map_err(|e| JsonRpcError {
-            code: -32603,
-            message: format!("Tool execution error: {e}"),
-            data: None,
-        })?;
+    // Get config from environment (MCP server path)
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    crate::atlassian::jira::delete_comment_data(
+        args.issue_key.clone(),
+        args.comment_id.clone(),
+        &config,
+    )
+    .await
+    .map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {e}"),
+        data: None,
+    })?;
 
     let json_string = serde_json::to_string_pretty(&serde_json::json!({
         "deleted": true,

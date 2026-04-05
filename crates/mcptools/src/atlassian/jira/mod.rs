@@ -11,6 +11,37 @@ use mcptools_core::atlassian::jira::TicketOutput;
 
 use crate::prelude::{println, *};
 
+/// Jira-specific configuration options
+#[derive(Debug, Clone, clap::Args)]
+pub struct Global {
+    /// Jira base URL (overrides ATLASSIAN_BASE_URL)
+    #[clap(long, env = "JIRA_BASE_URL")]
+    pub jira_url: Option<String>,
+
+    /// Jira email (overrides ATLASSIAN_EMAIL)
+    #[clap(long, env = "JIRA_EMAIL")]
+    pub jira_email: Option<String>,
+
+    /// Jira API token (overrides ATLASSIAN_API_TOKEN)
+    #[clap(long, env = "JIRA_API_TOKEN", hide = true)]
+    pub jira_token: Option<String>,
+
+    /// Jira board ID for sprint operations
+    #[clap(long, env = "JIRA_BOARD_ID")]
+    pub jira_board_id: Option<u64>,
+}
+
+/// Jira commands app
+#[derive(Debug, clap::Parser)]
+#[command(name = "jira")]
+pub struct App {
+    #[command(subcommand)]
+    pub command: Commands,
+
+    #[clap(flatten)]
+    pub global: Global,
+}
+
 /// Check that an HTTP response was successful, returning a descriptive error otherwise.
 pub(super) async fn check_response(
     response: reqwest::Response,
@@ -57,19 +88,26 @@ pub enum Commands {
 }
 
 /// Run Jira commands
-pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
-    if global.verbose {
+pub async fn run(
+    app: App,
+    atlassian_global: super::Global,
+    main_global: crate::Global,
+) -> Result<()> {
+    if main_global.verbose {
         println!("Running Jira command...");
     }
 
-    match cmd {
-        Commands::Create(options) => create::handler(options).await,
-        Commands::Search(options) => search::handler(options).await,
-        Commands::Get(options) => get::handler(options).await,
-        Commands::Update(options) => update::handler(options).await,
-        Commands::Comment(cmd) => comment::handler(cmd).await,
-        Commands::Attachment(cmd) => attachment::handler(cmd).await,
-        Commands::Sprint(cmd) => sprint::handler(cmd).await,
+    // Create config with fallback logic
+    let config = super::JiraConfig::new(&app.global, &atlassian_global)?;
+
+    match app.command {
+        Commands::Create(options) => create::handler(options, &config).await,
+        Commands::Search(options) => search::handler(options, &config).await,
+        Commands::Get(options) => get::handler(options, &config).await,
+        Commands::Update(options) => update::handler(options, &config).await,
+        Commands::Comment(cmd) => comment::handler(cmd, &config).await,
+        Commands::Attachment(cmd) => attachment::handler(cmd, &config).await,
+        Commands::Sprint(cmd) => sprint::handler(cmd, &config).await,
     }
 }
 

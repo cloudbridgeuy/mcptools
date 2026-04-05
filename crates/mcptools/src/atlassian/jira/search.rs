@@ -107,12 +107,11 @@ pub async fn search_issues_data(
     query: String,
     limit: usize,
     next_page: Option<String>,
+    config: &super::super::JiraConfig,
 ) -> Result<SearchOutput> {
-    use crate::atlassian::{create_jira_client, JiraConfig};
     use mcptools_core::pagination;
 
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+    let client = super::super::create_jira_client(config)?;
 
     // Handle base_url that may or may not have trailing slash
     let base_url = config.base_url.trim_end_matches('/');
@@ -200,7 +199,7 @@ pub async fn search_issues_data(
 }
 
 /// Handle the search command
-pub async fn handler(options: SearchOptions) -> Result<()> {
+pub async fn handler(options: SearchOptions, config: &super::super::JiraConfig) -> Result<()> {
     use mcptools_core::queries;
     use std::path::PathBuf;
 
@@ -325,7 +324,13 @@ pub async fn handler(options: SearchOptions) -> Result<()> {
     };
 
     // Execute search
-    let data = search_issues_data(search_query.clone(), options.limit, options.next_page).await?;
+    let data = search_issues_data(
+        search_query.clone(),
+        options.limit,
+        options.next_page,
+        config,
+    )
+    .await?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&data)?);

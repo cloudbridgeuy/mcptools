@@ -36,12 +36,10 @@ pub struct App {
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
     /// Jira operations
-    #[clap(subcommand)]
-    Jira(jira::Commands),
+    Jira(jira::App),
 
     /// Confluence operations
-    #[clap(subcommand)]
-    Confluence(confluence::Commands),
+    Confluence(confluence::App),
 
     /// Bitbucket operations
     Bitbucket(bitbucket::App),
@@ -78,8 +76,48 @@ pub struct JiraConfig {
 }
 
 impl JiraConfig {
+    /// Create configuration from CLI options with fallback to shared Atlassian options
+    /// Used by CLI path
+    pub fn new(jira_global: &jira::Global, atlassian_global: &Global) -> Result<Self> {
+        let base_url = jira_global
+            .jira_url
+            .as_ref()
+            .or(atlassian_global.atlassian_url.as_ref())
+            .ok_or_else(|| {
+                eyre!(
+                    "Jira URL not configured. Set --jira-url, --atlassian-url, JIRA_BASE_URL, or ATLASSIAN_BASE_URL"
+                )
+            })?;
+
+        let email = jira_global
+            .jira_email
+            .as_ref()
+            .or(atlassian_global.atlassian_email.as_ref())
+            .ok_or_else(|| {
+                eyre!(
+                    "Jira email not configured. Set --jira-email, --atlassian-email, JIRA_EMAIL, or ATLASSIAN_EMAIL"
+                )
+            })?;
+
+        let api_token = jira_global
+            .jira_token
+            .as_ref()
+            .or(atlassian_global.atlassian_token.as_ref())
+            .ok_or_else(|| {
+                eyre!(
+                    "Jira API token not configured. Set --jira-token, --atlassian-token, JIRA_API_TOKEN, or ATLASSIAN_API_TOKEN"
+                )
+            })?;
+
+        Ok(Self {
+            base_url: base_url.clone(),
+            email: email.clone(),
+            api_token: api_token.clone(),
+        })
+    }
+
     /// Load configuration from environment variables
-    /// Tries JIRA_* first, falls back to ATLASSIAN_*
+    /// Used by MCP server path
     pub fn from_env() -> Result<Self> {
         let base_url = std::env::var("JIRA_BASE_URL")
             .or_else(|_| std::env::var("ATLASSIAN_BASE_URL"))
@@ -116,6 +154,37 @@ pub struct ConfluenceConfig {
 }
 
 impl ConfluenceConfig {
+    /// Create configuration from CLI options with fallback to shared Atlassian options
+    /// Used by CLI path
+    pub fn new(confluence_global: &confluence::Global, atlassian_global: &Global) -> Result<Self> {
+        let base_url = confluence_global.confluence_url
+            .as_ref()
+            .or(atlassian_global.atlassian_url.as_ref())
+            .ok_or_else(|| eyre!(
+                "Confluence URL not configured. Set --confluence-url, --atlassian-url, CONFLUENCE_BASE_URL, or ATLASSIAN_BASE_URL"
+            ))?;
+
+        let email = confluence_global.confluence_email
+            .as_ref()
+            .or(atlassian_global.atlassian_email.as_ref())
+            .ok_or_else(|| eyre!(
+                "Confluence email not configured. Set --confluence-email, --atlassian-email, CONFLUENCE_EMAIL, or ATLASSIAN_EMAIL"
+            ))?;
+
+        let api_token = confluence_global.confluence_token
+            .as_ref()
+            .or(atlassian_global.atlassian_token.as_ref())
+            .ok_or_else(|| eyre!(
+                "Confluence API token not configured. Set --confluence-token, --atlassian-token, CONFLUENCE_API_TOKEN, or ATLASSIAN_API_TOKEN"
+            ))?;
+
+        Ok(Self {
+            base_url: base_url.clone(),
+            email: email.clone(),
+            api_token: api_token.clone(),
+        })
+    }
+
     /// Load configuration from environment variables
     /// Tries CONFLUENCE_* first, falls back to ATLASSIAN_*
     pub fn from_env() -> Result<Self> {
@@ -287,8 +356,10 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
     }
 
     match app.command {
-        Commands::Jira(cmd) => jira::run(cmd, main_global).await,
-        Commands::Confluence(cmd) => confluence::run(cmd, main_global).await,
+        Commands::Jira(jira_app) => jira::run(jira_app, app.global, main_global).await,
+        Commands::Confluence(confluence_app) => {
+            confluence::run(confluence_app, app.global, main_global).await
+        }
         Commands::Bitbucket(bitbucket_app) => {
             bitbucket::run(bitbucket_app, app.global, main_global).await
         }

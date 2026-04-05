@@ -1,6 +1,6 @@
 //! Update Jira ticket fields
 
-use crate::atlassian::{create_jira_client, JiraConfig};
+use crate::atlassian::create_jira_client;
 use crate::prelude::*;
 use clap::Args;
 use colored::Colorize;
@@ -57,9 +57,11 @@ pub struct UpdateOptions {
 /// - Looking up assignee account ID from email/name
 /// - Building and sending update requests
 /// - Tracking partial failures
-pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn update_ticket_data(
+    options: UpdateOptions,
+    config: &super::super::JiraConfig,
+) -> Result<UpdateOutput> {
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     // Validate that at least one field is provided
@@ -130,7 +132,7 @@ pub async fn update_ticket_data(options: UpdateOptions) -> Result<UpdateOutput> 
         let board_id = options.board.ok_or_else(|| {
             eyre!("--board is required when using --sprint (or set JIRA_BOARD_ID)")
         })?;
-        match handle_sprint_assignment(&options.ticket_key, sprint_name, board_id).await {
+        match handle_sprint_assignment(&options.ticket_key, sprint_name, board_id, config).await {
             Ok(()) => {
                 results.push(FieldUpdateResult {
                     field: "sprint".to_string(),
@@ -537,18 +539,19 @@ async fn handle_sprint_assignment(
     ticket_key: &str,
     sprint_name: &str,
     board_id: u64,
+    config: &super::super::JiraConfig,
 ) -> Result<()> {
-    let sprint_id = super::sprint::resolve_sprint_name(board_id, sprint_name).await?;
-    super::sprint::move_issue_to_sprint(ticket_key, sprint_id).await
+    let sprint_id = super::sprint::resolve_sprint_name(board_id, sprint_name, config).await?;
+    super::sprint::move_issue_to_sprint(ticket_key, sprint_id, config).await
 }
 
 /// CLI handler for update command
-pub async fn handler(options: UpdateOptions) -> Result<()> {
-    let update_output = update_ticket_data(options.clone()).await?;
+pub async fn handler(options: UpdateOptions, config: &super::super::JiraConfig) -> Result<()> {
+    let update_output = update_ticket_data(options.clone(), config).await?;
 
     if options.json {
         // For JSON output, fetch and return the full ticket details
-        let ticket = super::get::get_ticket_data(update_output.ticket_key.clone()).await?;
+        let ticket = super::get::get_ticket_data(update_output.ticket_key.clone(), config).await?;
         std::println!("{}", serde_json::to_string_pretty(&ticket)?);
     } else {
         // Display update summary
@@ -608,7 +611,7 @@ pub async fn handler(options: UpdateOptions) -> Result<()> {
         std::println!();
         std::println!("{}", "Current ticket state:".bold().cyan());
 
-        let ticket = super::get::get_ticket_data(update_output.ticket_key.clone()).await?;
+        let ticket = super::get::get_ticket_data(update_output.ticket_key.clone(), config).await?;
         super::display_ticket(&ticket);
     }
 

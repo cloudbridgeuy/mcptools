@@ -2,6 +2,33 @@ use super::{create_confluence_client, ConfluenceConfig};
 use crate::prelude::{eprintln, println, *};
 use serde::Deserialize;
 
+/// Confluence-specific configuration options
+#[derive(Debug, Clone, clap::Args)]
+pub struct Global {
+    /// Confluence base URL (overrides ATLASSIAN_BASE_URL)
+    #[clap(long, env = "CONFLUENCE_BASE_URL")]
+    pub confluence_url: Option<String>,
+
+    /// Confluence email (overrides ATLASSIAN_EMAIL)
+    #[clap(long, env = "CONFLUENCE_EMAIL")]
+    pub confluence_email: Option<String>,
+
+    /// Confluence API token (overrides ATLASSIAN_API_TOKEN)
+    #[clap(long, env = "CONFLUENCE_API_TOKEN", hide = true)]
+    pub confluence_token: Option<String>,
+}
+
+/// Confluence commands app
+#[derive(Debug, clap::Parser)]
+#[command(name = "confluence")]
+pub struct App {
+    #[command(subcommand)]
+    pub command: Commands,
+
+    #[clap(flatten)]
+    pub global: Global,
+}
+
 // Import domain models and pure functions from core crate
 use mcptools_core::atlassian::confluence::transform_search_results;
 pub use mcptools_core::atlassian::confluence::{
@@ -37,10 +64,13 @@ pub struct SearchOptions {
 ///
 /// This function handles I/O operations only and delegates transformation
 /// to the pure function in the core crate.
-pub async fn search_pages_data(query: String, limit: usize) -> Result<SearchOutput> {
+pub async fn search_pages_data(
+    query: String,
+    limit: usize,
+    config: &ConfluenceConfig,
+) -> Result<SearchOutput> {
     // Configure HTTP client (I/O setup)
-    let config = ConfluenceConfig::from_env()?;
-    let client = create_confluence_client(&config)?;
+    let client = create_confluence_client(config)?;
 
     // Build API URL (I/O configuration)
     let base_url = config.base_url.trim_end_matches('/');
@@ -78,8 +108,8 @@ pub async fn search_pages_data(query: String, limit: usize) -> Result<SearchOutp
 }
 
 /// Handle the search command
-async fn search_handler(options: SearchOptions) -> Result<()> {
-    let data = search_pages_data(options.query.clone(), options.limit).await?;
+async fn search_handler(options: SearchOptions, config: &ConfluenceConfig) -> Result<()> {
+    let data = search_pages_data(options.query.clone(), options.limit, config).await?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&data)?);
@@ -107,12 +137,19 @@ async fn search_handler(options: SearchOptions) -> Result<()> {
 }
 
 /// Run Confluence commands
-pub async fn run(cmd: Commands, global: crate::Global) -> Result<()> {
-    if global.verbose {
+pub async fn run(
+    app: App,
+    atlassian_global: super::Global,
+    main_global: crate::Global,
+) -> Result<()> {
+    if main_global.verbose {
         println!("Running Confluence command...");
     }
 
-    match cmd {
-        Commands::Search(options) => search_handler(options).await,
+    // Create config with fallback logic
+    let config = super::ConfluenceConfig::new(&app.global, &atlassian_global)?;
+
+    match app.command {
+        Commands::Search(options) => search_handler(options, &config).await,
     }
 }

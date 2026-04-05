@@ -8,7 +8,7 @@ use mcptools_core::atlassian::jira::{
 use serde::Deserialize;
 
 use super::check_response;
-use crate::atlassian::{create_jira_client, JiraConfig};
+use crate::atlassian::create_jira_client;
 use crate::prelude::*;
 
 /// Comment subcommands
@@ -82,9 +82,12 @@ struct JiraCommentListResponse {
 // --- Data functions (public, used by CLI and MCP) ---
 
 /// Add a new comment to a Jira ticket.
-pub async fn add_comment_data(issue_key: String, body: String) -> Result<CommentOutput> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn add_comment_data(
+    issue_key: String,
+    body: String,
+    config: &super::super::JiraConfig,
+) -> Result<CommentOutput> {
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let adf_body = markdown_to_adf(&body);
@@ -109,9 +112,11 @@ pub async fn add_comment_data(issue_key: String, body: String) -> Result<Comment
 }
 
 /// List all comments on a Jira ticket.
-pub async fn list_comments_data(issue_key: String) -> Result<Vec<CommentOutput>> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn list_comments_data(
+    issue_key: String,
+    config: &super::super::JiraConfig,
+) -> Result<Vec<CommentOutput>> {
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let url = format!("{base_url}/rest/api/3/issue/{issue_key}/comment");
@@ -137,9 +142,9 @@ pub async fn update_comment_data(
     issue_key: String,
     comment_id: String,
     body: String,
+    config: &super::super::JiraConfig,
 ) -> Result<CommentOutput> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let adf_body = markdown_to_adf(&body);
@@ -164,9 +169,12 @@ pub async fn update_comment_data(
 }
 
 /// Delete a comment from a Jira ticket.
-pub async fn delete_comment_data(issue_key: String, comment_id: String) -> Result<()> {
-    let config = JiraConfig::from_env()?;
-    let client = create_jira_client(&config)?;
+pub async fn delete_comment_data(
+    issue_key: String,
+    comment_id: String,
+    config: &super::super::JiraConfig,
+) -> Result<()> {
+    let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
     let url = format!("{base_url}/rest/api/3/issue/{issue_key}/comment/{comment_id}");
@@ -271,14 +279,14 @@ fn display_delete_confirmation(issue_key: &str, comment_id: &str) {
 // --- CLI handler ---
 
 /// Handle comment subcommands.
-pub async fn handler(cmd: CommentCommands) -> Result<()> {
+pub async fn handler(cmd: CommentCommands, config: &super::super::JiraConfig) -> Result<()> {
     match cmd {
         CommentCommands::Add {
             issue_key,
             body,
             json,
         } => {
-            let output = add_comment_data(issue_key, body).await?;
+            let output = add_comment_data(issue_key, body, config).await?;
             if json {
                 std::println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
@@ -287,7 +295,7 @@ pub async fn handler(cmd: CommentCommands) -> Result<()> {
         }
 
         CommentCommands::List { issue_key, json } => {
-            let comments = list_comments_data(issue_key).await?;
+            let comments = list_comments_data(issue_key, config).await?;
             if json {
                 std::println!("{}", serde_json::to_string_pretty(&comments)?);
             } else {
@@ -301,7 +309,7 @@ pub async fn handler(cmd: CommentCommands) -> Result<()> {
             body,
             json,
         } => {
-            let output = update_comment_data(issue_key, comment_id, body).await?;
+            let output = update_comment_data(issue_key, comment_id, body, config).await?;
             if json {
                 std::println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
@@ -314,7 +322,7 @@ pub async fn handler(cmd: CommentCommands) -> Result<()> {
             comment_id,
             json,
         } => {
-            delete_comment_data(issue_key.clone(), comment_id.clone()).await?;
+            delete_comment_data(issue_key.clone(), comment_id.clone(), config).await?;
             if json {
                 std::println!(
                     "{}",
