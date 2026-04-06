@@ -1,10 +1,11 @@
 use std::collections::BTreeSet;
 use std::fmt::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::atlas::types::{DirectoryPeekView, PeekView, Symbol, TreeEntry, Visibility};
+use crate::atlas::types::{DirectoryPeekView, IndexTier, PeekView, Symbol, TreeEntry, Visibility};
 
 /// Index health information (read model).
 #[derive(Debug, Clone, Serialize)]
@@ -153,6 +154,115 @@ fn format_number(n: usize) -> String {
     result
 }
 
+/// Format a duration for human display.
+///
+/// Produces compact output: "0.8s", "12s", "3m 42s", "1h 5m 23s".
+pub fn format_elapsed(duration: Duration) -> String {
+    let total_secs = duration.as_secs();
+    let millis = duration.subsec_millis();
+
+    if total_secs == 0 {
+        return format!("0.{}s", millis / 100);
+    }
+
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    match (hours, minutes) {
+        (0, 0) => format!("{seconds}s"),
+        (0, _) => format!("{minutes}m {seconds}s"),
+        _ => format!("{hours}h {minutes}m {seconds}s"),
+    }
+}
+
+/// A file entry for dry-run display.
+#[derive(Debug, Clone)]
+pub struct DryRunEntry {
+    pub path: PathBuf,
+    pub tier: IndexTier,
+    pub has_description: bool,
+}
+
+/// Format dry-run output for the index command.
+///
+/// Groups entries by tier (Full, Light, Skip), sorts each group
+/// alphabetically by path, and produces a human-readable summary.
+/// In incremental mode, annotates files that already have descriptions.
+pub fn format_dry_run_index(entries: &[DryRunEntry], incremental: bool) -> String {
+    if entries.is_empty() {
+        return "No files found.".to_string();
+    }
+
+    let (mut full, mut light, mut skipped): (
+        Vec<&DryRunEntry>,
+        Vec<&DryRunEntry>,
+        Vec<&DryRunEntry>,
+    ) = (Vec::new(), Vec::new(), Vec::new());
+    for entry in entries {
+        match entry.tier {
+            IndexTier::Full => full.push(entry),
+            IndexTier::Light => light.push(entry),
+            IndexTier::Skip => skipped.push(entry),
+        }
+    }
+    full.sort_by(|a, b| a.path.cmp(&b.path));
+    light.sort_by(|a, b| a.path.cmp(&b.path));
+    skipped.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let mut out = String::new();
+    let _ = writeln!(out, "Atlas Index Dry Run");
+    let _ = writeln!(out, "===================");
+
+    fn write_group(out: &mut String, label: &str, entries: &[&DryRunEntry], incremental: bool) {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{label}");
+        for entry in entries {
+            let path = entry.path.display();
+            if incremental && entry.has_description {
+                let _ = writeln!(out, "  {path}  (has description, would skip)");
+            } else {
+                let _ = writeln!(out, "  {path}");
+            }
+        }
+    }
+
+    if !full.is_empty() {
+        write_group(&mut out, "Full (tree-sitter + LLM):", &full, incremental);
+    }
+    if !light.is_empty() {
+        write_group(&mut out, "Light (LLM only):", &light, incremental);
+    }
+    if !skipped.is_empty() {
+        write_group(&mut out, "Skipped:", &skipped, incremental);
+    }
+
+    let _ = writeln!(out);
+    if incremental {
+        let full_described = full.iter().filter(|e| e.has_description).count();
+        let light_described = light.iter().filter(|e| e.has_description).count();
+        let _ = write!(
+            out,
+            "Total: {} full ({} already described), {} light ({} already described), {} skipped",
+            full.len(),
+            full_described,
+            light.len(),
+            light_described,
+            skipped.len(),
+        );
+    } else {
+        let _ = write!(
+            out,
+            "Total: {} full, {} light, {} skipped",
+            full.len(),
+            light.len(),
+            skipped.len(),
+        );
+    }
+
+    out
+}
+
 fn format_directory_peek_human(peek: &DirectoryPeekView) -> String {
     if peek.path.as_os_str().is_empty() && peek.children.is_empty() && peek.symbols.is_empty() {
         return String::from("(empty)");
@@ -251,6 +361,51 @@ fn format_peek_human(peek: &PeekView) -> String {
     }
 
     trim_trailing_newline(out)
+}
+
+/// Format dry-run output for the update command.
+pub fn format_dry_run_update(
+    added: &[PathBuf],
+    modified: &[PathBuf],
+    deleted: &[PathBuf],
+    affected_dirs: &[PathBuf],
+) -> String {
+    if added.is_empty() && modified.is_empty() && deleted.is_empty() {
+        return "Index is up to date.".to_string();
+    }
+
+    let mut out = String::new();
+
+    let _ = writeln!(out, "Atlas Update Dry Run");
+    let _ = writeln!(out, "====================");
+
+    fn write_section(out: &mut String, label: &str, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{label} ({}):", paths.len());
+        for p in paths {
+            let _ = writeln!(out, "  {}", p.display());
+        }
+    }
+
+    write_section(&mut out, "Added", added);
+    write_section(&mut out, "Modified", modified);
+    write_section(&mut out, "Deleted", deleted);
+    write_section(&mut out, "Directories to re-describe", affected_dirs);
+
+    let _ = writeln!(out);
+    let _ = write!(
+        out,
+        "Total: {} added, {} modified, {} deleted, {} directories affected",
+        added.len(),
+        modified.len(),
+        deleted.len(),
+        affected_dirs.len(),
+    );
+
+    out
 }
 
 fn format_symbol_line(sym: &Symbol) -> String {
@@ -808,5 +963,210 @@ src/
         let result = format_status(&status, false);
         let expected_truncated = format!("Primer:          {}...", "A".repeat(50));
         assert!(result.contains(&expected_truncated));
+    }
+
+    // ---- format_elapsed tests ----
+
+    #[test]
+    fn format_elapsed_sub_second() {
+        let d = std::time::Duration::from_millis(800);
+        assert_eq!(format_elapsed(d), "0.8s");
+    }
+
+    #[test]
+    fn format_elapsed_seconds_only() {
+        let d = std::time::Duration::from_secs(12);
+        assert_eq!(format_elapsed(d), "12s");
+    }
+
+    #[test]
+    fn format_elapsed_minutes_and_seconds() {
+        let d = std::time::Duration::from_secs(3 * 60 + 42);
+        assert_eq!(format_elapsed(d), "3m 42s");
+    }
+
+    #[test]
+    fn format_elapsed_hours_minutes_seconds() {
+        let d = std::time::Duration::from_secs(3600 + 5 * 60 + 23);
+        assert_eq!(format_elapsed(d), "1h 5m 23s");
+    }
+
+    #[test]
+    fn format_elapsed_zero() {
+        let d = std::time::Duration::from_millis(0);
+        assert_eq!(format_elapsed(d), "0.0s");
+    }
+
+    #[test]
+    fn format_elapsed_exact_minute() {
+        let d = std::time::Duration::from_secs(60);
+        assert_eq!(format_elapsed(d), "1m 0s");
+    }
+
+    // ---- format_dry_run_index tests ----
+
+    fn make_dry_run_entry(path: &str, tier: IndexTier, has_description: bool) -> DryRunEntry {
+        DryRunEntry {
+            path: PathBuf::from(path),
+            tier,
+            has_description,
+        }
+    }
+
+    #[test]
+    fn dry_run_empty_input() {
+        let result = format_dry_run_index(&[], false);
+        assert_eq!(result, "No files found.");
+    }
+
+    #[test]
+    fn dry_run_mixed_tiers_correct_grouping_and_counts() {
+        let entries = vec![
+            make_dry_run_entry("src/main.rs", IndexTier::Full, false),
+            make_dry_run_entry("Cargo.toml", IndexTier::Light, false),
+            make_dry_run_entry("logo.png", IndexTier::Skip, false),
+            make_dry_run_entry("src/lib.rs", IndexTier::Full, false),
+        ];
+
+        let result = format_dry_run_index(&entries, false);
+        assert!(result.contains("Full (tree-sitter + LLM):"));
+        assert!(result.contains("  src/lib.rs"));
+        assert!(result.contains("  src/main.rs"));
+        assert!(result.contains("Light (LLM only):"));
+        assert!(result.contains("  Cargo.toml"));
+        assert!(result.contains("Skipped:"));
+        assert!(result.contains("  logo.png"));
+        assert!(result.contains("Total: 2 full, 1 light, 1 skipped"));
+    }
+
+    #[test]
+    fn dry_run_files_sorted_alphabetically_within_group() {
+        let entries = vec![
+            make_dry_run_entry("src/z.rs", IndexTier::Full, false),
+            make_dry_run_entry("src/a.rs", IndexTier::Full, false),
+            make_dry_run_entry("src/m.rs", IndexTier::Full, false),
+        ];
+
+        let result = format_dry_run_index(&entries, false);
+        let full_section = result.split("Full (tree-sitter + LLM):").nth(1).unwrap();
+        let lines: Vec<&str> = full_section
+            .lines()
+            .filter(|l| l.starts_with("  src/"))
+            .collect();
+        assert_eq!(lines, vec!["  src/a.rs", "  src/m.rs", "  src/z.rs"]);
+    }
+
+    #[test]
+    fn dry_run_incremental_annotates_described_files() {
+        let entries = vec![
+            make_dry_run_entry("src/main.rs", IndexTier::Full, true),
+            make_dry_run_entry("src/lib.rs", IndexTier::Full, false),
+            make_dry_run_entry("README.md", IndexTier::Light, true),
+        ];
+
+        let result = format_dry_run_index(&entries, true);
+        assert!(result.contains("  src/main.rs  (has description, would skip)"));
+        assert!(result.contains("  src/lib.rs\n"));
+        assert!(result.contains("  README.md  (has description, would skip)"));
+        assert!(result.contains(
+            "Total: 2 full (1 already described), 1 light (1 already described), 0 skipped"
+        ));
+    }
+
+    #[test]
+    fn dry_run_empty_groups_omitted() {
+        let entries = vec![make_dry_run_entry("src/main.rs", IndexTier::Full, false)];
+
+        let result = format_dry_run_index(&entries, false);
+        assert!(result.contains("Full (tree-sitter + LLM):"));
+        assert!(!result.contains("Light"));
+        assert!(!result.contains("Skipped"));
+        assert!(result.contains("Total: 1 full, 0 light, 0 skipped"));
+    }
+
+    #[test]
+    fn dry_run_non_incremental_no_annotations() {
+        let entries = vec![make_dry_run_entry("src/main.rs", IndexTier::Full, true)];
+
+        let result = format_dry_run_index(&entries, false);
+        assert!(!result.contains("has description"));
+        assert!(!result.contains("already described"));
+    }
+
+    // ---- format_dry_run_update tests ----
+
+    #[test]
+    fn dry_run_update_all_sections() {
+        let added = vec![
+            PathBuf::from("src/a.rs"),
+            PathBuf::from("src/b.rs"),
+            PathBuf::from("src/c.rs"),
+        ];
+        let modified = vec![PathBuf::from("src/d.rs"), PathBuf::from("src/e.rs")];
+        let deleted = vec![PathBuf::from("src/old.rs")];
+        let dirs = vec![PathBuf::from("src"), PathBuf::from("src/sub")];
+
+        let result = format_dry_run_update(&added, &modified, &deleted, &dirs);
+
+        assert!(result.contains("Atlas Update Dry Run"));
+        assert!(result.contains("===================="));
+        assert!(result.contains("Added (3):"));
+        assert!(result.contains("  src/a.rs"));
+        assert!(result.contains("Modified (2):"));
+        assert!(result.contains("  src/d.rs"));
+        assert!(result.contains("Deleted (1):"));
+        assert!(result.contains("  src/old.rs"));
+        assert!(result.contains("Directories to re-describe (2):"));
+        assert!(result.contains("  src/sub"));
+        assert!(result.contains("Total: 3 added, 2 modified, 1 deleted, 2 directories affected"));
+    }
+
+    #[test]
+    fn dry_run_update_empty_is_up_to_date() {
+        let result = format_dry_run_update(&[], &[], &[], &[]);
+        assert_eq!(result, "Index is up to date.");
+    }
+
+    #[test]
+    fn dry_run_update_only_additions() {
+        let added = vec![PathBuf::from("new.rs")];
+        let result = format_dry_run_update(&added, &[], &[], &[]);
+
+        assert!(result.contains("Added (1):"));
+        assert!(!result.contains("Modified"));
+        assert!(!result.contains("Deleted"));
+        assert!(!result.contains("Directories to re-describe"));
+    }
+
+    #[test]
+    fn dry_run_update_only_deletions() {
+        let deleted = vec![PathBuf::from("gone.rs")];
+        let result = format_dry_run_update(&[], &[], &deleted, &[PathBuf::from("src")]);
+
+        assert!(!result.contains("Added"));
+        assert!(!result.contains("Modified"));
+        assert!(result.contains("Deleted (1):"));
+        assert!(result.contains("Directories to re-describe (1):"));
+    }
+
+    #[test]
+    fn dry_run_update_dirs_listed_and_counted() {
+        let modified = vec![PathBuf::from("a/b/c.rs")];
+        let dirs = vec![PathBuf::from("a/b"), PathBuf::from("a")];
+        let result = format_dry_run_update(&[], &modified, &[], &dirs);
+
+        assert!(result.contains("Directories to re-describe (2):"));
+        assert!(result.contains("  a/b"));
+        assert!(result.contains("  a"));
+        assert!(result.contains("2 directories affected"));
+    }
+
+    #[test]
+    fn dry_run_update_empty_dirs_omitted() {
+        let added = vec![PathBuf::from("root.rs")];
+        let result = format_dry_run_update(&added, &[], &[], &[]);
+
+        assert!(!result.contains("Directories to re-describe"));
+        assert!(result.contains("0 directories affected"));
     }
 }
