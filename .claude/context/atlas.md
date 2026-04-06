@@ -34,7 +34,11 @@ mcptools atlas update                 # Incremental update (changed files only)
 mcptools atlas sync                   # Force full re-index
 mcptools atlas status                 # Index health summary
 mcptools atlas status --json          # JSON output
+mcptools atlas index --dry-run        # Show what would be indexed (by tier)
+mcptools atlas update --dry-run       # Show what would change (adds/mods/deletes)
 ```
+
+The `index` and `update` commands display ETA and elapsed time during LLM description phases, and print total elapsed time on completion.
 
 ### `atlas init` Workflow
 

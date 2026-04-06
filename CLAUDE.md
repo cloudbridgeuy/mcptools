@@ -95,6 +95,8 @@ mcptools atlas peek <path>            # Show file or directory summary + symbols
 mcptools atlas update                 # Incremental update (changed files only)
 mcptools atlas sync                   # Force full re-index
 mcptools atlas status                 # Index health (--json)
+mcptools atlas index --dry-run        # Show what would be indexed
+mcptools atlas update --dry-run       # Show what would change
 ```
 
 ### Jira
