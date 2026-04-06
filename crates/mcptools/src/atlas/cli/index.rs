@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -12,7 +12,8 @@ use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlas::{
-    build_directory_prompt, content_hash, directory_system_prompt, DirectoryEntry, FileEntry,
+    build_directory_prompt, content_hash, directory_system_prompt, format_dry_run_index,
+    DirectoryEntry, DryRunEntry, FileEntry, IndexTier,
 };
 
 #[derive(Debug, clap::Parser)]
@@ -24,14 +25,45 @@ pub struct IndexOptions {
     /// Skip files and directories that already have descriptions
     #[clap(long)]
     pub incremental: bool,
+
+    /// Show what would be indexed without doing it
+    #[clap(long)]
+    pub dry_run: bool,
 }
 
 pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
+    let start = std::time::Instant::now();
     let root = find_git_root()?;
     let config = load_config(&root)?;
     let db_path = config.db_path.resolve(&root);
     ensure_parent_dir(&db_path)?;
     let db = Database::open(&db_path)?;
+
+    if opts.dry_run {
+        let described_files: HashSet<PathBuf> = if opts.incremental {
+            let all_files: HashSet<PathBuf> = db.file_hashes()?.into_keys().collect();
+            let needing: HashSet<PathBuf> = db.files_needing_descriptions()?.into_iter().collect();
+            all_files.difference(&needing).cloned().collect()
+        } else {
+            HashSet::new()
+        };
+
+        let mut entries = Vec::new();
+        for result in walk_repo(&root) {
+            let (path, _bytes) = result?;
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let tier = IndexTier::from_extension(ext);
+            let has_description = described_files.contains(&path);
+            entries.push(DryRunEntry {
+                path,
+                tier,
+                has_description,
+            });
+        }
+
+        crate::prelude::println!("{}", format_dry_run_index(&entries, opts.incremental));
+        return Ok(());
+    }
 
     let existing_hashes = if opts.incremental {
         db.file_hashes()?
@@ -237,6 +269,8 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         "primer_hash",
         &mcptools_core::atlas::content_hash(primer.as_bytes()).hex(),
     )?;
+
+    print_elapsed(start);
 
     Ok(())
 }
@@ -475,13 +509,21 @@ pub(crate) fn progress_bar(total: u64, initial_message: &str) -> ProgressBar {
     let pb = ProgressBar::new(total);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.cyan} [{bar:30.cyan/dim}] {pos}/{len} {msg}")
+            .template("{spinner:.cyan} [{bar:30.cyan/dim}] {pos}/{len} {elapsed} elapsed, ~{eta} remaining  {msg}")
             .unwrap()
             .progress_chars("━╸─"),
     );
     pb.set_message(initial_message.to_string());
     pb.enable_steady_tick(std::time::Duration::from_millis(80));
     pb
+}
+
+/// Print "Completed in X" to stderr using the elapsed time from `start`.
+pub(crate) fn print_elapsed(start: std::time::Instant) {
+    crate::prelude::eprintln!(
+        "Completed in {}",
+        mcptools_core::atlas::format_elapsed(start.elapsed()),
+    );
 }
 
 /// Build a finish message like "5 descriptions generated" or "5 descriptions generated, 2 failed".
@@ -509,8 +551,8 @@ pub(crate) fn msg_width() -> usize {
     let term_width = terminal_size::terminal_size()
         .map(|(w, _)| w.0 as usize)
         .unwrap_or(80);
-    // Chrome: "⠋ [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━] 999/999 " ≈ 45 chars
-    term_width.saturating_sub(45)
+    // Chrome: "⠋ [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━] 999/999 3m 42s elapsed, ~12m 5s remaining  " ≈ 80 chars
+    term_width.saturating_sub(80)
 }
 
 /// Produce an epoch-seconds timestamp from `SystemTime::now()`.

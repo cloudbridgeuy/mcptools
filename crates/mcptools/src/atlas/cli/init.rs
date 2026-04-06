@@ -39,6 +39,7 @@ pub async fn run(opts: InitOptions, global: crate::Global) -> Result<()> {
         crate::atlas::cli::index::IndexOptions {
             parallel: opts.parallel,
             incremental: false,
+            dry_run: false,
         },
         global,
     )

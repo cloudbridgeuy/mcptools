@@ -14,6 +14,7 @@ pub async fn run(opts: SyncOptions, global: crate::Global) -> Result<()> {
         IndexOptions {
             parallel: opts.parallel,
             incremental: false,
+            dry_run: false,
         },
         global,
     )

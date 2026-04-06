@@ -10,12 +10,13 @@ use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlas::{
     affected_directories, compute_change_set, content_hash, directory_system_prompt,
-    DirectoryEntry, FileEntry,
+    format_dry_run_update, DirectoryEntry, FileEntry,
 };
 
 use super::index::{
     collect_directories_bottom_up, describe_directory, ensure_parent_dir, epoch_now, find_git_root,
-    finish_message, generate_descriptions, msg_width, progress_bar, truncate_for_display,
+    finish_message, generate_descriptions, msg_width, print_elapsed, progress_bar,
+    truncate_for_display,
 };
 
 #[derive(Debug, clap::Parser)]
@@ -23,9 +24,14 @@ pub struct UpdateOptions {
     /// Number of parallel LLM workers for file descriptions
     #[clap(long, default_value = "1")]
     pub parallel: usize,
+
+    /// Show what would change without applying
+    #[clap(long)]
+    pub dry_run: bool,
 }
 
 pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
+    let start = std::time::Instant::now();
     let root = find_git_root()?;
     let config = load_config(&root)?;
     let db_path = config.db_path.resolve(&root);
@@ -59,6 +65,7 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
 
     if changes.is_empty() {
         spinner.finish_with_message("Index is up to date.");
+        print_elapsed(start);
         return Ok(());
     }
 
@@ -68,6 +75,28 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
         changes.modified.len(),
         changes.deleted.len()
     ));
+
+    let all_changed_paths: Vec<PathBuf> = changes
+        .added
+        .iter()
+        .chain(changes.modified.iter())
+        .chain(changes.deleted.iter())
+        .cloned()
+        .collect();
+
+    if opts.dry_run {
+        let affected_dirs = affected_directories(&all_changed_paths);
+        crate::prelude::println!(
+            "{}",
+            format_dry_run_update(
+                &changes.added,
+                &changes.modified,
+                &changes.deleted,
+                &affected_dirs,
+            )
+        );
+        return Ok(());
+    }
 
     // Phase 2: Apply deletions
     for path in &changes.deleted {
@@ -174,14 +203,7 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
 
     let parallel = opts.parallel.max(1);
 
-    // Collect affected directories from all changed/deleted file paths.
-    let all_changed_paths: Vec<PathBuf> = changes
-        .added
-        .iter()
-        .chain(changes.modified.iter())
-        .chain(changes.deleted.iter())
-        .cloned()
-        .collect();
+    // Compute affected directories from all changed/deleted file paths.
     let affected_dirs = affected_directories(&all_changed_paths);
 
     // Group changed files by parent directory.
@@ -263,6 +285,8 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
     progress.finish_with_message(f!("{file_msg}, {dir_msg}"));
 
     db.set_metadata("last_update", &epoch_now())?;
+
+    print_elapsed(start);
 
     Ok(())
 }
