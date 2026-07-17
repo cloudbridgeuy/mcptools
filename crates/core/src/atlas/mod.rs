@@ -20,10 +20,12 @@ pub use prompts::{
     directory_system_prompt, estimate_tokens, file_system_prompt, truncate_to_tokens,
 };
 pub use setup::{
-    detect_managers, format_manual_instructions, format_setup_plan, format_setup_summary,
-    hook_block, manual_instructions, parse_hook_state, plan_setup, splice_hook_block, HookState,
-    Manager, ManagerFiles, RepoFacts, SetupAction, SetupFlags, SetupStep, SkipReason,
-    UntouchableReason, HOOK_MARKER_END, HOOK_MARKER_START,
+    detect_managers, extract_claude_md_block, format_manual_instructions, format_setup_plan,
+    format_setup_summary, format_warnings, hook_block, manual_instructions, parse_hook_state,
+    plan_setup, splice_claude_md, splice_hook_block, template_status, HookState, Manager,
+    ManagerFiles, RepoFacts, SetupAction, SetupFlags, SetupStep, SkipReason, TemplateStatus,
+    Templates, UntouchableReason, CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START, HOOK_MARKER_END,
+    HOOK_MARKER_START,
 };
 pub use symbols::extract_symbols;
 pub use tree_view::{

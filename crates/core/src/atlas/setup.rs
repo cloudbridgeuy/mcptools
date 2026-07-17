@@ -79,6 +79,8 @@ pub enum HookState {
 #[derive(Debug, Clone, Default)]
 pub struct SetupFlags {
     pub no_hooks: bool,
+    pub no_skills: bool,
+    pub no_claude_md: bool,
 }
 
 /// Everything the planner needs to know about the repository.
@@ -87,18 +89,33 @@ pub struct RepoFacts {
     pub hook_state: HookState,
     /// Raw hook file content, `None` when the file does not exist.
     pub hook_content: Option<String>,
+    /// Content of `.claude/skills/atlas-navigation/SKILL.md`, if it exists.
+    pub skill_content: Option<String>,
+    /// Content of the project `CLAUDE.md`, if it exists.
+    pub claude_md_content: Option<String>,
+}
+
+/// Templates embedded in the binary, passed in by the shell.
+#[derive(Debug, Clone, Copy)]
+pub struct Templates<'a> {
+    pub skill: &'a str,
+    pub claude_md_snippet: &'a str,
 }
 
 /// Which setup step an action belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupStep {
     Hooks,
+    Skill,
+    ClaudeMd,
 }
 
 impl SetupStep {
     pub fn label(self) -> &'static str {
         match self {
             SetupStep::Hooks => "post-commit hook",
+            SetupStep::Skill => "atlas-navigation skill",
+            SetupStep::ClaudeMd => "CLAUDE.md section",
         }
     }
 }
@@ -108,6 +125,7 @@ impl SetupStep {
 pub enum SkipReason {
     Flag,
     AlreadyInstalled,
+    UserEdited,
 }
 
 impl SkipReason {
@@ -115,6 +133,7 @@ impl SkipReason {
         match self {
             SkipReason::Flag => "skipped by flag",
             SkipReason::AlreadyInstalled => "already installed",
+            SkipReason::UserEdited => "user-edited, left unchanged",
         }
     }
 }
@@ -174,6 +193,8 @@ pub fn manual_instructions(reason: UntouchableReason) -> String {
 pub enum SetupAction {
     CreateHook { content: String },
     AppendHookBlock { content: String },
+    WriteSkill { content: String },
+    WriteClaudeMd { content: String },
     Skip { step: SetupStep, reason: SkipReason },
     LeaveAlone { reason: UntouchableReason },
 }
@@ -227,7 +248,11 @@ pub fn parse_hook_state(is_symlink: bool, managers: &[Manager], bytes: Option<&[
 }
 
 /// Map observed repo facts + flags to the list of actions to perform.
-pub fn plan_setup(facts: &RepoFacts, flags: &SetupFlags) -> Vec<SetupAction> {
+pub fn plan_setup(
+    facts: &RepoFacts,
+    flags: &SetupFlags,
+    templates: &Templates,
+) -> Vec<SetupAction> {
     let hook_action = if flags.no_hooks {
         SetupAction::Skip {
             step: SetupStep::Hooks,
@@ -256,7 +281,57 @@ pub fn plan_setup(facts: &RepoFacts, flags: &SetupFlags) -> Vec<SetupAction> {
             },
         }
     };
-    vec![hook_action]
+
+    let skill_action = if flags.no_skills {
+        SetupAction::Skip {
+            step: SetupStep::Skill,
+            reason: SkipReason::Flag,
+        }
+    } else {
+        match template_status(facts.skill_content.as_deref(), templates.skill) {
+            TemplateStatus::Absent => SetupAction::WriteSkill {
+                content: templates.skill.to_string(),
+            },
+            TemplateStatus::Current => SetupAction::Skip {
+                step: SetupStep::Skill,
+                reason: SkipReason::AlreadyInstalled,
+            },
+            TemplateStatus::UserEdited => SetupAction::Skip {
+                step: SetupStep::Skill,
+                reason: SkipReason::UserEdited,
+            },
+        }
+    };
+
+    let claude_md_action = if flags.no_claude_md {
+        SetupAction::Skip {
+            step: SetupStep::ClaudeMd,
+            reason: SkipReason::Flag,
+        }
+    } else {
+        let existing_block = facts
+            .claude_md_content
+            .as_deref()
+            .and_then(extract_claude_md_block);
+        match existing_block {
+            None => SetupAction::WriteClaudeMd {
+                content: splice_claude_md(
+                    facts.claude_md_content.as_deref(),
+                    templates.claude_md_snippet,
+                ),
+            },
+            Some(block) if block == templates.claude_md_snippet.trim_end() => SetupAction::Skip {
+                step: SetupStep::ClaudeMd,
+                reason: SkipReason::AlreadyInstalled,
+            },
+            Some(_) => SetupAction::Skip {
+                step: SetupStep::ClaudeMd,
+                reason: SkipReason::UserEdited,
+            },
+        }
+    };
+
+    vec![hook_action, skill_action, claude_md_action]
 }
 
 fn action_row(action: &SetupAction, executed: bool) -> String {
@@ -272,6 +347,14 @@ fn action_row(action: &SetupAction, executed: bool) -> String {
                 "append atlas block"
             };
             format!("post-commit hook: {verb}")
+        }
+        SetupAction::WriteSkill { .. } => {
+            let verb = if executed { "installed" } else { "install" };
+            format!("{}: {verb}", SetupStep::Skill.label())
+        }
+        SetupAction::WriteClaudeMd { .. } => {
+            let verb = if executed { "wrote" } else { "write" };
+            format!("{}: {verb}", SetupStep::ClaudeMd.label())
         }
         SetupAction::Skip { step, reason } => {
             format!("{}: {}", step.label(), reason.label())
@@ -376,14 +459,45 @@ pub fn format_manual_instructions(actions: &[SetupAction]) -> Option<String> {
     }
 }
 
+/// Warnings for user-edited files that were left unchanged, `None` if none.
+pub fn format_warnings(actions: &[SetupAction]) -> Option<String> {
+    let lines: Vec<String> = actions
+        .iter()
+        .filter_map(|a| match a {
+            SetupAction::Skip {
+                step,
+                reason: SkipReason::UserEdited,
+            } => Some(format!(
+                "warning: {} was edited by hand; not overwritten",
+                step.label()
+            )),
+            _ => None,
+        })
+        .collect();
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn no_templates() -> Templates<'static> {
+        Templates {
+            skill: "SKILL TPL v1",
+            claude_md_snippet: "SNIPPET v1",
+        }
+    }
 
     fn facts(hook_content: Option<&str>) -> RepoFacts {
         RepoFacts {
             hook_state: parse_hook_state(false, &[], hook_content.map(str::as_bytes)),
             hook_content: hook_content.map(str::to_string),
+            skill_content: None,
+            claude_md_content: None,
         }
     }
 
@@ -520,12 +634,15 @@ mod tests {
         let f = RepoFacts {
             hook_state: HookState::Symlink,
             hook_content: None,
+            skill_content: None,
+            claude_md_content: None,
         };
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
         assert_eq!(
-            plan_setup(&f, &SetupFlags::default()),
-            vec![SetupAction::LeaveAlone {
+            actions[0],
+            SetupAction::LeaveAlone {
                 reason: UntouchableReason::Symlink
-            }]
+            }
         );
     }
 
@@ -534,12 +651,15 @@ mod tests {
         let f = RepoFacts {
             hook_state: HookState::Managed(Manager::Husky),
             hook_content: None,
+            skill_content: None,
+            claude_md_content: None,
         };
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
         assert_eq!(
-            plan_setup(&f, &SetupFlags::default()),
-            vec![SetupAction::LeaveAlone {
+            actions[0],
+            SetupAction::LeaveAlone {
                 reason: UntouchableReason::Managed(Manager::Husky)
-            }]
+            }
         );
     }
 
@@ -548,12 +668,15 @@ mod tests {
         let f = RepoFacts {
             hook_state: HookState::Opaque,
             hook_content: None,
+            skill_content: None,
+            claude_md_content: None,
         };
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
         assert_eq!(
-            plan_setup(&f, &SetupFlags::default()),
-            vec![SetupAction::LeaveAlone {
+            actions[0],
+            SetupAction::LeaveAlone {
                 reason: UntouchableReason::NonUtf8
-            }]
+            }
         );
     }
 
@@ -562,13 +685,20 @@ mod tests {
         let f = RepoFacts {
             hook_state: HookState::Symlink,
             hook_content: None,
+            skill_content: None,
+            claude_md_content: None,
         };
+        let flags = SetupFlags {
+            no_hooks: true,
+            ..Default::default()
+        };
+        let actions = plan_setup(&f, &flags, &no_templates());
         assert_eq!(
-            plan_setup(&f, &SetupFlags { no_hooks: true }),
-            vec![SetupAction::Skip {
+            actions[0],
+            SetupAction::Skip {
                 step: SetupStep::Hooks,
                 reason: SkipReason::Flag
-            }]
+            }
         );
     }
 
@@ -606,8 +736,11 @@ mod tests {
             &RepoFacts {
                 hook_state: HookState::Absent,
                 hook_content: None,
+                skill_content: None,
+                claude_md_content: None,
             },
             &SetupFlags::default(),
+            &no_templates(),
         );
         assert_eq!(format_manual_instructions(&actions), None);
     }
@@ -629,12 +762,12 @@ mod tests {
 
     #[test]
     fn plan_creates_hook_when_absent() {
-        let actions = plan_setup(&facts(None), &SetupFlags::default());
+        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
         assert_eq!(
-            actions,
-            vec![SetupAction::CreateHook {
+            actions[0],
+            SetupAction::CreateHook {
                 content: splice_hook_block(None)
-            }]
+            }
         );
     }
 
@@ -642,12 +775,12 @@ mod tests {
     fn plan_appends_when_plain_without_marker() {
         let existing = "#!/bin/sh\nnpm run lint\n";
         let f = facts(Some(existing));
-        let actions = plan_setup(&f, &SetupFlags::default());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
         assert_eq!(
-            actions,
-            vec![SetupAction::AppendHookBlock {
+            actions[0],
+            SetupAction::AppendHookBlock {
                 content: splice_hook_block(Some(existing))
-            }]
+            }
         );
     }
 
@@ -655,33 +788,186 @@ mod tests {
     fn plan_skips_when_marker_present() {
         let content = splice_hook_block(None);
         let f = facts(Some(&content));
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
         assert_eq!(
-            plan_setup(&f, &SetupFlags::default()),
-            vec![SetupAction::Skip {
+            actions[0],
+            SetupAction::Skip {
                 step: SetupStep::Hooks,
                 reason: SkipReason::AlreadyInstalled
-            }]
+            }
         );
     }
 
     #[test]
     fn plan_skips_on_no_hooks_flag() {
         let f = facts(None);
+        let flags = SetupFlags {
+            no_hooks: true,
+            ..Default::default()
+        };
+        let actions = plan_setup(&f, &flags, &no_templates());
         assert_eq!(
-            plan_setup(&f, &SetupFlags { no_hooks: true }),
-            vec![SetupAction::Skip {
+            actions[0],
+            SetupAction::Skip {
                 step: SetupStep::Hooks,
                 reason: SkipReason::Flag
-            }]
+            }
         );
     }
 
     #[test]
     fn plan_output_describes_each_action() {
-        let actions = plan_setup(&facts(None), &SetupFlags::default());
+        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
         let out = format_setup_plan(&actions);
         assert!(out.contains("post-commit hook"));
         assert!(out.contains("create"));
+    }
+
+    #[test]
+    fn plan_writes_skill_when_absent() {
+        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
+        assert_eq!(
+            actions[1],
+            SetupAction::WriteSkill {
+                content: "SKILL TPL v1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn plan_skips_skill_when_current() {
+        let mut f = facts(None);
+        f.skill_content = Some("SKILL TPL v1\n".to_string());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        assert_eq!(
+            actions[1],
+            SetupAction::Skip {
+                step: SetupStep::Skill,
+                reason: SkipReason::AlreadyInstalled
+            }
+        );
+    }
+
+    #[test]
+    fn plan_keeps_user_edited_skill() {
+        let mut f = facts(None);
+        f.skill_content = Some("SKILL TPL v1 + my edits".to_string());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        assert_eq!(
+            actions[1],
+            SetupAction::Skip {
+                step: SetupStep::Skill,
+                reason: SkipReason::UserEdited
+            }
+        );
+    }
+
+    #[test]
+    fn plan_skips_skill_on_flag() {
+        let flags = SetupFlags {
+            no_skills: true,
+            ..Default::default()
+        };
+        let actions = plan_setup(&facts(None), &flags, &no_templates());
+        assert_eq!(
+            actions[1],
+            SetupAction::Skip {
+                step: SetupStep::Skill,
+                reason: SkipReason::Flag
+            }
+        );
+    }
+
+    #[test]
+    fn plan_writes_claude_md_when_no_marker() {
+        let mut f = facts(None);
+        f.claude_md_content = Some("# My Project\n".to_string());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        assert_eq!(
+            actions[2],
+            SetupAction::WriteClaudeMd {
+                content: splice_claude_md(Some("# My Project\n"), "SNIPPET v1")
+            }
+        );
+    }
+
+    #[test]
+    fn plan_creates_claude_md_when_file_absent() {
+        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
+        assert_eq!(
+            actions[2],
+            SetupAction::WriteClaudeMd {
+                content: splice_claude_md(None, "SNIPPET v1")
+            }
+        );
+    }
+
+    #[test]
+    fn plan_skips_claude_md_when_block_current() {
+        let mut f = facts(None);
+        f.claude_md_content = Some(splice_claude_md(Some("# P\n"), "SNIPPET v1"));
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        assert_eq!(
+            actions[2],
+            SetupAction::Skip {
+                step: SetupStep::ClaudeMd,
+                reason: SkipReason::AlreadyInstalled
+            }
+        );
+    }
+
+    #[test]
+    fn plan_keeps_user_edited_claude_md_block() {
+        let mut f = facts(None);
+        let installed = splice_claude_md(Some("# P\n"), "SNIPPET v1");
+        f.claude_md_content = Some(installed.replace("SNIPPET v1", "SNIPPET v1 edited"));
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        assert_eq!(
+            actions[2],
+            SetupAction::Skip {
+                step: SetupStep::ClaudeMd,
+                reason: SkipReason::UserEdited
+            }
+        );
+    }
+
+    #[test]
+    fn plan_skips_claude_md_on_flag() {
+        let flags = SetupFlags {
+            no_claude_md: true,
+            ..Default::default()
+        };
+        let actions = plan_setup(&facts(None), &flags, &no_templates());
+        assert_eq!(
+            actions[2],
+            SetupAction::Skip {
+                step: SetupStep::ClaudeMd,
+                reason: SkipReason::Flag
+            }
+        );
+    }
+
+    #[test]
+    fn warnings_listed_for_user_edited_files() {
+        let actions = vec![
+            SetupAction::Skip {
+                step: SetupStep::Skill,
+                reason: SkipReason::UserEdited,
+            },
+            SetupAction::Skip {
+                step: SetupStep::ClaudeMd,
+                reason: SkipReason::AlreadyInstalled,
+            },
+        ];
+        let text = format_warnings(&actions).expect("warning expected");
+        assert!(text.contains("atlas-navigation skill"));
+        assert!(!text.contains("CLAUDE.md section"));
+    }
+
+    #[test]
+    fn warnings_none_when_no_user_edits() {
+        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
+        assert_eq!(format_warnings(&actions), None);
     }
 
     #[test]
