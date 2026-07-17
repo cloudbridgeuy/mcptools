@@ -30,6 +30,8 @@ pub enum Commands {
     Sync(cli::sync::SyncOptions),
     /// Show index status and statistics
     Status(cli::status::StatusOptions),
+    /// Configure this repo for atlas (git hook; more in later slices)
+    Setup(cli::setup::SetupOptions),
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
@@ -41,5 +43,6 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
         Commands::Update(opts) => cli::update::run(opts, global).await,
         Commands::Sync(opts) => cli::sync::run(opts, global).await,
         Commands::Status(opts) => cli::status::run(opts, global).await,
+        Commands::Setup(opts) => cli::setup::run(opts, global).await,
     }
 }
