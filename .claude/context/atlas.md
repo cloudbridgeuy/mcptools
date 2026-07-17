@@ -37,9 +37,11 @@ mcptools atlas status --json          # JSON output
 mcptools atlas index --dry-run        # Show what would be indexed (by tier)
 mcptools atlas update --dry-run       # Show what would change (adds/mods/deletes)
 git status --porcelain | mcptools atlas index --stdin   # Index only the listed paths
-mcptools atlas setup                  # Install the post-commit hook (V1)
+mcptools atlas setup                  # Install hook + atlas-navigation skill + CLAUDE.md section
 mcptools atlas setup --dry-run        # Preview setup actions without applying them
 mcptools atlas setup --no-hooks       # Skip git hook installation
+mcptools atlas setup --no-skills      # Skip installing .claude/skills/atlas-navigation/SKILL.md
+mcptools atlas setup --no-claude-md   # Skip the CLAUDE.md atlas section
 ```
 
 The `index` and `update` commands display ETA and elapsed time during LLM description phases, and print total elapsed time on completion.
@@ -84,14 +86,17 @@ Only the listed files are indexed: the existing index is neither cleared nor has
 
 ### Setup
 
-`mcptools atlas setup` installs a `post-commit` git hook that runs `mcptools atlas update` in the background after each commit, so the index stays fresh without manual intervention.
+`mcptools atlas setup` installs a `post-commit` git hook that runs `mcptools atlas update` in the background after each commit, plus agent-facing guidance: a `.claude/skills/atlas-navigation/SKILL.md` file and a marker-delimited section in the project `CLAUDE.md`.
 
 - The hook is a marker-delimited block (`# >>> mcptools atlas >>>` ... `# <<< mcptools atlas <<<`) appended to `.git/hooks/post-commit` (or the path from `core.hooksPath`). If no hook file exists, one is created with a shebang; if one exists without the marker, the block is appended, preserving existing content.
-- Re-running `atlas setup` is idempotent: if the marker is already present, that step is skipped and reported as "already installed".
+- The skill and CLAUDE.md section come from templates embedded in the binary via `include_str!` — no network access needed. The CLAUDE.md section uses its own marker pair (`<!-- >>> mcptools atlas >>> -->` ... `<!-- <<< mcptools atlas <<< -->`); if the file doesn't exist, it's created; if it exists without the marker, the section is appended after a blank line.
+- Both templates start with a `<!-- atlas-template v1 -->` comment for future version detection — only exact-match against the current template exists today (no historical-version list yet, since there's only one template).
+- Re-running `atlas setup` is idempotent: if a step's marker/content is already installed, that step is skipped and reported as "already installed".
+- If an installed skill file or CLAUDE.md section differs from the shipped template (the user edited it), setup leaves it untouched, reports "user-edited, left unchanged", and prints a `warning: ... was edited by hand; not overwritten` line — it never overwrites user edits.
 - `--dry-run` prints the plan without touching the filesystem.
-- `--no-hooks` skips hook installation entirely.
-- Setup never touches a hook it doesn't own. It detects: a symlinked `post-commit` hook, a non-UTF8 hook file, or a repo managed by a third-party hook manager (`.husky/` dir, `lefthook.yml`/`lefthook.yaml`, `.pre-commit-config.yaml`). In these cases the hook is left untouched and manual instructions for wiring in `mcptools atlas update` are printed instead (both in `--dry-run` and normal runs).
-- Skills/CLAUDE.md scaffolding and index bootstrap on first run arrive in later slices — V1/V2 only manage the hook.
+- `--no-hooks` skips hook installation; `--no-skills` skips the skill file; `--no-claude-md` skips the CLAUDE.md section. Each step is independently skippable.
+- Setup never touches a hook it doesn't own. It detects: a symlinked `post-commit` hook, a non-UTF8 hook file, or a repo managed by a third-party hook manager (`.husky/` dir, `lefthook.yml`/`lefthook.yaml`, `.pre-commit-config.yaml`). In these cases the hook is left untouched and manual instructions for wiring in `mcptools atlas update` are printed instead (both in `--dry-run` and normal runs) — this never blocks the skill/CLAUDE.md steps.
+- Index bootstrap on first run (primer + initial index) arrives in a later slice — setup currently manages the hook, skill, and CLAUDE.md only.
 
 ## Configuration
 

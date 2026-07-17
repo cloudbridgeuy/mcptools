@@ -98,7 +98,8 @@ mcptools atlas status                 # Index health (--json)
 mcptools atlas index --dry-run        # Show what would be indexed
 mcptools atlas update --dry-run       # Show what would change
 git status --porcelain | mcptools atlas index --stdin  # Index only the listed paths
-mcptools atlas setup                  # Install post-commit hook to keep the index fresh
+mcptools atlas setup                  # Install post-commit hook + atlas-navigation skill + CLAUDE.md section
+mcptools atlas setup --no-skills --no-claude-md  # Hook only, skip agent-guidance scaffolding
 ```
 
 ### Jira
