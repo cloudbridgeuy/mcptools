@@ -40,6 +40,7 @@ pub async fn run(opts: InitOptions, global: crate::Global) -> Result<()> {
             parallel: opts.parallel,
             incremental: false,
             dry_run: false,
+            stdin: false,
         },
         global,
     )

@@ -2063,6 +2063,7 @@ name = "mcptools_core"
 version = "0.0.0"
 dependencies = [
  "chrono",
+ "globset",
  "html-escape",
  "html2md",
  "md5",

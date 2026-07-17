@@ -15,6 +15,7 @@ pub async fn run(opts: SyncOptions, global: crate::Global) -> Result<()> {
             parallel: opts.parallel,
             incremental: false,
             dry_run: false,
+            stdin: false,
         },
         global,
     )

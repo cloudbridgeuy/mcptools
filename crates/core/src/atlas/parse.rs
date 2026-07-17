@@ -31,10 +31,13 @@ pub fn parse_description(response: &str) -> Result<FileDescription, ParseDescrip
     let lines: Vec<&str> = response.lines().collect();
 
     // Find first line starting with "SHORT:"
-    let short_idx = lines
+    let short_idx = match lines
         .iter()
         .position(|l| l.trim_start().starts_with("SHORT:"))
-        .ok_or(ParseDescriptionError::MissingShort)?;
+    {
+        Some(idx) => idx,
+        None => return parse_description_fallback(response),
+    };
 
     let short = lines[short_idx]
         .trim_start()
@@ -76,6 +79,68 @@ pub fn parse_description(response: &str) -> Result<FileDescription, ParseDescrip
     }
 
     Ok(FileDescription { short, long })
+}
+
+/// Fallback parser for LLM responses that lack SHORT:/LONG: markers.
+///
+/// Uses the first non-empty line (truncated to 80 chars) as the short
+/// description and the remaining text as the long description.
+fn parse_description_fallback(response: &str) -> Result<FileDescription, ParseDescriptionError> {
+    let trimmed = response.trim();
+    if trimmed.is_empty() {
+        return Err(ParseDescriptionError::MissingShort);
+    }
+
+    let mut lines = trimmed.lines();
+    let first_line = lines
+        .next()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .ok_or(ParseDescriptionError::EmptyShort)?;
+
+    let short: String = first_line.chars().take(80).collect();
+
+    let long: String = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+
+    if long.is_empty() {
+        // Use the short as long too — better than failing
+        return Ok(FileDescription {
+            short: short.clone(),
+            long: short,
+        });
+    }
+
+    Ok(FileDescription { short, long })
+}
+
+/// Parse a single line from stdin into a file path, or `None` to skip.
+///
+/// Handles:
+/// - Plain paths (`src/foo.ts`)
+/// - Git porcelain format (`M  src/foo.ts`, `?? new_file.ts`)
+/// - Renames (`R  old.ts -> new.ts` — returns the new path)
+/// - Returns `None` for empty lines and `#` comments
+pub fn parse_stdin_line(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+
+    // Detect git status --porcelain format: "XY path" where X/Y are status chars
+    // and position 2 is a space. Status chars: A, M, D, R, C, U, ?, !
+    let is_porcelain = trimmed.len() > 3
+        && trimmed.as_bytes()[2] == b' '
+        && (trimmed.as_bytes()[0].is_ascii_alphabetic()
+            || trimmed.as_bytes()[0] == b'?'
+            || trimmed.as_bytes()[0] == b'!');
+
+    if is_porcelain {
+        let rest = &trimmed[3..];
+        // Handle renames: "old -> new", take the new path
+        Some(rest.split(" -> ").last().unwrap_or(rest))
+    } else {
+        Some(trimmed)
+    }
 }
 
 #[cfg(test)]
@@ -123,10 +188,11 @@ and starts the server.";
     }
 
     #[test]
-    fn missing_short_returns_error() {
+    fn missing_short_uses_fallback() {
+        // Without SHORT: prefix, fallback parser uses first line as short
         let input = "LONG: Some long description";
-        let err = parse_description(input).unwrap_err();
-        assert!(matches!(err, ParseDescriptionError::MissingShort));
+        let desc = parse_description(input).unwrap();
+        assert_eq!(desc.short, "LONG: Some long description");
     }
 
     #[test]
@@ -167,16 +233,106 @@ and starts the server.";
     }
 
     #[test]
-    fn case_sensitive_short_required() {
+    fn case_sensitive_short_falls_back() {
+        // Without "SHORT:" prefix, fallback parser kicks in
         let input = "short: lowercase\nLONG: Something";
+        let desc = parse_description(input).unwrap();
+        assert_eq!(desc.short, "short: lowercase");
+        assert_eq!(desc.long, "LONG: Something");
+    }
+
+    #[test]
+    fn case_sensitive_long_falls_back_from_main_to_use_remaining() {
+        let input = "SHORT: Valid\nlong: lowercase";
+        // SHORT: found, but no LONG: — falls back to treating remaining lines as long
+        let err = parse_description(input).unwrap_err();
+        assert!(matches!(err, ParseDescriptionError::MissingLong));
+    }
+
+    // -- Fallback parser tests --
+
+    #[test]
+    fn fallback_freeform_response_uses_first_line_as_short() {
+        let input = "This file handles authentication.\nIt validates tokens and manages sessions.";
+        let desc = parse_description(input).unwrap();
+        assert_eq!(desc.short, "This file handles authentication.");
+        assert_eq!(desc.long, "It validates tokens and manages sessions.");
+    }
+
+    #[test]
+    fn fallback_single_line_uses_same_for_both() {
+        let input = "A utility module for string processing.";
+        let desc = parse_description(input).unwrap();
+        assert_eq!(desc.short, "A utility module for string processing.");
+        assert_eq!(desc.long, "A utility module for string processing.");
+    }
+
+    #[test]
+    fn fallback_truncates_short_to_80_chars() {
+        let input = "a".repeat(120) + "\nSome long description here.";
+        let desc = parse_description(&input).unwrap();
+        assert_eq!(desc.short.len(), 80);
+        assert_eq!(desc.long, "Some long description here.");
+    }
+
+    #[test]
+    fn fallback_empty_response_fails() {
+        let input = "";
         let err = parse_description(input).unwrap_err();
         assert!(matches!(err, ParseDescriptionError::MissingShort));
     }
 
+    // -- parse_stdin_line tests --
+
     #[test]
-    fn case_sensitive_long_required() {
-        let input = "SHORT: Valid\nlong: lowercase";
-        let err = parse_description(input).unwrap_err();
-        assert!(matches!(err, ParseDescriptionError::MissingLong));
+    fn stdin_line_plain_path() {
+        assert_eq!(parse_stdin_line("src/foo.ts"), Some("src/foo.ts"));
+    }
+
+    #[test]
+    fn stdin_line_porcelain_modified() {
+        assert_eq!(parse_stdin_line("M  src/foo.ts"), Some("src/foo.ts"));
+    }
+
+    #[test]
+    fn stdin_line_porcelain_added() {
+        assert_eq!(parse_stdin_line("A  src/new.ts"), Some("src/new.ts"));
+    }
+
+    #[test]
+    fn stdin_line_porcelain_untracked() {
+        assert_eq!(parse_stdin_line("?? src/new.ts"), Some("src/new.ts"));
+    }
+
+    #[test]
+    fn stdin_line_porcelain_rename() {
+        assert_eq!(parse_stdin_line("R  old.ts -> new.ts"), Some("new.ts"));
+    }
+
+    #[test]
+    fn stdin_line_empty() {
+        assert_eq!(parse_stdin_line(""), None);
+    }
+
+    #[test]
+    fn stdin_line_whitespace_only() {
+        assert_eq!(parse_stdin_line("   "), None);
+    }
+
+    #[test]
+    fn stdin_line_comment() {
+        assert_eq!(parse_stdin_line("# this is a comment"), None);
+    }
+
+    #[test]
+    fn stdin_line_short_path_not_porcelain() {
+        // "ab" is only 2 chars — too short to be porcelain format
+        assert_eq!(parse_stdin_line("ab"), Some("ab"));
+    }
+
+    #[test]
+    fn stdin_line_path_starting_with_question_mark_not_porcelain() {
+        // "?readme.txt" has no space at position 2, so it's a plain path
+        assert_eq!(parse_stdin_line("?readme.txt"), Some("?readme.txt"));
     }
 }

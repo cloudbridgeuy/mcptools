@@ -29,6 +29,10 @@ pub struct IndexOptions {
     /// Show what would be indexed without doing it
     #[clap(long)]
     pub dry_run: bool,
+
+    /// Read file paths from stdin (one per line) instead of walking the repo
+    #[clap(long)]
+    pub stdin: bool,
 }
 
 pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
@@ -38,6 +42,16 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     let db_path = config.db_path.resolve(&root);
     ensure_parent_dir(&db_path)?;
     let db = Database::open(&db_path)?;
+
+    let ignore = mcptools_core::atlas::build_ignore_matcher(&config.skip_patterns)
+        .map_err(|e| eyre!("invalid skip pattern: {e}"))?;
+
+    // Resolve file source: stdin paths or repo walk.
+    let file_source: Box<dyn Iterator<Item = Result<(PathBuf, Vec<u8>)>>> = if opts.stdin {
+        Box::new(read_paths_from_stdin(&root))
+    } else {
+        Box::new(walk_repo(&root, &ignore))
+    };
 
     if opts.dry_run {
         let described_files: HashSet<PathBuf> = if opts.incremental {
@@ -49,7 +63,7 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         };
 
         let mut entries = Vec::new();
-        for result in walk_repo(&root) {
+        for result in file_source {
             let (path, _bytes) = result?;
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let tier = IndexTier::from_extension(ext);
@@ -65,7 +79,10 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         return Ok(());
     }
 
-    let existing_hashes = if opts.incremental {
+    let existing_hashes = if opts.stdin {
+        // --stdin replaces the walk; don't clear or check hashes
+        HashMap::new()
+    } else if opts.incremental {
         db.file_hashes()?
     } else {
         db.clear_all()?;
@@ -89,7 +106,7 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
 
     let mut indexed_paths: Vec<PathBuf> = Vec::new();
 
-    for result in walk_repo(&root) {
+    for result in file_source {
         let (path, bytes) = result?;
         let hash = content_hash(&bytes);
 
@@ -553,6 +570,42 @@ pub(crate) fn msg_width() -> usize {
         .unwrap_or(80);
     // Chrome: "⠋ [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━] 999/999 3m 42s elapsed, ~12m 5s remaining  " ≈ 80 chars
     term_width.saturating_sub(80)
+}
+
+/// Read file paths from stdin (one per line) and yield `(relative_path, bytes)`.
+///
+/// Line parsing (porcelain detection, comments, renames) is delegated to
+/// [`mcptools_core::atlas::parse_stdin_line`]. This function handles only I/O:
+/// reading lines and reading file bytes.
+fn read_paths_from_stdin(root: &Path) -> impl Iterator<Item = Result<(PathBuf, Vec<u8>)>> + '_ {
+    use std::io::BufRead;
+
+    std::io::stdin()
+        .lock()
+        .lines()
+        .filter_map(move |line_result| {
+            let line = match line_result {
+                Ok(l) => l,
+                Err(e) => return Some(Err(eyre!("reading stdin: {e}"))),
+            };
+
+            let path_str = mcptools_core::atlas::parse_stdin_line(&line)?;
+            let relative = PathBuf::from(path_str);
+            let abs_path = root.join(&relative);
+
+            if !abs_path.is_file() {
+                return None;
+            }
+
+            let bytes = match std::fs::read(&abs_path) {
+                Ok(b) => b,
+                Err(e) => {
+                    return Some(Err(eyre!("reading file: {}: {e}", abs_path.display())));
+                }
+            };
+
+            Some(Ok((relative, bytes)))
+        })
 }
 
 /// Produce an epoch-seconds timestamp from `SystemTime::now()`.

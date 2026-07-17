@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{self, Context};
 use ignore::WalkBuilder;
+use mcptools_core::atlas::IgnoreMatcher;
 
 /// Directories to always skip, beyond what `.gitignore` handles.
 const SKIP_DIRS: &[&str] = &[
@@ -17,8 +18,12 @@ const SKIP_DIRS: &[&str] = &[
 const BINARY_CHECK_LEN: usize = 8192;
 
 /// Walk a repository root and yield `(relative_path, file_bytes)` for each indexable file.
-/// Respects `.gitignore`. Skips binary files and known skip patterns.
-pub fn walk_repo(root: &Path) -> impl Iterator<Item = eyre::Result<(PathBuf, Vec<u8>)>> + use<'_> {
+/// Respects `.gitignore`. Skips binary files, known skip directories, and user-configured
+/// ignore patterns (via [`IgnoreMatcher`]).
+pub fn walk_repo<'a>(
+    root: &'a Path,
+    ignore: &'a IgnoreMatcher,
+) -> impl Iterator<Item = eyre::Result<(PathBuf, Vec<u8>)>> + use<'a> {
     WalkBuilder::new(root)
         .hidden(false) // don't skip dot-files globally; .gitignore still applies
         .filter_entry(|entry| {
@@ -50,6 +55,11 @@ pub fn walk_repo(root: &Path) -> impl Iterator<Item = eyre::Result<(PathBuf, Vec
                 Ok(r) => r.to_path_buf(),
                 Err(_) => abs_path.clone(),
             };
+
+            // Skip files matching user-configured ignore patterns.
+            if ignore.is_match(&relative) {
+                return None;
+            }
 
             let bytes = match std::fs::read(&abs_path) {
                 Ok(b) => b,

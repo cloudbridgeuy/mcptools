@@ -3,6 +3,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
 
 // ---------------------------------------------------------------------------
@@ -175,7 +176,21 @@ fn default_directory_llm() -> LlmProviderConfig {
 // Raw serde target (private)
 // ---------------------------------------------------------------------------
 
+/// Top-level config file that supports both flat and `[atlas]`-nested formats.
+///
+/// Flat:     `skip_patterns = [...]`
+/// Nested:   `[atlas]\nskip_patterns = [...]`
+///
+/// Nested `[atlas]` fields take precedence over flat fields when both are present.
 #[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct RawConfigFile {
+    #[serde(flatten)]
+    flat: RawConfig,
+    atlas: Option<RawConfig>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 struct RawConfig {
     primer_path: Option<String>,
@@ -186,7 +201,7 @@ struct RawConfig {
     directory_llm: Option<RawLlmProvider>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 struct RawLlmProvider {
     kind: Option<String>,
@@ -207,7 +222,10 @@ pub fn parse_config(
     env_vars: &HashMap<String, String>,
 ) -> Result<AtlasConfig, ConfigError> {
     let raw: RawConfig = match toml_content {
-        Some(content) => toml::from_str(content)?,
+        Some(content) => {
+            let file: RawConfigFile = toml::from_str(content)?;
+            merge_raw_config(file.flat, file.atlas)
+        }
         None => RawConfig::default(),
     };
 
@@ -275,6 +293,45 @@ pub fn parse_config(
         file_llm,
         directory_llm,
     })
+}
+
+/// Merge flat (top-level) and nested (`[atlas]`) config. Nested values take precedence.
+fn merge_raw_config(flat: RawConfig, nested: Option<RawConfig>) -> RawConfig {
+    let Some(nested) = nested else {
+        return flat;
+    };
+    RawConfig {
+        primer_path: nested.primer_path.or(flat.primer_path),
+        db_path: nested.db_path.or(flat.db_path),
+        max_file_tokens: nested.max_file_tokens.or(flat.max_file_tokens),
+        skip_patterns: nested.skip_patterns.or(flat.skip_patterns),
+        file_llm: nested.file_llm.or(flat.file_llm),
+        directory_llm: nested.directory_llm.or(flat.directory_llm),
+    }
+}
+
+/// Compiled set of ignore patterns. Wraps `globset::GlobSet` to avoid
+/// leaking the third-party type into the public API.
+#[derive(Debug, Clone)]
+pub struct IgnoreMatcher(GlobSet);
+
+impl IgnoreMatcher {
+    /// Test whether a path matches any ignore pattern.
+    pub fn is_match(&self, path: &std::path::Path) -> bool {
+        self.0.is_match(path)
+    }
+}
+
+/// Compile skip patterns into an [`IgnoreMatcher`].
+///
+/// Each pattern is a glob expression (e.g. `"*.log"`, `"vendor/**"`).
+/// An empty slice produces a matcher that matches nothing.
+pub fn build_ignore_matcher(patterns: &[String]) -> Result<IgnoreMatcher, globset::Error> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        builder.add(Glob::new(pattern)?);
+    }
+    builder.build().map(IgnoreMatcher)
 }
 
 /// Treat empty-or-whitespace strings as `None` so they fall through to defaults.
@@ -629,5 +686,34 @@ mod tests {
             cfg.directory_llm.base_url.as_ref().unwrap().as_str(),
             "http://custom:9999"
         );
+    }
+
+    // -- build_ignore_matcher --
+
+    #[test]
+    fn ignore_matcher_extension_patterns() {
+        let patterns = vec!["*.md".to_string(), "*.json".to_string()];
+        let matcher = build_ignore_matcher(&patterns).unwrap();
+        assert!(matcher.is_match(Path::new("README.md")));
+        assert!(matcher.is_match(Path::new("src/config.json")));
+        assert!(!matcher.is_match(Path::new("src/main.rs")));
+        assert!(!matcher.is_match(Path::new("lib.py")));
+    }
+
+    #[test]
+    fn ignore_matcher_directory_glob() {
+        let patterns = vec!["packages/mom/**".to_string()];
+        let matcher = build_ignore_matcher(&patterns).unwrap();
+        assert!(matcher.is_match(Path::new("packages/mom/index.js")));
+        assert!(matcher.is_match(Path::new("packages/mom/src/lib.rs")));
+        assert!(!matcher.is_match(Path::new("packages/dad/index.js")));
+        assert!(!matcher.is_match(Path::new("src/main.rs")));
+    }
+
+    #[test]
+    fn ignore_matcher_empty_patterns_match_nothing() {
+        let matcher = build_ignore_matcher(&[]).unwrap();
+        assert!(!matcher.is_match(Path::new("anything.rs")));
+        assert!(!matcher.is_match(Path::new("some/path/file.txt")));
     }
 }

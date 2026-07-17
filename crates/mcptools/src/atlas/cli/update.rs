@@ -50,11 +50,14 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
 
     let stored_hashes = db.file_hashes()?;
 
+    let ignore = mcptools_core::atlas::build_ignore_matcher(&config.skip_patterns)
+        .map_err(|e| eyre!("invalid skip pattern: {e}"))?;
+
     // Walk repo to compute current file hashes.
     let mut current_hashes: HashMap<PathBuf, mcptools_core::atlas::ContentHash> = HashMap::new();
     let mut file_bytes: HashMap<PathBuf, Vec<u8>> = HashMap::new();
 
-    for result in walk_repo(&root) {
+    for result in walk_repo(&root, &ignore) {
         let (path, bytes) = result?;
         let hash = content_hash(&bytes);
         current_hashes.insert(path.clone(), hash);
