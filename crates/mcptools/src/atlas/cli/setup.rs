@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use mcptools_core::atlas::{
-    format_setup_plan, format_setup_summary, parse_hook_state, plan_setup, RepoFacts, SetupAction,
-    SetupFlags,
+    detect_managers, format_manual_instructions, format_setup_plan, format_setup_summary,
+    parse_hook_state, plan_setup, ManagerFiles, RepoFacts, SetupAction, SetupFlags,
 };
 use std::path::{Path, PathBuf};
 
@@ -21,14 +21,32 @@ pub async fn run(opts: SetupOptions, _global: crate::Global) -> Result<()> {
     let root = find_git_root()?;
     let hook_path = resolve_hook_path(&root)?;
 
-    let hook_content = match std::fs::read_to_string(&hook_path) {
-        Ok(content) => Some(content),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(eyre!("reading {}: {e}", hook_path.display())),
+    let is_symlink = std::fs::symlink_metadata(&hook_path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+
+    let hook_bytes = if is_symlink {
+        None // never read through a symlink we won't touch
+    } else {
+        match std::fs::read(&hook_path) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(eyre!("reading {}: {e}", hook_path.display())),
+        }
     };
+    let hook_content = hook_bytes
+        .as_deref()
+        .and_then(|b| std::str::from_utf8(b).ok().map(str::to_string));
+
+    let manager_files = ManagerFiles {
+        husky_dir: root.join(".husky").is_dir(),
+        lefthook_yml: root.join("lefthook.yml").is_file() || root.join("lefthook.yaml").is_file(),
+        precommit_yaml: root.join(".pre-commit-config.yaml").is_file(),
+    };
+    let managers = detect_managers(&manager_files);
 
     let facts = RepoFacts {
-        hook_state: parse_hook_state(hook_content.as_deref()),
+        hook_state: parse_hook_state(is_symlink, &managers, hook_bytes.as_deref()),
         hook_content,
     };
     let flags = SetupFlags {
@@ -38,6 +56,9 @@ pub async fn run(opts: SetupOptions, _global: crate::Global) -> Result<()> {
 
     if opts.dry_run {
         crate::prelude::println!("{}", format_setup_plan(&actions));
+        if let Some(instructions) = format_manual_instructions(&actions) {
+            crate::prelude::println!("{instructions}");
+        }
         return Ok(());
     }
 
@@ -45,6 +66,9 @@ pub async fn run(opts: SetupOptions, _global: crate::Global) -> Result<()> {
         execute(action, &hook_path)?;
     }
     crate::prelude::println!("{}", format_setup_summary(&actions));
+    if let Some(instructions) = format_manual_instructions(&actions) {
+        crate::prelude::println!("{instructions}");
+    }
     Ok(())
 }
 
@@ -59,7 +83,7 @@ fn execute(action: &SetupAction, hook_path: &Path) -> Result<()> {
                 .map_err(|e| eyre!("writing {}: {e}", hook_path.display()))?;
             set_executable(hook_path)?;
         }
-        SetupAction::Skip { .. } => {}
+        SetupAction::Skip { .. } | SetupAction::LeaveAlone { .. } => {}
     }
     Ok(())
 }
