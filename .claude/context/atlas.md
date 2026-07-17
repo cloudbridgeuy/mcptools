@@ -37,6 +37,9 @@ mcptools atlas status --json          # JSON output
 mcptools atlas index --dry-run        # Show what would be indexed (by tier)
 mcptools atlas update --dry-run       # Show what would change (adds/mods/deletes)
 git status --porcelain | mcptools atlas index --stdin   # Index only the listed paths
+mcptools atlas setup                  # Install the post-commit hook (V1)
+mcptools atlas setup --dry-run        # Preview setup actions without applying them
+mcptools atlas setup --no-hooks       # Skip git hook installation
 ```
 
 The `index` and `update` commands display ETA and elapsed time during LLM description phases, and print total elapsed time on completion.
@@ -78,6 +81,16 @@ Only the listed files are indexed: the existing index is neither cleared nor has
 ### `atlas sync` — Force Full Re-Index
 
 `atlas sync` clears the existing index and performs a complete rebuild from scratch. This is equivalent to clearing the database and then running `atlas index`. Use this when the index is corrupt, after major refactors, or when you want a guaranteed-fresh index.
+
+### Setup
+
+`mcptools atlas setup` installs a `post-commit` git hook that runs `mcptools atlas update` in the background after each commit, so the index stays fresh without manual intervention.
+
+- The hook is a marker-delimited block (`# >>> mcptools atlas >>>` ... `# <<< mcptools atlas <<<`) appended to `.git/hooks/post-commit` (or the path from `core.hooksPath`). If no hook file exists, one is created with a shebang; if one exists without the marker, the block is appended, preserving existing content.
+- Re-running `atlas setup` is idempotent: if the marker is already present, that step is skipped and reported as "already installed".
+- `--dry-run` prints the plan without touching the filesystem.
+- `--no-hooks` skips hook installation entirely.
+- Hook-manager detection (husky, symlinked hooks), skills/CLAUDE.md scaffolding, and index bootstrap on first run arrive in later slices — V1 only manages the hook.
 
 ## Configuration
 
