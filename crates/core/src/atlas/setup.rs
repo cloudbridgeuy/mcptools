@@ -300,6 +300,40 @@ pub fn format_setup_summary(actions: &[SetupAction]) -> String {
     out
 }
 
+/// Opening marker of the managed CLAUDE.md section.
+pub const CLAUDE_MD_MARKER_START: &str = "<!-- >>> mcptools atlas >>> -->";
+/// Closing marker of the managed CLAUDE.md section.
+pub const CLAUDE_MD_MARKER_END: &str = "<!-- <<< mcptools atlas <<< -->";
+
+/// The text between the CLAUDE.md markers, trimmed of surrounding newlines.
+/// `None` when no complete marker pair exists.
+pub fn extract_claude_md_block(content: &str) -> Option<&str> {
+    let start = content.find(CLAUDE_MD_MARKER_START)? + CLAUDE_MD_MARKER_START.len();
+    let end = content[start..].find(CLAUDE_MD_MARKER_END)? + start;
+    Some(content[start..end].trim_matches('\n'))
+}
+
+/// Full CLAUDE.md content with the marker-wrapped snippet appended.
+/// Callers must check for an existing block first (see `plan_setup`) —
+/// this function always appends.
+pub fn splice_claude_md(existing: Option<&str>, snippet: &str) -> String {
+    let block = format!(
+        "{CLAUDE_MD_MARKER_START}\n{}\n{CLAUDE_MD_MARKER_END}\n",
+        snippet.trim_end()
+    );
+    let Some(content) = existing.filter(|content| !content.trim().is_empty()) else {
+        return block;
+    };
+    let sep = if content.ends_with("\n\n") {
+        ""
+    } else if content.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
+    format!("{content}{sep}{block}")
+}
+
 /// Manual instructions for every `LeaveAlone` action, `None` if there are none.
 pub fn format_manual_instructions(actions: &[SetupAction]) -> Option<String> {
     let texts: Vec<String> = actions
@@ -633,5 +667,47 @@ mod tests {
         let out = format_setup_summary(&actions);
         assert!(out.contains("post-commit hook"));
         assert!(out.contains("already installed"));
+    }
+
+    const SNIPPET: &str = "## Atlas\n\nThis repo is atlas-indexed.\n";
+
+    #[test]
+    fn claude_md_splice_creates_file_when_absent() {
+        let out = splice_claude_md(None, SNIPPET);
+        assert!(out.starts_with(CLAUDE_MD_MARKER_START));
+        assert!(out.contains("This repo is atlas-indexed."));
+        assert!(out.trim_end().ends_with(CLAUDE_MD_MARKER_END));
+    }
+
+    #[test]
+    fn claude_md_splice_appends_with_separation() {
+        let existing = "# My Project\n\nDocs here.\n";
+        let out = splice_claude_md(Some(existing), SNIPPET);
+        assert!(out.starts_with(existing));
+        assert!(out.contains("Docs here.\n\n<!-- >>> mcptools atlas >>> -->"));
+        assert_eq!(out.matches(CLAUDE_MD_MARKER_START).count(), 1);
+    }
+
+    #[test]
+    fn claude_md_splice_adds_newline_when_missing() {
+        let out = splice_claude_md(Some("# My Project"), SNIPPET);
+        assert!(out.contains("# My Project\n\n<!-- >>> mcptools atlas >>> -->"));
+    }
+
+    #[test]
+    fn extract_block_roundtrips_snippet() {
+        let out = splice_claude_md(Some("# P\n"), SNIPPET);
+        assert_eq!(extract_claude_md_block(&out), Some(SNIPPET.trim_end()));
+    }
+
+    #[test]
+    fn extract_block_none_without_markers() {
+        assert_eq!(extract_claude_md_block("# P\nno markers here\n"), None);
+    }
+
+    #[test]
+    fn extract_block_none_with_unclosed_marker() {
+        let content = format!("# P\n{CLAUDE_MD_MARKER_START}\ndangling\n");
+        assert_eq!(extract_claude_md_block(&content), None);
     }
 }
