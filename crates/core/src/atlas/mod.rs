@@ -3,6 +3,7 @@ pub mod config;
 pub mod hash;
 pub mod parse;
 pub mod prompts;
+pub mod setup;
 pub mod symbols;
 pub mod tree_view;
 pub mod types;
@@ -17,6 +18,11 @@ pub use parse::{parse_description, parse_stdin_line, FileDescription, ParseDescr
 pub use prompts::{
     build_directory_prompt, build_file_prompt, build_primer_refinement_prompt,
     directory_system_prompt, estimate_tokens, file_system_prompt, truncate_to_tokens,
+};
+pub use setup::{
+    format_setup_plan, format_setup_summary, hook_block, parse_hook_state, plan_setup,
+    splice_hook_block, HookState, RepoFacts, SetupAction, SetupFlags, SetupStep, SkipReason,
+    HOOK_MARKER_END, HOOK_MARKER_START,
 };
 pub use symbols::extract_symbols;
 pub use tree_view::{
