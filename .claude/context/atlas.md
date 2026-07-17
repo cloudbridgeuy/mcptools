@@ -90,7 +90,8 @@ Only the listed files are indexed: the existing index is neither cleared nor has
 - Re-running `atlas setup` is idempotent: if the marker is already present, that step is skipped and reported as "already installed".
 - `--dry-run` prints the plan without touching the filesystem.
 - `--no-hooks` skips hook installation entirely.
-- Hook-manager detection (husky, symlinked hooks), skills/CLAUDE.md scaffolding, and index bootstrap on first run arrive in later slices — V1 only manages the hook.
+- Setup never touches a hook it doesn't own. It detects: a symlinked `post-commit` hook, a non-UTF8 hook file, or a repo managed by a third-party hook manager (`.husky/` dir, `lefthook.yml`/`lefthook.yaml`, `.pre-commit-config.yaml`). In these cases the hook is left untouched and manual instructions for wiring in `mcptools atlas update` are printed instead (both in `--dry-run` and normal runs).
+- Skills/CLAUDE.md scaffolding and index bootstrap on first run arrive in later slices — V1/V2 only manage the hook.
 
 ## Configuration
 
