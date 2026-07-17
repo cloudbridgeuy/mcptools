@@ -334,6 +334,32 @@ pub fn splice_claude_md(existing: Option<&str>, snippet: &str) -> String {
     format!("{content}{sep}{block}")
 }
 
+/// How an installed template file compares to the template we ship.
+///
+/// Only exact-match detection exists today because only template v1 exists.
+/// When a v2 template ships, add `KnownOldVersion` and compare against a
+/// list of historical templates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemplateStatus {
+    /// File does not exist.
+    Absent,
+    /// File matches the current template (modulo trailing whitespace).
+    Current,
+    /// File exists but differs — the user changed it; never overwrite.
+    UserEdited,
+}
+
+/// Classify an installed file against the current template.
+pub fn template_status(existing: Option<&str>, current_template: &str) -> TemplateStatus {
+    match existing {
+        None => TemplateStatus::Absent,
+        Some(content) if content.trim_end() == current_template.trim_end() => {
+            TemplateStatus::Current
+        }
+        Some(_) => TemplateStatus::UserEdited,
+    }
+}
+
 /// Manual instructions for every `LeaveAlone` action, `None` if there are none.
 pub fn format_manual_instructions(actions: &[SetupAction]) -> Option<String> {
     let texts: Vec<String> = actions
@@ -709,5 +735,30 @@ mod tests {
     fn extract_block_none_with_unclosed_marker() {
         let content = format!("# P\n{CLAUDE_MD_MARKER_START}\ndangling\n");
         assert_eq!(extract_claude_md_block(&content), None);
+    }
+
+    #[test]
+    fn template_status_absent() {
+        assert_eq!(template_status(None, "tpl v1"), TemplateStatus::Absent);
+    }
+
+    #[test]
+    fn template_status_current_ignores_trailing_whitespace() {
+        assert_eq!(
+            template_status(Some("tpl v1"), "tpl v1"),
+            TemplateStatus::Current
+        );
+        assert_eq!(
+            template_status(Some("tpl v1\n"), "tpl v1"),
+            TemplateStatus::Current
+        );
+    }
+
+    #[test]
+    fn template_status_user_edited() {
+        assert_eq!(
+            template_status(Some("tpl v1 plus my notes"), "tpl v1"),
+            TemplateStatus::UserEdited
+        );
     }
 }
