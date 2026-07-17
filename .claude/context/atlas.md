@@ -36,6 +36,7 @@ mcptools atlas status                 # Index health summary
 mcptools atlas status --json          # JSON output
 mcptools atlas index --dry-run        # Show what would be indexed (by tier)
 mcptools atlas update --dry-run       # Show what would change (adds/mods/deletes)
+git status --porcelain | mcptools atlas index --stdin   # Index only the listed paths
 ```
 
 The `index` and `update` commands display ETA and elapsed time during LLM description phases, and print total elapsed time on completion.
@@ -57,6 +58,14 @@ After the tree-sitter scan, `atlas index` performs a single bottom-up pass over 
 2. **Directory description**: Describes the directory itself using the Ollama provider (`ATLAS_DIR_MODEL`, default `atlas`), which has access to all children's descriptions (both files and subdirectories).
 
 Because directories are processed deepest-first, parent directories always see their children's descriptions. The Ollama provider requires a running Ollama server (`ollama serve`) and the model to be available.
+
+Descriptions are expected in `SHORT:` / `LONG:` form. When a model ignores that format, the response is still accepted: the first line (truncated to 80 characters) becomes the short description and the remaining text becomes the long one. Only an empty response is an error.
+
+### `atlas index --stdin` — Index an Explicit Path List
+
+`atlas index --stdin` reads file paths from standard input, one per line, instead of walking the repository. Each line may be a plain path (`src/foo.ts`) or `git status --porcelain` output (`M  src/foo.ts`, `?? new.ts`, `R  old.ts -> new.ts` — the new path wins). Blank lines and `#` comments are ignored, as are paths that don't resolve to a file.
+
+Only the listed files are indexed: the existing index is neither cleared nor hash-checked, so `--stdin` adds to or refreshes the index rather than rebuilding it. `skip_patterns` are not applied — the caller decides what to feed in.
 
 ### `atlas peek` for Files and Directories
 
@@ -82,9 +91,22 @@ max_file_tokens = 10000
 ollama_url = "http://localhost:11434"
 file_model = "atlas"
 dir_model = "atlas"
+skip_patterns = ["*.test.ts", "*.md", "*.json", "*.yml"]
 ```
 
 All fields are optional and fall back to defaults. Environment variables override config file values.
+
+Fields may also be written flat, without the `[atlas]` header. When a key appears both flat and under `[atlas]`, the `[atlas]` value wins.
+
+### Ignore Patterns
+
+The `skip_patterns` field accepts glob patterns (powered by the `globset` crate), matched against repository-relative paths. Files matching any pattern are skipped by the `index` and `update` repo walks, so they never enter the index and never appear in tree, peek, or status output. `atlas index --stdin` bypasses these patterns. An invalid pattern fails the command.
+
+Common patterns:
+- `"*.test.ts"` — skip test files by extension
+- `"*.md"` — skip markdown files
+- `"packages/mom/**"` — skip an entire directory tree
+- `"*.{json,yml,yaml}"` — skip multiple extensions
 
 ### Environment Variables
 
