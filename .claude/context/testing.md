@@ -80,6 +80,17 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 |----------|-------------|
 | `CALENDSYNC_DEV_URL` | Dev server base URL (default: `http://localhost:3000`) |
 
+## Images Variables
+
+| Variable | Description |
+|----------|-------------|
+| `MCPTOOLS_IMAGES_API` | Backend: `chatgpt` (subscription, default) or `openai` (API key) |
+| `LLM_STREAM_CONFIG_DIR` | Config dir holding subscription `auth.json` (default: `~/.config/llm-stream`) |
+| `MCPTOOLS_IMAGES_MAINLINE` | Chat model fronting the image tool (default: `gpt-5.6-sol`) |
+| `OPENAI_IMAGES_MODEL` | Image model (default: `gpt-image-2.5-flare`) |
+| `OPENAI_API_KEY` | Key for `--api openai` |
+| `OPENAI_BASE_URL` | Base URL for `--api openai` (default: `https://api.openai.com/v1`) |
+
 ## Usage Examples
 
 ### Scripting

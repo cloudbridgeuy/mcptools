@@ -72,6 +72,7 @@ For detailed usage of each feature, see the context files:
 - **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
 - **[Atlas](.claude/context/atlas.md)** - Codebase navigation for AI agents; symbol index, tree view, peek, status; MCP tools + primer resource
 - **[GrepRAG](.claude/context/greprag.md)** - Code context retrieval via local model + ripgrep
+- **[Images](.claude/context/images.md)** - ChatGPT Images 2.5 generation, editing, variations; subscription or API key
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
 

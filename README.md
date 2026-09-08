@@ -14,6 +14,7 @@ Useful MCP Tools to use with LLM Coding Agents
 - **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)
 - **Strand**: Generate Rust code via local Ollama model (`generate_code`)
 - **GrepRAG**: Retrieve relevant code context from a repository using a local model + ripgrep + BM25 ranking (`greprag_retrieve`)
+- **Images**: Generate, edit, and vary images with ChatGPT Images 2.5 via subscription or API key (`images_generate`, `images_edit`, `images_vary`)
 - **UI Annotations**: Query and manage UI annotations from a calendsync dev server (`ui_annotations_list`, `ui_annotations_get`, `ui_annotations_resolve`, `ui_annotations_clear`)
 
 ## Installation
@@ -937,6 +938,65 @@ Retrieve relevant code context from a repository. Uses a local Ollama model to g
 
 **Requires:** A running Ollama instance with the `greprag` model. See [docs/GREPRAG_SETUP.md](docs/GREPRAG_SETUP.md) for setup instructions.
 
+### Images Tools
+
+Generate, edit, and vary images with the GPT Image 2.5 models (`gpt-image-2.5-flare` default, `gpt-image-2.5-sunburst` for premium precision). Defaults to the ChatGPT subscription (llm-stream `auth.json`); pass `api: "openai"` with `OPENAI_API_KEY` for the metered API.
+
+#### images_generate
+
+Generate images from a text prompt. Saves files and returns paths plus metadata.
+
+**Parameters:**
+
+- `prompt` (string, required) - Text description of the image
+- `model` (string, optional) - Image model (default: `gpt-image-2.5-flare`)
+- `size` (string, optional) - `auto`, `1024x1024`, `1536x1024`, `1024x1536`, or custom `WIDTHxHEIGHT`
+- `quality` (string, optional) - `auto`, `low`, `medium`, `high`, `xhigh`, `max`
+- `outputFormat` (string, optional) - `png`, `jpeg`, `webp` (default: `png`)
+- `outputCompression` (integer, optional) - 0-100 for jpeg/webp
+- `background` (string, optional) - `auto`, `transparent`, `opaque`
+- `moderation` (string, optional) - `auto` or `low`
+- `n` (integer, optional) - 1-10 images (default: 1; subscription always returns 1)
+- `outputDir` (string, optional) - Directory for output files (default: `.`)
+
+**Example:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "images_generate",
+    "arguments": {
+      "prompt": "a fox reading a newspaper, watercolor",
+      "quality": "low"
+    }
+  }
+}
+```
+
+#### images_edit
+
+Edit 1-16 reference images with a prompt and optional mask. Preserves subject and composition outside the edit.
+
+**Parameters:**
+
+- `prompt` (string, required) - Edit instruction
+- `images` (array of strings, required) - Input image file paths (1-16)
+- `mask` (string, optional) - Mask PNG path (alpha channel marks edit area)
+- Same output options as `images_generate`, plus `inputFidelity` (string, optional) - `high` or `low`
+
+#### images_vary
+
+Create variations anchored to 1-16 reference images. Same as `images_edit` with an optional prompt (defaults to preserving subject and style).
+
+**Parameters:**
+
+- `images` (array of strings, required) - Input image file paths (1-16)
+- `prompt` (string, optional) - Variation instruction
+- Same output options as `images_edit`
+
 ## MCP Protocol Implementation
 
 This server implements the Model Context Protocol specification with the following methods:
@@ -1337,6 +1397,33 @@ mcptools grep-rag retrieve "let result = parse(&input);" \
 | `GREPRAG_MODEL` | `greprag` | Default model name |
 
 **Requires:** A running Ollama instance with the `greprag` model. See [docs/GREPRAG_SETUP.md](docs/GREPRAG_SETUP.md) for setup instructions.
+
+### Images
+
+```bash
+# Generate with subscription (first sign in once: llm-stream --login)
+mcptools images generate "a fox reading a newspaper, watercolor" --quality low -o /tmp/fox.png --open
+
+# Edit a reference image
+mcptools images edit "make the fox wear glasses" --image /tmp/fox.png -o /tmp/fox-glasses.png
+
+# Variation anchored to a reference image
+mcptools images vary --image /tmp/fox.png --prompt "same fox, cyberpunk style" -o /tmp/fox-cyber.png
+
+# Metered API path with multiple images
+mcptools images generate "a lighthouse" --api openai --model gpt-image-2.5-sunburst -n 2 --output-dir /tmp
+```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCPTOOLS_IMAGES_API` | `chatgpt` | Backend: `chatgpt` (subscription) or `openai` (API key) |
+| `LLM_STREAM_CONFIG_DIR` | `~/.config/llm-stream` | Config dir holding subscription `auth.json` |
+| `MCPTOOLS_IMAGES_MAINLINE` | `gpt-5.6-sol` | Chat model fronting the image tool (subscription) |
+| `OPENAI_IMAGES_MODEL` | `gpt-image-2.5-flare` | Image model |
+| `OPENAI_API_KEY` | — | Key for `--api openai` |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Base URL for `--api openai` |
 
 ## Best Practices for Web Fetching with Claude Code
 
