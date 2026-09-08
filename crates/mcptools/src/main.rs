@@ -8,6 +8,7 @@ mod atlassian;
 mod error;
 mod greprag;
 mod hn;
+mod images;
 mod mcp;
 mod md;
 mod pdf;
@@ -51,6 +52,9 @@ pub enum SubCommands {
     /// HackerNews (news.ycombinator.com) operations
     HN(crate::hn::App),
 
+    /// ChatGPT Images 2.5 generation, editing and variations
+    Images(crate::images::App),
+
     /// Model Context Protocol server
     MCP(crate::mcp::App),
 
@@ -79,6 +83,7 @@ async fn main() -> Result<()> {
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(*sub_app, app.global).await,
         SubCommands::GrepRag(sub_app) => crate::greprag::run(sub_app, app.global).await,
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
+        SubCommands::Images(sub_app) => crate::images::run(sub_app, app.global).await,
         SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,
         SubCommands::MD(sub_app) => crate::md::run(sub_app, app.global).await,
         SubCommands::Pdf(sub_app) => crate::pdf::run(sub_app, app.global).await,

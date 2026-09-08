@@ -3,6 +3,7 @@ mod atlas;
 mod atlassian;
 mod greprag;
 mod hn;
+mod images;
 mod md;
 mod pdf;
 mod strand;
@@ -985,6 +986,80 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            name: "images_generate".to_string(),
+            description: "Generate images with ChatGPT Images 2.5 (gpt-image-2.5-flare default, gpt-image-2.5-sunburst for premium precision). Text-to-image via POST /v1/images/generations. Saves PNG/JPEG/WebP files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string", "description": "Text description of the image" },
+                    "model": { "type": "string", "description": "gpt-image-2.5-flare (default) or gpt-image-2.5-sunburst" },
+                    "size": { "type": "string", "description": "auto, 1024x1024, 1536x1024, 1024x1536, or custom WIDTHxHEIGHT" },
+                    "quality": { "type": "string", "description": "auto, low, medium, high, xhigh, max" },
+                    "outputFormat": { "type": "string", "description": "png, jpeg, webp (default png)" },
+                    "outputCompression": { "type": "integer", "description": "0-100 for jpeg/webp" },
+                    "background": { "type": "string", "description": "auto, transparent, opaque" },
+                    "moderation": { "type": "string", "description": "auto or low" },
+                    "n": { "type": "integer", "description": "1-10 images (default 1). ChatGPT subscription always returns 1." },
+                    "outputDir": { "type": "string", "description": "Directory for output files (default .)" },
+                    "api": { "type": "string", "description": "chatgpt (default, uses subscription) or openai (uses OPENAI_API_KEY)" },
+                    "configDir": { "type": "string", "description": "llm-stream config dir holding auth.json" },
+                    "mainline": { "type": "string", "description": "Chat model fronting the image tool (default gpt-5.6-sol)" }
+                },
+                "required": ["prompt"]
+            }),
+        },
+        Tool {
+            name: "images_edit".to_string(),
+            description: "Edit ChatGPT Images 2.5 images with a prompt plus 1-16 reference images and optional mask via POST /v1/images/edits. Preserves subject/composition outside the edit. Saves files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string", "description": "Edit instruction" },
+                    "images": { "type": "array", "items": { "type": "string" }, "description": "Input image file paths (1-16)" },
+                    "mask": { "type": "string", "description": "Mask PNG path (alpha channel marks edit area)" },
+                    "model": { "type": "string", "description": "gpt-image-2.5-flare (default) or gpt-image-2.5-sunburst" },
+                    "size": { "type": "string", "description": "auto, 1024x1024, 1536x1024, 1024x1536, or custom WIDTHxHEIGHT" },
+                    "quality": { "type": "string", "description": "auto, low, medium, high, xhigh, max" },
+                    "outputFormat": { "type": "string", "description": "png, jpeg, webp (default png)" },
+                    "outputCompression": { "type": "integer", "description": "0-100 for jpeg/webp" },
+                    "background": { "type": "string", "description": "auto, transparent, opaque" },
+                    "moderation": { "type": "string", "description": "auto or low" },
+                    "inputFidelity": { "type": "string", "description": "high or low fidelity to inputs" },
+                    "n": { "type": "integer", "description": "1-10 images (default 1). ChatGPT subscription always returns 1." },
+                    "outputDir": { "type": "string", "description": "Directory for output files (default .)" },
+                    "api": { "type": "string", "description": "chatgpt (default, uses subscription) or openai (uses OPENAI_API_KEY)" },
+                    "configDir": { "type": "string", "description": "llm-stream config dir holding auth.json" },
+                    "mainline": { "type": "string", "description": "Chat model fronting the image tool (default gpt-5.6-sol)" }
+                },
+                "required": ["prompt", "images"]
+            }),
+        },
+        Tool {
+            name: "images_vary".to_string(),
+            description: "Create variations of ChatGPT Images 2.5 images anchored to 1-16 reference images. Same as images_edit with a default variation prompt when prompt is omitted. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "images": { "type": "array", "items": { "type": "string" }, "description": "Input image file paths (1-16)" },
+                    "prompt": { "type": "string", "description": "Optional variation instruction (default preserves subject/style)" },
+                    "model": { "type": "string", "description": "gpt-image-2.5-flare (default) or gpt-image-2.5-sunburst" },
+                    "size": { "type": "string", "description": "auto, 1024x1024, 1536x1024, 1024x1536, or custom WIDTHxHEIGHT" },
+                    "quality": { "type": "string", "description": "auto, low, medium, high, xhigh, max" },
+                    "outputFormat": { "type": "string", "description": "png, jpeg, webp (default png)" },
+                    "outputCompression": { "type": "integer", "description": "0-100 for jpeg/webp" },
+                    "background": { "type": "string", "description": "auto, transparent, opaque" },
+                    "moderation": { "type": "string", "description": "auto or low" },
+                    "inputFidelity": { "type": "string", "description": "high or low fidelity to inputs" },
+                    "n": { "type": "integer", "description": "1-10 images (default 1). ChatGPT subscription always returns 1." },
+                    "outputDir": { "type": "string", "description": "Directory for output files (default .)" },
+                    "api": { "type": "string", "description": "chatgpt (default, uses subscription) or openai (uses OPENAI_API_KEY)" },
+                    "configDir": { "type": "string", "description": "llm-stream config dir holding auth.json" },
+                    "mainline": { "type": "string", "description": "Chat model fronting the image tool (default gpt-5.6-sol)" }
+                },
+                "required": ["images"]
+            }),
+        },
+        Tool {
             name: "atlas_tree_view".to_string(),
             description: "Browse an annotated directory tree of the codebase. Each entry includes a short description of what the file or directory contains. Use this to navigate unfamiliar codebases — start at the root, then drill into directories of interest.".to_string(),
             input_schema: serde_json::json!({
@@ -1083,6 +1158,9 @@ pub async fn handle_tools_call(
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
         "md_toc" => md::handle_md_toc(params.arguments, global).await,
         "generate_code" => strand::handle_generate_code(params.arguments, global).await,
+        "images_generate" => images::handle_images_generate(params.arguments, global).await,
+        "images_edit" => images::handle_images_edit(params.arguments, global).await,
+        "images_vary" => images::handle_images_vary(params.arguments, global).await,
         "greprag_retrieve" => greprag::handle_greprag_retrieve(params.arguments, global).await,
         "ui_annotations_list" => {
             annotations::handle_ui_annotations_list(params.arguments, global).await

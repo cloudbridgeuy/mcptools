@@ -78,6 +78,7 @@ pub mod atlas;
 pub mod atlassian;
 pub mod greprag;
 pub mod hn;
+pub mod images;
 pub mod md;
 pub mod pagination;
 pub mod queries;
