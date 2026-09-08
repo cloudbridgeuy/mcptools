@@ -519,7 +519,7 @@ impl Database {
         if let Some(dir_peek) = self.peek_directory(path)? {
             return Ok(PeekResult::Directory(dir_peek));
         }
-        eyre::bail!("no file or directory found at: {}", path.display())
+        eyre::bail!("no file or directory found at: {}", path.display());
     }
 
     /// Return all symbols from files that are direct children of the given directory.
