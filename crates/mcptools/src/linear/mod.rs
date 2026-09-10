@@ -22,16 +22,22 @@ pub enum Commands {
     /// Issue operations
     #[command(subcommand)]
     Issue(IssueCommands),
+    /// Team operations
     #[command(subcommand)]
     Teams(TeamsCommands),
+    /// Project operations
     #[command(subcommand)]
     Projects(ProjectsCommands),
+    /// User operations
     #[command(subcommand)]
     Users(UsersCommands),
+    /// Workflow state operations
     #[command(subcommand)]
     States(StatesCommands),
+    /// Label operations
     #[command(subcommand)]
     Labels(LabelsCommands),
+    /// Cycle operations
     #[command(subcommand)]
     Cycles(CyclesCommands),
 }
@@ -46,37 +52,47 @@ pub enum AuthCommands {
 pub enum IssueCommands {
     /// Get one issue by id or identifier
     Get(IssueGetOptions),
+    /// List issues with filters
+    List(IssueListOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum TeamsCommands {
+    /// List teams
     List(TeamsListOptions),
+    /// Get one team by id, key, or name
     Get(TeamsGetOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum ProjectsCommands {
+    /// List projects in a team
     List(ProjectsListOptions),
+    /// Get one project by id or name
     Get(ProjectsGetOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum UsersCommands {
+    /// List users matching a name query
     List(UsersListOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum StatesCommands {
+    /// List workflow states in a team
     List(TeamScopedListOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum LabelsCommands {
+    /// List labels in a team
     List(TeamScopedListOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum CyclesCommands {
+    /// List cycles in a team
     List(TeamScopedListOptions),
 }
 
@@ -97,63 +113,123 @@ pub struct IssueGetOptions {
 }
 
 #[derive(Debug, clap::Args, Clone)]
-pub struct TeamsListOptions {
+pub struct IssueListOptions {
+    /// Team id, key, or name
+    #[arg(long)]
+    pub team: Option<String>,
+    /// Project id or name (names need --team)
+    #[arg(long)]
+    pub project: Option<String>,
+    /// Assignee user UUID or 'me'
+    #[arg(long)]
+    pub assignee: Option<String>,
+    /// Workflow state name (e.g. Todo)
+    #[arg(long)]
+    pub state: Option<String>,
+    /// Label name
+    #[arg(long)]
+    pub label: Option<String>,
+    /// Cycle number or id
+    #[arg(long)]
+    pub cycle: Option<String>,
+    /// Title substring to search
+    #[arg(long)]
+    pub query: Option<String>,
+    /// Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)
+    #[arg(long)]
+    pub updated_after: Option<String>,
+    /// Max items per page
     #[arg(long, default_value = "25")]
     pub limit: u32,
+    /// Page cursor for pagination
     #[arg(long)]
     pub cursor: Option<String>,
+    /// Fetch all pages (up to 50 items)
     #[arg(long)]
     pub all: bool,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct TeamsListOptions {
+    /// Max items per page
+    #[arg(long, default_value = "25")]
+    pub limit: u32,
+    /// Page cursor for pagination
+    #[arg(long)]
+    pub cursor: Option<String>,
+    /// Fetch all pages (up to 50 items)
+    #[arg(long)]
+    pub all: bool,
+    /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct TeamsGetOptions {
+    /// Team id, key, or name
     pub selector: String,
+    /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct ProjectsListOptions {
+    /// Team id, key, or name
     #[arg(long)]
     pub team: String,
+    /// Max items per page
     #[arg(long, default_value = "25")]
     pub limit: u32,
+    /// Page cursor for pagination
     #[arg(long)]
     pub cursor: Option<String>,
+    /// Fetch all pages (up to 50 items)
     #[arg(long)]
     pub all: bool,
+    /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct ProjectsGetOptions {
+    /// Project id or name
     pub id: String,
+    /// Team id, key, or name
     #[arg(long)]
     pub team: String,
+    /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct UsersListOptions {
+    /// Name substring to search
     #[arg(long)]
     pub query: String,
+    /// Max items per page
     #[arg(long, default_value = "25")]
     pub limit: u32,
+    /// Page cursor for pagination
     #[arg(long)]
     pub cursor: Option<String>,
+    /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct TeamScopedListOptions {
+    /// Team id, key, or name
     #[arg(long)]
     pub team: String,
+    /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -168,6 +244,7 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
         },
         Commands::Issue(cmd) => match cmd {
             IssueCommands::Get(options) => issue_get_handler(options).await,
+            IssueCommands::List(options) => issues_list_handler(options).await,
         },
         Commands::Teams(cmd) => match cmd {
             TeamsCommands::List(options) => teams_list_handler(options).await,
@@ -215,6 +292,65 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
             found.state
         ]);
         table.printstd();
+    }
+    Ok(())
+}
+
+async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let filter = issue::resolve_issue_filter(
+        &client,
+        options.team.as_deref(),
+        options.project.as_deref(),
+        options.assignee.as_deref(),
+        options.state.as_deref(),
+        options.label.as_deref(),
+        options.cycle.as_deref(),
+        options.query.as_deref(),
+        options.updated_after.as_deref(),
+    )
+    .await?;
+    let mut nodes = Vec::new();
+    let mut cursor = options.cursor.clone();
+    let mut page_info = mcptools_core::linear::PageInfo {
+        has_next: false,
+        end_cursor: None,
+    };
+    loop {
+        let page = issue::issues_list_data(&client, &filter, options.limit, cursor.clone()).await?;
+        page_info = page.page_info.clone();
+        nodes.extend(page.nodes);
+        if !options.all || !page_info.has_next || nodes.len() >= 50 {
+            break;
+        }
+        cursor = page_info.end_cursor.clone();
+    }
+    nodes.truncate(50);
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"nodes": nodes, "pageInfo": page_info})
+            )?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Identifier", "Title", "State"]);
+        for issue in &nodes {
+            table.add_row(prettytable::row![
+                issue.id,
+                issue.identifier,
+                issue.title,
+                issue.state
+            ]);
+        }
+        table.printstd();
+        println!(
+            "hasMore: {} endCursor: {}",
+            page_info.has_next,
+            page_info.end_cursor.as_deref().unwrap_or("")
+        );
     }
     Ok(())
 }

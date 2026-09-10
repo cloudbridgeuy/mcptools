@@ -107,7 +107,7 @@ pub fn match_projects(selector: &ProjectSelector, candidates: &[Project]) -> Pro
     }
 }
 
-fn is_uuid(value: &str) -> bool {
+pub fn is_uuid(value: &str) -> bool {
     value.len() == 36
         && value.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
         && value.chars().filter(|c| *c == '-').count() == 4

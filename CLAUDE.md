@@ -65,6 +65,7 @@ For detailed usage of each feature, see the context files:
 
 ### Integrations
 - **[Jira](.claude/context/jira.md)** - Search, create, update tickets; saved queries; MCP tools
+- **[Linear](.claude/context/linear.md)** - List/get issues with filters; teams, projects, users, states, labels, cycles
 - **[Confluence](.claude/context/confluence.md)** - Search pages; CQL queries
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
@@ -128,6 +129,18 @@ mcptools atlassian jira comment delete PROJ-123 12345
 
 ```bash
 mcptools atlassian confluence search "text ~ 'deployment'"
+```
+
+### Linear
+
+```bash
+mcptools linear auth status
+mcptools linear issue get GUZ-79
+mcptools linear issue list --team GUZ --state "In Progress"
+mcptools linear issue list --assignee me --json
+mcptools linear teams list
+mcptools linear projects list --team GUZ
+mcptools linear users list --query "Ada"
 ```
 
 ### Bitbucket

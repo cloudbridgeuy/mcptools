@@ -103,6 +103,8 @@ pub enum LinearError {
     MissingProject,
     #[error("Linear response missing users field")]
     MissingUsers,
+    #[error("Linear response missing issues field")]
+    MissingIssues,
     #[error("Linear response missing states field")]
     MissingStates,
     #[error("Linear response missing labels field")]
@@ -161,6 +163,115 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
                 state: raw.state.name,
             })
         }
+    }
+}
+
+pub fn transform_issues(data: serde_json::Value) -> Result<Paginated<IssueMini>, LinearError> {
+    match data.get("issues") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingIssues),
+        Some(issues) => {
+            let paged: RawPaged<RawIssue> = serde_json::from_value(issues.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?;
+            Ok(Paginated {
+                nodes: paged
+                    .nodes
+                    .into_iter()
+                    .map(|raw| IssueMini {
+                        id: raw.id,
+                        identifier: raw.identifier,
+                        title: raw.title,
+                        url: raw.url,
+                        state: raw.state.name,
+                    })
+                    .collect(),
+                page_info: paged.page_info,
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct IssueListFilter {
+    pub team_id: Option<String>,
+    pub project_id: Option<String>,
+    pub assignee_id: Option<String>,
+    pub state: Option<String>,
+    pub label: Option<String>,
+    pub cycle: Option<String>,
+    pub query: Option<String>,
+    pub updated_after: Option<String>,
+}
+
+pub fn issue_filter_value(filter: &IssueListFilter) -> Result<serde_json::Value, LinearError> {
+    let mut out = serde_json::Map::new();
+    if let Some(team_id) = present(&filter.team_id) {
+        out.insert(
+            "team".to_string(),
+            serde_json::json!({"id": {"eq": team_id}}),
+        );
+    }
+    if let Some(project_id) = present(&filter.project_id) {
+        out.insert(
+            "project".to_string(),
+            serde_json::json!({"id": {"eq": project_id}}),
+        );
+    }
+    if let Some(assignee_id) = present(&filter.assignee_id) {
+        out.insert(
+            "assignee".to_string(),
+            serde_json::json!({"id": {"eq": assignee_id}}),
+        );
+    }
+    if let Some(state) = present(&filter.state) {
+        out.insert(
+            "state".to_string(),
+            serde_json::json!({"name": {"eq": state}}),
+        );
+    }
+    if let Some(label) = present(&filter.label) {
+        out.insert(
+            "labels".to_string(),
+            serde_json::json!({"name": {"eq": label}}),
+        );
+    }
+    if let Some(cycle) = present(&filter.cycle) {
+        match cycle.parse::<u32>() {
+            Ok(number) => {
+                out.insert(
+                    "cycle".to_string(),
+                    serde_json::json!({"number": {"eq": number}}),
+                );
+            }
+            Err(_) => {
+                out.insert(
+                    "cycle".to_string(),
+                    serde_json::json!({"id": {"eq": cycle}}),
+                );
+            }
+        }
+    }
+    if let Some(query) = present(&filter.query) {
+        out.insert("title".to_string(), serde_json::json!({"contains": query}));
+    }
+    if let Some(updated_after) = present(&filter.updated_after) {
+        chrono::DateTime::parse_from_rfc3339(updated_after).map_err(|_| {
+            LinearError::Parse(format!(
+                "Invalid --updated-after '{}': expected RFC3339 like 2026-01-01T00:00:00Z",
+                updated_after
+            ))
+        })?;
+        out.insert(
+            "updatedAt".to_string(),
+            serde_json::json!({"gte": updated_after}),
+        );
+    }
+    Ok(serde_json::Value::Object(out))
+}
+
+fn present(value: &Option<String>) -> Option<&str> {
+    match value {
+        Some(text) if !text.trim().is_empty() => Some(text.trim()),
+        _ => None,
     }
 }
 
@@ -558,6 +669,159 @@ mod tests {
             Some("GUZ-79")
         );
         assert_eq!(value.get("state").and_then(|v| v.as_str()), Some("Todo"));
+    }
+
+    #[test]
+    fn transform_issues_parses_nodes_and_page_info() {
+        let data = serde_json::json!({"issues": {"nodes": [
+            {"id": "i1", "identifier": "GUZ-1", "title": "First", "url": "https://linear.app/x/issue/GUZ-1/t", "state": {"name": "Todo"}},
+            {"id": "i2", "identifier": "GUZ-2", "title": "Second", "url": "https://linear.app/x/issue/GUZ-2/s", "state": {"name": "Done"}},
+        ], "pageInfo": {"hasNextPage": true, "endCursor": "cur1"}}});
+        let paged = transform_issues(data).unwrap();
+        assert_eq!(paged.nodes.len(), 2);
+        assert_eq!(paged.nodes[0].identifier, "GUZ-1");
+        assert_eq!(paged.nodes[1].state, "Done");
+        assert!(paged.page_info.has_next);
+        assert_eq!(paged.page_info.end_cursor.as_deref(), Some("cur1"));
+    }
+
+    #[test]
+    fn transform_issues_accepts_empty_nodes() {
+        let data = serde_json::json!({"issues": {"nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}}});
+        let paged = transform_issues(data).unwrap();
+        assert!(paged.nodes.is_empty());
+    }
+
+    #[test]
+    fn transform_issues_rejects_missing_issues() {
+        let err = transform_issues(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssues);
+        let err = transform_issues(serde_json::json!({"issues": null})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssues);
+    }
+
+    #[test]
+    fn issue_filter_empty_yields_empty_object() {
+        let value = issue_filter_value(&IssueListFilter::default()).unwrap();
+        assert_eq!(value, serde_json::json!({}));
+    }
+
+    #[test]
+    fn issue_filter_maps_ids_state_label_query() {
+        let filter = IssueListFilter {
+            team_id: Some("t1".to_string()),
+            project_id: Some("p1".to_string()),
+            assignee_id: Some("u1".to_string()),
+            state: Some("Todo".to_string()),
+            label: Some("Bug".to_string()),
+            cycle: None,
+            query: Some("authéntico".to_string()),
+            updated_after: None,
+        };
+        let value = issue_filter_value(&filter).unwrap();
+        assert_eq!(
+            value
+                .get("team")
+                .and_then(|v| v.get("id"))
+                .and_then(|v| v.get("eq")),
+            Some(&serde_json::json!("t1"))
+        );
+        assert_eq!(
+            value
+                .get("project")
+                .and_then(|v| v.get("id"))
+                .and_then(|v| v.get("eq")),
+            Some(&serde_json::json!("p1"))
+        );
+        assert_eq!(
+            value
+                .get("assignee")
+                .and_then(|v| v.get("id"))
+                .and_then(|v| v.get("eq")),
+            Some(&serde_json::json!("u1"))
+        );
+        assert_eq!(
+            value
+                .get("state")
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.get("eq")),
+            Some(&serde_json::json!("Todo"))
+        );
+        assert_eq!(
+            value
+                .get("labels")
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.get("eq")),
+            Some(&serde_json::json!("Bug"))
+        );
+        assert_eq!(
+            value.get("title").and_then(|v| v.get("contains")),
+            Some(&serde_json::json!("authéntico"))
+        );
+    }
+
+    #[test]
+    fn issue_filter_maps_cycle_number_and_id() {
+        let numbered = IssueListFilter {
+            cycle: Some("3".to_string()),
+            ..IssueListFilter::default()
+        };
+        let value = issue_filter_value(&numbered).unwrap();
+        assert_eq!(
+            value
+                .get("cycle")
+                .and_then(|v| v.get("number"))
+                .and_then(|v| v.get("eq")),
+            Some(&serde_json::json!(3))
+        );
+        let identified = IssueListFilter {
+            cycle: Some("c1-uuid".to_string()),
+            ..IssueListFilter::default()
+        };
+        let value = issue_filter_value(&identified).unwrap();
+        assert_eq!(
+            value
+                .get("cycle")
+                .and_then(|v| v.get("id"))
+                .and_then(|v| v.get("eq")),
+            Some(&serde_json::json!("c1-uuid"))
+        );
+    }
+
+    #[test]
+    fn issue_filter_accepts_updated_after_and_rejects_bad_time() {
+        let dated = IssueListFilter {
+            updated_after: Some("2026-01-01T00:00:00Z".to_string()),
+            ..IssueListFilter::default()
+        };
+        let value = issue_filter_value(&dated).unwrap();
+        assert_eq!(
+            value.get("updatedAt").and_then(|v| v.get("gte")),
+            Some(&serde_json::json!("2026-01-01T00:00:00Z"))
+        );
+        let bad = IssueListFilter {
+            updated_after: Some("january".to_string()),
+            ..IssueListFilter::default()
+        };
+        let err = issue_filter_value(&bad).unwrap_err();
+        assert!(err.to_string().contains("--updated-after"));
+    }
+
+    #[test]
+    fn issue_filter_skips_blank_values() {
+        let filter = IssueListFilter {
+            state: Some("   ".to_string()),
+            label: None,
+            query: Some("  x  ".to_string()),
+            ..IssueListFilter::default()
+        };
+        let value = issue_filter_value(&filter).unwrap();
+        assert!(value.get("state").is_none());
+        assert_eq!(
+            value.get("title").and_then(|v| v.get("contains")),
+            Some(&serde_json::json!("x"))
+        );
     }
 
     #[test]
