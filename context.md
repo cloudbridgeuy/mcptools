@@ -7,6 +7,11 @@
 - V2: Users + states + labels + cycles complete — depends on V1 interfaces
 - Pattern: Functional Core-Imperative Shell; parse don't validate; no defaults for --team/--project; Users --query required; explicit --team for scoped lists
 - Errors → stderr + nonzero exit, no TTY, no key leak
+- V1 merged 40c88d4: Team{id,key,name}, Project{id,name}, Paginated<T> in core types (crates/core/src/linear/types.rs:transform_teams/transform_team/transform_projects/transform_team_projects)
+- V1 merged 40c88d4: TeamSelector{Id,Key,Name}+match_teams, ProjectSelector{Id,Name}+match_projects in core resolve (crates/core/src/linear/resolve.rs:parse_team_selector/parse_project_selector)
+- V1 merged 40c88d4: teams_list_data/limit/cursor, teams_get_data/selector→Team, projects_list_data/team/limit/cursor, projects_get_data/id/team→Project in shell discover (crates/mcptools/src/linear/discover.rs)
+- V1 merged 40c88d4: projects scoping resolves team key to id first; ProjectFilter has no team field; team.projects nested query used
+- V1 merged 40c88d4: --all pages capped at 50 items; --team required with no default
 
 ## Gotchas
 - Two unsuccessful repair rounds on same issue → diagnose before final dispatch
