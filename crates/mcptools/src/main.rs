@@ -3,6 +3,7 @@
 use crate::prelude::*;
 use clap::Parser;
 
+mod agent;
 mod atlas;
 mod atlassian;
 mod error;
@@ -41,6 +42,9 @@ pub struct Global {
 
 #[derive(Debug, clap::Parser)]
 pub enum SubCommands {
+    /// Agent setup, status, and uninstall
+    Agent(crate::agent::App),
+
     /// Code-aware repository index (symbol tree, peek, search)
     Atlas(crate::atlas::App),
 
@@ -82,6 +86,7 @@ async fn main() -> Result<()> {
     let app = App::parse();
 
     match app.command {
+        SubCommands::Agent(sub_app) => crate::agent::run(sub_app, app.global).await,
         SubCommands::Atlas(sub_app) => crate::atlas::run(sub_app, app.global).await,
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(*sub_app, app.global).await,
         SubCommands::GrepRag(sub_app) => crate::greprag::run(sub_app, app.global).await,

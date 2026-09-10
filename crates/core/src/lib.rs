@@ -73,6 +73,7 @@
 //!
 //! For implementation details, see the `REFACTORING-PLAN.md` in the project root.
 
+pub mod agent;
 pub mod annotations;
 pub mod atlas;
 pub mod atlassian;
