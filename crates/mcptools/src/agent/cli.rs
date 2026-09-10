@@ -18,8 +18,11 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
+    /// Write MCP entries plus skill files
     Setup(SetupOptions),
+    /// Show per-target health, writes nothing
     Status(StatusOptions),
+    /// Remove owned entries only
     Uninstall(UninstallOptions),
 }
 
@@ -35,22 +38,27 @@ pub enum ShellTarget {
 
 #[derive(Debug, clap::Args)]
 pub struct SetupOptions {
+    /// Which agent to configure
     #[arg(long, value_enum, default_value = "all")]
     pub target: ShellTarget,
+    /// Print planned paths and changes, write nothing
     #[arg(long)]
     pub dry_run: bool,
 }
 
 #[derive(Debug, clap::Args)]
 pub struct StatusOptions {
+    /// Which agent to check
     #[arg(long, value_enum, default_value = "all")]
     pub target: ShellTarget,
 }
 
 #[derive(Debug, clap::Args)]
 pub struct UninstallOptions {
+    /// Which agent to clean
     #[arg(long, value_enum, default_value = "all")]
     pub target: ShellTarget,
+    /// Print planned removals, remove nothing
     #[arg(long)]
     pub dry_run: bool,
 }
