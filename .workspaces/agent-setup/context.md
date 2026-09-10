@@ -7,6 +7,10 @@
 - V1 probing: `classify_health` keeps spec signature and probes PATH/HOME internally; all branching lives in pure `classify_target` (consequence of spec-pinned `GlobalFacts` shape). `Live` needs exe plus agent binary plus writable config.
 - V1 CLI: `ShellTarget` maps 1:1 to core `AgentTarget`; `opencode2` accepted as alias, both binaries probed.
 - V1 shell gotcha: call `crate::prelude::println!` explicitly (anstream glob collides with std `println`).
+- V2 on trunk: planner in `crates/core/src/agent/plan.rs` (`GlobalAction`, `SkipReason`, `plan_global`, `plan_global_with_home`, `format_plan`, `plan_config`, `plan_skill`, `config_path`, `skill_path`, `skill_content`, `desired_server_value`); setup verb in `crates/mcptools/src/agent/cli.rs` (`--dry-run` flag, prints plan, never writes).
+- V2 decisions: skill body is minimal discovery snippet naming target (no reusable bundled global skill source in repo); Codex plans skill-plus-guidance only, TOML entry deferred to V5 `codex mcp` CLI; Pi skill only, never MCP entry; `RemoveOwned` plus `UserEdited`/`NotApplicable` spec-shaped but unreturned until V4.
+- V2 paths: Claude `~/.claude.json` (`mcpServers.mcptools`) plus `.claude/skills`; Opencode `~/.config/opencode/opencode.json` (`mcp.mcptools`) plus skills; Codex `.codex/skills`; Pi `.pi/agent/skills`. V1 probe roots are parents of these write paths.
+- Orchestrator rule: every `lane merge` passes explicit `--base trunk-agent-setup` (timed-out `lane new` leaves lanes without id metadata, default base is wrong).
 
 ## Gotchas
 - Global mode never calls `find_git_root` and never hard-codes checkout or `target/`.
