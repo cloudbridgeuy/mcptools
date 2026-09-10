@@ -7,6 +7,23 @@ pub struct Viewer {
     pub email: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IssueMini {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub url: String,
+    pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PageInfo {
+    #[serde(rename = "hasNextPage", alias = "has_next")]
+    pub has_next: bool,
+    #[serde(rename = "endCursor", alias = "end_cursor")]
+    pub end_cursor: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum LinearError {
     #[error(
@@ -27,6 +44,8 @@ pub enum LinearError {
     MissingData,
     #[error("Linear response missing viewer field")]
     MissingViewer,
+    #[error("Linear issue not found")]
+    MissingIssue,
 }
 
 pub fn check_response(status: u16, body: &str) -> Result<serde_json::Value, LinearError> {
@@ -63,6 +82,37 @@ pub fn transform_viewer(data: serde_json::Value) -> Result<Viewer, LinearError> 
             serde_json::from_value(viewer.clone()).map_err(|e| LinearError::Parse(e.to_string()))
         }
     }
+}
+
+pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError> {
+    match data.get("issue") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingIssue),
+        Some(issue) => {
+            let raw: RawIssue = serde_json::from_value(issue.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?;
+            Ok(IssueMini {
+                id: raw.id,
+                identifier: raw.identifier,
+                title: raw.title,
+                url: raw.url,
+                state: raw.state.name,
+            })
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RawIssue {
+    id: String,
+    identifier: String,
+    title: String,
+    url: String,
+    state: RawState,
+}
+
+#[derive(Deserialize)]
+struct RawState {
+    name: String,
 }
 
 fn truncate(body: &str) -> String {
@@ -256,5 +306,100 @@ mod tests {
         }
         .to_string();
         assert!(!err.contains(fixture_key));
+    }
+
+    #[test]
+    fn transform_issue_parses_full_issue() {
+        let data = serde_json::json!({"issue":{
+            "id": "9d1a2b3c-0000-4000-8000-000000000001",
+            "identifier": "GUZ-79",
+            "title": "Wire the thing",
+            "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing",
+            "state": {"name": "In Progress"},
+        }});
+        let issue = transform_issue(data).unwrap();
+        assert_eq!(
+            issue,
+            IssueMini {
+                id: "9d1a2b3c-0000-4000-8000-000000000001".to_string(),
+                identifier: "GUZ-79".to_string(),
+                title: "Wire the thing".to_string(),
+                url: "https://linear.app/acme/issue/GUZ-79/wire-the-thing".to_string(),
+                state: "In Progress".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn transform_issue_rejects_missing_issue() {
+        let err = transform_issue(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+        assert!(err.to_string().to_lowercase().contains("not found"));
+    }
+
+    #[test]
+    fn transform_issue_rejects_null_issue() {
+        let err = transform_issue(serde_json::json!({"issue": null})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+    }
+
+    #[test]
+    fn transform_issue_rejects_invalid_issue_shape() {
+        let err = transform_issue(serde_json::json!({"issue": {"id": 1}})).unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
+    }
+
+    #[test]
+    fn transform_issue_rejects_missing_state_name() {
+        let data = serde_json::json!({"issue":{
+            "id": "u1",
+            "identifier": "GUZ-1",
+            "title": "T",
+            "url": "https://linear.app/x/issue/GUZ-1/t",
+            "state": {},
+        }});
+        let err = transform_issue(data).unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
+    }
+
+    #[test]
+    fn issue_mini_serializes_expected_keys() {
+        let issue = IssueMini {
+            id: "u1".to_string(),
+            identifier: "GUZ-79".to_string(),
+            title: "T".to_string(),
+            url: "https://linear.app/x/issue/GUZ-79/t".to_string(),
+            state: "Todo".to_string(),
+        };
+        let value = serde_json::to_value(&issue).unwrap();
+        assert_eq!(
+            value.get("identifier").and_then(|v| v.as_str()),
+            Some("GUZ-79")
+        );
+        assert_eq!(value.get("state").and_then(|v| v.as_str()), Some("Todo"));
+    }
+
+    #[test]
+    fn page_info_reads_linear_cursor_shape() {
+        let page: PageInfo =
+            serde_json::from_value(serde_json::json!({"hasNextPage": true, "endCursor": "cur1"}))
+                .unwrap();
+        assert_eq!(
+            page,
+            PageInfo {
+                has_next: true,
+                end_cursor: Some("cur1".to_string()),
+            }
+        );
+        let page: PageInfo =
+            serde_json::from_value(serde_json::json!({"hasNextPage": false, "endCursor": null}))
+                .unwrap();
+        assert_eq!(
+            page,
+            PageInfo {
+                has_next: false,
+                end_cursor: None,
+            }
+        );
     }
 }
