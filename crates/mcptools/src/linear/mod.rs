@@ -282,14 +282,18 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
             "Identifier",
             "Title",
             "URL",
-            "State"
+            "State",
+            "Parent",
+            "BlockedBy"
         ]);
         table.add_row(prettytable::row![
             found.id,
             found.identifier,
             found.title,
             found.url,
-            found.state
+            found.state,
+            found.parent.as_deref().unwrap_or(""),
+            found.blocked_by.join(", ")
         ]);
         table.printstd();
     }
@@ -336,13 +340,22 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
         );
     } else {
         let mut table = new_table();
-        table.add_row(prettytable::row!["ID", "Identifier", "Title", "State"]);
+        table.add_row(prettytable::row![
+            "ID",
+            "Identifier",
+            "Title",
+            "State",
+            "Parent",
+            "BlockedBy"
+        ]);
         for issue in &nodes {
             table.add_row(prettytable::row![
                 issue.id,
                 issue.identifier,
                 issue.title,
-                issue.state
+                issue.state,
+                issue.parent.as_deref().unwrap_or(""),
+                issue.blocked_by.join(", ")
             ]);
         }
         table.printstd();

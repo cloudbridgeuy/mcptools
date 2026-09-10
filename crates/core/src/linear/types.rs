@@ -61,6 +61,10 @@ pub struct IssueMini {
     pub title: String,
     pub url: String,
     pub state: String,
+    #[serde(default)]
+    pub parent: Option<String>,
+    #[serde(default)]
+    pub blocked_by: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -161,6 +165,15 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
                 title: raw.title,
                 url: raw.url,
                 state: raw.state.name,
+                parent: raw.parent.map(|parent| parent.identifier),
+                blocked_by: raw
+                    .inverse_relations
+                    .unwrap_or_default()
+                    .nodes
+                    .into_iter()
+                    .filter(|node| node.rel_type == "blocks")
+                    .filter_map(|node| node.issue.map(|issue| issue.identifier))
+                    .collect(),
             })
         }
     }
@@ -182,6 +195,15 @@ pub fn transform_issues(data: serde_json::Value) -> Result<Paginated<IssueMini>,
                         title: raw.title,
                         url: raw.url,
                         state: raw.state.name,
+                        parent: raw.parent.map(|parent| parent.identifier),
+                        blocked_by: raw
+                            .inverse_relations
+                            .unwrap_or_default()
+                            .nodes
+                            .into_iter()
+                            .filter(|node| node.rel_type == "blocks")
+                            .filter_map(|node| node.issue.map(|issue| issue.identifier))
+                            .collect(),
                     })
                     .collect(),
                 page_info: paged.page_info,
@@ -400,6 +422,34 @@ struct RawIssue {
     title: String,
     url: String,
     state: RawState,
+    #[serde(default)]
+    parent: Option<RawParent>,
+    #[serde(default, rename = "inverseRelations")]
+    inverse_relations: Option<RawRelationConnection>,
+}
+
+#[derive(Deserialize)]
+struct RawParent {
+    identifier: String,
+}
+
+#[derive(Deserialize, Default)]
+struct RawRelationConnection {
+    #[serde(default)]
+    nodes: Vec<RawRelationNode>,
+}
+
+#[derive(Deserialize)]
+struct RawRelationNode {
+    #[serde(rename = "type")]
+    rel_type: String,
+    #[serde(default)]
+    issue: Option<RawRelated>,
+}
+
+#[derive(Deserialize)]
+struct RawRelated {
+    identifier: String,
 }
 
 #[derive(Deserialize)]
@@ -608,6 +658,11 @@ mod tests {
             "title": "Wire the thing",
             "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing",
             "state": {"name": "In Progress"},
+            "parent": {"identifier": "GUZ-78"},
+            "inverseRelations": {"nodes": [
+                {"type": "blocks", "issue": {"identifier": "GUZ-80"}},
+                {"type": "related", "issue": {"identifier": "GUZ-81"}},
+            ]},
         }});
         let issue = transform_issue(data).unwrap();
         assert_eq!(
@@ -618,6 +673,8 @@ mod tests {
                 title: "Wire the thing".to_string(),
                 url: "https://linear.app/acme/issue/GUZ-79/wire-the-thing".to_string(),
                 state: "In Progress".to_string(),
+                parent: Some("GUZ-78".to_string()),
+                blocked_by: vec!["GUZ-80".to_string()],
             }
         );
     }
@@ -662,6 +719,8 @@ mod tests {
             title: "T".to_string(),
             url: "https://linear.app/x/issue/GUZ-79/t".to_string(),
             state: "Todo".to_string(),
+            parent: Some("GUZ-78".to_string()),
+            blocked_by: vec!["GUZ-80".to_string()],
         };
         let value = serde_json::to_value(&issue).unwrap();
         assert_eq!(
@@ -669,6 +728,25 @@ mod tests {
             Some("GUZ-79")
         );
         assert_eq!(value.get("state").and_then(|v| v.as_str()), Some("Todo"));
+        assert_eq!(value.get("parent").and_then(|v| v.as_str()), Some("GUZ-78"));
+        assert_eq!(
+            value.get("blocked_by"),
+            Some(&serde_json::json!(["GUZ-80"]))
+        );
+    }
+
+    #[test]
+    fn transform_issue_defaults_parent_and_blocked_by() {
+        let data = serde_json::json!({"issue":{
+            "id": "u1",
+            "identifier": "GUZ-1",
+            "title": "T",
+            "url": "https://linear.app/x/issue/GUZ-1/t",
+            "state": {"name": "Todo"},
+        }});
+        let issue = transform_issue(data).unwrap();
+        assert_eq!(issue.parent, None);
+        assert!(issue.blocked_by.is_empty());
     }
 
     #[test]

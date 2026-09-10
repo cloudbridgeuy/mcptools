@@ -63,5 +63,6 @@ mcptools linear cycles list --team GUZ
 ## Output
 
 - Tables show compact rows plus a `hasMore/endCursor` line. Truncation is never hidden.
+- `issue get` and `issue list` tables include `Parent` (parent issue identifier, empty when none) and `BlockedBy` (comma-separated identifiers of issues blocking this one) columns; `--json` carries the same data as `parent` and `blocked_by` fields.
 - `--json` returns `{"nodes": [...], "pageInfo": {...}}`.
 - `--all` follows cursors and caps results at 50 items.

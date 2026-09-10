@@ -3,9 +3,9 @@ use crate::prelude::*;
 use mcptools_core::linear::{is_uuid, issue_filter_value, IssueListFilter};
 
 pub const ISSUE_QUERY: &str =
-    "query ($id: String!) { issue(id: $id) { id identifier title url state { name } } }";
+    "query ($id: String!) { issue(id: $id) { id identifier title url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } }";
 
-pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title url state { name } } pageInfo { hasNextPage endCursor } } }";
+pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } pageInfo { hasNextPage endCursor } } }";
 
 pub async fn issue_get_data(
     client: &reqwest::Client,
