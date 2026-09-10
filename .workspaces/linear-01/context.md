@@ -29,3 +29,4 @@
 - Pattern policy: ~/.claude/patterns/POLICY.md (MUST Functional Core-Imperative Shell; unit tests for every pure function)
 - No comments of any kind in code; no shaping jargon (slice IDs, shape parts) in code
 - Live Linear API: https://api.linear.app/graphql; viewer doc {viewer{id name email}}; issues nodes{id identifier title url} with pageInfo{hasNextPage endCursor}
+- `IssueMini{id,identifier,title,url,state}` + `PageInfo{has_next,end_cursor}` (camelCase renames, LINEAR-03 reuse) and `transform_issue` in core types.rs; `issue_get_data(client, selector)` + `ISSUE_QUERY` (`issue(id:$id)` takes UUID or identifier) in shell issue.rs; CLI `mcptools linear issue get <ID> [--json]`; empty selector fails pre-I/O; unknown ids surface GraphQL `Entity not found: Issue`, exit 1, empty stdout
