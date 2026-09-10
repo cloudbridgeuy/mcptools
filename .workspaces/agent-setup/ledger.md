@@ -1,0 +1,22 @@
+# agent-setup — Ledger
+
+Trunk: trunk-agent-setup
+Base: f07ffea6dbd632c9cc1f025b2f9662a86050ef95
+
+## Slices
+
+| Slice | State | Branch | Lane | Merge SHA | Verdict | Notes |
+| ----- | ----- | ------ | ---- | --------- | ------- | ----- |
+| V1 | pending | | | | | Doctor reads, no writes |
+| V2 | pending | | | | | Setup dry-run, blocked by V1 |
+| V3 | pending | | | | | JSON write, blocked by V2 |
+| V4 | pending | | | | | Skills plus uninstall, blocked by V3 |
+| V5 | pending | | | | | Codex plus all-matrix, blocked by V1,V3,V4 |
+
+## Deferred decisions
+
+None yet.
+
+## Events
+
+- 2026-09-10: run started. Plan check clean (handoff 0, slices 0). Trunk lane exists clean at 68d8a90, base f07ffea. context.md created. Mode not yet selected.
