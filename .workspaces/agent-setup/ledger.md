@@ -9,7 +9,7 @@ Base: f07ffea6dbd632c9cc1f025b2f9662a86050ef95
 | ----- | ----- | ------ | ---- | --------- | ------- | ----- |
 | V1 | merged | agent-setup-V1 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V1 | 27d639a | verified-live | Doctor reads, no writes. Code c582688, QA 38641dd. Demo exit 0, 4 lines, pi MissingAgent exact, 0 files. Suite 97+4+609+248+16 pass. |
 | V2 | merged | agent-setup-V2 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V2 | ab74595 | verified-live | Setup dry-run. Code b850ad7 (rebased from bf12d61, content-identical). Demo exit 0, plan lines, 0 newer files. Suite 100+4+632+248+16 pass on trunk. |
-| V3 | ready | | | | | JSON write, unblocked by V2 merge |
+| V3 | dispatched | agent-setup-V3 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V3 | | | JSON write. Model gpt-5.6-terra/openai/medium, base 300a05e, attempt 1 |
 | V3 | pending | | | | | JSON write, blocked by V2 |
 | V4 | pending | | | | | Skills plus uninstall, blocked by V3 |
 | V5 | pending | | | | | Codex plus all-matrix, blocked by V1,V3,V4 |
@@ -30,3 +30,4 @@ Base: f07ffea6dbd632c9cc1f025b2f9662a86050ef95
 - 2026-09-10: V2 reviewed. Diff: qa/V2.md plus plan.rs, cli.rs setup verb, agent/mod export — 729 insertions, zero comments, zero jargon. `plan_global(facts, action)` matches spec exactly; pure `plan_global_with_home` takes explicit home/exe/reader. Demo re-run live exit 0, plan lines, 0 newer files. Suite 100+4+632+248+16 pass. Strict QA gate 0 problems. Verdict verified-live.
 - 2026-09-10: INCIDENT lane merge without --base fast-forwarded local main to rebased lane (lane lacked id metadata after timed-out `lane new`). Recovered: main reset to cc8f0dc (verified pre-merge state, untracked-only tree), lane branch reset to c13ee7a, re-merged with `lane merge agent-setup-V2 --base trunk-agent-setup --keep`. Trunk now ab74595, main untouched. RULE: every future `lane merge` in this run passes explicit `--base trunk-agent-setup`.
 - 2026-09-10: V2 merged as ab74595 (code b850ad7; rebased from bf12d61, empty crates/ diff, suite plus demo re-run on trunk). V3 unblocked.
+- 2026-09-10: V3 dispatched into lane agent-setup-V3 at base 300a05e, model gpt-5.6-terra/openai/medium, attempt 1.
