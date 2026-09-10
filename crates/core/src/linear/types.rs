@@ -21,6 +21,8 @@ pub enum LinearError {
     Parse(String),
     #[error("Linear GraphQL error: {0}")]
     GraphQl(String),
+    #[error("Linear GraphQL error: {errors}; partial data: {data}")]
+    PartialData { errors: String, data: String },
     #[error("Linear response missing data field")]
     MissingData,
     #[error("Linear response missing viewer field")]
@@ -36,17 +38,21 @@ pub fn check_response(status: u16, body: &str) -> Result<serde_json::Value, Line
     }
     let parsed: serde_json::Value =
         serde_json::from_str(body).map_err(|e| LinearError::Parse(e.to_string()))?;
-    if let Some(errors) = parsed.get("errors") {
-        if errors.is_array() && errors.as_array().is_some_and(|a| !a.is_empty()) {
-            return Err(LinearError::GraphQl(describe_errors(errors)));
+    let message = match parsed.get("errors") {
+        Some(errors) if errors.as_array().is_some_and(|items| !items.is_empty()) => {
+            Some(describe_errors(errors))
         }
-        if errors.is_object() {
-            return Err(LinearError::GraphQl(errors.to_string()));
-        }
-    }
-    match parsed.get("data") {
-        None | Some(serde_json::Value::Null) => Err(LinearError::MissingData),
-        Some(data) => Ok(data.clone()),
+        Some(errors) if errors.is_object() => Some(errors.to_string()),
+        _ => None,
+    };
+    match (parsed.get("data"), message) {
+        (Some(data), None) if !data.is_null() => Ok(data.clone()),
+        (Some(data), Some(errors)) if !data.is_null() => Err(LinearError::PartialData {
+            errors: truncate(&errors),
+            data: truncate(&data.to_string()),
+        }),
+        (_, Some(errors)) => Err(LinearError::GraphQl(truncate(&errors))),
+        _ => Err(LinearError::MissingData),
     }
 }
 
@@ -61,10 +67,14 @@ pub fn transform_viewer(data: serde_json::Value) -> Result<Viewer, LinearError> 
 
 fn truncate(body: &str) -> String {
     const LIMIT: usize = 1000;
-    match body.len() > LIMIT {
-        true => body[..LIMIT].to_string(),
-        false => body.to_string(),
+    if body.len() <= LIMIT {
+        return body.to_string();
     }
+    let mut end = LIMIT;
+    while !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    body[..end].to_string()
 }
 
 fn describe_errors(errors: &serde_json::Value) -> String {
@@ -194,6 +204,57 @@ mod tests {
         let fixture_key = "lin_api_3x4mpl3_s3cr3t_k3y_zz99";
         let err = LinearError::Auth(401, "bad credentials".to_string()).to_string();
         assert!(err.to_lowercase().contains("authentication"));
+        assert!(!err.contains(fixture_key));
+    }
+
+    #[test]
+    fn check_response_rejects_partial_data_with_errors() {
+        let body = r#"{"data":{"viewer":{"id":"u1"}},"errors":[{"message":"Field timed out"}]}"#;
+        let err = check_response(200, body).unwrap_err();
+        match &err {
+            LinearError::PartialData { errors, data } => {
+                assert!(errors.contains("Field timed out"));
+                assert!(data.contains("u1"));
+            }
+            other => panic!("expected partial-data error, got {other:?}"),
+        }
+        let text = err.to_string();
+        assert!(text.contains("Field timed out"));
+        assert!(text.contains("u1"));
+    }
+
+    #[test]
+    fn check_response_keeps_graphql_error_without_data() {
+        let body = r#"{"data":null,"errors":[{"message":"Bad field"}]}"#;
+        let err = check_response(200, body).unwrap_err();
+        assert!(matches!(err, LinearError::GraphQl(_)));
+        assert!(err.to_string().contains("Bad field"));
+    }
+
+    #[test]
+    fn check_response_truncates_long_error_bodies() {
+        let big = "e".repeat(2500);
+        let body = format!(r#"{{"data":null,"errors":[{{"message":"{big}"}}]}}"#);
+        let err = check_response(200, &body).unwrap_err();
+        assert!(err.to_string().len() <= 1000 + 64);
+    }
+
+    #[test]
+    fn truncate_stops_on_character_boundary() {
+        let big = "é".repeat(2000);
+        let out = truncate(&big);
+        assert!(out.len() <= 1000);
+        assert!(out.chars().count() == out.len() / 2);
+    }
+
+    #[test]
+    fn partial_error_redacts_key_material() {
+        let fixture_key = "lin_api_3x4mpl3_s3cr3t_k3y_zz99";
+        let err = LinearError::PartialData {
+            errors: "slow".to_string(),
+            data: "{}".to_string(),
+        }
+        .to_string();
         assert!(!err.contains(fixture_key));
     }
 }
