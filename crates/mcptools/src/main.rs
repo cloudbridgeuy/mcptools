@@ -9,6 +9,7 @@ mod error;
 mod greprag;
 mod hn;
 mod images;
+mod linear;
 mod mcp;
 mod md;
 mod pdf;
@@ -67,6 +68,8 @@ pub enum SubCommands {
     /// Local Rust code generation using Ollama
     Strand(crate::strand::App),
 
+    Linear(crate::linear::App),
+
     /// Upgrade mcptools to the latest version
     Upgrade(crate::upgrade::App),
 }
@@ -88,6 +91,7 @@ async fn main() -> Result<()> {
         SubCommands::MD(sub_app) => crate::md::run(sub_app, app.global).await,
         SubCommands::Pdf(sub_app) => crate::pdf::run(sub_app, app.global).await,
         SubCommands::Strand(sub_app) => crate::strand::run(sub_app, app.global).await,
+        SubCommands::Linear(sub_app) => crate::linear::run(sub_app, app.global).await,
         SubCommands::Upgrade(sub_app) => crate::upgrade::run(sub_app, app.global).await,
     }
     .map_err(|err: color_eyre::eyre::Report| eyre!(err))
