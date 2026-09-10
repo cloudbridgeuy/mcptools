@@ -4,8 +4,10 @@ use mcptools_core::agent::health::{
     classify_health, expand_targets, find_on_path, parse_version_output, target_name, AgentTarget,
     GlobalFacts, TargetHealth,
 };
-use mcptools_core::agent::plan::{format_plan, plan_global};
+use mcptools_core::agent::plan::{format_plan, plan_global, GlobalAction};
 use std::path::PathBuf;
+
+use super::exec::{execute_global, format_outcome};
 
 #[derive(Debug, clap::Parser)]
 pub struct App {
@@ -93,7 +95,20 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
             let target: AgentTarget = opts.target.into();
             let facts = gather_global_facts(target)?;
             let actions = plan_global(&facts, AgentAction::Setup);
-            crate::prelude::println!("{}", format_plan(&actions));
+            if opts.dry_run {
+                crate::prelude::println!("{}", format_plan(&actions));
+                return Ok(());
+            }
+            let backups = execute_global(&actions)?;
+            let mut lines = Vec::with_capacity(actions.len());
+            for (action, backup) in actions.iter().zip(backups.iter()) {
+                let existing = match action {
+                    GlobalAction::Refuse { path, .. } => std::fs::read_to_string(path).ok(),
+                    _ => None,
+                };
+                lines.push(format_outcome(action, backup, existing.as_deref()));
+            }
+            crate::prelude::println!("{}", lines.join("\n"));
             Ok(())
         }
         Commands::Status(opts) => {
