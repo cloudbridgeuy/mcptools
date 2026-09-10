@@ -26,6 +26,14 @@ pub enum Commands {
     Teams(TeamsCommands),
     #[command(subcommand)]
     Projects(ProjectsCommands),
+    #[command(subcommand)]
+    Users(UsersCommands),
+    #[command(subcommand)]
+    States(StatesCommands),
+    #[command(subcommand)]
+    Labels(LabelsCommands),
+    #[command(subcommand)]
+    Cycles(CyclesCommands),
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -50,6 +58,26 @@ pub enum TeamsCommands {
 pub enum ProjectsCommands {
     List(ProjectsListOptions),
     Get(ProjectsGetOptions),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum UsersCommands {
+    List(UsersListOptions),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum StatesCommands {
+    List(TeamScopedListOptions),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum LabelsCommands {
+    List(TeamScopedListOptions),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum CyclesCommands {
+    List(TeamScopedListOptions),
 }
 
 #[derive(Debug, clap::Args, Clone)]
@@ -110,6 +138,26 @@ pub struct ProjectsGetOptions {
     pub json: bool,
 }
 
+#[derive(Debug, clap::Args, Clone)]
+pub struct UsersListOptions {
+    #[arg(long)]
+    pub query: String,
+    #[arg(long, default_value = "25")]
+    pub limit: u32,
+    #[arg(long)]
+    pub cursor: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct TeamScopedListOptions {
+    #[arg(long)]
+    pub team: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
 pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
     if main_global.verbose {
         println!("Running Linear command...");
@@ -128,6 +176,18 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
         Commands::Projects(cmd) => match cmd {
             ProjectsCommands::List(options) => projects_list_handler(options).await,
             ProjectsCommands::Get(options) => projects_get_handler(options).await,
+        },
+        Commands::Users(cmd) => match cmd {
+            UsersCommands::List(options) => users_list_handler(options).await,
+        },
+        Commands::States(cmd) => match cmd {
+            StatesCommands::List(options) => states_list_handler(options).await,
+        },
+        Commands::Labels(cmd) => match cmd {
+            LabelsCommands::List(options) => labels_list_handler(options).await,
+        },
+        Commands::Cycles(cmd) => match cmd {
+            CyclesCommands::List(options) => cycles_list_handler(options).await,
         },
     }
 }
@@ -290,6 +350,123 @@ async fn projects_get_handler(options: ProjectsGetOptions) -> Result<()> {
         table.add_row(prettytable::row!["ID", "Name"]);
         table.add_row(prettytable::row![item.id, item.name]);
         table.printstd();
+    }
+    Ok(())
+}
+
+async fn users_list_handler(options: UsersListOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let data =
+        discover::users_list_data(&client, &options.query, options.limit, options.cursor).await?;
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info})
+            )?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Name", "Email"]);
+        for user in &data.nodes {
+            table.add_row(prettytable::row![
+                user.id,
+                user.name,
+                user.email.as_deref().unwrap_or("")
+            ]);
+        }
+        table.printstd();
+        println!(
+            "hasMore: {} endCursor: {}",
+            data.page_info.has_next,
+            data.page_info.end_cursor.as_deref().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
+async fn states_list_handler(options: TeamScopedListOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let data = discover::states_list_data(&client, &options.team).await?;
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info})
+            )?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Name", "Type"]);
+        for state in &data.nodes {
+            table.add_row(prettytable::row![state.id, state.name, state.state_type]);
+        }
+        table.printstd();
+        println!(
+            "hasMore: {} endCursor: {}",
+            data.page_info.has_next,
+            data.page_info.end_cursor.as_deref().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
+async fn labels_list_handler(options: TeamScopedListOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let data = discover::labels_list_data(&client, &options.team).await?;
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info})
+            )?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Name"]);
+        for label in &data.nodes {
+            table.add_row(prettytable::row![label.id, label.name]);
+        }
+        table.printstd();
+        println!(
+            "hasMore: {} endCursor: {}",
+            data.page_info.has_next,
+            data.page_info.end_cursor.as_deref().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
+async fn cycles_list_handler(options: TeamScopedListOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let data = discover::cycles_list_data(&client, &options.team).await?;
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info})
+            )?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Number", "Name"]);
+        for cycle in &data.nodes {
+            table.add_row(prettytable::row![
+                cycle.id,
+                cycle.number,
+                cycle.name.as_deref().unwrap_or("")
+            ]);
+        }
+        table.printstd();
+        println!(
+            "hasMore: {} endCursor: {}",
+            data.page_info.has_next,
+            data.page_info.end_cursor.as_deref().unwrap_or("")
+        );
     }
     Ok(())
 }

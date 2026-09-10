@@ -21,6 +21,34 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct User {
+    pub id: String,
+    pub name: String,
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowState {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub state_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Label {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Cycle {
+    pub id: String,
+    pub number: u32,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Paginated<T> {
     pub nodes: Vec<T>,
     pub page_info: PageInfo,
@@ -73,6 +101,14 @@ pub enum LinearError {
     MissingProjects,
     #[error("Linear response missing project field")]
     MissingProject,
+    #[error("Linear response missing users field")]
+    MissingUsers,
+    #[error("Linear response missing states field")]
+    MissingStates,
+    #[error("Linear response missing labels field")]
+    MissingLabels,
+    #[error("Linear response missing cycles field")]
+    MissingCycles,
 }
 
 pub fn check_response(status: u16, body: &str) -> Result<serde_json::Value, LinearError> {
@@ -169,6 +205,73 @@ pub fn transform_team_projects(data: serde_json::Value) -> Result<Paginated<Proj
     match data.get("team") {
         None | Some(serde_json::Value::Null) => Err(LinearError::MissingTeam),
         Some(team) => transform_projects(team.clone()),
+    }
+}
+
+pub fn transform_users(data: serde_json::Value) -> Result<Paginated<User>, LinearError> {
+    match data.get("users") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingUsers),
+        Some(users) => {
+            let paged: RawPaged<User> = serde_json::from_value(users.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?;
+            Ok(Paginated {
+                nodes: paged.nodes,
+                page_info: paged.page_info,
+            })
+        }
+    }
+}
+
+pub fn transform_team_states(
+    data: serde_json::Value,
+) -> Result<Paginated<WorkflowState>, LinearError> {
+    match data.get("team") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingTeam),
+        Some(team) => match team.get("states") {
+            None | Some(serde_json::Value::Null) => Err(LinearError::MissingStates),
+            Some(states) => {
+                let paged: RawPaged<WorkflowState> = serde_json::from_value(states.clone())
+                    .map_err(|e| LinearError::Parse(e.to_string()))?;
+                Ok(Paginated {
+                    nodes: paged.nodes,
+                    page_info: paged.page_info,
+                })
+            }
+        },
+    }
+}
+
+pub fn transform_team_labels(data: serde_json::Value) -> Result<Paginated<Label>, LinearError> {
+    match data.get("team") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingTeam),
+        Some(team) => match team.get("labels") {
+            None | Some(serde_json::Value::Null) => Err(LinearError::MissingLabels),
+            Some(labels) => {
+                let paged: RawPaged<Label> = serde_json::from_value(labels.clone())
+                    .map_err(|e| LinearError::Parse(e.to_string()))?;
+                Ok(Paginated {
+                    nodes: paged.nodes,
+                    page_info: paged.page_info,
+                })
+            }
+        },
+    }
+}
+
+pub fn transform_team_cycles(data: serde_json::Value) -> Result<Paginated<Cycle>, LinearError> {
+    match data.get("team") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingTeam),
+        Some(team) => match team.get("cycles") {
+            None | Some(serde_json::Value::Null) => Err(LinearError::MissingCycles),
+            Some(cycles) => {
+                let paged: RawPaged<Cycle> = serde_json::from_value(cycles.clone())
+                    .map_err(|e| LinearError::Parse(e.to_string()))?;
+                Ok(Paginated {
+                    nodes: paged.nodes,
+                    page_info: paged.page_info,
+                })
+            }
+        },
     }
 }
 
@@ -524,6 +627,66 @@ mod tests {
     #[test]
     fn transform_team_projects_rejects_missing_team() {
         let err = transform_team_projects(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingTeam);
+    }
+
+    #[test]
+    fn transform_users_parses_nodes_and_page_info() {
+        let data = serde_json::json!({"users": {"nodes": [
+            {"id": "u1", "name": "Ada", "email": "ada@example.com"},
+        ], "pageInfo": {"hasNextPage": false, "endCursor": null}}});
+        let paged = transform_users(data).unwrap();
+        assert_eq!(paged.nodes.len(), 1);
+        assert_eq!(paged.nodes[0].email.as_deref(), Some("ada@example.com"));
+    }
+
+    #[test]
+    fn transform_users_rejects_missing_users() {
+        let err = transform_users(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingUsers);
+    }
+
+    #[test]
+    fn transform_team_states_parses_type_field() {
+        let data = serde_json::json!({"team": {"states": {"nodes": [
+            {"id": "s1", "name": "Todo", "type": "unstarted"},
+        ], "pageInfo": {"hasNextPage": false, "endCursor": null}}}});
+        let paged = transform_team_states(data).unwrap();
+        assert_eq!(paged.nodes[0].state_type, "unstarted");
+    }
+
+    #[test]
+    fn transform_team_states_rejects_missing_states() {
+        let err = transform_team_states(serde_json::json!({"team": {}})).unwrap_err();
+        assert_eq!(err, LinearError::MissingStates);
+    }
+
+    #[test]
+    fn transform_team_labels_parses_nodes() {
+        let data = serde_json::json!({"team": {"labels": {"nodes": [
+            {"id": "l1", "name": "docs"},
+        ], "pageInfo": {"hasNextPage": false, "endCursor": null}}}});
+        let paged = transform_team_labels(data).unwrap();
+        assert_eq!(paged.nodes[0].name, "docs");
+    }
+
+    #[test]
+    fn transform_team_labels_rejects_missing_labels() {
+        let err = transform_team_labels(serde_json::json!({"team": {}})).unwrap_err();
+        assert_eq!(err, LinearError::MissingLabels);
+    }
+
+    #[test]
+    fn transform_team_cycles_accepts_empty_nodes() {
+        let data = serde_json::json!({"team": {"cycles": {"nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}}}});
+        let paged = transform_team_cycles(data).unwrap();
+        assert!(paged.nodes.is_empty());
+    }
+
+    #[test]
+    fn transform_team_cycles_rejects_missing_team() {
+        let err = transform_team_cycles(serde_json::json!({})).unwrap_err();
         assert_eq!(err, LinearError::MissingTeam);
     }
 
