@@ -15,31 +15,38 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
+    /// Authentication and access checks
     #[command(subcommand)]
     Auth(AuthCommands),
+    /// Issue operations
     #[command(subcommand)]
     Issue(IssueCommands),
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum AuthCommands {
+    /// Show the viewer identity for LINEAR_API_KEY
     Status(StatusOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
 pub enum IssueCommands {
+    /// Get one issue by id or identifier
     Get(GetOptions),
 }
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct GetOptions {
+    /// Issue id or identifier (e.g. GUZ-79)
     pub id: String,
+    /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct StatusOptions {
+    /// Output as JSON
     #[arg(long)]
     pub json: bool,
 }
