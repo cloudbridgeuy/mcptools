@@ -12,6 +12,9 @@
 - V1 merged 40c88d4: teams_list_data/limit/cursor, teams_get_data/selector→Team, projects_list_data/team/limit/cursor, projects_get_data/id/team→Project in shell discover (crates/mcptools/src/linear/discover.rs)
 - V1 merged 40c88d4: projects scoping resolves team key to id first; ProjectFilter has no team field; team.projects nested query used
 - V1 merged 40c88d4: --all pages capped at 50 items; --team required with no default
+- V2 merged 11bef45: User{id,name,email}, WorkflowState{id,name,type}, Label{id,name}, Cycle{id,number,name} + transform_users/team_states/team_labels/team_cycles (crates/core/src/linear/types.rs)
+- V2 merged 11bef45: users_list_data/query/limit/cursor, states_list_data/team, labels_list_data/team, cycles_list_data/team in shell discover (crates/mcptools/src/linear/discover.rs)
+- V2 merged 11bef45: users list requires --query (no full dump); states/labels/cycles list require --team; empty lists exit 0
 
 ## Gotchas
 - Two unsuccessful repair rounds on same issue → diagnose before final dispatch
