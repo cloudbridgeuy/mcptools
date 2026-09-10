@@ -4,7 +4,7 @@ use mcptools_core::agent::health::{
     classify_health, expand_targets, find_on_path, parse_version_output, target_name, AgentTarget,
     GlobalFacts, TargetHealth,
 };
-use mcptools_core::agent::plan::{format_plan, plan_global, GlobalAction};
+use mcptools_core::agent::plan::{format_plan, plan_global, plan_uninstall, GlobalAction};
 use std::path::PathBuf;
 
 use super::exec::{execute_global, format_outcome};
@@ -50,6 +50,8 @@ pub struct StatusOptions {
 pub struct UninstallOptions {
     #[arg(long, value_enum, default_value = "all")]
     pub target: ShellTarget,
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 impl From<ShellTarget> for AgentTarget {
@@ -119,10 +121,23 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
         }
         Commands::Uninstall(opts) => {
             let target: AgentTarget = opts.target.into();
-            Err(eyre!(f!(
-                "agent uninstall for {} is not available in this build",
-                target_name(target)
-            )))
+            let facts = gather_global_facts(target)?;
+            let actions = plan_uninstall(&facts);
+            if opts.dry_run {
+                crate::prelude::println!("{}", format_plan(&actions));
+                return Ok(());
+            }
+            let backups = execute_global(&actions)?;
+            let mut lines = Vec::with_capacity(actions.len());
+            for (action, backup) in actions.iter().zip(backups.iter()) {
+                let existing = match action {
+                    GlobalAction::Refuse { path, .. } => std::fs::read_to_string(path).ok(),
+                    _ => None,
+                };
+                lines.push(format_outcome(action, backup, existing.as_deref()));
+            }
+            crate::prelude::println!("{}", lines.join("\n"));
+            Ok(())
         }
     }
 }
@@ -294,5 +309,24 @@ mod tests {
         assert!(text.contains("t 2"));
         assert!(text.contains("mcptools"));
         assert!(std::fs::read_dir(&home).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn uninstall_flag_accepts_dry_run() {
+        use clap::Parser;
+        let app =
+            App::try_parse_from(["agent", "uninstall", "--target", "claude", "--dry-run"]).unwrap();
+        match app.command {
+            Commands::Uninstall(opts) => {
+                assert_eq!(AgentTarget::from(opts.target), AgentTarget::Claude);
+                assert!(opts.dry_run);
+            }
+            _ => panic!("expected uninstall"),
+        }
+        let app = App::try_parse_from(["agent", "uninstall"]).unwrap();
+        match app.command {
+            Commands::Uninstall(opts) => assert!(!opts.dry_run),
+            _ => panic!("expected uninstall"),
+        }
     }
 }

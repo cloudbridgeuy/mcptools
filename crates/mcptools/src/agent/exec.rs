@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use mcptools_core::agent::health::AgentTarget;
-use mcptools_core::agent::plan::{skill_content, GlobalAction};
+use mcptools_core::agent::plan::{skill_content, GlobalAction, SkipReason};
 
 use crate::prelude::*;
 
@@ -90,10 +90,16 @@ pub fn format_outcome(
                 None => f!("created {} (no backup, new file)", path.display()),
             }
         }
-        GlobalAction::Skip { path, .. } => f!(
-            "{}: already installed (owned mcptools entry matches)",
-            path.display()
-        ),
+        GlobalAction::Skip { path, reason } => match reason {
+            SkipReason::AlreadyInstalled => f!(
+                "{}: already installed (owned mcptools entry matches)",
+                path.display()
+            ),
+            SkipReason::UserEdited => f!("{}: user-edited, left unchanged", path.display()),
+            SkipReason::NotApplicable => {
+                f!("{}: not applicable to this target", path.display())
+            }
+        },
         GlobalAction::Refuse { path, diff } => {
             let mut out = f!(
                 "refuse {}: owned mcptools entry differs ({diff})",
@@ -107,10 +113,15 @@ pub fn format_outcome(
             }
             out
         }
-        GlobalAction::RemoveOwned { path } => f!(
-            "{}: left unchanged (removal is not part of setup)",
-            path.display()
-        ),
+        GlobalAction::RemoveOwned { path } => match &backup.backup_path {
+            Some(made) => f!(
+                "removed owned mcptools entry from {}\nbackup {} (restore: {})",
+                path.display(),
+                made.display(),
+                backup.restore_cmd
+            ),
+            None => f!("removed owned mcptools entry from {}", path.display()),
+        },
     }
 }
 
@@ -159,15 +170,86 @@ pub fn execute_global(actions: &[GlobalAction]) -> Result<Vec<BackupInfo>> {
             GlobalAction::Create { path, content } | GlobalAction::MergeOwned { path, content } => {
                 backups.push(atomic_write(path, content)?);
             }
-            GlobalAction::Skip { .. }
-            | GlobalAction::Refuse { .. }
-            | GlobalAction::RemoveOwned { .. } => backups.push(BackupInfo {
+            GlobalAction::RemoveOwned { path } => {
+                backups.push(execute_remove(path)?);
+            }
+            GlobalAction::Skip { .. } | GlobalAction::Refuse { .. } => backups.push(BackupInfo {
                 backup_path: None,
                 restore_cmd: String::new(),
             }),
         }
     }
     Ok(backups)
+}
+
+pub fn execute_remove(path: &Path) -> Result<BackupInfo> {
+    if staged_skill_for_path(path).is_some() {
+        remove_skill(path)
+    } else {
+        strip_owned_key(path)
+    }
+}
+
+fn remove_skill(path: &Path) -> Result<BackupInfo> {
+    if path.is_file() {
+        std::fs::remove_file(path)?;
+        if let Some(parent) = path.parent() {
+            let empty = std::fs::read_dir(parent)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+            if empty {
+                std::fs::remove_dir(parent)?;
+            }
+        }
+    }
+    Ok(BackupInfo {
+        backup_path: None,
+        restore_cmd: String::new(),
+    })
+}
+
+fn config_root_key_for_path(path: &Path) -> &'static str {
+    let text = path.to_string_lossy().replace('\\', "/");
+    if text.ends_with(".config/opencode/opencode.json") {
+        "mcp"
+    } else {
+        "mcpServers"
+    }
+}
+
+fn strip_owned_key(path: &Path) -> Result<BackupInfo> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(_) => {
+            return Ok(BackupInfo {
+                backup_path: None,
+                restore_cmd: String::new(),
+            });
+        }
+    };
+    let mut parsed: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            return Ok(BackupInfo {
+                backup_path: None,
+                restore_cmd: String::new(),
+            });
+        }
+    };
+    let root_key = config_root_key_for_path(path);
+    let owned = parsed
+        .get_mut(root_key)
+        .and_then(|root| root.as_object_mut())
+        .and_then(|servers| servers.remove("mcptools"));
+    if owned.is_none() {
+        return Ok(BackupInfo {
+            backup_path: None,
+            restore_cmd: String::new(),
+        });
+    }
+    let mut out = serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| "{}".to_string());
+    out.push('\n');
+    atomic_write(path, out.as_bytes())
 }
 
 #[cfg(test)]
@@ -325,12 +407,47 @@ mod tests {
     }
 
     #[test]
-    fn outcome_leaves_remove_owned_untouched() {
+    fn outcome_reports_remove_owned_without_backup() {
+        let action = GlobalAction::RemoveOwned {
+            path: PathBuf::from("/tmp/t/.claude/skills/mcptools/SKILL.md"),
+        };
+        let text = format_outcome(&action, &info_none(), None);
+        assert!(text.contains("removed owned mcptools entry"));
+        assert!(text.contains("/tmp/t/.claude/skills/mcptools/SKILL.md"));
+    }
+
+    #[test]
+    fn outcome_reports_remove_owned_with_backup() {
         let action = GlobalAction::RemoveOwned {
             path: PathBuf::from("/tmp/t/.claude.json"),
         };
+        let backup = BackupInfo {
+            backup_path: Some(PathBuf::from("/tmp/t/.claude.json.mcptools-backup.1")),
+            restore_cmd: "cp 'b' 't'".to_string(),
+        };
+        let text = format_outcome(&action, &backup, None);
+        assert!(text.contains("removed owned mcptools entry from /tmp/t/.claude.json"));
+        assert!(text.contains("restore: cp 'b' 't'"));
+    }
+
+    #[test]
+    fn outcome_reports_user_edited_skip() {
+        let action = GlobalAction::Skip {
+            path: PathBuf::from("/tmp/t/.claude/skills/mcptools/SKILL.md"),
+            reason: SkipReason::UserEdited,
+        };
         let text = format_outcome(&action, &info_none(), None);
-        assert!(text.contains("left unchanged"));
+        assert!(text.contains("user-edited, left unchanged"));
+    }
+
+    #[test]
+    fn outcome_reports_not_applicable_skip() {
+        let action = GlobalAction::Skip {
+            path: PathBuf::from("/tmp/t/.claude.json"),
+            reason: SkipReason::NotApplicable,
+        };
+        let text = format_outcome(&action, &info_none(), None);
+        assert!(text.contains("not applicable"));
     }
 
     #[test]
@@ -426,5 +543,97 @@ mod tests {
             .unwrap()
             .contains("secret-value"));
         std::env::remove_var("LINEAR_API_KEY");
+    }
+
+    #[test]
+    fn remove_deletes_skill_file_and_prunes_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = dir.path().join(".claude/skills/mcptools/SKILL.md");
+        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        std::fs::write(&skill, b"staged").unwrap();
+        let actions = vec![GlobalAction::RemoveOwned {
+            path: skill.clone(),
+        }];
+        execute_global(&actions).unwrap();
+        assert!(!skill.exists());
+        assert!(!skill.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn remove_keeps_non_empty_skill_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = dir.path().join(".claude/skills/mcptools/SKILL.md");
+        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        std::fs::write(&skill, b"staged").unwrap();
+        let foreign = skill.parent().unwrap().join("notes.md");
+        std::fs::write(&foreign, b"operator notes").unwrap();
+        let actions = vec![GlobalAction::RemoveOwned {
+            path: skill.clone(),
+        }];
+        execute_global(&actions).unwrap();
+        assert!(!skill.exists());
+        assert!(skill.parent().unwrap().exists());
+        assert_eq!(std::fs::read(&foreign).unwrap(), b"operator notes");
+    }
+
+    #[test]
+    fn remove_strips_owned_key_and_keeps_foreign_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+        std::fs::write(
+            &path,
+            br#"{"mcpServers": {"playwright": {"command": "npx"}, "mcptools": {"command": "mcptools", "args": ["mcp", "stdio"]}}}"#,
+        )
+        .unwrap();
+        let actions = vec![GlobalAction::RemoveOwned { path: path.clone() }];
+        let backups = execute_global(&actions).unwrap();
+        assert!(backups[0].backup_path.is_some());
+        assert!(path.exists());
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(parsed["mcpServers"].get("mcptools").is_none());
+        assert_eq!(parsed["mcpServers"]["playwright"]["command"], "npx");
+    }
+
+    #[test]
+    fn remove_keeps_file_when_owned_key_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+        std::fs::write(
+            &path,
+            br#"{"mcpServers": {"playwright": {"command": "npx"}}}"#,
+        )
+        .unwrap();
+        let actions = vec![GlobalAction::RemoveOwned { path: path.clone() }];
+        let backups = execute_global(&actions).unwrap();
+        assert!(backups[0].backup_path.is_none());
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["mcpServers"]["playwright"]["command"], "npx");
+    }
+
+    #[test]
+    fn remove_tolerates_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claude.json");
+        let actions = vec![GlobalAction::RemoveOwned { path }];
+        let backups = execute_global(&actions).unwrap();
+        assert!(backups[0].backup_path.is_none());
+    }
+
+    #[test]
+    fn remove_supports_spaces_in_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill = dir
+            .path()
+            .join("t 4")
+            .join(".claude/skills/mcptools/SKILL.md");
+        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        std::fs::write(&skill, b"staged").unwrap();
+        let actions = vec![GlobalAction::RemoveOwned {
+            path: skill.clone(),
+        }];
+        execute_global(&actions).unwrap();
+        assert!(!skill.exists());
     }
 }

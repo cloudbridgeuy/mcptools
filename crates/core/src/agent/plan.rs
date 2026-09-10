@@ -39,14 +39,17 @@ pub fn skill_path(target: AgentTarget, home: &str) -> Option<PathBuf> {
 }
 
 pub fn skill_content(target: AgentTarget) -> String {
-    let name = target_name(target);
+    stage_skill(target_name(target))
+}
+
+pub fn stage_skill(template: &str) -> String {
     [
         "---",
         "name: mcptools",
-        &format!("description: Use mcptools tools inside {name} sessions"),
+        &format!("description: Use mcptools tools inside {template} sessions"),
         "---",
         "",
-        &format!("# mcptools for {name}"),
+        &format!("# mcptools for {template}"),
         "",
         "Use the mcptools MCP server tools instead of shelling out",
         "when they are connected. Secrets come from process",
@@ -230,6 +233,118 @@ pub fn plan_global(facts: &GlobalFacts, action: AgentAction) -> Vec<GlobalAction
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|| "mcptools".to_string());
     plan_global_with_home(facts, action, &home, &exe, &|path| {
+        std::fs::read_to_string(path).ok()
+    })
+}
+
+pub fn plan_uninstall_config(
+    target: AgentTarget,
+    path: PathBuf,
+    existing: Option<&str>,
+    desired: &serde_json::Value,
+) -> GlobalAction {
+    let root_key = config_root_key(target);
+    match existing {
+        None => GlobalAction::Skip {
+            path,
+            reason: SkipReason::NotApplicable,
+        },
+        Some(text) => match serde_json::from_str::<serde_json::Value>(text) {
+            Err(_) => GlobalAction::Skip {
+                path,
+                reason: SkipReason::UserEdited,
+            },
+            Ok(parsed) => match parsed.get(root_key) {
+                None => GlobalAction::Skip {
+                    path,
+                    reason: SkipReason::NotApplicable,
+                },
+                Some(root) => match root.as_object() {
+                    None => GlobalAction::Skip {
+                        path,
+                        reason: SkipReason::UserEdited,
+                    },
+                    Some(servers) => match servers.get("mcptools") {
+                        None => GlobalAction::Skip {
+                            path,
+                            reason: SkipReason::NotApplicable,
+                        },
+                        Some(current) if current == desired => GlobalAction::RemoveOwned { path },
+                        Some(_) => GlobalAction::Skip {
+                            path,
+                            reason: SkipReason::UserEdited,
+                        },
+                    },
+                },
+            },
+        },
+    }
+}
+
+pub fn plan_uninstall_skill(path: PathBuf, existing: Option<&str>, desired: &str) -> GlobalAction {
+    match existing {
+        None => GlobalAction::Skip {
+            path,
+            reason: SkipReason::NotApplicable,
+        },
+        Some(text) if text.trim_end() == desired.trim_end() => GlobalAction::RemoveOwned { path },
+        Some(_) => GlobalAction::Skip {
+            path,
+            reason: SkipReason::UserEdited,
+        },
+    }
+}
+
+pub fn plan_uninstall_target(
+    target: AgentTarget,
+    home: &str,
+    exe: &str,
+    read: &dyn Fn(&Path) -> Option<String>,
+) -> Vec<GlobalAction> {
+    let mut actions = Vec::new();
+    if let Some(path) = config_path(target, home) {
+        if let Some(desired) = desired_server_value(target, exe) {
+            actions.push(plan_uninstall_config(
+                target,
+                path.clone(),
+                read(&path).as_deref(),
+                &desired,
+            ));
+        }
+    }
+    if let Some(path) = skill_path(target, home) {
+        let desired = skill_content(target);
+        actions.push(plan_uninstall_skill(
+            path.clone(),
+            read(&path).as_deref(),
+            &desired,
+        ));
+    }
+    actions
+}
+
+pub fn plan_uninstall_with_home(
+    facts: &GlobalFacts,
+    home: &str,
+    exe: &str,
+    read: &dyn Fn(&Path) -> Option<String>,
+) -> Vec<GlobalAction> {
+    facts
+        .targets
+        .iter()
+        .flat_map(|item| expand_targets(*item))
+        .flat_map(|target| plan_uninstall_target(target, home, exe, read))
+        .collect()
+}
+
+pub fn plan_uninstall(facts: &GlobalFacts) -> Vec<GlobalAction> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let exe = facts
+        .exe
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mcptools".to_string());
+    plan_uninstall_with_home(facts, &home, &exe, &|path| {
         std::fs::read_to_string(path).ok()
     })
 }
@@ -634,5 +749,223 @@ mod tests {
     #[test]
     fn format_empty_plan_says_nothing() {
         assert_eq!(format_plan(&[]), "nothing to do");
+    }
+
+    #[test]
+    fn stage_skill_substitutes_target_name() {
+        let staged = stage_skill("claude");
+        assert!(staged.contains("claude"));
+        assert!(staged.contains("mcptools"));
+        assert!(!staged.contains("{target}"));
+    }
+
+    #[test]
+    fn stage_skill_matches_skill_content_bytes() {
+        for target in [
+            AgentTarget::Codex,
+            AgentTarget::Claude,
+            AgentTarget::Pi,
+            AgentTarget::Opencode,
+        ] {
+            assert_eq!(stage_skill(target_name(target)), skill_content(target));
+        }
+    }
+
+    #[test]
+    fn uninstall_missing_paths_plan_not_applicable() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let config = plan_uninstall_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t4/.claude.json"),
+            None,
+            &desired,
+        );
+        assert_eq!(
+            config,
+            GlobalAction::Skip {
+                path: PathBuf::from("/tmp/t4/.claude.json"),
+                reason: SkipReason::NotApplicable,
+            }
+        );
+        let skill = plan_uninstall_skill(
+            PathBuf::from("/tmp/t4/.claude/skills/mcptools/SKILL.md"),
+            None,
+            &skill_content(AgentTarget::Claude),
+        );
+        assert!(matches!(
+            skill,
+            GlobalAction::Skip {
+                reason: SkipReason::NotApplicable,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn uninstall_matching_owned_config_plans_remove() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let existing = serde_json::json!({
+            "mcpServers": {"playwright": {"command": "npx"}, "mcptools": desired}
+        })
+        .to_string();
+        let action = plan_uninstall_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t4/.claude.json"),
+            Some(&existing),
+            &desired,
+        );
+        assert_eq!(
+            action,
+            GlobalAction::RemoveOwned {
+                path: PathBuf::from("/tmp/t4/.claude.json")
+            }
+        );
+    }
+
+    #[test]
+    fn uninstall_edited_owned_config_plans_user_edited() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let existing = r#"{"mcpServers": {"mcptools": {"command": "other"}}}"#;
+        let action = plan_uninstall_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t4/.claude.json"),
+            Some(existing),
+            &desired,
+        );
+        assert_eq!(
+            action,
+            GlobalAction::Skip {
+                path: PathBuf::from("/tmp/t4/.claude.json"),
+                reason: SkipReason::UserEdited,
+            }
+        );
+    }
+
+    #[test]
+    fn uninstall_config_without_owned_key_plans_not_applicable() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let existing = r#"{"mcpServers": {"playwright": {"command": "npx"}}}"#;
+        let action = plan_uninstall_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t4/.claude.json"),
+            Some(existing),
+            &desired,
+        );
+        assert!(matches!(
+            action,
+            GlobalAction::Skip {
+                reason: SkipReason::NotApplicable,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn uninstall_broken_config_plans_user_edited() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let action = plan_uninstall_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t4/.claude.json"),
+            Some("{oops"),
+            &desired,
+        );
+        assert!(matches!(
+            action,
+            GlobalAction::Skip {
+                reason: SkipReason::UserEdited,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn uninstall_matching_skill_plans_remove() {
+        let desired = skill_content(AgentTarget::Pi);
+        let action = plan_uninstall_skill(
+            PathBuf::from("/tmp/t4/.pi/agent/skills/mcptools/SKILL.md"),
+            Some(&desired),
+            &desired,
+        );
+        assert!(matches!(action, GlobalAction::RemoveOwned { .. }));
+    }
+
+    #[test]
+    fn uninstall_edited_skill_plans_user_edited() {
+        let desired = skill_content(AgentTarget::Claude);
+        let action = plan_uninstall_skill(
+            PathBuf::from("/tmp/t4/.claude/skills/mcptools/SKILL.md"),
+            Some("operator edit\n"),
+            &desired,
+        );
+        assert_eq!(
+            action,
+            GlobalAction::Skip {
+                path: PathBuf::from("/tmp/t4/.claude/skills/mcptools/SKILL.md"),
+                reason: SkipReason::UserEdited,
+            }
+        );
+    }
+
+    #[test]
+    fn uninstall_target_covers_config_plus_skill() {
+        let actions = plan_uninstall_target(AgentTarget::Claude, "/tmp/t4", "mcptools", &read_none);
+        assert_eq!(actions.len(), 2);
+        assert!(actions.iter().all(|action| matches!(
+            action,
+            GlobalAction::Skip {
+                reason: SkipReason::NotApplicable,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn uninstall_pi_target_covers_skill_only() {
+        let actions = plan_uninstall_target(AgentTarget::Pi, "/tmp/t4", "mcptools", &read_none);
+        assert_eq!(actions.len(), 1);
+    }
+
+    #[test]
+    fn uninstall_all_expands_to_every_config_and_skill() {
+        let planned = plan_uninstall_with_home(
+            &facts_of(vec![AgentTarget::All]),
+            "/tmp/t4",
+            "mcptools",
+            &read_none,
+        );
+        assert_eq!(planned.len(), 6);
+    }
+
+    #[test]
+    fn uninstall_supports_spaces_in_home() {
+        let planned = plan_uninstall_with_home(
+            &facts_of(vec![AgentTarget::Claude]),
+            "/tmp/t 4",
+            "mcptools",
+            &read_none,
+        );
+        assert_eq!(planned.len(), 2);
+        let text = format_plan(&planned);
+        assert!(text.contains("t 4"));
+    }
+
+    #[test]
+    fn uninstall_format_names_remove_and_user_edited() {
+        let desired = skill_content(AgentTarget::Claude);
+        let actions = vec![
+            plan_uninstall_skill(
+                PathBuf::from("/tmp/t4/.claude/skills/mcptools/SKILL.md"),
+                Some(&desired),
+                &desired,
+            ),
+            plan_uninstall_skill(
+                PathBuf::from("/tmp/t4/.codex/skills/mcptools/SKILL.md"),
+                Some("operator edit"),
+                &skill_content(AgentTarget::Codex),
+            ),
+        ];
+        let text = format_plan(&actions);
+        assert!(text.contains("remove /tmp/t4/.claude/skills/mcptools/SKILL.md"));
+        assert!(text.contains("user-edited, left unchanged"));
     }
 }
