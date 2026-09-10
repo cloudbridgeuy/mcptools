@@ -1,6 +1,6 @@
 # QA — linear-02: Linear workspace discovery and identifier resolution
 
-**Tested SHA:** 11bef45
+**Tested SHA:** 11bef45194a403f4edfa07a6018ff6eb98e8797b
 
 ## Agent-run
 
