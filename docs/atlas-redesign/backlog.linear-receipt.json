@@ -1,0 +1,381 @@
+{
+  "dependencies": {
+    "ATLAS-01->ATLAS-12": {
+      "from": "ATLAS-01",
+      "id": "147d2209-4b4f-424b-8e53-9ad6a24980c4",
+      "to": "ATLAS-12"
+    },
+    "ATLAS-01->ATLAS-21": {
+      "from": "ATLAS-01",
+      "id": "9c4799a9-641e-4a8c-b89f-1185e2d32a79",
+      "to": "ATLAS-21"
+    },
+    "ATLAS-02->ATLAS-03": {
+      "from": "ATLAS-02",
+      "id": "7e8c1c28-043f-4b24-9f29-c4b08e130d4e",
+      "to": "ATLAS-03"
+    },
+    "ATLAS-02->ATLAS-04": {
+      "from": "ATLAS-02",
+      "id": "b3acaa6b-7152-43e1-89eb-06f222f78ab1",
+      "to": "ATLAS-04"
+    },
+    "ATLAS-02->ATLAS-05": {
+      "from": "ATLAS-02",
+      "id": "72564d95-46b5-4591-9c02-79528f378f3d",
+      "to": "ATLAS-05"
+    },
+    "ATLAS-02->ATLAS-06": {
+      "from": "ATLAS-02",
+      "id": "086017ce-76aa-43fd-8beb-992618428da7",
+      "to": "ATLAS-06"
+    },
+    "ATLAS-03->ATLAS-05": {
+      "from": "ATLAS-03",
+      "id": "29393b21-816c-4144-acbd-0625f869db7b",
+      "to": "ATLAS-05"
+    },
+    "ATLAS-03->ATLAS-10": {
+      "from": "ATLAS-03",
+      "id": "5d068fc0-b324-440e-9e7d-fb31eb9e0022",
+      "to": "ATLAS-10"
+    },
+    "ATLAS-03->ATLAS-16": {
+      "from": "ATLAS-03",
+      "id": "a62f4ffd-dafd-4af9-ad16-d0b690aead53",
+      "to": "ATLAS-16"
+    },
+    "ATLAS-03->ATLAS-17": {
+      "from": "ATLAS-03",
+      "id": "4284b164-ab3f-436a-98da-7b4b63a06368",
+      "to": "ATLAS-17"
+    },
+    "ATLAS-03->ATLAS-18": {
+      "from": "ATLAS-03",
+      "id": "f9390dd4-36da-474c-bfa3-d052745360c3",
+      "to": "ATLAS-18"
+    },
+    "ATLAS-04->ATLAS-06": {
+      "from": "ATLAS-04",
+      "id": "062f7825-79aa-49d8-a06e-9948e32d0938",
+      "to": "ATLAS-06"
+    },
+    "ATLAS-04->ATLAS-11": {
+      "from": "ATLAS-04",
+      "id": "f2f0c9d8-e79e-4a17-b49b-8cd8303e6988",
+      "to": "ATLAS-11"
+    },
+    "ATLAS-04->ATLAS-17": {
+      "from": "ATLAS-04",
+      "id": "e6c5ffe8-21fc-4910-99c0-c936e8018cd2",
+      "to": "ATLAS-17"
+    },
+    "ATLAS-04->ATLAS-18": {
+      "from": "ATLAS-04",
+      "id": "5a035ab7-75f0-40d2-8fb0-a908c121f609",
+      "to": "ATLAS-18"
+    },
+    "ATLAS-05->ATLAS-06": {
+      "from": "ATLAS-05",
+      "id": "65dd1cf6-9da8-48df-88a4-1a416341fea0",
+      "to": "ATLAS-06"
+    },
+    "ATLAS-05->ATLAS-09": {
+      "from": "ATLAS-05",
+      "id": "cfdfb2a6-d957-4994-99d9-2f4a8827a97b",
+      "to": "ATLAS-09"
+    },
+    "ATLAS-05->ATLAS-10": {
+      "from": "ATLAS-05",
+      "id": "f9d0a573-cf70-4a26-a7af-c93a0ac38cc2",
+      "to": "ATLAS-10"
+    },
+    "ATLAS-05->ATLAS-17": {
+      "from": "ATLAS-05",
+      "id": "bfddfa98-6dbb-46a6-abf3-2f2489d35dd0",
+      "to": "ATLAS-17"
+    },
+    "ATLAS-05->ATLAS-18": {
+      "from": "ATLAS-05",
+      "id": "f48d8789-3ef3-435a-8b77-59b6c61a1dff",
+      "to": "ATLAS-18"
+    },
+    "ATLAS-06->ATLAS-11": {
+      "from": "ATLAS-06",
+      "id": "e908c9b0-d16b-446f-ac10-7e2a3f3ab37f",
+      "to": "ATLAS-11"
+    },
+    "ATLAS-06->ATLAS-20": {
+      "from": "ATLAS-06",
+      "id": "cc9d06f1-9f29-4c76-a7cd-b242d1b33215",
+      "to": "ATLAS-20"
+    },
+    "ATLAS-07->ATLAS-08": {
+      "from": "ATLAS-07",
+      "id": "717d7e03-93b1-4711-afe0-e1172461369a",
+      "to": "ATLAS-08"
+    },
+    "ATLAS-07->ATLAS-10": {
+      "from": "ATLAS-07",
+      "id": "08cae32b-48f4-4b18-a308-77cd7e9534ff",
+      "to": "ATLAS-10"
+    },
+    "ATLAS-07->ATLAS-14": {
+      "from": "ATLAS-07",
+      "id": "ddc68769-9156-4ffa-b909-64d945d05ec9",
+      "to": "ATLAS-14"
+    },
+    "ATLAS-07->ATLAS-16": {
+      "from": "ATLAS-07",
+      "id": "e955ca77-4592-438f-bae6-72850fb39e0d",
+      "to": "ATLAS-16"
+    },
+    "ATLAS-08->ATLAS-09": {
+      "from": "ATLAS-08",
+      "id": "aa0565b3-69ef-4bdf-ab57-93d482cc9158",
+      "to": "ATLAS-09"
+    },
+    "ATLAS-08->ATLAS-11": {
+      "from": "ATLAS-08",
+      "id": "fc8750e0-ef30-46e1-b9bf-4091dfa6388f",
+      "to": "ATLAS-11"
+    },
+    "ATLAS-08->ATLAS-16": {
+      "from": "ATLAS-08",
+      "id": "f9a8e5bd-ac1f-4351-85ae-3d38f154417f",
+      "to": "ATLAS-16"
+    },
+    "ATLAS-09->ATLAS-10": {
+      "from": "ATLAS-09",
+      "id": "424a0750-9ccb-45b4-ada5-ed1c56e5b3d1",
+      "to": "ATLAS-10"
+    },
+    "ATLAS-09->ATLAS-11": {
+      "from": "ATLAS-09",
+      "id": "3cfe6d42-39ab-4510-98bd-07e8e639c51f",
+      "to": "ATLAS-11"
+    },
+    "ATLAS-09->ATLAS-13": {
+      "from": "ATLAS-09",
+      "id": "a51943b8-f28c-4e8c-8dba-a580c26a28ec",
+      "to": "ATLAS-13"
+    },
+    "ATLAS-09->ATLAS-14": {
+      "from": "ATLAS-09",
+      "id": "defd0886-0f54-4f17-aeb9-20027474c5de",
+      "to": "ATLAS-14"
+    },
+    "ATLAS-10->ATLAS-11": {
+      "from": "ATLAS-10",
+      "id": "7cda0937-77b0-4c2f-b712-28f200af5872",
+      "to": "ATLAS-11"
+    },
+    "ATLAS-11->ATLAS-12": {
+      "from": "ATLAS-11",
+      "id": "41c4fabf-4752-4262-985d-15cde8254c4d",
+      "to": "ATLAS-12"
+    },
+    "ATLAS-11->ATLAS-13": {
+      "from": "ATLAS-11",
+      "id": "b799d9f1-4a68-4c68-838a-ca88467ba3c2",
+      "to": "ATLAS-13"
+    },
+    "ATLAS-11->ATLAS-19": {
+      "from": "ATLAS-11",
+      "id": "91d534df-7f5f-4475-9612-81e5558a0d0f",
+      "to": "ATLAS-19"
+    },
+    "ATLAS-11->ATLAS-20": {
+      "from": "ATLAS-11",
+      "id": "7043e15e-9d0d-456e-9408-658a530d589e",
+      "to": "ATLAS-20"
+    },
+    "ATLAS-12->ATLAS-20": {
+      "from": "ATLAS-12",
+      "id": "347f8972-abbd-49ea-a6ae-a5c9fbab20ba",
+      "to": "ATLAS-20"
+    },
+    "ATLAS-12->ATLAS-21": {
+      "from": "ATLAS-12",
+      "id": "75fb0fb9-0269-4511-a0e0-3acc1ce313c3",
+      "to": "ATLAS-21"
+    },
+    "ATLAS-13->ATLAS-15": {
+      "from": "ATLAS-13",
+      "id": "68122aed-83a7-42e6-96ef-5a333811460c",
+      "to": "ATLAS-15"
+    },
+    "ATLAS-13->ATLAS-20": {
+      "from": "ATLAS-13",
+      "id": "e4314c7e-89f0-44e6-b6d1-e4328bdab2d3",
+      "to": "ATLAS-20"
+    },
+    "ATLAS-14->ATLAS-15": {
+      "from": "ATLAS-14",
+      "id": "a3867727-1162-413c-99ec-c93b9ceff429",
+      "to": "ATLAS-15"
+    },
+    "ATLAS-14->ATLAS-20": {
+      "from": "ATLAS-14",
+      "id": "9f6110e1-2380-403e-8f3d-d54f525be54d",
+      "to": "ATLAS-20"
+    },
+    "ATLAS-15->ATLAS-16": {
+      "from": "ATLAS-15",
+      "id": "ce87f362-9c27-419b-a98e-db4e69708df8",
+      "to": "ATLAS-16"
+    },
+    "ATLAS-15->ATLAS-21": {
+      "from": "ATLAS-15",
+      "id": "329fcaff-defa-4a04-9d01-82c6f17f0b09",
+      "to": "ATLAS-21"
+    },
+    "ATLAS-16->ATLAS-20": {
+      "from": "ATLAS-16",
+      "id": "86459d0a-a48d-4419-8ec9-67a057f0f658",
+      "to": "ATLAS-20"
+    },
+    "ATLAS-16->ATLAS-21": {
+      "from": "ATLAS-16",
+      "id": "d41e1b02-c746-48ed-9b02-7647b6c11078",
+      "to": "ATLAS-21"
+    },
+    "ATLAS-17->ATLAS-19": {
+      "from": "ATLAS-17",
+      "id": "c76e33a1-e753-4376-a91e-d61efec4714a",
+      "to": "ATLAS-19"
+    },
+    "ATLAS-17->ATLAS-20": {
+      "from": "ATLAS-17",
+      "id": "a2e80b17-d407-418d-b55d-5b064c246ca8",
+      "to": "ATLAS-20"
+    },
+    "ATLAS-18->ATLAS-19": {
+      "from": "ATLAS-18",
+      "id": "821a74cf-16b7-4787-bc71-b9093ccadb42",
+      "to": "ATLAS-19"
+    },
+    "ATLAS-18->ATLAS-20": {
+      "from": "ATLAS-18",
+      "id": "6bfd00fb-c2e0-4480-8ef0-4ef0970ea1f3",
+      "to": "ATLAS-20"
+    },
+    "ATLAS-19->ATLAS-22": {
+      "from": "ATLAS-19",
+      "id": "40324ab7-7a94-4080-9987-1c63104817b6",
+      "to": "ATLAS-22"
+    },
+    "ATLAS-20->ATLAS-21": {
+      "from": "ATLAS-20",
+      "id": "5e59a081-6cfe-404e-b037-4de3500cfd99",
+      "to": "ATLAS-21"
+    },
+    "ATLAS-20->ATLAS-22": {
+      "from": "ATLAS-20",
+      "id": "8a6b0bfb-85dd-443f-814d-d383b44a4522",
+      "to": "ATLAS-22"
+    },
+    "ATLAS-21->ATLAS-22": {
+      "from": "ATLAS-21",
+      "id": "f2cff2ad-cadd-4664-bd5a-bdae3082c4d8",
+      "to": "ATLAS-22"
+    }
+  },
+  "initiative": "atlas-redesign-2026-09-08",
+  "issues": {
+    "ATLAS-00": {
+      "id": "fd37a665-63f9-48ee-a7af-9ffef698b5d6",
+      "url": "https://linear.app/guzmonne/issue/GUZ-20/make-atlas-fast-to-start-and-move-mcptools-model-calls-to-llm-stream"
+    },
+    "ATLAS-01": {
+      "id": "8f3f4538-facb-4352-bbba-ffdfa2aacef3",
+      "url": "https://linear.app/guzmonne/issue/GUZ-21/record-atlas-baseline-and-verify-relevant-graft-mechanisms"
+    },
+    "ATLAS-02": {
+      "id": "a02d2f8c-8ad0-451b-a9c6-a2638c3a506e",
+      "url": "https://linear.app/guzmonne/issue/GUZ-22/expose-a-reliable-automation-contract-from-llm-stream"
+    },
+    "ATLAS-03": {
+      "id": "8de4d510-4512-459c-8b08-028f8a8beb96",
+      "url": "https://linear.app/guzmonne/issue/GUZ-24/ship-and-install-atlas-templates-for-llm-stream"
+    },
+    "ATLAS-04": {
+      "id": "a9469e2d-2add-4451-b282-e6296ecd874d",
+      "url": "https://linear.app/guzmonne/issue/GUZ-25/add-the-shared-llm-stream-process-runner"
+    },
+    "ATLAS-05": {
+      "id": "72301c1b-c068-46ad-bfe5-4d664c2504d5",
+      "url": "https://linear.app/guzmonne/issue/GUZ-27/replace-atlas-ollama-configuration-with-template-and-runner-settings"
+    },
+    "ATLAS-06": {
+      "id": "493c0d20-e219-424a-8e1a-5b362be4f760",
+      "url": "https://linear.app/guzmonne/issue/GUZ-28/handle-429-with-bounded-retries-and-shared-cooldowns"
+    },
+    "ATLAS-07": {
+      "id": "af20ad7d-2bac-47cb-8710-950062b84d40",
+      "url": "https://linear.app/guzmonne/issue/GUZ-23/make-atlas-initialization-and-structural-refresh-model-free"
+    },
+    "ATLAS-08": {
+      "id": "5984e42e-609c-4813-a118-cd1d3b7682b1",
+      "url": "https://linear.app/guzmonne/issue/GUZ-26/make-the-primer-optional-and-preserve-operator-text"
+    },
+    "ATLAS-09": {
+      "id": "6481e31e-1f00-4135-a873-5623954ae7af",
+      "url": "https://linear.app/guzmonne/issue/GUZ-29/track-enrichment-provenance-stale-state-and-durable-progress"
+    },
+    "ATLAS-10": {
+      "id": "9e4d1aab-352e-49e3-b201-15c7065c78d0",
+      "url": "https://linear.app/guzmonne/issue/GUZ-32/plan-scoped-enrichment-before-making-model-calls"
+    },
+    "ATLAS-11": {
+      "id": "edc24509-bd10-41cf-a471-6e3de1e79e47",
+      "url": "https://linear.app/guzmonne/issue/GUZ-34/execute-and-resume-explicit-atlas-enrichment"
+    },
+    "ATLAS-12": {
+      "id": "000b4f7c-5ce9-4b31-8902-37ab5b5685a5",
+      "url": "https://linear.app/guzmonne/issue/GUZ-35/bound-prompt-size-and-remove-unnecessary-enrichment-serialization"
+    },
+    "ATLAS-13": {
+      "id": "37f1ec4e-bdc8-4f4b-9792-65d91a2bdd68",
+      "url": "https://linear.app/guzmonne/issue/GUZ-36/expose-structural-readiness-enrichment-progress-and-retry-state"
+    },
+    "ATLAS-14": {
+      "id": "06037bec-447f-4916-9232-0badb88206bd",
+      "url": "https://linear.app/guzmonne/issue/GUZ-33/keep-structural-data-fresh-across-edits-deletions-and-worktrees"
+    },
+    "ATLAS-15": {
+      "id": "271ac3da-1bf6-44d4-b402-bc211eaea251",
+      "url": "https://linear.app/guzmonne/issue/GUZ-38/provide-a-focused-atlas-query-and-predictable-climcp-results"
+    },
+    "ATLAS-16": {
+      "id": "65d56232-822a-4f23-a0ff-cbf04908db45",
+      "url": "https://linear.app/guzmonne/issue/GUZ-39/install-atlas-guidance-for-codex-and-claude-harnesses"
+    },
+    "ATLAS-17": {
+      "id": "d696e870-391c-4be6-a02f-df34d333e0c0",
+      "url": "https://linear.app/guzmonne/issue/GUZ-30/migrate-greprag-to-llm-stream-and-an-explicit-template"
+    },
+    "ATLAS-18": {
+      "id": "478e93de-7766-4aa9-8290-21504972d4b6",
+      "url": "https://linear.app/guzmonne/issue/GUZ-31/migrate-strand-to-llm-stream-with-a-portable-prompt-contract"
+    },
+    "ATLAS-19": {
+      "id": "0e7327ed-ec09-4eb4-a63d-8a8a572265b2",
+      "url": "https://linear.app/guzmonne/issue/GUZ-37/remove-obsolete-ollama-clients-assets-and-dependency-wiring"
+    },
+    "ATLAS-20": {
+      "id": "fbef3549-24b0-477e-8231-76e2c3b354ff",
+      "url": "https://linear.app/guzmonne/issue/GUZ-40/verify-the-complete-workflow-under-failures-and-concurrency"
+    },
+    "ATLAS-21": {
+      "id": "d1bffa81-8ad7-4d31-a525-2beabc86a6c7",
+      "url": "https://linear.app/guzmonne/issue/GUZ-41/measure-atlas-usefulness-and-enrichment-cost-after-redesign"
+    },
+    "ATLAS-22": {
+      "id": "292bf78f-5d10-453a-9cd9-62ea0adfa5e6",
+      "url": "https://linear.app/guzmonne/issue/GUZ-42/publish-migration-instructions-and-the-complete-operator-flow"
+    }
+  },
+  "project_id": "5fe03c79-0c6b-4e49-a56d-f10421143727",
+  "team_id": "e3b567ba-bcd1-42d8-8ae8-129fd11c97ab"
+}

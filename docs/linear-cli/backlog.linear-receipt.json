@@ -1,0 +1,128 @@
+{
+  "dependencies": {
+    "AGENTS-01->AGENTS-02": {
+      "from": "AGENTS-01",
+      "id": "3c2ba09b-1ea1-477d-9fe6-ce1611234d57",
+      "to": "AGENTS-02"
+    },
+    "AGENTS-01->AGENTS-03": {
+      "from": "AGENTS-01",
+      "id": "d80cdf5f-32c8-429d-892f-bd149bc5308e",
+      "to": "AGENTS-03"
+    },
+    "AGENTS-02->LINEAR-07": {
+      "from": "AGENTS-02",
+      "id": "8cc0efb6-4609-490b-8f45-a886d71ab60f",
+      "to": "LINEAR-07"
+    },
+    "AGENTS-03->LINEAR-07": {
+      "from": "AGENTS-03",
+      "id": "c07f8a64-923c-4d66-bcd1-896d1c78f344",
+      "to": "LINEAR-07"
+    },
+    "LINEAR-01->LINEAR-02": {
+      "from": "LINEAR-01",
+      "id": "3fe63c3f-14fc-48ba-8a61-0e80000bde52",
+      "to": "LINEAR-02"
+    },
+    "LINEAR-02->LINEAR-03": {
+      "from": "LINEAR-02",
+      "id": "7a5aaad2-0d39-4062-9678-dd90b78cf4b2",
+      "to": "LINEAR-03"
+    },
+    "LINEAR-02->LINEAR-04": {
+      "from": "LINEAR-02",
+      "id": "8035c2fd-ccc1-466e-8ea6-71c7a1cedd31",
+      "to": "LINEAR-04"
+    },
+    "LINEAR-03->LINEAR-05": {
+      "from": "LINEAR-03",
+      "id": "ca4a6426-6c87-484a-a2b1-536ed1516d6f",
+      "to": "LINEAR-05"
+    },
+    "LINEAR-03->LINEAR-06": {
+      "from": "LINEAR-03",
+      "id": "23268f2f-e564-48e4-8d1c-d95f4bf9c77d",
+      "to": "LINEAR-06"
+    },
+    "LINEAR-04->LINEAR-05": {
+      "from": "LINEAR-04",
+      "id": "141d2306-e2e3-48d8-9452-53c10d8d6bfa",
+      "to": "LINEAR-05"
+    },
+    "LINEAR-04->LINEAR-06": {
+      "from": "LINEAR-04",
+      "id": "2daab088-8e79-4344-b623-1d64141ed20e",
+      "to": "LINEAR-06"
+    },
+    "LINEAR-05->LINEAR-06": {
+      "from": "LINEAR-05",
+      "id": "a92bf2da-8b5e-4b6b-9ac7-851df30c46a7",
+      "to": "LINEAR-06"
+    },
+    "LINEAR-06->AGENTS-02": {
+      "from": "LINEAR-06",
+      "id": "cb2291ba-2ce7-4d4a-8405-3e86cce5677b",
+      "to": "AGENTS-02"
+    },
+    "LINEAR-06->AGENTS-03": {
+      "from": "LINEAR-06",
+      "id": "7ef81146-9bed-4b86-93bd-63cdb391b013",
+      "to": "AGENTS-03"
+    },
+    "LINEAR-06->LINEAR-07": {
+      "from": "LINEAR-06",
+      "id": "7b5a9fb7-0004-4d6c-812d-7e083b09ba54",
+      "to": "LINEAR-07"
+    }
+  },
+  "initiative": "linear-cli-global-agents-2026-09-10",
+  "issues": {
+    "AGENTS-01": {
+      "id": "39433282-fca3-4f92-9a5e-3d9a8b7c3d32",
+      "url": "https://linear.app/guzmonne/issue/GUZ-80/add-user-level-mcptools-setup-status-and-uninstall"
+    },
+    "AGENTS-02": {
+      "id": "608b7dd5-e9f9-40c3-b9d1-7434a16d897c",
+      "url": "https://linear.app/guzmonne/issue/GUZ-86/integrate-mcptools-globally-with-codex-and-claude-code"
+    },
+    "AGENTS-03": {
+      "id": "d800f840-d914-4b3b-9f44-7f0503663030",
+      "url": "https://linear.app/guzmonne/issue/GUZ-87/integrate-mcptools-globally-with-pi-and-opencode2"
+    },
+    "LINEAR-00": {
+      "id": "eaa1ca71-b6cb-48d5-ae76-72f262544b42",
+      "url": "https://linear.app/guzmonne/issue/GUZ-78/add-linear-cli-and-mcp-tools-with-global-agent-setup"
+    },
+    "LINEAR-01": {
+      "id": "ef7555da-b728-4208-aef9-12b0fb699e86",
+      "url": "https://linear.app/guzmonne/issue/GUZ-79/add-the-shared-linear-client-and-noninteractive-output-contract"
+    },
+    "LINEAR-02": {
+      "id": "a8fde2c2-6366-42c1-bce4-eb00db671b2e",
+      "url": "https://linear.app/guzmonne/issue/GUZ-81/add-linear-workspace-discovery-and-identifier-resolution"
+    },
+    "LINEAR-03": {
+      "id": "5efec6b1-8534-49e4-8f73-9d27bea1a399",
+      "url": "https://linear.app/guzmonne/issue/GUZ-82/add-paginated-linear-issue-search-and-detail-commands"
+    },
+    "LINEAR-04": {
+      "id": "6ed6cba6-ec46-4e72-b7c2-95860a3dd90d",
+      "url": "https://linear.app/guzmonne/issue/GUZ-83/add-linear-issue-creation-and-targeted-updates"
+    },
+    "LINEAR-05": {
+      "id": "514cdd92-6e08-4287-a28b-00a88c37283c",
+      "url": "https://linear.app/guzmonne/issue/GUZ-84/add-linear-comments-and-issue-relationships"
+    },
+    "LINEAR-06": {
+      "id": "10716d35-fccd-459d-9b8d-b9f257048e42",
+      "url": "https://linear.app/guzmonne/issue/GUZ-85/expose-linear-workflows-through-the-existing-mcp-server"
+    },
+    "LINEAR-07": {
+      "id": "b0b828e6-d2a1-482d-b8e0-52667aae6110",
+      "url": "https://linear.app/guzmonne/issue/GUZ-88/verify-and-document-the-full-linear-agent-workflow"
+    }
+  },
+  "project_id": "5fe03c79-0c6b-4e49-a56d-f10421143727",
+  "team_id": "e3b567ba-bcd1-42d8-8ae8-129fd11c97ab"
+}

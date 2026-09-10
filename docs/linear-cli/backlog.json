@@ -1,0 +1,117 @@
+{
+  "project_name": "MCPTools",
+  "initiative": "linear-cli-global-agents-2026-09-10",
+  "issues": [
+    {
+      "key": "LINEAR-00",
+      "title": "Add Linear CLI and MCP tools with global agent setup",
+      "description": "Enable coding agents to discover and use Linear through mcptools from any working directory. Reuse the existing CLI, MCP server, and binary installer. Deliver focused issue workflows first. Proposed command names below may follow existing repository conventions.\n\nAcceptance criteria:\n\n- [ ] An agent can find a team/project, search and read issues, create or update an issue, comment, and manage parent/blocking relations through CLI and MCP.\n- [ ] Codex, Claude Code, pi, and opencode2 can discover mcptools after one user-level setup; include status and uninstall.\n- [ ] Use LINEAR_API_KEY from the process environment. Never write the key into tickets, logs, skills, or client configuration.\n- [ ] Each child issue is complete with offline tests and a documented live verification result or explicit access limitation.\n- [ ] Initial scope excludes OAuth hosting, webhooks, autonomous background work, file uploads, arbitrary GraphQL, and full Linear administrative CRUD.",
+      "priority": 3,
+      "parent": null,
+      "depends_on": []
+    },
+    {
+      "key": "LINEAR-01",
+      "title": "Add the shared Linear client and noninteractive output contract",
+      "description": "Add mcptools linear and a shared typed GraphQL client for all Linear CLI and MCP operations. Keep HTTP effects separate from input and response conversion. Reuse installed HTTP/JSON dependencies.\n\nSources: https://linear.app/developers/graphql and https://linear.app/developers/rate-limiting\n\nAcceptance criteria:\n\n- [ ] Read LINEAR_API_KEY at runtime; auth status checks viewer access and reports identity without exposing the key. Missing or invalid credentials return actionable errors.\n- [ ] Define stable JSON success/error shapes, resource IDs and URLs, pagination fields, and nonzero error exits. stdout contains only requested data; diagnostics use stderr. Commands never require a TTY.\n- [ ] Use GraphQL variables; reject invalid input before requests. Check HTTP errors, GraphQL errors even with HTTP 200, partial data, and mutation success flags.\n- [ ] Set request timeouts and bounded read retries. Handle HTTP 429 and GraphQL RATELIMITED, including HTTP 400; respect available reset/retry metadata.\n- [ ] Never blindly retry mutations after an uncertain transport outcome; report the uncertainty and a reconciliation path.\n- [ ] Offline tests cover missing auth, redaction, timeout, malformed JSON, partial errors, rate limits, and exhausted retries.\n\nRepository starting points:\n\n- crates/mcptools/src/main.rs\n- crates/mcptools/src/atlassian/mod.rs\n- crates/core/src/atlassian/jira.rs",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": []
+    },
+    {
+      "key": "LINEAR-02",
+      "title": "Add Linear workspace discovery and identifier resolution",
+      "description": "Expose viewer, teams, projects, users, workflow states, labels, and cycles needed to create and update issues. Share resolution code across commands.\n\nAcceptance criteria:\n\n- [ ] Provide bounded list/get commands with cursor pagination and explicit all-pages behavior. Return stable IDs and human-readable names.\n- [ ] Resolve team keys and IDs, issue identifiers and UUIDs, and documented resource selectors; reject ambiguous names with candidate IDs.\n- [ ] Scope states, cycles, labels, and projects to the selected team where required. Never silently select the first match or team.\n- [ ] Allow explicit team/project flags without requiring a repository. If defaults are added, document precedence and require unambiguous selection.\n- [ ] Test multi-page results, missing resources, ambiguous names, team mismatch, and empty lists.\n\nRepository starting points:\n\n- crates/mcptools/src/atlassian/jira/mod.rs",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": [
+        "LINEAR-01"
+      ]
+    },
+    {
+      "key": "LINEAR-03",
+      "title": "Add paginated Linear issue search and detail commands",
+      "description": "Implement mcptools linear issue list, search, and get for agent planning and execution.\n\nAcceptance criteria:\n\n- [ ] Filter by team, project, assignee (including current user), workflow state, label, cycle, and updated time; provide text search.\n- [ ] Get accepts issue UUID or identifier and returns description, state, assignment, project, cycle, labels, timestamps, and URL.\n- [ ] Return compact list rows by default, with explicit detail expansion. Expose next cursor and has-more state; never hide truncation.\n- [ ] Paginate nested comments and relations through their dedicated commands or explicit continuation metadata.\n- [ ] Test filters, issue identifiers, Unicode search, pagination, empty results, and permission/not-found errors.\n\nRepository starting points:\n\n- crates/mcptools/src/atlassian/jira/search.rs",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": [
+        "LINEAR-02"
+      ]
+    },
+    {
+      "key": "LINEAR-04",
+      "title": "Add Linear issue creation and targeted updates",
+      "description": "Implement issue create and update with structured inputs suitable for agents.\n\nAcceptance criteria:\n\n- [ ] Support title, Markdown description, team, project, assignee, state, priority, labels, cycle, due date, and parent where the API supports them.\n- [ ] Accept JSON from stdin or file and Markdown description from file/stdin without shell interpolation or an editor; reject conflicting input sources.\n- [ ] Distinguish omitted values from explicit clears. Update only requested fields; define label add/remove/replace behavior. Validate team compatibility.\n- [ ] Return the persisted issue ID, identifier, URL, and changed fields. Implement local dry-run validation without a mutation.\n- [ ] Repeated create attempts after uncertain failure have a documented reconciliation path; do not claim idempotency from a title match.\n- [ ] Test multiline input, invalid fields, clearing values, cross-team selectors, dry-run, and uncertain mutation results.",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": [
+        "LINEAR-02"
+      ]
+    },
+    {
+      "key": "LINEAR-05",
+      "title": "Add Linear comments and issue relationships",
+      "description": "Enable agents to report progress and express ticket dependencies.\n\nAcceptance criteria:\n\n- [ ] Add paginated comment list and comment create with body from JSON/file/stdin and stable comment IDs.\n- [ ] Add relation list, add, and remove for blocks/blocked-by and related issues; support parent assignment and clearing via shared issue update behavior.\n- [ ] Define relation direction explicitly: A blocks B means B depends on A. Reject self-relations and report server validation errors.\n- [ ] Avoid creating a duplicate known relation; distinguish an existing relation from an uncertain create result. Remove only the selected relation.\n- [ ] Test direction, parent updates, pagination, duplicate relation handling, comment validation, and remote permission errors.",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": [
+        "LINEAR-03",
+        "LINEAR-04"
+      ]
+    },
+    {
+      "key": "LINEAR-06",
+      "title": "Expose Linear workflows through the existing MCP server",
+      "description": "Register focused Linear tools in the existing tool registry and dispatch each tool to the same operations as the CLI.\n\nAcceptance criteria:\n\n- [ ] Expose workspace discovery, issue list/search/get/create/update, comment list/create, and relation list/add/remove. Use descriptive names and strict input schemas.\n- [ ] Describe required fields, selector formats, pagination, empty-versus-omitted values, and mutation effects. Include read-only/destructive/idempotency annotations only where supported and accurate.\n- [ ] tools/list and server startup succeed without LINEAR_API_KEY. A Linear call without credentials returns a scoped tool error; unrelated tools remain usable.\n- [ ] Return structured success/errors without protocol stdout noise, secrets, or mandatory interactive prompts. Preserve caller approval controls.\n- [ ] Test tool discovery and representative read/write/error calls over existing supported transports; assert CLI/MCP behavior parity.\n\nRepository starting points:\n\n- crates/mcptools/src/mcp/tools/mod.rs\n- crates/mcptools/src/mcp/tools/atlassian.rs",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": [
+        "LINEAR-03",
+        "LINEAR-04",
+        "LINEAR-05"
+      ]
+    },
+    {
+      "key": "AGENTS-01",
+      "title": "Add user-level mcptools setup, status, and uninstall",
+      "description": "Add a small global agent setup command family. Reuse cargo xtask install for binary installation and existing setup helpers where suitable. This is user-level integration, usable outside this checkout.\n\nAcceptance criteria:\n\n- [ ] Provide install/setup, status/doctor, and uninstall with explicit targets codex, claude, pi, opencode2, or all; support a dry-run that shows planned paths and changes.\n- [ ] Resolve a stable executable path. Detect missing/obsolete binary, missing agent, unsupported version, and unavailable writable configuration separately. An absent pi executable must not be reported as a successful live integration.\n- [ ] Keep setup independent of Atlas indexing, models, and repository initialization. Never hard-code this checkout or its target directory into global setup.\n- [ ] Merge only owned entries, preserve unrelated configuration and formatting where supported, refuse conflicts, and use atomic file replacement plus rollback information. Repeating setup is a no-op.\n- [ ] Uninstall removes only owned unchanged entries; preserve user edits and unrelated skills/MCP servers. Honor supported environment overrides for configuration roots.\n- [ ] Generate reusable command-discovery guidance from a shared bundled source; no secret values in generated content. Test temporary-home setup, rerun, conflicts, rollback, uninstall, and paths with spaces.\n\nRepository starting points:\n\n- xtask/src/scripts/install.rs\n- scripts/install.sh\n- crates/mcptools/src/atlas/cli/setup.rs\n- crates/core/src/atlas/setup.rs",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": []
+    },
+    {
+      "key": "AGENTS-02",
+      "title": "Integrate mcptools globally with Codex and Claude Code",
+      "description": "Use supported user-level MCP registration and skill discovery for Codex and Claude Code. Verify installed client versions and official documentation during implementation.\n\nSources: https://developers.openai.com/codex/skills/ and https://code.claude.com/docs/en/skills\n\nAcceptance criteria:\n\n- [ ] Register the stable mcptools stdio launch command at user scope for each client. Confirm actual CLI arguments from mcptools help.\n- [ ] Install concise discoverable mcptools skill guidance through each supported user-level path, avoiding duplicate discovery. Include CLI/MCP selection, JSON output, pagination, and mutation examples.\n- [ ] Use inherited LINEAR_API_KEY without copying its value to configuration. Doctor identifies missing runtime environment and explains a supported launch path.\n- [ ] Respect client tool permissions and sandbox settings; setup does not broaden permissions.\n- [ ] Test config merge and discovery fixtures for supported versions; record a fresh session from an unrelated directory listing mcptools and making a read call, or state why live verification is blocked.",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": [
+        "AGENTS-01",
+        "LINEAR-06"
+      ]
+    },
+    {
+      "key": "AGENTS-03",
+      "title": "Integrate mcptools globally with pi and opencode2",
+      "description": "Support the exact requested executables. Verify opencode2 version and configuration format before choosing an OpenCode adapter.\n\nSources: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md and https://opencode.ai/v2/docs/skills and https://opencode.ai/v2/docs/mcp-servers\n\nAcceptance criteria:\n\n- [ ] Expose mcptools CLI through a global pi skill using pi-supported discovery. Do not require an MCP bridge for basic CLI access; make any bridge a separately documented optional integration.\n- [ ] For opencode2, register mcptools with the actual supported user-level MCP schema and install discoverable shared skill guidance. Do not infer configuration solely from the executable name.\n- [ ] Prevent duplicate skill registrations where clients already scan shared locations. Preserve existing client settings and MCP servers.\n- [ ] Inherit LINEAR_API_KEY without storing it; diagnose missing executable, environment, config support, or tool access clearly.\n- [ ] Test supported config fixtures and run fresh-session discovery from an unrelated directory on each installed client. Missing clients are explicit verification gaps.",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": [
+        "AGENTS-01",
+        "LINEAR-06"
+      ]
+    },
+    {
+      "key": "LINEAR-07",
+      "title": "Verify and document the full Linear agent workflow",
+      "description": "Publish the final commands, setup procedure, supported client versions, and failure behavior. Extend existing tests at the affected boundaries.\n\nAcceptance criteria:\n\n- [ ] Offline end-to-end test: discover team/project -> search -> get -> create -> update -> comment -> add blocking relation -> read back; use a mock Linear service and assert exact writes.\n- [ ] Exercise missing/invalid auth, HTTP 200 GraphQL errors, rate limits, pagination, ambiguous selectors, uncertain mutations, and secret redaction across CLI and MCP.\n- [ ] Document executable installation, global setup/status/uninstall, runtime credential inheritance, and working-directory independence for all four agents.\n- [ ] Use an explicitly selected test project for any live mutation verification; report created IDs and cleanup disposition. Record unavailable network/client access as unverified.\n- [ ] Update README with runnable examples and compact agent guidance. Run relevant Rust tests, formatting, build, and MCP protocol checks; no unrelated source changes.",
+      "priority": 3,
+      "parent": "LINEAR-00",
+      "depends_on": [
+        "LINEAR-06",
+        "AGENTS-02",
+        "AGENTS-03"
+      ]
+    }
+  ]
+}
