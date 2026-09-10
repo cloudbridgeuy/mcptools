@@ -338,19 +338,17 @@ fn collect_image_locations(
 
                 stack.push((id, lvl, title.clone()));
             }
-            ClassifiedBlock::Image { id, page } => {
-                if ancestor_is_target(&stack) {
-                    let (section_id, section_title) = match stack.last() {
-                        Some((sid, _, title)) => (sid.clone(), title.clone()),
-                        None => (doc_section_id.clone(), doc_section_title.clone()),
-                    };
-                    locations.push(ImageLocation {
-                        id: id.clone(),
-                        page: *page,
-                        section_id,
-                        section_title,
-                    });
-                }
+            ClassifiedBlock::Image { id, page } if ancestor_is_target(&stack) => {
+                let (section_id, section_title) = match stack.last() {
+                    Some((sid, _, title)) => (sid.clone(), title.clone()),
+                    None => (doc_section_id.clone(), doc_section_title.clone()),
+                };
+                locations.push(ImageLocation {
+                    id: id.clone(),
+                    page: *page,
+                    section_id,
+                    section_title,
+                });
             }
             _ => {}
         }

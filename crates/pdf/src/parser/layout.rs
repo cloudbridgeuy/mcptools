@@ -452,9 +452,9 @@ pub fn extract_page_spans(
                     emit_show_string(first, backend, page_id, &mut state, &mut spans);
                 }
             }
-            "\"" => {
+            "\""
                 // " aw ac string  =>  set Tw, Tc, T*, Tj
-                if op.operands.len() >= 3 {
+                if op.operands.len() >= 3 => {
                     if let Some(aw) = get_number_from_value(&op.operands[0]) {
                         state.word_spacing = aw;
                     }
@@ -464,7 +464,6 @@ pub fn extract_page_spans(
                     state.translate_line(0.0, -state.leading);
                     emit_show_string(&op.operands[2], backend, page_id, &mut state, &mut spans);
                 }
-            }
 
             _ => { /* Ignore non-text operators */ }
         }

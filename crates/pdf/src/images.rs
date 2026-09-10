@@ -231,7 +231,7 @@ fn expand_sub_byte_pixels(raw_bytes: &[u8], meta: &RawImageMeta) -> Vec<u8> {
 /// Convert CMYK pixel bytes to RGB.
 fn cmyk_to_rgb(cmyk_bytes: &[u8]) -> Vec<u8> {
     let mut rgb = Vec::with_capacity(cmyk_bytes.len() / 4 * 3);
-    for pixel in cmyk_bytes.chunks_exact(4) {
+    for pixel in cmyk_bytes.as_chunks::<4>().0 {
         let (c, m, y, k) = (
             pixel[0] as u16,
             pixel[1] as u16,
