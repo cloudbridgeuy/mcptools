@@ -11,7 +11,7 @@ Base: f07ffea6dbd632c9cc1f025b2f9662a86050ef95
 | V2 | merged | agent-setup-V2 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V2 | ab74595 | verified-live | Setup dry-run. Code b850ad7 (rebased from bf12d61, content-identical). Demo exit 0, plan lines, 0 newer files. Suite 100+4+632+248+16 pass on trunk. |
 | V3 | merged | agent-setup-V3 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V3 | 48139a5 | verified-live | JSON write. Code d0b9420 (rebased from 59160d7, content-identical). Write/rerun-skip/refuse-identical/backup-on-overwrite/foreign-preserved all live. Suite 120+4+632+248+16 pass on trunk. |
 | V4 | merged | agent-setup-V4 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V4 | 002ad5e | verified-live | Skills plus uninstall. Code cba63c9 (rebased from 4849631, content-identical). Uninstall removes dir, edited stays with warning, foreign preserved. Suite 130+4+646+248+16 pass on trunk. |
-| V5 | ready | | | | | Codex plus all-matrix, unblocked by V1,V3,V4 merge |
+| V5 | dispatched | agent-setup-V5 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V5 | | | Codex plus all-matrix. Model gpt-5.6-terra/openai/medium, base 4bdf04f, attempt 1 |
 | V3 | pending | | | | | JSON write, blocked by V2 |
 | V4 | pending | | | | | Skills plus uninstall, blocked by V3 |
 | V5 | pending | | | | | Codex plus all-matrix, blocked by V1,V3,V4 |
@@ -39,3 +39,4 @@ Base: f07ffea6dbd632c9cc1f025b2f9662a86050ef95
 - 2026-09-10: V4 reviewed. Diff: qa/V4.md plus plan.rs uninstall planning, exec.rs RemoveOwned, cli.rs uninstall verb — 622 insertions, zero comments, zero jargon. Spec signatures exact. Demo re-run live: setup creates SKILL.md, uninstall removes dir, hand-edit stays md5-identical with user-edited warning, foreign key preserved. Suite 130+4+646+248+16 pass. Strict QA gate 0 problems. Verdict verified-live. Accepted: uninstall JSON strip re-renders pretty (whitespace normalized, keys intact, backup-first) over text splice — disclosed ceiling.
 - 2026-09-10: external event — local main advanced cc8f0dc to ec71bbd by another workflow (`wt merge`, linear-02 landing). Not this run; trunk base f07ffea unaffected.
 - 2026-09-10: V4 merged as 002ad5e with explicit --base (code cba63c9; rebased from 4849631, empty crates/ diff, suite plus demo re-run on trunk). V5 unblocked.
+- 2026-09-10: V5 dispatched into lane agent-setup-V5 at base 4bdf04f, model gpt-5.6-terra/openai/medium, attempt 1.
