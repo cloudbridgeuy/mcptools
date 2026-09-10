@@ -8,6 +8,25 @@ pub struct Viewer {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Team {
+    pub id: String,
+    pub key: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Paginated<T> {
+    pub nodes: Vec<T>,
+    pub page_info: PageInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IssueMini {
     pub id: String,
     pub identifier: String,
@@ -46,6 +65,14 @@ pub enum LinearError {
     MissingViewer,
     #[error("Linear issue not found")]
     MissingIssue,
+    #[error("Linear response missing teams field")]
+    MissingTeams,
+    #[error("Linear response missing team field")]
+    MissingTeam,
+    #[error("Linear response missing projects field")]
+    MissingProjects,
+    #[error("Linear response missing project field")]
+    MissingProject,
 }
 
 pub fn check_response(status: u16, body: &str) -> Result<serde_json::Value, LinearError> {
@@ -99,6 +126,57 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
             })
         }
     }
+}
+
+pub fn transform_teams(data: serde_json::Value) -> Result<Paginated<Team>, LinearError> {
+    match data.get("teams") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingTeams),
+        Some(teams) => {
+            let paged: RawPaged<Team> = serde_json::from_value(teams.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?;
+            Ok(Paginated {
+                nodes: paged.nodes,
+                page_info: paged.page_info,
+            })
+        }
+    }
+}
+
+pub fn transform_team(data: serde_json::Value) -> Result<Team, LinearError> {
+    match data.get("team") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingTeam),
+        Some(team) => {
+            serde_json::from_value(team.clone()).map_err(|e| LinearError::Parse(e.to_string()))
+        }
+    }
+}
+
+pub fn transform_projects(data: serde_json::Value) -> Result<Paginated<Project>, LinearError> {
+    match data.get("projects") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingProjects),
+        Some(projects) => {
+            let paged: RawPaged<Project> = serde_json::from_value(projects.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?;
+            Ok(Paginated {
+                nodes: paged.nodes,
+                page_info: paged.page_info,
+            })
+        }
+    }
+}
+
+pub fn transform_team_projects(data: serde_json::Value) -> Result<Paginated<Project>, LinearError> {
+    match data.get("team") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingTeam),
+        Some(team) => transform_projects(team.clone()),
+    }
+}
+
+#[derive(Deserialize)]
+struct RawPaged<T> {
+    nodes: Vec<T>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
 }
 
 #[derive(Deserialize)]
@@ -377,6 +455,76 @@ mod tests {
             Some("GUZ-79")
         );
         assert_eq!(value.get("state").and_then(|v| v.as_str()), Some("Todo"));
+    }
+
+    #[test]
+    fn transform_teams_parses_nodes_and_page_info() {
+        let data = serde_json::json!({"teams": {"nodes": [
+            {"id": "t1", "key": "GUZ", "name": "Guzman"},
+        ], "pageInfo": {"hasNextPage": true, "endCursor": "cur1"}}});
+        let paged = transform_teams(data).unwrap();
+        assert_eq!(paged.nodes.len(), 1);
+        assert_eq!(paged.nodes[0].key, "GUZ");
+        assert!(paged.page_info.has_next);
+        assert_eq!(paged.page_info.end_cursor.as_deref(), Some("cur1"));
+    }
+
+    #[test]
+    fn transform_teams_rejects_missing_teams() {
+        let err = transform_teams(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingTeams);
+    }
+
+    #[test]
+    fn transform_teams_rejects_invalid_shape() {
+        let err = transform_teams(serde_json::json!({"teams": {"nodes": {}}})).unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
+    }
+
+    #[test]
+    fn transform_team_parses_single_team() {
+        let data = serde_json::json!({"team": {"id": "t1", "key": "GUZ", "name": "Guzman"}});
+        let team = transform_team(data).unwrap();
+        assert_eq!(team.key, "GUZ");
+    }
+
+    #[test]
+    fn transform_team_rejects_missing_team() {
+        let err = transform_team(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingTeam);
+    }
+
+    #[test]
+    fn transform_projects_parses_nodes_and_page_info() {
+        let data = serde_json::json!({"projects": {"nodes": [
+            {"id": "p1", "name": "MCPTools"},
+        ], "pageInfo": {"hasNextPage": false, "endCursor": null}}});
+        let paged = transform_projects(data).unwrap();
+        assert_eq!(paged.nodes.len(), 1);
+        assert_eq!(paged.nodes[0].name, "MCPTools");
+        assert!(!paged.page_info.has_next);
+    }
+
+    #[test]
+    fn transform_projects_rejects_missing_projects() {
+        let err = transform_projects(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingProjects);
+    }
+
+    #[test]
+    fn transform_team_projects_reads_nested_connection() {
+        let data = serde_json::json!({"team": {"projects": {"nodes": [
+            {"id": "p1", "name": "MCPTools"},
+        ], "pageInfo": {"hasNextPage": false, "endCursor": null}}}});
+        let paged = transform_team_projects(data).unwrap();
+        assert_eq!(paged.nodes.len(), 1);
+        assert_eq!(paged.nodes[0].id, "p1");
+    }
+
+    #[test]
+    fn transform_team_projects_rejects_missing_team() {
+        let err = transform_team_projects(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingTeam);
     }
 
     #[test]
