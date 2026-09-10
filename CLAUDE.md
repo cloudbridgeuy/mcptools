@@ -76,6 +76,7 @@ For detailed usage of each feature, see the context files:
 - **[Images](.claude/context/images.md)** - ChatGPT Images 2.5 generation, editing, variations; subscription or API key
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
+- **[Agent Setup](.claude/context/agent-setup.md)** - User-level agent integration; setup, status, uninstall for codex, claude, pi, opencode
 
 ### Infrastructure
 - **[MCP Server](.claude/context/mcp-server.md)** - Server configuration; available tools
