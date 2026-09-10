@@ -14,6 +14,9 @@
 - `LinearConfig::from_env()` in `crates/mcptools/src/linear/config.rs` — runtime-only `LINEAR_API_KEY`, actionable missing-key error, redacted `Debug`
 - `build_client(cfg)` / `execute(client, query, variables)` in `crates/mcptools/src/linear/client.rs` — 10s timeout, `https://api.linear.app/graphql`, variables-object-only, never interpolates queries
 - `auth_status_data(client)` in `crates/mcptools/src/linear/auth.rs` with `VIEWER_QUERY` constant there (shell, not core — signature needs reqwest::Client)
+- `classify_retry(status, code, headers)` / `retry_after_ms` / `backoff_ms` / `first_error_code` / `is_mutation` in `crates/core/src/linear/retry.rs` with `MAX_READ_ATTEMPTS=3`, `DEFAULT_RETRY_AFTER_MS=1000`, jitter ceiling 100ms, backoff `250 << failed_attempt` maxed with header hint. Note: core references reqwest HeaderMap type because slices.md mandates that signature (shaping A1 said no reqwest; reqwest is workspace-reused, no new external dep)
+- `LinearError::PartialData { errors, data }` in core types.rs — partial data+errors is error carrying both sides
+- `execute()` retries read-only queries max 3 attempts; mutations and timeout-uncertain outcomes never retried, error names re-query-by-ID reconciliation; `build_client_with_timeout(cfg, timeout)` test seam in shell client.rs; 400 retryable only with rate-shaped code
 - CLI shape `mcptools linear auth status [--json]` via `crates/mcptools/src/linear/mod.rs` + `main.rs` `SubCommands::Linear`
 - Error display truncation cap is 1000 chars in core `truncate`
 
