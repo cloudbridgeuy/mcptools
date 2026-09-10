@@ -1,0 +1,638 @@
+use std::path::{Path, PathBuf};
+
+use super::health::{expand_targets, target_name, AgentAction, AgentTarget, GlobalFacts};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    AlreadyInstalled,
+    NotApplicable,
+    UserEdited,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GlobalAction {
+    Create { path: PathBuf, content: Vec<u8> },
+    MergeOwned { path: PathBuf, content: Vec<u8> },
+    Skip { path: PathBuf, reason: SkipReason },
+    Refuse { path: PathBuf, diff: String },
+    RemoveOwned { path: PathBuf },
+}
+
+pub fn config_path(target: AgentTarget, home: &str) -> Option<PathBuf> {
+    let base = PathBuf::from(home);
+    match target {
+        AgentTarget::Claude => Some(base.join(".claude.json")),
+        AgentTarget::Opencode => Some(base.join(".config/opencode/opencode.json")),
+        AgentTarget::Codex | AgentTarget::Pi | AgentTarget::All => None,
+    }
+}
+
+pub fn skill_path(target: AgentTarget, home: &str) -> Option<PathBuf> {
+    let base = PathBuf::from(home);
+    match target {
+        AgentTarget::Codex => Some(base.join(".codex/skills/mcptools/SKILL.md")),
+        AgentTarget::Claude => Some(base.join(".claude/skills/mcptools/SKILL.md")),
+        AgentTarget::Pi => Some(base.join(".pi/agent/skills/mcptools/SKILL.md")),
+        AgentTarget::Opencode => Some(base.join(".config/opencode/skills/mcptools/SKILL.md")),
+        AgentTarget::All => None,
+    }
+}
+
+pub fn skill_content(target: AgentTarget) -> String {
+    let name = target_name(target);
+    [
+        "---",
+        "name: mcptools",
+        &format!("description: Use mcptools tools inside {name} sessions"),
+        "---",
+        "",
+        &format!("# mcptools for {name}"),
+        "",
+        "Use the mcptools MCP server tools instead of shelling out",
+        "when they are connected. Secrets come from process",
+        "environment only and are never written to config files.",
+        "",
+    ]
+    .join("\n")
+}
+
+pub fn desired_server_value(target: AgentTarget, exe: &str) -> Option<serde_json::Value> {
+    match target {
+        AgentTarget::Claude => Some(serde_json::json!({
+            "command": exe,
+            "args": ["mcp", "stdio"],
+        })),
+        AgentTarget::Opencode => Some(serde_json::json!({
+            "type": "local",
+            "command": [exe, "mcp", "stdio"],
+            "enabled": true,
+        })),
+        AgentTarget::Codex | AgentTarget::Pi | AgentTarget::All => None,
+    }
+}
+
+fn config_root_key(target: AgentTarget) -> &'static str {
+    match target {
+        AgentTarget::Opencode => "mcp",
+        _ => "mcpServers",
+    }
+}
+
+fn merged_content(
+    existing: Option<&str>,
+    root_key: &str,
+    desired: &serde_json::Value,
+) -> Option<serde_json::Value> {
+    match existing {
+        None => {
+            let mut root = serde_json::Map::new();
+            let mut servers = serde_json::Map::new();
+            servers.insert("mcptools".to_string(), desired.clone());
+            root.insert(root_key.to_string(), serde_json::Value::Object(servers));
+            Some(serde_json::Value::Object(root))
+        }
+        Some(text) => {
+            let mut parsed: serde_json::Value = serde_json::from_str(text).ok()?;
+            let obj = parsed.as_object_mut()?;
+            let entry = obj
+                .entry(root_key.to_string())
+                .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+            let servers = entry.as_object_mut()?;
+            servers.insert("mcptools".to_string(), desired.clone());
+            Some(parsed)
+        }
+    }
+}
+
+fn render_json(value: &serde_json::Value) -> Vec<u8> {
+    let mut out = serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_string());
+    out.push('\n');
+    out.into_bytes()
+}
+
+pub fn plan_config(
+    target: AgentTarget,
+    path: PathBuf,
+    existing: Option<&str>,
+    desired: &serde_json::Value,
+) -> GlobalAction {
+    let root_key = config_root_key(target);
+    match existing {
+        None => GlobalAction::Create {
+            path,
+            content: render_json(
+                &merged_content(None, root_key, desired).unwrap_or(serde_json::Value::Null),
+            ),
+        },
+        Some(text) => match serde_json::from_str::<serde_json::Value>(text) {
+            Err(_) => GlobalAction::Refuse {
+                path,
+                diff: "existing file is not valid JSON".to_string(),
+            },
+            Ok(parsed) => {
+                let current = parsed
+                    .get(root_key)
+                    .and_then(|root| root.get("mcptools"))
+                    .cloned();
+                match current {
+                    None => match merged_content(Some(text), root_key, desired) {
+                        Some(merged) => GlobalAction::MergeOwned {
+                            path,
+                            content: render_json(&merged),
+                        },
+                        None => GlobalAction::Refuse {
+                            path,
+                            diff: format!("{root_key} map is not an object"),
+                        },
+                    },
+                    Some(current) if current == *desired => GlobalAction::Skip {
+                        path,
+                        reason: SkipReason::AlreadyInstalled,
+                    },
+                    Some(current) => GlobalAction::Refuse {
+                        path,
+                        diff: format!("existing {current} differs from staged {desired}"),
+                    },
+                }
+            }
+        },
+    }
+}
+
+pub fn plan_skill(path: PathBuf, existing: Option<&str>, desired: &str) -> GlobalAction {
+    match existing {
+        None => GlobalAction::Create {
+            path,
+            content: desired.as_bytes().to_vec(),
+        },
+        Some(text) if text.trim_end() == desired.trim_end() => GlobalAction::Skip {
+            path,
+            reason: SkipReason::AlreadyInstalled,
+        },
+        Some(text) => GlobalAction::Refuse {
+            path,
+            diff: format!(
+                "existing {} bytes differ from staged {} bytes",
+                text.len(),
+                desired.len()
+            ),
+        },
+    }
+}
+
+pub fn plan_target(
+    target: AgentTarget,
+    home: &str,
+    exe: &str,
+    read: &dyn Fn(&Path) -> Option<String>,
+) -> Vec<GlobalAction> {
+    let mut actions = Vec::new();
+    if let Some(path) = config_path(target, home) {
+        if let Some(desired) = desired_server_value(target, exe) {
+            actions.push(plan_config(
+                target,
+                path.clone(),
+                read(&path).as_deref(),
+                &desired,
+            ));
+        }
+    }
+    if let Some(path) = skill_path(target, home) {
+        let desired = skill_content(target);
+        actions.push(plan_skill(path.clone(), read(&path).as_deref(), &desired));
+    }
+    actions
+}
+
+pub fn plan_global_with_home(
+    facts: &GlobalFacts,
+    action: AgentAction,
+    home: &str,
+    exe: &str,
+    read: &dyn Fn(&Path) -> Option<String>,
+) -> Vec<GlobalAction> {
+    if action != AgentAction::Setup {
+        return Vec::new();
+    }
+    facts
+        .targets
+        .iter()
+        .flat_map(|item| expand_targets(*item))
+        .flat_map(|target| plan_target(target, home, exe, read))
+        .collect()
+}
+
+pub fn plan_global(facts: &GlobalFacts, action: AgentAction) -> Vec<GlobalAction> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let exe = facts
+        .exe
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mcptools".to_string());
+    plan_global_with_home(facts, action, &home, &exe, &|path| {
+        std::fs::read_to_string(path).ok()
+    })
+}
+
+fn skip_detail(reason: SkipReason) -> &'static str {
+    match reason {
+        SkipReason::AlreadyInstalled => "already installed (owned mcptools entry matches)",
+        SkipReason::NotApplicable => "not applicable to this target",
+        SkipReason::UserEdited => "user-edited, left unchanged",
+    }
+}
+
+pub fn format_plan(actions: &[GlobalAction]) -> String {
+    if actions.is_empty() {
+        return "nothing to do".to_string();
+    }
+    actions
+        .iter()
+        .map(|action| match action {
+            GlobalAction::Create { path, content } => format!(
+                "create {}: add owned mcptools entry ({} bytes)",
+                path.display(),
+                content.len()
+            ),
+            GlobalAction::MergeOwned { path, content } => format!(
+                "merge {}: add owned mcptools entry ({} bytes)",
+                path.display(),
+                content.len()
+            ),
+            GlobalAction::Skip { path, reason } => {
+                format!("{}: {}", path.display(), skip_detail(*reason))
+            }
+            GlobalAction::Refuse { path, diff } => format!(
+                "refuse {}: owned mcptools entry differs ({})",
+                path.display(),
+                diff
+            ),
+            GlobalAction::RemoveOwned { path } => {
+                format!("remove {}: remove owned mcptools entry", path.display())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::health::AgentTarget;
+
+    fn facts_of(targets: Vec<AgentTarget>) -> GlobalFacts {
+        GlobalFacts {
+            exe: None,
+            exe_version: None,
+            targets,
+        }
+    }
+
+    fn read_none(_: &Path) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn config_paths_match_spike_roots() {
+        assert_eq!(
+            config_path(AgentTarget::Claude, "/tmp/t2"),
+            Some(PathBuf::from("/tmp/t2/.claude.json"))
+        );
+        assert_eq!(
+            config_path(AgentTarget::Opencode, "/tmp/t2"),
+            Some(PathBuf::from("/tmp/t2/.config/opencode/opencode.json"))
+        );
+        assert_eq!(config_path(AgentTarget::Codex, "/tmp/t2"), None);
+        assert_eq!(config_path(AgentTarget::Pi, "/tmp/t2"), None);
+        assert_eq!(config_path(AgentTarget::All, "/tmp/t2"), None);
+    }
+
+    #[test]
+    fn config_paths_support_spaces() {
+        assert_eq!(
+            config_path(AgentTarget::Claude, "/tmp/t 2"),
+            Some(PathBuf::from("/tmp/t 2/.claude.json"))
+        );
+    }
+
+    #[test]
+    fn skill_paths_cover_every_concrete_target() {
+        assert_eq!(
+            skill_path(AgentTarget::Codex, "/tmp/t2"),
+            Some(PathBuf::from("/tmp/t2/.codex/skills/mcptools/SKILL.md"))
+        );
+        assert_eq!(
+            skill_path(AgentTarget::Claude, "/tmp/t2"),
+            Some(PathBuf::from("/tmp/t2/.claude/skills/mcptools/SKILL.md"))
+        );
+        assert_eq!(
+            skill_path(AgentTarget::Pi, "/tmp/t2"),
+            Some(PathBuf::from("/tmp/t2/.pi/agent/skills/mcptools/SKILL.md"))
+        );
+        assert_eq!(
+            skill_path(AgentTarget::Opencode, "/tmp/t2"),
+            Some(PathBuf::from(
+                "/tmp/t2/.config/opencode/skills/mcptools/SKILL.md"
+            ))
+        );
+        assert_eq!(skill_path(AgentTarget::All, "/tmp/t2"), None);
+    }
+
+    #[test]
+    fn skill_content_names_each_target() {
+        for target in [
+            AgentTarget::Codex,
+            AgentTarget::Claude,
+            AgentTarget::Pi,
+            AgentTarget::Opencode,
+        ] {
+            let content = skill_content(target);
+            assert!(content.contains(target_name(target)), "{target:?}");
+            assert!(content.contains("mcptools"), "{target:?}");
+        }
+    }
+
+    #[test]
+    fn desired_values_match_documented_shapes() {
+        let claude = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        assert_eq!(
+            claude,
+            serde_json::json!({"command": "mcptools", "args": ["mcp", "stdio"]})
+        );
+        let opencode = desired_server_value(AgentTarget::Opencode, "mcptools").unwrap();
+        assert_eq!(
+            opencode,
+            serde_json::json!({
+                "type": "local",
+                "command": ["mcptools", "mcp", "stdio"],
+                "enabled": true,
+            })
+        );
+        assert_eq!(desired_server_value(AgentTarget::Codex, "mcptools"), None);
+        assert_eq!(desired_server_value(AgentTarget::Pi, "mcptools"), None);
+    }
+
+    #[test]
+    fn desired_values_hold_no_secrets() {
+        std::env::set_var("LINEAR_API_KEY", "secret-value");
+        let claude = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let opencode = desired_server_value(AgentTarget::Opencode, "mcptools").unwrap();
+        assert!(!claude.to_string().contains("secret-value"));
+        assert!(!opencode.to_string().contains("secret-value"));
+        std::env::remove_var("LINEAR_API_KEY");
+    }
+
+    #[test]
+    fn absent_config_plans_create() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let action = plan_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t2/.claude.json"),
+            None,
+            &desired,
+        );
+        match action {
+            GlobalAction::Create { path, content } => {
+                assert_eq!(path, PathBuf::from("/tmp/t2/.claude.json"));
+                let parsed: serde_json::Value = serde_json::from_slice(&content).unwrap();
+                assert_eq!(parsed["mcpServers"]["mcptools"], desired);
+            }
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_owned_key_plans_merge_and_keeps_foreign_keys() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let existing = r#"{"mcpServers": {"playwright": {"command": "npx"}}}"#;
+        let action = plan_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t2/.claude.json"),
+            Some(existing),
+            &desired,
+        );
+        match action {
+            GlobalAction::MergeOwned { content, .. } => {
+                let parsed: serde_json::Value = serde_json::from_slice(&content).unwrap();
+                assert_eq!(parsed["mcpServers"]["mcptools"], desired);
+                assert_eq!(parsed["mcpServers"]["playwright"]["command"], "npx");
+            }
+            other => panic!("expected MergeOwned, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn identical_owned_bytes_plan_skip() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let existing = serde_json::json!({"mcpServers": {"mcptools": desired}}).to_string();
+        let action = plan_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t2/.claude.json"),
+            Some(&existing),
+            &desired,
+        );
+        assert_eq!(
+            action,
+            GlobalAction::Skip {
+                path: PathBuf::from("/tmp/t2/.claude.json"),
+                reason: SkipReason::AlreadyInstalled,
+            }
+        );
+    }
+
+    #[test]
+    fn different_owned_bytes_plan_refuse() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let existing = r#"{"mcpServers": {"mcptools": {"command": "other"}}}"#;
+        let action = plan_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t2/.claude.json"),
+            Some(existing),
+            &desired,
+        );
+        match action {
+            GlobalAction::Refuse { diff, .. } => assert!(diff.contains("differs")),
+            other => panic!("expected Refuse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn broken_json_plans_refuse() {
+        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let action = plan_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t2/.claude.json"),
+            Some("{oops"),
+            &desired,
+        );
+        assert!(matches!(action, GlobalAction::Refuse { .. }));
+    }
+
+    #[test]
+    fn opencode_merges_under_mcp_key() {
+        let desired = desired_server_value(AgentTarget::Opencode, "mcptools").unwrap();
+        let existing = r#"{"mcp": {"context7": {"type": "local"}}}"#;
+        let action = plan_config(
+            AgentTarget::Opencode,
+            PathBuf::from("/tmp/t2/.config/opencode/opencode.json"),
+            Some(existing),
+            &desired,
+        );
+        match action {
+            GlobalAction::MergeOwned { content, .. } => {
+                let parsed: serde_json::Value = serde_json::from_slice(&content).unwrap();
+                assert_eq!(parsed["mcp"]["mcptools"], desired);
+                assert_eq!(parsed["mcp"]["context7"]["type"], "local");
+            }
+            other => panic!("expected MergeOwned, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn absent_skill_plans_create() {
+        let action = plan_skill(
+            PathBuf::from("/tmp/t2/.pi/agent/skills/mcptools/SKILL.md"),
+            None,
+            "staged",
+        );
+        match action {
+            GlobalAction::Create { content, .. } => assert_eq!(content, b"staged"),
+            other => panic!("expected Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn identical_skill_plans_skip() {
+        let action = plan_skill(PathBuf::from("/tmp/t2/x.md"), Some("staged\n"), "staged");
+        assert!(matches!(
+            action,
+            GlobalAction::Skip {
+                reason: SkipReason::AlreadyInstalled,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn edited_skill_plans_refuse() {
+        let action = plan_skill(
+            PathBuf::from("/tmp/t2/x.md"),
+            Some("operator edit"),
+            "staged",
+        );
+        assert!(matches!(action, GlobalAction::Refuse { .. }));
+    }
+
+    #[test]
+    fn claude_target_plans_config_plus_skill() {
+        let actions = plan_target(AgentTarget::Claude, "/tmp/t2", "mcptools", &read_none);
+        assert_eq!(actions.len(), 2);
+    }
+
+    #[test]
+    fn pi_target_plans_skill_only() {
+        let actions = plan_target(AgentTarget::Pi, "/tmp/t2", "mcptools", &read_none);
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            GlobalAction::Create { path, .. } => {
+                assert_eq!(
+                    *path,
+                    PathBuf::from("/tmp/t2/.pi/agent/skills/mcptools/SKILL.md")
+                );
+            }
+            other => panic!("expected skill Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_target_plans_skill_only() {
+        let actions = plan_target(AgentTarget::Codex, "/tmp/t2", "mcptools", &read_none);
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            GlobalAction::Create { path, .. } => {
+                assert!(path.ends_with("SKILL.md"), "{path:?}");
+            }
+            other => panic!("expected skill Create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_setup_actions_plan_nothing() {
+        for action in [AgentAction::Status, AgentAction::Uninstall] {
+            let planned = plan_global_with_home(
+                &facts_of(vec![AgentTarget::Claude]),
+                action,
+                "/tmp/t2",
+                "mcptools",
+                &read_none,
+            );
+            assert!(planned.is_empty(), "{action:?}");
+        }
+    }
+
+    #[test]
+    fn all_target_expands_to_every_config_and_skill() {
+        let planned = plan_global_with_home(
+            &facts_of(vec![AgentTarget::All]),
+            AgentAction::Setup,
+            "/tmp/t2",
+            "mcptools",
+            &read_none,
+        );
+        assert_eq!(planned.len(), 6);
+    }
+
+    #[test]
+    fn planning_reads_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_string_lossy().to_string();
+        let before: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        let planned = plan_global_with_home(
+            &facts_of(vec![AgentTarget::All]),
+            AgentAction::Setup,
+            &home,
+            "mcptools",
+            &read_none,
+        );
+        let after: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(before.len(), after.len());
+        assert_eq!(planned.len(), 6);
+    }
+
+    #[test]
+    fn format_names_every_variant_with_path() {
+        let actions = vec![
+            GlobalAction::Create {
+                path: PathBuf::from("/tmp/t2/.claude.json"),
+                content: b"x".to_vec(),
+            },
+            GlobalAction::MergeOwned {
+                path: PathBuf::from("/tmp/t2/.claude.json"),
+                content: b"xy".to_vec(),
+            },
+            GlobalAction::Skip {
+                path: PathBuf::from("/tmp/t2/.claude.json"),
+                reason: SkipReason::AlreadyInstalled,
+            },
+            GlobalAction::Refuse {
+                path: PathBuf::from("/tmp/t2/.claude.json"),
+                diff: "d".to_string(),
+            },
+            GlobalAction::RemoveOwned {
+                path: PathBuf::from("/tmp/t2/.claude.json"),
+            },
+        ];
+        let text = format_plan(&actions);
+        assert!(text.contains("create /tmp/t2/.claude.json"));
+        assert!(text.contains("merge /tmp/t2/.claude.json"));
+        assert!(text.contains("already installed"));
+        assert!(text.contains("refuse /tmp/t2/.claude.json"));
+        assert!(text.contains("remove /tmp/t2/.claude.json"));
+        assert!(text.contains("mcptools"));
+    }
+
+    #[test]
+    fn format_empty_plan_says_nothing() {
+        assert_eq!(format_plan(&[]), "nothing to do");
+    }
+}

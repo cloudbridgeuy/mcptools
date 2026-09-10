@@ -1,8 +1,10 @@
 use crate::prelude::*;
+use mcptools_core::agent::health::AgentAction;
 use mcptools_core::agent::health::{
     classify_health, expand_targets, find_on_path, parse_version_output, target_name, AgentTarget,
     GlobalFacts, TargetHealth,
 };
+use mcptools_core::agent::plan::{format_plan, plan_global};
 use std::path::PathBuf;
 
 #[derive(Debug, clap::Parser)]
@@ -32,6 +34,8 @@ pub enum ShellTarget {
 pub struct SetupOptions {
     #[arg(long, value_enum, default_value = "all")]
     pub target: ShellTarget,
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -87,10 +91,10 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
     match app.command {
         Commands::Setup(opts) => {
             let target: AgentTarget = opts.target.into();
-            Err(eyre!(f!(
-                "agent setup for {} is not available in this build",
-                target_name(target)
-            )))
+            let facts = gather_global_facts(target)?;
+            let actions = plan_global(&facts, AgentAction::Setup);
+            crate::prelude::println!("{}", format_plan(&actions));
+            Ok(())
         }
         Commands::Status(opts) => {
             let facts = gather_global_facts(opts.target.into())?;
@@ -216,5 +220,64 @@ mod tests {
     fn gather_resolves_single_target() {
         let facts = gather_global_facts(AgentTarget::Pi).unwrap();
         assert_eq!(facts.targets, vec![AgentTarget::Pi]);
+    }
+
+    #[test]
+    fn setup_flag_accepts_dry_run() {
+        use clap::Parser;
+        let app =
+            App::try_parse_from(["agent", "setup", "--target", "claude", "--dry-run"]).unwrap();
+        match app.command {
+            Commands::Setup(opts) => {
+                assert_eq!(AgentTarget::from(opts.target), AgentTarget::Claude);
+                assert!(opts.dry_run);
+            }
+            _ => panic!("expected setup"),
+        }
+        let app = App::try_parse_from(["agent", "setup"]).unwrap();
+        match app.command {
+            Commands::Setup(opts) => assert!(!opts.dry_run),
+            _ => panic!("expected setup"),
+        }
+    }
+
+    #[test]
+    fn setup_plan_writes_nothing() {
+        use mcptools_core::agent::health::AgentAction;
+        use mcptools_core::agent::plan::plan_global_with_home;
+        let dir = tempfile::tempdir().unwrap();
+        let before: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        let facts = gather_global_facts(AgentTarget::Claude).unwrap();
+        let home = std::env::var("HOME").unwrap_or_default();
+        let exe = facts
+            .exe
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_else(|| "mcptools".to_string());
+        let actions = plan_global_with_home(&facts, AgentAction::Setup, &home, &exe, &|path| {
+            std::fs::read_to_string(path).ok()
+        });
+        let text = format_plan(&actions);
+        assert!(text.contains("mcptools"));
+        let after: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(before.len(), after.len());
+    }
+
+    #[test]
+    fn setup_plan_supports_spaces_in_home() {
+        use mcptools_core::agent::health::AgentAction;
+        use mcptools_core::agent::plan::plan_global_with_home;
+        let parent = tempfile::tempdir().unwrap();
+        let home = parent.path().join("t 2");
+        std::fs::create_dir(&home).unwrap();
+        let home = home.to_string_lossy().to_string();
+        let facts = gather_global_facts(AgentTarget::Claude).unwrap();
+        let actions =
+            plan_global_with_home(&facts, AgentAction::Setup, &home, "mcptools", &|_| None);
+        assert!(!actions.is_empty());
+        let text = format_plan(&actions);
+        assert!(text.contains("t 2"));
+        assert!(text.contains("mcptools"));
+        assert!(std::fs::read_dir(&home).unwrap().next().is_none());
     }
 }
