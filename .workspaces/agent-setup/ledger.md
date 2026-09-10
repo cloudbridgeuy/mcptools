@@ -8,7 +8,7 @@ Base: f07ffea6dbd632c9cc1f025b2f9662a86050ef95
 | Slice | State | Branch | Lane | Merge SHA | Verdict | Notes |
 | ----- | ----- | ------ | ---- | --------- | ------- | ----- |
 | V1 | merged | agent-setup-V1 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V1 | 27d639a | verified-live | Doctor reads, no writes. Code c582688, QA 38641dd. Demo exit 0, 4 lines, pi MissingAgent exact, 0 files. Suite 97+4+609+248+16 pass. |
-| V2 | ready | | | | | Setup dry-run, unblocked by V1 merge |
+| V2 | dispatched | agent-setup-V2 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/agent-setup-V2 | | | Setup dry-run. Model gpt-5.6-terra/openai/medium, base 7ce5965, attempt 1 |
 | V3 | pending | | | | | JSON write, blocked by V2 |
 | V4 | pending | | | | | Skills plus uninstall, blocked by V3 |
 | V5 | pending | | | | | Codex plus all-matrix, blocked by V1,V3,V4 |
@@ -25,3 +25,4 @@ Base: f07ffea6dbd632c9cc1f025b2f9662a86050ef95
 - 2026-09-10: mode Auto-DAG selected. V1 dispatched into lane agent-setup-V1 at base 458723a, model gpt-5.6-terra/openai/medium, attempt 1.
 - 2026-09-10: V1 reviewed. Diff: qa/V1.md plus 7 code files, 746 insertions, zero comments, zero jargon. Demo re-run live exit 0 with exact pi line and 0 files. Suite 97+4+609+248+16 pass on final tree. Strict QA gate 0 problems (expected-sha c582688, crates/ identical to HEAD). Verdict verified-live. Lane scaffolding reverted before merge.
 - 2026-09-10: V1 merged as 27d639a (code c582688). V2 unblocked.
+- 2026-09-10: V2 dispatched into lane agent-setup-V2 at base 7ce5965, model gpt-5.6-terra/openai/medium, attempt 1.
