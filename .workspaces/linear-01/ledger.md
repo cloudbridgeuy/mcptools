@@ -10,7 +10,7 @@ Mode: auto-DAG (selected by user 2026-09-10)
 | Slice | State | Branch | Lane | Merge SHA | Verdict | Notes |
 | ----- | ----- | ------ | ---- | --------- | ------- | ----- |
 | V1 | merged | linear-01-V1 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/linear-01-V1 | 8844da4 | verified-live | Auth status vertical. QA Tested SHA 05efad5, HEAD c8e7202 lane-side (QA-only diff). No User-run items, no pause. |
-| V2 | pending | | | | | Retry/rate/error hardening, depends V1 |
+| V2 | dispatched | linear-01-V2 | /Users/guzmanmonne/Projects/Rust/mcptools/.lane/trees/linear-01-V2 | | | Retry/rate/error hardening, depends V1 |
 | V3 | pending | | | | | Minimal issue read proof, depends V2 |
 
 ## Deferred decisions
@@ -24,3 +24,4 @@ Mode: auto-DAG (selected by user 2026-09-10)
 - 2026-09-10: run init. check-plan clean (handoff 0 problems, slices 0 problems). Trunk trunk-linear-01 exists, workspace committed (9711392). context.md created.
 - 2026-09-10: mode selected: auto-DAG. Lane linear-01-V1 created off trunk d7d304c. V1 dispatched (attempt 1). Role resolution: no implementer mapping for active provider (Meta/Muse Spark); agent-roles.json covers openai/anthropic only — dispatched with session-default runtime, no cross-provider model inherited.
 - 2026-09-10: V1 merged to trunk as 8844da4 (verdict verified-live: agent live battery + orchestrator offline re-run on identical code tree: 14 core tests green, missing-key CLI exit 1 empty-stdout actionable-stderr). QA invariant: Tested SHA ancestor-of-HEAD with Tested-SHA..HEAD touching only QA files (file cannot name its own hash).
+- 2026-09-10: Lane linear-01-V2 created off trunk fc0ef19. V2 dispatched (attempt 1).
