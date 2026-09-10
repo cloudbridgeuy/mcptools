@@ -7,6 +7,7 @@ use mcptools_core::agent::health::{
 use mcptools_core::agent::plan::{format_plan, plan_global, plan_uninstall, GlobalAction};
 use std::path::PathBuf;
 
+use super::codex::{codex_mcp_add, codex_mcp_remove, describe_add, describe_remove};
 use super::exec::{execute_global, format_outcome};
 
 #[derive(Debug, clap::Parser)]
@@ -91,6 +92,22 @@ pub fn format_doctor(health: &[TargetHealth]) -> String {
         .join("\n")
 }
 
+pub fn codex_included(target: AgentTarget) -> bool {
+    expand_targets(target).contains(&AgentTarget::Codex)
+}
+
+pub fn codex_exe(facts: &GlobalFacts) -> String {
+    facts
+        .exe
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mcptools".to_string())
+}
+
+fn codex_add_args() -> Vec<String> {
+    vec!["mcp".to_string(), "stdio".to_string()]
+}
+
 pub async fn run(app: App, _global: crate::Global) -> Result<()> {
     match app.command {
         Commands::Setup(opts) => {
@@ -98,17 +115,36 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
             let facts = gather_global_facts(target)?;
             let actions = plan_global(&facts, AgentAction::Setup);
             if opts.dry_run {
-                crate::prelude::println!("{}", format_plan(&actions));
+                let mut text = format_plan(&actions);
+                if codex_included(target) {
+                    let exe = codex_exe(&facts);
+                    text.push('\n');
+                    text.push_str(&describe_add("mcptools", &exe, &codex_add_args()));
+                }
+                crate::prelude::println!("{text}");
                 return Ok(());
             }
             let backups = execute_global(&actions)?;
-            let mut lines = Vec::with_capacity(actions.len());
+            let mut lines = Vec::with_capacity(actions.len() + 1);
             for (action, backup) in actions.iter().zip(backups.iter()) {
                 let existing = match action {
                     GlobalAction::Refuse { path, .. } => std::fs::read_to_string(path).ok(),
                     _ => None,
                 };
                 lines.push(format_outcome(action, backup, existing.as_deref()));
+            }
+            if codex_included(target) {
+                let exe = codex_exe(&facts);
+                if find_on_path("codex").is_none() {
+                    lines.push("codex: codex CLI not found, MCP entry skipped".to_string());
+                } else {
+                    match codex_mcp_add("mcptools", &exe, &codex_add_args()) {
+                        Ok(()) => {
+                            lines.push("codex: registered mcptools via codex mcp add".to_string())
+                        }
+                        Err(err) => lines.push(f!("codex: codex mcp add failed: {err}")),
+                    }
+                }
             }
             crate::prelude::println!("{}", lines.join("\n"));
             Ok(())
@@ -124,17 +160,34 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
             let facts = gather_global_facts(target)?;
             let actions = plan_uninstall(&facts);
             if opts.dry_run {
-                crate::prelude::println!("{}", format_plan(&actions));
+                let mut text = format_plan(&actions);
+                if codex_included(target) {
+                    text.push('\n');
+                    text.push_str(&describe_remove("mcptools"));
+                }
+                crate::prelude::println!("{text}");
                 return Ok(());
             }
             let backups = execute_global(&actions)?;
-            let mut lines = Vec::with_capacity(actions.len());
+            let mut lines = Vec::with_capacity(actions.len() + 1);
             for (action, backup) in actions.iter().zip(backups.iter()) {
                 let existing = match action {
                     GlobalAction::Refuse { path, .. } => std::fs::read_to_string(path).ok(),
                     _ => None,
                 };
                 lines.push(format_outcome(action, backup, existing.as_deref()));
+            }
+            if codex_included(target) {
+                if find_on_path("codex").is_none() {
+                    lines.push("codex: codex CLI not found, MCP removal skipped".to_string());
+                } else {
+                    match codex_mcp_remove("mcptools") {
+                        Ok(()) => {
+                            lines.push("codex: removed mcptools via codex mcp remove".to_string())
+                        }
+                        Err(err) => lines.push(f!("codex: codex mcp remove failed: {err}")),
+                    }
+                }
             }
             crate::prelude::println!("{}", lines.join("\n"));
             Ok(())
@@ -328,5 +381,42 @@ mod tests {
             Commands::Uninstall(opts) => assert!(!opts.dry_run),
             _ => panic!("expected uninstall"),
         }
+    }
+
+    #[test]
+    fn codex_scope_covers_codex_and_all_only() {
+        assert!(codex_included(AgentTarget::Codex));
+        assert!(codex_included(AgentTarget::All));
+        assert!(!codex_included(AgentTarget::Claude));
+        assert!(!codex_included(AgentTarget::Pi));
+        assert!(!codex_included(AgentTarget::Opencode));
+    }
+
+    #[test]
+    fn codex_exe_falls_back_to_path_name() {
+        let facts = GlobalFacts {
+            exe: None,
+            exe_version: None,
+            targets: vec![AgentTarget::Codex],
+        };
+        assert_eq!(codex_exe(&facts), "mcptools");
+        let facts = GlobalFacts {
+            exe: Some(PathBuf::from("/tmp/t 5/bin/mcptools")),
+            exe_version: None,
+            targets: vec![AgentTarget::Codex],
+        };
+        assert_eq!(codex_exe(&facts), "/tmp/t 5/bin/mcptools");
+    }
+
+    #[test]
+    fn codex_exe_holds_no_secrets() {
+        std::env::set_var("LINEAR_API_KEY", "secret-value");
+        let facts = GlobalFacts {
+            exe: Some(PathBuf::from("/tmp/t/bin/mcptools")),
+            exe_version: None,
+            targets: vec![AgentTarget::Codex],
+        };
+        assert!(!codex_exe(&facts).contains("secret-value"));
+        std::env::remove_var("LINEAR_API_KEY");
     }
 }
