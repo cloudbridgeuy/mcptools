@@ -10,6 +10,12 @@
 - Reuse reqwest, serde_json, tokio, clap from workspace; no new HTTP/JSON dependencies
 - Module seams: pure transforms in crates/core/src/linear/ (jira.rs style), CLI dispatch and data fns in crates/mcptools/src/linear/ (atlassian/ style), wiring in crates/mcptools/src/main.rs SubCommands
 - Future MCP JSON error boundary uses #[serde(tag = "type")], never boolean flag
+- `mcptools_core::linear::{Viewer, LinearError, check_response, transform_viewer}` in `crates/core/src/linear/types.rs` — pure, offline-tested
+- `LinearConfig::from_env()` in `crates/mcptools/src/linear/config.rs` — runtime-only `LINEAR_API_KEY`, actionable missing-key error, redacted `Debug`
+- `build_client(cfg)` / `execute(client, query, variables)` in `crates/mcptools/src/linear/client.rs` — 10s timeout, `https://api.linear.app/graphql`, variables-object-only, never interpolates queries
+- `auth_status_data(client)` in `crates/mcptools/src/linear/auth.rs` with `VIEWER_QUERY` constant there (shell, not core — signature needs reqwest::Client)
+- CLI shape `mcptools linear auth status [--json]` via `crates/mcptools/src/linear/mod.rs` + `main.rs` `SubCommands::Linear`
+- Error display truncation cap is 1000 chars in core `truncate`
 
 ## Gotchas
 - Concurrent process committing in repo (pdf refactor, planning docs); slice lanes rebase on trunk-linear-01 at start, keep diffs scoped to crates/core/src/linear/* and crates/mcptools/src/linear/* plus main.rs wiring
