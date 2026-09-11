@@ -1,4 +1,4 @@
-use super::types::{Project, Team};
+use super::types::{Project, Team, WorkflowState};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,6 +113,47 @@ pub fn is_uuid(value: &str) -> bool {
         && value.chars().filter(|c| *c == '-').count() == 4
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum StateSelector {
+    Id(String),
+    Name(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StateResolution {
+    Resolved(WorkflowState),
+    NotFound(String),
+}
+
+pub fn parse_state_selector(input: &str) -> Option<StateSelector> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if is_uuid(trimmed) {
+        return Some(StateSelector::Id(trimmed.to_string()));
+    }
+    Some(StateSelector::Name(trimmed.to_string()))
+}
+
+pub fn match_state(selector: &StateSelector, candidates: &[WorkflowState]) -> StateResolution {
+    match selector {
+        StateSelector::Id(id) => match candidates.iter().find(|item| item.id == *id) {
+            Some(item) => StateResolution::Resolved(item.clone()),
+            None => StateResolution::NotFound(id.clone()),
+        },
+        StateSelector::Name(name) => {
+            match candidates
+                .iter()
+                .find(|item| item.name.eq_ignore_ascii_case(name))
+            {
+                Some(item) => StateResolution::Resolved(item.clone()),
+                None => StateResolution::NotFound(name.clone()),
+            }
+        }
+    }
+}
+
 fn is_key(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 10
@@ -222,5 +263,42 @@ mod tests {
     #[test]
     fn rejects_empty_project_selector() {
         assert_eq!(parse_project_selector(""), None);
+    }
+
+    #[test]
+    fn parses_state_id_and_name() {
+        let id = "e3b567ba-bcd1-42d8-8ae8-129fd11c97ab";
+        assert_eq!(
+            parse_state_selector(id),
+            Some(StateSelector::Id(id.to_string()))
+        );
+        assert_eq!(
+            parse_state_selector("Todo"),
+            Some(StateSelector::Name("Todo".to_string()))
+        );
+        assert_eq!(parse_state_selector("   "), None);
+    }
+
+    #[test]
+    fn resolves_state_by_name_case_insensitively() {
+        let items = vec![
+            WorkflowState {
+                id: "s1".to_string(),
+                name: "Todo".to_string(),
+                state_type: "unstarted".to_string(),
+            },
+            WorkflowState {
+                id: "s2".to_string(),
+                name: "Done".to_string(),
+                state_type: "completed".to_string(),
+            },
+        ];
+        let found = match_state(&StateSelector::Name("todo".to_string()), &items);
+        match found {
+            StateResolution::Resolved(item) => assert_eq!(item.id, "s1"),
+            other => panic!("expected resolved, got {other:?}"),
+        }
+        let missing = match_state(&StateSelector::Name("nope".to_string()), &items);
+        assert!(matches!(missing, StateResolution::NotFound(_)));
     }
 }

@@ -408,6 +408,120 @@ pub fn transform_team_cycles(data: serde_json::Value) -> Result<Paginated<Cycle>
     }
 }
 
+pub fn issue_create_input(
+    team_id: &str,
+    title: &str,
+    description: Option<&str>,
+    state_id: Option<&str>,
+    assignee_id: Option<&str>,
+) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    out.insert(
+        "teamId".to_string(),
+        serde_json::Value::String(team_id.trim().to_string()),
+    );
+    out.insert(
+        "title".to_string(),
+        serde_json::Value::String(title.trim().to_string()),
+    );
+    if let Some(value) = description.and_then(non_blank) {
+        out.insert(
+            "description".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = state_id.and_then(non_blank) {
+        out.insert(
+            "stateId".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = assignee_id.and_then(non_blank) {
+        out.insert(
+            "assigneeId".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    serde_json::Value::Object(out)
+}
+
+pub fn issue_update_input(
+    title: Option<&str>,
+    description: Option<&str>,
+    state_id: Option<&str>,
+    assignee_id: Option<&str>,
+) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    if let Some(value) = title.and_then(non_blank) {
+        out.insert(
+            "title".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = description.and_then(non_blank) {
+        out.insert(
+            "description".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = state_id.and_then(non_blank) {
+        out.insert(
+            "stateId".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = assignee_id.and_then(non_blank) {
+        out.insert(
+            "assigneeId".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    serde_json::Value::Object(out)
+}
+
+pub fn transform_issue_create(data: serde_json::Value) -> Result<IssueMini, LinearError> {
+    match data.get("issueCreate") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingIssue),
+        Some(payload) => {
+            if payload.get("success").and_then(|v| v.as_bool()) != Some(true) {
+                return Err(LinearError::Parse(
+                    "Linear issueCreate failed: success was false".to_string(),
+                ));
+            }
+            match payload.get("issue") {
+                None | Some(serde_json::Value::Null) => Err(LinearError::MissingIssue),
+                Some(_) => transform_issue(serde_json::json!({"issue": payload.get("issue")})),
+            }
+        }
+    }
+}
+
+pub fn transform_issue_update(data: serde_json::Value) -> Result<IssueMini, LinearError> {
+    match data.get("issueUpdate") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingIssue),
+        Some(payload) => {
+            if payload.get("success").and_then(|v| v.as_bool()) != Some(true) {
+                return Err(LinearError::Parse(
+                    "Linear issueUpdate failed: success was false".to_string(),
+                ));
+            }
+            match payload.get("issue") {
+                None | Some(serde_json::Value::Null) => Err(LinearError::MissingIssue),
+                Some(_) => transform_issue(serde_json::json!({"issue": payload.get("issue")})),
+            }
+        }
+    }
+}
+
+fn non_blank(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
 #[derive(Deserialize)]
 struct RawPaged<T> {
     nodes: Vec<T>,
@@ -1054,5 +1168,84 @@ mod tests {
                 end_cursor: None,
             }
         );
+    }
+
+    #[test]
+    fn issue_create_input_maps_ids_and_skips_blanks() {
+        let value = issue_create_input("t1", " Title ", Some("desc"), Some("s1"), Some("u1"));
+        assert_eq!(value.get("teamId"), Some(&serde_json::json!("t1")));
+        assert_eq!(value.get("title"), Some(&serde_json::json!("Title")));
+        assert_eq!(value.get("description"), Some(&serde_json::json!("desc")));
+        assert_eq!(value.get("stateId"), Some(&serde_json::json!("s1")));
+        assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
+        let minimal = issue_create_input("t1", "T", Some("   "), None, Some(""));
+        assert!(minimal.get("description").is_none());
+        assert!(minimal.get("stateId").is_none());
+        assert!(minimal.get("assigneeId").is_none());
+    }
+
+    #[test]
+    fn issue_update_input_skips_blank_values() {
+        let value = issue_update_input(Some("  T  "), None, Some("   "), Some("u1"));
+        assert_eq!(value.get("title"), Some(&serde_json::json!("T")));
+        assert!(value.get("description").is_none());
+        assert!(value.get("stateId").is_none());
+        assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
+        let empty = issue_update_input(None, None, None, None);
+        assert_eq!(empty, serde_json::json!({}));
+    }
+
+    #[test]
+    fn transform_issue_create_parses_success_payload() {
+        let data = serde_json::json!({"issueCreate": {"success": true, "issue": {
+            "id": "i1", "identifier": "GUZ-1", "title": "T",
+            "url": "https://linear.app/x/issue/GUZ-1/t", "state": {"name": "Todo"},
+        }}});
+        let issue = transform_issue_create(data).unwrap();
+        assert_eq!(issue.identifier, "GUZ-1");
+        assert_eq!(issue.state, "Todo");
+    }
+
+    #[test]
+    fn transform_issue_create_rejects_failed_success() {
+        let data = serde_json::json!({"issueCreate": {"success": false, "issue": null}});
+        let err = transform_issue_create(data).unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
+    }
+
+    #[test]
+    fn transform_issue_create_rejects_missing_issue() {
+        let err = transform_issue_create(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+        let err = transform_issue_create(
+            serde_json::json!({"issueCreate": {"success": true, "issue": null}}),
+        )
+        .unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+    }
+
+    #[test]
+    fn transform_issue_update_parses_success_payload() {
+        let data = serde_json::json!({"issueUpdate": {"success": true, "issue": {
+            "id": "i2", "identifier": "GUZ-2", "title": "U",
+            "url": "https://linear.app/x/issue/GUZ-2/u", "state": {"name": "Done"},
+            "parent": {"identifier": "GUZ-1"},
+        }}});
+        let issue = transform_issue_update(data).unwrap();
+        assert_eq!(issue.identifier, "GUZ-2");
+        assert_eq!(issue.parent.as_deref(), Some("GUZ-1"));
+    }
+
+    #[test]
+    fn transform_issue_update_rejects_failed_success() {
+        let data = serde_json::json!({"issueUpdate": {"success": false, "issue": null}});
+        let err = transform_issue_update(data).unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
+    }
+
+    #[test]
+    fn transform_issue_update_rejects_missing_issue() {
+        let err = transform_issue_update(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
     }
 }

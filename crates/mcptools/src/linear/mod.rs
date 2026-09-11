@@ -54,6 +54,10 @@ pub enum IssueCommands {
     Get(IssueGetOptions),
     /// List issues with filters
     List(IssueListOptions),
+    #[command(about = "Create one issue")]
+    Create(IssueCreateOptions),
+    #[command(about = "Update one issue")]
+    Update(IssueUpdateOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -153,6 +157,40 @@ pub struct IssueListOptions {
 }
 
 #[derive(Debug, clap::Args, Clone)]
+pub struct IssueCreateOptions {
+    #[arg(long, help = "Team id, key, or name")]
+    pub team: String,
+    #[arg(long, help = "Issue title")]
+    pub title: String,
+    #[arg(long, help = "Issue description")]
+    pub description: Option<String>,
+    #[arg(long, help = "Workflow state name or UUID")]
+    pub state: Option<String>,
+    #[arg(long, help = "Assignee user UUID or 'me'")]
+    pub assignee: Option<String>,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct IssueUpdateOptions {
+    #[arg(help = "Issue id or identifier")]
+    pub id: String,
+    #[arg(long, help = "New title")]
+    pub title: Option<String>,
+    #[arg(long, help = "New description")]
+    pub description: Option<String>,
+    #[arg(long, help = "Workflow state name or UUID (names need --team)")]
+    pub state: Option<String>,
+    #[arg(long, help = "Team id, key, or name for state lookup")]
+    pub team: Option<String>,
+    #[arg(long, help = "Assignee user UUID or 'me'")]
+    pub assignee: Option<String>,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
 pub struct TeamsListOptions {
     /// Max items per page
     #[arg(long, default_value = "25")]
@@ -245,6 +283,8 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
         Commands::Issue(cmd) => match cmd {
             IssueCommands::Get(options) => issue_get_handler(options).await,
             IssueCommands::List(options) => issues_list_handler(options).await,
+            IssueCommands::Create(options) => issue_create_handler(options).await,
+            IssueCommands::Update(options) => issue_update_handler(options).await,
         },
         Commands::Teams(cmd) => match cmd {
             TeamsCommands::List(options) => teams_list_handler(options).await,
@@ -364,6 +404,77 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
             page_info.has_next,
             page_info.end_cursor.as_deref().unwrap_or("")
         );
+    }
+    Ok(())
+}
+
+async fn issue_create_handler(options: IssueCreateOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let found = issue::issue_create_data(
+        &client,
+        &options.team,
+        &options.title,
+        options.description.as_deref(),
+        options.state.as_deref(),
+        options.assignee.as_deref(),
+    )
+    .await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&found)?);
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row![
+            "ID",
+            "Identifier",
+            "Title",
+            "State",
+            "URL"
+        ]);
+        table.add_row(prettytable::row![
+            found.id,
+            found.identifier,
+            found.title,
+            found.state,
+            found.url
+        ]);
+        table.printstd();
+    }
+    Ok(())
+}
+
+async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let found = issue::issue_update_data(
+        &client,
+        &options.id,
+        options.title.as_deref(),
+        options.description.as_deref(),
+        options.state.as_deref(),
+        options.team.as_deref(),
+        options.assignee.as_deref(),
+    )
+    .await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&found)?);
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row![
+            "ID",
+            "Identifier",
+            "Title",
+            "State",
+            "URL"
+        ]);
+        table.add_row(prettytable::row![
+            found.id,
+            found.identifier,
+            found.title,
+            found.state,
+            found.url
+        ]);
+        table.printstd();
     }
     Ok(())
 }

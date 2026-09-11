@@ -22,3 +22,4 @@ docs/shaping
 .gguf
 .mcptools/atlas/index.db
 .lane/
+docs/

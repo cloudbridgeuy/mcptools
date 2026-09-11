@@ -1,11 +1,19 @@
 use crate::linear::client::execute;
 use crate::prelude::*;
-use mcptools_core::linear::{is_uuid, issue_filter_value, IssueListFilter};
+use mcptools_core::linear::{
+    is_uuid, issue_create_input, issue_filter_value, issue_update_input, match_state,
+    parse_state_selector, transform_issue_create, transform_issue_update, IssueListFilter,
+    IssueMini, StateResolution,
+};
 
 pub const ISSUE_QUERY: &str =
     "query ($id: String!) { issue(id: $id) { id identifier title url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } }";
 
 pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } pageInfo { hasNextPage endCursor } } }";
+
+pub const ISSUE_CREATE_MUTATION: &str = "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title url state { name } parent { identifier } } } }";
+
+pub const ISSUE_UPDATE_MUTATION: &str = "mutation ($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title url state { name } parent { identifier } } } }";
 
 pub async fn issue_get_data(
     client: &reqwest::Client,
@@ -109,6 +117,189 @@ pub async fn issues_list_data(
     mcptools_core::linear::transform_issues(data).map_err(|e| eyre!("{}", e))
 }
 
+pub async fn issue_create_data(
+    client: &reqwest::Client,
+    team: &str,
+    title: &str,
+    description: Option<&str>,
+    state: Option<&str>,
+    assignee: Option<&str>,
+) -> Result<IssueMini> {
+    if team.trim().is_empty() {
+        return Err(eyre!("Linear issue create --team must not be empty"));
+    }
+    if title.trim().is_empty() {
+        return Err(eyre!("Linear issue create --title must not be empty"));
+    }
+    for (flag, value) in [
+        ("--description", description),
+        ("--state", state),
+        ("--assignee", assignee),
+    ] {
+        if value.is_some_and(|text| text.trim().is_empty()) {
+            return Err(eyre!("Linear issue create {} must not be empty", flag));
+        }
+    }
+    if let Some(selector) = assignee.map(str::trim).filter(|text| !text.is_empty()) {
+        if !selector.eq_ignore_ascii_case("me") && !is_uuid(selector) {
+            return Err(eyre!(
+                "Linear issue create --assignee '{}' must be a user UUID or 'me'. Find the UUID with `mcptools linear users list --query NAME`",
+                selector
+            ));
+        }
+    }
+    let team_id = super::discover::teams_get_data(client, team.trim())
+        .await?
+        .id;
+    let state_id = resolve_state_id(client, state, Some(team.trim()), "create").await?;
+    let assignee_id = resolve_assignee_id(client, assignee, "create").await?;
+    let input = issue_create_input(
+        &team_id,
+        title.trim(),
+        description.map(str::trim),
+        state_id.as_deref(),
+        assignee_id.as_deref(),
+    );
+    let data = execute(
+        client,
+        ISSUE_CREATE_MUTATION,
+        serde_json::json!({"input": input}),
+    )
+    .await?;
+    transform_issue_create(data).map_err(|e| match e {
+        mcptools_core::linear::LinearError::MissingIssue => {
+            eyre!("Linear issue create returned no issue")
+        }
+        other => eyre!("{}", other),
+    })
+}
+
+pub async fn issue_update_data(
+    client: &reqwest::Client,
+    id: &str,
+    title: Option<&str>,
+    description: Option<&str>,
+    state: Option<&str>,
+    team: Option<&str>,
+    assignee: Option<&str>,
+) -> Result<IssueMini> {
+    let selector = id.trim();
+    if selector.is_empty() {
+        return Err(eyre!("Linear issue id must not be empty"));
+    }
+    for (flag, value) in [
+        ("--title", title),
+        ("--description", description),
+        ("--state", state),
+        ("--team", team),
+        ("--assignee", assignee),
+    ] {
+        if value.is_some_and(|text| text.trim().is_empty()) {
+            return Err(eyre!("Linear issue update {} must not be empty", flag));
+        }
+    }
+    let has_field = [title, description, state, assignee]
+        .iter()
+        .any(|value| value.map(str::trim).is_some_and(|text| !text.is_empty()));
+    if !has_field {
+        return Err(eyre!(
+            "Linear issue update needs at least one of --title, --description, --state, --assignee"
+        ));
+    }
+    if let Some(value) = assignee.map(str::trim).filter(|text| !text.is_empty()) {
+        if !value.eq_ignore_ascii_case("me") && !is_uuid(value) {
+            return Err(eyre!(
+                "Linear issue update --assignee '{}' must be a user UUID or 'me'. Find the UUID with `mcptools linear users list --query NAME`",
+                value
+            ));
+        }
+    }
+    if let Some(value) = state.map(str::trim).filter(|text| !text.is_empty()) {
+        if !is_uuid(value)
+            && team
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .is_none()
+        {
+            return Err(eyre!(
+                "Linear issue update --state '{}' needs --team to resolve the state name. Pass a state UUID to skip team resolution",
+                value
+            ));
+        }
+    }
+    let state_id = resolve_state_id(client, state, team, "update").await?;
+    let assignee_id = resolve_assignee_id(client, assignee, "update").await?;
+    let input = issue_update_input(
+        title.map(str::trim),
+        description.map(str::trim),
+        state_id.as_deref(),
+        assignee_id.as_deref(),
+    );
+    let data = execute(
+        client,
+        ISSUE_UPDATE_MUTATION,
+        serde_json::json!({"id": selector, "input": input}),
+    )
+    .await?;
+    transform_issue_update(data).map_err(|e| match e {
+        mcptools_core::linear::LinearError::MissingIssue => {
+            eyre!("Linear issue not found: {}", selector)
+        }
+        other => eyre!("{}", other),
+    })
+}
+
+async fn resolve_assignee_id(
+    client: &reqwest::Client,
+    assignee: Option<&str>,
+    op: &str,
+) -> Result<Option<String>> {
+    match assignee.map(str::trim).filter(|text| !text.is_empty()) {
+        None => Ok(None),
+        Some(selector) if selector.eq_ignore_ascii_case("me") => {
+            Ok(Some(super::auth::auth_status_data(client).await?.id))
+        }
+        Some(selector) if is_uuid(selector) => Ok(Some(selector.to_string())),
+        Some(selector) => Err(eyre!(
+            "Linear issue {} --assignee '{}' must be a user UUID or 'me'. Find the UUID with `mcptools linear users list --query NAME`",
+            op,
+            selector
+        )),
+    }
+}
+
+async fn resolve_state_id(
+    client: &reqwest::Client,
+    state: Option<&str>,
+    team: Option<&str>,
+    op: &str,
+) -> Result<Option<String>> {
+    let selector = match state.map(str::trim).filter(|text| !text.is_empty()) {
+        None => return Ok(None),
+        Some(value) => value,
+    };
+    if is_uuid(selector) {
+        return Ok(Some(selector.to_string()));
+    }
+    let team_selector = match team.map(str::trim).filter(|text| !text.is_empty()) {
+        None => {
+            return Err(eyre!(
+                "Linear issue {} --state '{}' needs --team to resolve the state name. Pass a state UUID to skip team resolution",
+                op,
+                selector
+            ));
+        }
+        Some(value) => value,
+    };
+    let parsed = parse_state_selector(selector)
+        .ok_or_else(|| eyre!("Linear issue {} --state must not be empty", op))?;
+    let listed = super::discover::states_list_data(client, team_selector).await?;
+    match match_state(&parsed, &listed.nodes) {
+        StateResolution::Resolved(item) => Ok(Some(item.id)),
+        StateResolution::NotFound(input) => Err(eyre!("Linear state not found: {}", input)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +381,53 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.to_string().contains("--state"));
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_create_title_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        let err = issue_create_data(&client, "GUZ", "   ", None, None, None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("--title"));
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_update_id_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        let err = issue_update_data(&client, "   ", Some("T"), None, None, None, None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[tokio::test]
+    async fn rejects_update_without_fields_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        let err = issue_update_data(&client, "i1", None, None, None, None, None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("at least one"));
+    }
+
+    #[tokio::test]
+    async fn rejects_state_name_without_team_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        let err = issue_update_data(&client, "i1", None, None, Some("Todo"), None, None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("--team"));
     }
 }
