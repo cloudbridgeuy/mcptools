@@ -72,6 +72,22 @@ pub fn parse_answer(stdout: &str) -> Result<String, ContractError> {
     Ok(stdout.to_string())
 }
 
+pub fn template_not_found_detail(stderr: &str) -> Option<String> {
+    if stderr.to_lowercase().contains("template not found") {
+        Some(stderr.trim().to_string())
+    } else {
+        None
+    }
+}
+
+pub fn classify_spawn_error(e: &std::io::Error) -> ContractError {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        ContractError::BinaryMissing
+    } else {
+        ContractError::Failed(e.to_string())
+    }
+}
+
 fn resolve_paths_from(env: &HashMap<String, String>) -> ResolvedPaths {
     let binary = env
         .get("LLM_STREAM_BIN")
@@ -253,5 +269,47 @@ mod tests {
     #[test]
     fn parse_answer_empty_fails() {
         assert!(matches!(parse_answer(""), Err(ContractError::Failed(_))));
+    }
+
+    #[test]
+    fn template_detail_found() {
+        assert_eq!(
+            template_not_found_detail("Error: template not found: foo"),
+            Some("Error: template not found: foo".to_string())
+        );
+    }
+
+    #[test]
+    fn template_detail_case_insensitive() {
+        assert!(template_not_found_detail("Template Not Found").is_some());
+    }
+
+    #[test]
+    fn template_detail_absent() {
+        assert_eq!(template_not_found_detail("boom"), None);
+        assert_eq!(template_not_found_detail(""), None);
+    }
+
+    #[test]
+    fn spawn_not_found_is_binary_missing() {
+        let e = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        assert!(matches!(
+            classify_spawn_error(&e),
+            ContractError::BinaryMissing
+        ));
+    }
+
+    #[test]
+    fn spawn_other_is_failed() {
+        let e = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        assert!(matches!(classify_spawn_error(&e), ContractError::Failed(_)));
+    }
+
+    #[test]
+    fn timed_out_display() {
+        assert_eq!(
+            ContractError::TimedOut.to_string(),
+            "llm-stream timed out after 120s"
+        );
     }
 }
