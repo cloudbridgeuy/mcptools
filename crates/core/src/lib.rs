@@ -81,6 +81,7 @@ pub mod greprag;
 pub mod hn;
 pub mod images;
 pub mod linear;
+pub mod llm_stream;
 pub mod md;
 pub mod pagination;
 pub mod queries;
