@@ -293,6 +293,10 @@ pub struct IssueUpdateOptions {
     pub team: Option<String>,
     #[arg(long, help = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,
+    #[arg(long, help = "Parent issue id or identifier")]
+    pub parent: Option<String>,
+    #[arg(long, help = "Clear the parent issue")]
+    pub clear_parent: bool,
     #[arg(long, help = "Output as JSON")]
     pub json: bool,
 }
@@ -391,6 +395,7 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
             IssueCommands::Get(options) => issue_get_handler(options).await,
             IssueCommands::List(options) => issues_list_handler(options).await,
             IssueCommands::Create(options) => issue_create_handler(options).await,
+            IssueCommands::Update(options) => issue_update_handler(options).await,
             IssueCommands::Update(options) => issue_update_handler(options).await,
             IssueCommands::Comments(cmd) => match cmd {
                 IssueCommentsCommands::List(options) => comments_list_handler(options).await,
@@ -560,6 +565,16 @@ async fn issue_create_handler(options: IssueCreateOptions) -> Result<()> {
 }
 
 async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
+    if options.parent.is_some() && options.clear_parent {
+        return Err(eyre!(
+            "Linear issue update accepts only one of --parent or --clear-parent"
+        ));
+    }
+    let parent = if options.clear_parent {
+        Some(None)
+    } else {
+        options.parent.map(Some)
+    };
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
     let found = issue::issue_update_data(
@@ -570,6 +585,7 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
         options.state.as_deref(),
         options.team.as_deref(),
         options.assignee.as_deref(),
+        parent,
     )
     .await?;
     if options.json {
@@ -581,14 +597,16 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
             "Identifier",
             "Title",
             "State",
-            "URL"
+            "URL",
+            "Parent"
         ]);
         table.add_row(prettytable::row![
             found.id,
             found.identifier,
             found.title,
             found.state,
-            found.url
+            found.url,
+            found.parent.as_deref().unwrap_or("")
         ]);
         table.printstd();
     }

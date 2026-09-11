@@ -13,7 +13,7 @@ pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: Is
 
 pub const ISSUE_CREATE_MUTATION: &str = "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title url state { name } parent { identifier } } } }";
 
-pub const ISSUE_UPDATE_MUTATION: &str = "mutation ($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title url state { name } parent { identifier } } } }";
+pub const ISSUE_UPDATE_MUTATION: &str = "mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } } }";
 
 pub async fn issue_get_data(
     client: &reqwest::Client,
@@ -182,6 +182,7 @@ pub async fn issue_update_data(
     state: Option<&str>,
     team: Option<&str>,
     assignee: Option<&str>,
+    parent: Option<Option<String>>,
 ) -> Result<IssueMini> {
     let selector = id.trim();
     if selector.is_empty() {
@@ -198,12 +199,19 @@ pub async fn issue_update_data(
             return Err(eyre!("Linear issue update {} must not be empty", flag));
         }
     }
+    if parent
+        .as_ref()
+        .is_some_and(|slot| slot.as_ref().is_some_and(|pid| pid.trim().is_empty()))
+    {
+        return Err(eyre!("Linear parent issue id must not be empty"));
+    }
     let has_field = [title, description, state, assignee]
         .iter()
-        .any(|value| value.map(str::trim).is_some_and(|text| !text.is_empty()));
+        .any(|value| value.map(str::trim).is_some_and(|text| !text.is_empty()))
+        || parent.is_some();
     if !has_field {
         return Err(eyre!(
-            "Linear issue update needs at least one of --title, --description, --state, --assignee"
+            "Linear issue update needs at least one of --title, --description, --state, --assignee, --parent, --clear-parent"
         ));
     }
     if let Some(value) = assignee.map(str::trim).filter(|text| !text.is_empty()) {
@@ -234,6 +242,7 @@ pub async fn issue_update_data(
         description.map(str::trim),
         state_id.as_deref(),
         assignee_id.as_deref(),
+        parent,
     );
     let data = execute(
         client,
@@ -315,6 +324,34 @@ mod tests {
             let err = issue_get_data(&client, selector).await.unwrap_err();
             assert!(err.to_string().contains("must not be empty"));
         }
+    }
+
+    #[tokio::test]
+    async fn update_rejects_empty_ids_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        for selector in ["", "   "] {
+            let err =
+                issue_update_data(&client, selector, None, None, None, None, None, Some(None))
+                    .await
+                    .unwrap_err();
+            assert!(err.to_string().contains("must not be empty"));
+        }
+        let err = issue_update_data(
+            &client,
+            "GUZ-81",
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(Some("   ".to_string())),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
     }
 
     #[tokio::test]
@@ -401,7 +438,7 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_update_data(&client, "   ", Some("T"), None, None, None, None)
+        let err = issue_update_data(&client, "   ", Some("T"), None, None, None, None, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("must not be empty"));
@@ -413,7 +450,7 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_update_data(&client, "i1", None, None, None, None, None)
+        let err = issue_update_data(&client, "i1", None, None, None, None, None, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("at least one"));
@@ -425,7 +462,7 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_update_data(&client, "i1", None, None, Some("Todo"), None, None)
+        let err = issue_update_data(&client, "i1", None, None, Some("Todo"), None, None, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("--team"));

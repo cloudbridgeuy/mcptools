@@ -624,6 +624,7 @@ pub fn issue_update_input(
     description: Option<&str>,
     state_id: Option<&str>,
     assignee_id: Option<&str>,
+    parent: Option<Option<String>>,
 ) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     if let Some(value) = title.and_then(non_blank) {
@@ -648,6 +649,15 @@ pub fn issue_update_input(
         out.insert(
             "assigneeId".to_string(),
             serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(slot) = parent {
+        out.insert(
+            "parentId".to_string(),
+            match slot {
+                Some(id) => serde_json::Value::String(id.trim().to_string()),
+                None => serde_json::Value::Null,
+            },
         );
     }
     serde_json::Value::Object(out)
@@ -1441,6 +1451,27 @@ mod tests {
     }
 
     #[test]
+    fn issue_update_input_omits_key_without_parent() {
+        assert_eq!(
+            issue_update_input(None, None, None, None, None),
+            serde_json::json!({})
+        );
+    }
+
+    #[test]
+    fn issue_update_input_sets_parent_id_trimmed() {
+        let value =
+            issue_update_input(None, None, None, None, Some(Some("  GUZ-78  ".to_string())));
+        assert_eq!(value, serde_json::json!({"parentId": "GUZ-78"}));
+    }
+
+    #[test]
+    fn issue_update_input_clears_parent_with_null() {
+        let value = issue_update_input(None, None, None, None, Some(None));
+        assert_eq!(value, serde_json::json!({"parentId": null}));
+    }
+
+    #[test]
     fn transform_comment_create_parses_created_comment() {
         let data = serde_json::json!({"commentCreate": {"success": true, "comment": {
             "id": "c9", "body": "progress note",
@@ -1604,12 +1635,12 @@ mod tests {
 
     #[test]
     fn issue_update_input_skips_blank_values() {
-        let value = issue_update_input(Some("  T  "), None, Some("   "), Some("u1"));
+        let value = issue_update_input(Some("  T  "), None, Some("   "), Some("u1"), None);
         assert_eq!(value.get("title"), Some(&serde_json::json!("T")));
         assert!(value.get("description").is_none());
         assert!(value.get("stateId").is_none());
         assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
-        let empty = issue_update_input(None, None, None, None);
+        let empty = issue_update_input(None, None, None, None, None);
         assert_eq!(empty, serde_json::json!({}));
     }
 
