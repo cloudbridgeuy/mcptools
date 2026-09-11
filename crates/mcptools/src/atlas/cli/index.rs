@@ -150,15 +150,12 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     ));
     db.set_metadata("last_full_sync", &epoch_now())?;
 
-    // Phase 2: Bottom-up LLM descriptions
     let primer_path = config.primer_path.resolve(&root);
     let primer = match std::fs::read_to_string(&primer_path) {
         Ok(p) => p,
         Err(_) => {
-            crate::prelude::eprintln!(
-                "Primer not found at {}. Run `atlas init` first. Skipping descriptions.",
-                primer_path.display()
-            );
+            crate::prelude::eprintln!("structural-only, enrichment pending");
+            print_elapsed(start);
             return Ok(());
         }
     };
@@ -183,7 +180,12 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         }
     };
 
-    // In incremental mode, only describe files and directories that lack descriptions.
+    if file_provider_opt.is_none() && dir_provider_opt.is_none() {
+        crate::prelude::eprintln!("structural-only, enrichment pending");
+        print_elapsed(start);
+        return Ok(());
+    }
+
     let files_to_describe: Vec<PathBuf> = if opts.incremental {
         let needed: std::collections::HashSet<PathBuf> =
             db.files_needing_descriptions()?.into_iter().collect();
