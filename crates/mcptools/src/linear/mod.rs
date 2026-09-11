@@ -68,6 +68,23 @@ pub enum IssueCommands {
 pub enum IssueCommentsCommands {
     /// List comments on one issue
     List(CommentsListOptions),
+    /// Create a comment on one issue
+    Create(CommentsCreateOptions),
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct CommentsCreateOptions {
+    /// Issue id or identifier (e.g. GUZ-84)
+    pub id: String,
+    /// Comment body text
+    #[arg(long)]
+    pub body: Option<String>,
+    /// Read comment body from file
+    #[arg(long)]
+    pub body_file: Option<std::path::PathBuf>,
+    /// Read comment body from stdin and output as JSON
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, clap::Args, Clone)]
@@ -315,6 +332,7 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
             IssueCommands::Update(options) => issue_update_handler(options).await,
             IssueCommands::Comments(cmd) => match cmd {
                 IssueCommentsCommands::List(options) => comments_list_handler(options).await,
+                IssueCommentsCommands::Create(options) => comments_create_handler(options).await,
             },
         },
         Commands::Teams(cmd) => match cmd {
@@ -555,6 +573,67 @@ async fn comments_list_handler(options: CommentsListOptions) -> Result<()> {
             page_info.has_next,
             page_info.end_cursor.as_deref().unwrap_or("")
         );
+    }
+    Ok(())
+}
+
+async fn comments_create_handler(options: CommentsCreateOptions) -> Result<()> {
+    use std::io::IsTerminal;
+    if options.body.is_some() && options.body_file.is_some() {
+        return Err(eyre!("{}", comments::BODY_CONFLICT_MSG));
+    }
+    let stdin_piped = !std::io::stdin().is_terminal();
+    if options.json && !stdin_piped {
+        return Err(eyre!("{}", comments::BODY_MISSING_MSG));
+    }
+    let stdin_text = match options.json || stdin_piped {
+        true => {
+            use std::io::Read;
+            let mut text = String::new();
+            std::io::stdin()
+                .read_to_string(&mut text)
+                .map_err(|e| eyre!("Failed to read comment body from stdin: {}", e))?;
+            Some(text)
+        }
+        false => None,
+    };
+    let source = comments::pick_comment_body_source(
+        options.body.as_deref(),
+        options.body_file.as_deref(),
+        options.json,
+        stdin_text.as_deref(),
+    )?;
+    let from_stdin = source == comments::CommentBodySource::Stdin;
+    let raw = match source {
+        comments::CommentBodySource::Direct(text) => text,
+        comments::CommentBodySource::File(path) => std::fs::read_to_string(&path).map_err(|e| {
+            eyre!(
+                "Failed to read comment body file '{}': {}",
+                path.display(),
+                e
+            )
+        })?,
+        comments::CommentBodySource::Stdin => stdin_text.unwrap_or_default(),
+    };
+    let body = match from_stdin {
+        true => comments::stdin_body_text(&raw)?,
+        false => comments::normalize_comment_body(&raw)?,
+    };
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let created = comments::comment_create_data(&client, &options.id, &body).await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&created)?);
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Author", "Created", "Body"]);
+        table.add_row(prettytable::row![
+            created.id,
+            created.author.as_deref().unwrap_or(""),
+            created.created_at,
+            created.body
+        ]);
+        table.printstd();
     }
     Ok(())
 }
