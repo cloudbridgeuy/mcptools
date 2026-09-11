@@ -63,6 +63,15 @@ pub fn resolve_paths() -> Result<ResolvedPaths, ContractError> {
     Ok(resolve_paths_from(&env))
 }
 
+pub fn parse_answer(stdout: &str) -> Result<String, ContractError> {
+    if stdout.is_empty() {
+        return Err(ContractError::Failed(
+            "llm-stream returned empty output".to_string(),
+        ));
+    }
+    Ok(stdout.to_string())
+}
+
 fn resolve_paths_from(env: &HashMap<String, String>) -> ResolvedPaths {
     let binary = env
         .get("LLM_STREAM_BIN")
@@ -234,5 +243,15 @@ mod tests {
         let resolved = resolve_paths_from(&env);
         assert_eq!(resolved.binary, PathBuf::from("/custom/bin/llm-stream"));
         assert_eq!(resolved.config_dir, PathBuf::from("/custom/config"));
+    }
+
+    #[test]
+    fn parse_answer_passthrough() {
+        assert_eq!(parse_answer("OK\n").unwrap(), "OK\n");
+    }
+
+    #[test]
+    fn parse_answer_empty_fails() {
+        assert!(matches!(parse_answer(""), Err(ContractError::Failed(_))));
     }
 }

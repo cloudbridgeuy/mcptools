@@ -11,6 +11,7 @@ mod greprag;
 mod hn;
 mod images;
 mod linear;
+mod llm_stream;
 mod mcp;
 mod md;
 mod pdf;
