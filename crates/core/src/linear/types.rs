@@ -77,6 +77,15 @@ pub struct Comment {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IssueRelation {
+    pub id: String,
+    pub rel_type: String,
+    pub issue: String,
+    pub related_issue: String,
+    pub direction: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PageInfo {
     #[serde(rename = "hasNextPage", alias = "has_next")]
     pub has_next: bool,
@@ -126,6 +135,8 @@ pub enum LinearError {
     MissingCycles,
     #[error("Linear response missing comments field")]
     MissingComments,
+    #[error("Linear response missing relations field")]
+    MissingRelations,
 }
 
 pub fn check_response(status: u16, body: &str) -> Result<serde_json::Value, LinearError> {
@@ -324,6 +335,108 @@ pub fn transform_comments(data: serde_json::Value) -> Result<Paginated<Comment>,
             })
         }
     }
+}
+
+pub fn transform_relations(
+    data: serde_json::Value,
+) -> Result<Paginated<IssueRelation>, LinearError> {
+    let issue = match data.get("issue") {
+        None | Some(serde_json::Value::Null) => return Err(LinearError::MissingIssue),
+        Some(issue) => issue,
+    };
+    let current = issue
+        .get("identifier")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let forward = match issue.get("relations") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(connection) => Some(
+            serde_json::from_value::<RawPaged<RawFullRelation>>(connection.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?,
+        ),
+    };
+    let inverse = match issue.get("inverseRelations") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(connection) => Some(
+            serde_json::from_value::<RawPaged<RawFullRelation>>(connection.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?,
+        ),
+    };
+    let (forward, inverse) = match (forward, inverse) {
+        (None, None) => return Err(LinearError::MissingRelations),
+        (forward, inverse) => (
+            forward.unwrap_or(RawPaged {
+                nodes: Vec::new(),
+                page_info: PageInfo {
+                    has_next: false,
+                    end_cursor: None,
+                },
+            }),
+            inverse.unwrap_or(RawPaged {
+                nodes: Vec::new(),
+                page_info: PageInfo {
+                    has_next: false,
+                    end_cursor: None,
+                },
+            }),
+        ),
+    };
+    let mut nodes = Vec::new();
+    for raw in forward.nodes {
+        let rel_type = raw.rel_type.to_lowercase();
+        if rel_type != "blocks" && rel_type != "related" {
+            continue;
+        }
+        let related = match raw.related_issue.map(|item| item.identifier) {
+            Some(identifier) => identifier,
+            None => continue,
+        };
+        nodes.push(IssueRelation {
+            id: raw.id,
+            rel_type,
+            issue: raw
+                .issue
+                .map(|item| item.identifier)
+                .unwrap_or_else(|| current.to_string()),
+            related_issue: related,
+            direction: "outgoing".to_string(),
+        });
+    }
+    for raw in inverse.nodes {
+        let rel_type = match raw.rel_type.to_lowercase().as_str() {
+            "blocks" => "blocked-by".to_string(),
+            "related" => "related".to_string(),
+            _ => continue,
+        };
+        let counterpart = match raw.issue.map(|item| item.identifier) {
+            Some(identifier) => identifier,
+            None => continue,
+        };
+        nodes.push(IssueRelation {
+            id: raw.id,
+            rel_type,
+            issue: raw
+                .related_issue
+                .map(|item| item.identifier)
+                .unwrap_or_else(|| current.to_string()),
+            related_issue: counterpart,
+            direction: "incoming".to_string(),
+        });
+    }
+    let page_info = PageInfo {
+        has_next: forward.page_info.has_next || inverse.page_info.has_next,
+        end_cursor: match forward.page_info.has_next {
+            true => forward
+                .page_info
+                .end_cursor
+                .or(inverse.page_info.end_cursor),
+            false => inverse
+                .page_info
+                .end_cursor
+                .or(forward.page_info.end_cursor),
+        },
+    };
+    Ok(Paginated { nodes, page_info })
 }
 
 pub fn comment_create_input(issue_id: &str, body: &str) -> serde_json::Value {
@@ -616,6 +729,17 @@ struct RawRelationNode {
     rel_type: String,
     #[serde(default)]
     issue: Option<RawRelated>,
+}
+
+#[derive(Deserialize)]
+struct RawFullRelation {
+    id: String,
+    #[serde(rename = "type")]
+    rel_type: String,
+    #[serde(default)]
+    issue: Option<RawRelated>,
+    #[serde(default, rename = "relatedIssue")]
+    related_issue: Option<RawRelated>,
 }
 
 #[derive(Deserialize)]
@@ -1343,6 +1467,88 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, LinearError::Parse(_)));
+    }
+
+    #[test]
+    fn transform_relations_merges_forward_and_inverse() {
+        let data = serde_json::json!({"issue": {"identifier": "GUZ-84",
+            "relations": {"nodes": [
+                {"id": "r1", "type": "blocks", "issue": {"identifier": "GUZ-84"}, "relatedIssue": {"identifier": "GUZ-85"}},
+                {"id": "r2", "type": "related", "issue": {"identifier": "GUZ-84"}, "relatedIssue": {"identifier": "GUZ-86"}},
+                {"id": "r3", "type": "similar", "issue": {"identifier": "GUZ-84"}, "relatedIssue": {"identifier": "GUZ-87"}},
+            ], "pageInfo": {"hasNextPage": false, "endCursor": null}},
+            "inverseRelations": {"nodes": [
+                {"id": "r4", "type": "blocks", "issue": {"identifier": "GUZ-88"}, "relatedIssue": {"identifier": "GUZ-84"}},
+                {"id": "r5", "type": "duplicate", "issue": {"identifier": "GUZ-89"}, "relatedIssue": {"identifier": "GUZ-84"}},
+            ], "pageInfo": {"hasNextPage": true, "endCursor": "inv1"}}}});
+        let paged = transform_relations(data).unwrap();
+        assert_eq!(
+            paged.nodes,
+            vec![
+                IssueRelation {
+                    id: "r1".to_string(),
+                    rel_type: "blocks".to_string(),
+                    issue: "GUZ-84".to_string(),
+                    related_issue: "GUZ-85".to_string(),
+                    direction: "outgoing".to_string(),
+                },
+                IssueRelation {
+                    id: "r2".to_string(),
+                    rel_type: "related".to_string(),
+                    issue: "GUZ-84".to_string(),
+                    related_issue: "GUZ-86".to_string(),
+                    direction: "outgoing".to_string(),
+                },
+                IssueRelation {
+                    id: "r4".to_string(),
+                    rel_type: "blocked-by".to_string(),
+                    issue: "GUZ-84".to_string(),
+                    related_issue: "GUZ-88".to_string(),
+                    direction: "incoming".to_string(),
+                },
+            ]
+        );
+        assert!(paged.page_info.has_next);
+        assert_eq!(paged.page_info.end_cursor.as_deref(), Some("inv1"));
+    }
+
+    #[test]
+    fn transform_relations_accepts_empty_connections() {
+        let data = serde_json::json!({"issue": {"identifier": "GUZ-84",
+            "relations": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}},
+            "inverseRelations": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}});
+        let paged = transform_relations(data).unwrap();
+        assert!(paged.nodes.is_empty());
+        assert!(!paged.page_info.has_next);
+    }
+
+    #[test]
+    fn transform_relations_rejects_missing_issue_and_connections() {
+        let err = transform_relations(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+        let err = transform_relations(serde_json::json!({"issue": null})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+        let err = transform_relations(serde_json::json!({"issue": {"identifier": "GUZ-84"}}))
+            .unwrap_err();
+        assert_eq!(err, LinearError::MissingRelations);
+    }
+
+    #[test]
+    fn transform_relations_rejects_invalid_shape() {
+        let err = transform_relations(serde_json::json!({"issue": {"relations": {"nodes": {}}}}))
+            .unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
+    }
+
+    #[test]
+    fn transform_relations_skips_nodes_missing_counterpart() {
+        let data = serde_json::json!({"issue": {"identifier": "GUZ-84",
+            "relations": {"nodes": [
+                {"id": "r1", "type": "blocks", "issue": {"identifier": "GUZ-84"}, "relatedIssue": null},
+            ], "pageInfo": {"hasNextPage": false, "endCursor": null}},
+            "inverseRelations": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}});
+        let paged = transform_relations(data).unwrap();
+        assert!(paged.nodes.is_empty());
     }
 
     #[test]

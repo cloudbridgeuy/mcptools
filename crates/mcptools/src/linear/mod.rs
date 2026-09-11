@@ -4,6 +4,7 @@ pub mod comments;
 pub mod config;
 pub mod discover;
 pub mod issue;
+pub mod relations;
 
 use crate::prelude::{println, *};
 
@@ -62,6 +63,9 @@ pub enum IssueCommands {
     /// Comment operations
     #[command(subcommand)]
     Comments(IssueCommentsCommands),
+    /// Relation operations
+    #[command(subcommand)]
+    Relations(IssueRelationsCommands),
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -70,6 +74,12 @@ pub enum IssueCommentsCommands {
     List(CommentsListOptions),
     /// Create a comment on one issue
     Create(CommentsCreateOptions),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum IssueRelationsCommands {
+    /// List relations on one issue
+    List(RelationsListOptions),
 }
 
 #[derive(Debug, clap::Args, Clone)]
@@ -89,6 +99,24 @@ pub struct CommentsCreateOptions {
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct CommentsListOptions {
+    /// Issue id or identifier (e.g. GUZ-84)
+    pub id: String,
+    /// Max items per page
+    #[arg(long, default_value = "25")]
+    pub limit: u32,
+    /// Page cursor for pagination
+    #[arg(long)]
+    pub cursor: Option<String>,
+    /// Fetch all pages (up to 50 items)
+    #[arg(long)]
+    pub all: bool,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct RelationsListOptions {
     /// Issue id or identifier (e.g. GUZ-84)
     pub id: String,
     /// Max items per page
@@ -334,6 +362,9 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
                 IssueCommentsCommands::List(options) => comments_list_handler(options).await,
                 IssueCommentsCommands::Create(options) => comments_create_handler(options).await,
             },
+            IssueCommands::Relations(cmd) => match cmd {
+                IssueRelationsCommands::List(options) => relations_list_handler(options).await,
+            },
         },
         Commands::Teams(cmd) => match cmd {
             TeamsCommands::List(options) => teams_list_handler(options).await,
@@ -565,6 +596,62 @@ async fn comments_list_handler(options: CommentsListOptions) -> Result<()> {
                 comment.author.as_deref().unwrap_or(""),
                 comment.created_at,
                 comment.body
+            ]);
+        }
+        table.printstd();
+        println!(
+            "hasMore: {} endCursor: {}",
+            page_info.has_next,
+            page_info.end_cursor.as_deref().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
+async fn relations_list_handler(options: RelationsListOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let mut nodes = Vec::new();
+    let mut cursor = options.cursor.clone();
+    let mut page_info = mcptools_core::linear::PageInfo {
+        has_next: false,
+        end_cursor: None,
+    };
+    loop {
+        let page =
+            relations::relations_list_data(&client, &options.id, options.limit, cursor.clone())
+                .await?;
+        page_info = page.page_info.clone();
+        nodes.extend(page.nodes);
+        if !options.all || !page_info.has_next || nodes.len() >= 50 {
+            break;
+        }
+        cursor = page_info.end_cursor.clone();
+    }
+    nodes.truncate(50);
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"nodes": nodes, "pageInfo": page_info})
+            )?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row![
+            "ID",
+            "Type",
+            "Issue",
+            "Related",
+            "Direction"
+        ]);
+        for relation in &nodes {
+            table.add_row(prettytable::row![
+                relation.id,
+                relation.rel_type,
+                relation.issue,
+                relation.related_issue,
+                relation.direction
             ]);
         }
         table.printstd();
