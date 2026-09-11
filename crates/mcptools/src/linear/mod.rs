@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod client;
+pub mod comments;
 pub mod config;
 pub mod discover;
 pub mod issue;
@@ -58,6 +59,33 @@ pub enum IssueCommands {
     Create(IssueCreateOptions),
     #[command(about = "Update one issue")]
     Update(IssueUpdateOptions),
+    /// Comment operations
+    #[command(subcommand)]
+    Comments(IssueCommentsCommands),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum IssueCommentsCommands {
+    /// List comments on one issue
+    List(CommentsListOptions),
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct CommentsListOptions {
+    /// Issue id or identifier (e.g. GUZ-84)
+    pub id: String,
+    /// Max items per page
+    #[arg(long, default_value = "25")]
+    pub limit: u32,
+    /// Page cursor for pagination
+    #[arg(long)]
+    pub cursor: Option<String>,
+    /// Fetch all pages (up to 50 items)
+    #[arg(long)]
+    pub all: bool,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -285,6 +313,9 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
             IssueCommands::List(options) => issues_list_handler(options).await,
             IssueCommands::Create(options) => issue_create_handler(options).await,
             IssueCommands::Update(options) => issue_update_handler(options).await,
+            IssueCommands::Comments(cmd) => match cmd {
+                IssueCommentsCommands::List(options) => comments_list_handler(options).await,
+            },
         },
         Commands::Teams(cmd) => match cmd {
             TeamsCommands::List(options) => teams_list_handler(options).await,
@@ -475,6 +506,55 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
             found.url
         ]);
         table.printstd();
+    }
+    Ok(())
+}
+
+async fn comments_list_handler(options: CommentsListOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let mut nodes = Vec::new();
+    let mut cursor = options.cursor.clone();
+    let mut page_info = mcptools_core::linear::PageInfo {
+        has_next: false,
+        end_cursor: None,
+    };
+    loop {
+        let page =
+            comments::comments_list_data(&client, &options.id, options.limit, cursor.clone())
+                .await?;
+        page_info = page.page_info.clone();
+        nodes.extend(page.nodes);
+        if !options.all || !page_info.has_next || nodes.len() >= 50 {
+            break;
+        }
+        cursor = page_info.end_cursor.clone();
+    }
+    nodes.truncate(50);
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"nodes": nodes, "pageInfo": page_info})
+            )?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Author", "Created", "Body"]);
+        for comment in &nodes {
+            table.add_row(prettytable::row![
+                comment.id,
+                comment.author.as_deref().unwrap_or(""),
+                comment.created_at,
+                comment.body
+            ]);
+        }
+        table.printstd();
+        println!(
+            "hasMore: {} endCursor: {}",
+            page_info.has_next,
+            page_info.end_cursor.as_deref().unwrap_or("")
+        );
     }
     Ok(())
 }
