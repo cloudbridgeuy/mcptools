@@ -68,6 +68,15 @@ pub struct IssueMini {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: String,
+    pub body: String,
+    pub url: String,
+    pub author: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PageInfo {
     #[serde(rename = "hasNextPage", alias = "has_next")]
     pub has_next: bool,
@@ -115,6 +124,8 @@ pub enum LinearError {
     MissingLabels,
     #[error("Linear response missing cycles field")]
     MissingCycles,
+    #[error("Linear response missing comments field")]
+    MissingComments,
 }
 
 pub fn check_response(status: u16, body: &str) -> Result<serde_json::Value, LinearError> {
@@ -294,6 +305,24 @@ fn present(value: &Option<String>) -> Option<&str> {
     match value {
         Some(text) if !text.trim().is_empty() => Some(text.trim()),
         _ => None,
+    }
+}
+
+pub fn transform_comments(data: serde_json::Value) -> Result<Paginated<Comment>, LinearError> {
+    let issue = match data.get("issue") {
+        None | Some(serde_json::Value::Null) => return Err(LinearError::MissingIssue),
+        Some(issue) => issue,
+    };
+    match issue.get("comments") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingComments),
+        Some(comments) => {
+            let paged: RawPaged<RawComment> = serde_json::from_value(comments.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?;
+            Ok(Paginated {
+                nodes: paged.nodes.into_iter().map(Comment::from).collect(),
+                page_info: paged.page_info,
+            })
+        }
     }
 }
 
@@ -569,6 +598,41 @@ struct RawRelated {
 #[derive(Deserialize)]
 struct RawState {
     name: String,
+}
+
+#[derive(Deserialize)]
+struct RawComment {
+    id: String,
+    body: String,
+    url: String,
+    #[serde(default)]
+    user: Option<RawCommentUser>,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+struct RawCommentUser {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default, rename = "displayName")]
+    display_name: Option<String>,
+}
+
+impl From<RawComment> for Comment {
+    fn from(raw: RawComment) -> Self {
+        Self {
+            id: raw.id,
+            body: raw.body,
+            url: raw.url,
+            author: raw.user.and_then(|user| {
+                user.display_name
+                    .filter(|name| !name.trim().is_empty())
+                    .or_else(|| user.name.filter(|name| !name.trim().is_empty()))
+            }),
+            created_at: raw.created_at,
+        }
+    }
 }
 
 fn truncate(body: &str) -> String {
@@ -1144,6 +1208,62 @@ mod tests {
     fn transform_team_cycles_rejects_missing_team() {
         let err = transform_team_cycles(serde_json::json!({})).unwrap_err();
         assert_eq!(err, LinearError::MissingTeam);
+    }
+
+    #[test]
+    fn transform_comments_parses_nodes_and_page_info() {
+        let data = serde_json::json!({"issue": {"comments": {"nodes": [
+            {"id": "c1", "body": "First", "url": "https://linear.app/x/comment/c1", "user": {"name": "Ada", "displayName": "Ada L"}, "createdAt": "2026-01-01T00:00:00Z"},
+            {"id": "c2", "body": "Second", "url": "https://linear.app/x/comment/c2", "user": null, "createdAt": "2026-01-02T00:00:00Z"},
+        ], "pageInfo": {"hasNextPage": true, "endCursor": "cur1"}}}});
+        let paged = transform_comments(data).unwrap();
+        assert_eq!(paged.nodes.len(), 2);
+        assert_eq!(paged.nodes[0].id, "c1");
+        assert_eq!(paged.nodes[0].body, "First");
+        assert_eq!(paged.nodes[0].author.as_deref(), Some("Ada L"));
+        assert_eq!(paged.nodes[1].author, None);
+        assert!(paged.page_info.has_next);
+        assert_eq!(paged.page_info.end_cursor.as_deref(), Some("cur1"));
+    }
+
+    #[test]
+    fn transform_comments_prefers_display_name_and_skips_blank() {
+        let data = serde_json::json!({"issue": {"comments": {"nodes": [
+            {"id": "c1", "body": "B", "url": "https://linear.app/x/comment/c1", "user": {"name": "Ada", "displayName": "   "}, "createdAt": "2026-01-01T00:00:00Z"},
+        ], "pageInfo": {"hasNextPage": false, "endCursor": null}}}});
+        let paged = transform_comments(data).unwrap();
+        assert_eq!(paged.nodes[0].author.as_deref(), Some("Ada"));
+    }
+
+    #[test]
+    fn transform_comments_accepts_empty_nodes() {
+        let data = serde_json::json!({"issue": {"comments": {"nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}}}});
+        let paged = transform_comments(data).unwrap();
+        assert!(paged.nodes.is_empty());
+    }
+
+    #[test]
+    fn transform_comments_rejects_missing_issue() {
+        let err = transform_comments(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+        let err = transform_comments(serde_json::json!({"issue": null})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+    }
+
+    #[test]
+    fn transform_comments_rejects_missing_comments() {
+        let err = transform_comments(serde_json::json!({"issue": {}})).unwrap_err();
+        assert_eq!(err, LinearError::MissingComments);
+        let err = transform_comments(serde_json::json!({"issue": {"comments": null}})).unwrap_err();
+        assert_eq!(err, LinearError::MissingComments);
+    }
+
+    #[test]
+    fn transform_comments_rejects_invalid_shape() {
+        let err = transform_comments(serde_json::json!({"issue": {"comments": {"nodes": {}}}}))
+            .unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
     }
 
     #[test]
