@@ -326,6 +326,34 @@ pub fn transform_comments(data: serde_json::Value) -> Result<Paginated<Comment>,
     }
 }
 
+pub fn comment_create_input(issue_id: &str, body: &str) -> serde_json::Value {
+    serde_json::json!({"issueId": issue_id.trim(), "body": body.trim()})
+}
+
+pub fn transform_comment_create(data: serde_json::Value) -> Result<Comment, LinearError> {
+    let payload = match data.get("commentCreate") {
+        None | Some(serde_json::Value::Null) => return Err(LinearError::MissingComments),
+        Some(payload) => payload,
+    };
+    if !payload
+        .get("success")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(LinearError::GraphQl("comment creation failed".to_string()));
+    }
+    match payload.get("comment") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::Parse(
+            "commentCreate.comment missing".to_string(),
+        )),
+        Some(comment) => {
+            let raw: RawComment = serde_json::from_value(comment.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?;
+            Ok(Comment::from(raw))
+        }
+    }
+}
+
 pub fn transform_teams(data: serde_json::Value) -> Result<Paginated<Team>, LinearError> {
     match data.get("teams") {
         None | Some(serde_json::Value::Null) => Err(LinearError::MissingTeams),
@@ -1263,6 +1291,57 @@ mod tests {
     fn transform_comments_rejects_invalid_shape() {
         let err = transform_comments(serde_json::json!({"issue": {"comments": {"nodes": {}}}}))
             .unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
+    }
+
+    #[test]
+    fn comment_create_input_trims_and_shapes_payload() {
+        let value = comment_create_input("  GUZ-84  ", "  progress note  ");
+        assert_eq!(
+            value,
+            serde_json::json!({"issueId": "GUZ-84", "body": "progress note"})
+        );
+    }
+
+    #[test]
+    fn transform_comment_create_parses_created_comment() {
+        let data = serde_json::json!({"commentCreate": {"success": true, "comment": {
+            "id": "c9", "body": "progress note",
+            "url": "https://linear.app/x/comment/c9",
+            "user": {"name": "Ada", "displayName": "Ada L"},
+            "createdAt": "2026-09-11T00:00:00Z",
+        }}});
+        let comment = transform_comment_create(data).unwrap();
+        assert_eq!(
+            comment,
+            Comment {
+                id: "c9".to_string(),
+                body: "progress note".to_string(),
+                url: "https://linear.app/x/comment/c9".to_string(),
+                author: Some("Ada L".to_string()),
+                created_at: "2026-09-11T00:00:00Z".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn transform_comment_create_rejects_failed_or_missing_payload() {
+        let err = transform_comment_create(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingComments);
+        let err = transform_comment_create(
+            serde_json::json!({"commentCreate": {"success": false, "comment": null}}),
+        )
+        .unwrap_err();
+        assert!(matches!(err, LinearError::GraphQl(_)));
+        let err = transform_comment_create(
+            serde_json::json!({"commentCreate": {"success": true, "comment": null}}),
+        )
+        .unwrap_err();
+        assert!(matches!(err, LinearError::Parse(_)));
+        let err = transform_comment_create(
+            serde_json::json!({"commentCreate": {"success": true, "comment": {"id": 1}}}),
+        )
+        .unwrap_err();
         assert!(matches!(err, LinearError::Parse(_)));
     }
 
