@@ -175,11 +175,9 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
     let primer = match std::fs::read_to_string(&primer_path) {
         Ok(p) => p,
         Err(_) => {
-            crate::prelude::eprintln!(
-                "Primer not found at {}. Run `atlas init` first. Skipping descriptions.",
-                primer_path.display()
-            );
+            crate::prelude::eprintln!("structural-only, enrichment pending");
             db.set_metadata("last_update", &epoch_now())?;
+            print_elapsed(start);
             return Ok(());
         }
     };
@@ -203,6 +201,13 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
             None
         }
     };
+
+    if file_provider_opt.is_none() && dir_provider_opt.is_none() {
+        crate::prelude::eprintln!("structural-only, enrichment pending");
+        db.set_metadata("last_update", &epoch_now())?;
+        print_elapsed(start);
+        return Ok(());
+    }
 
     let parallel = opts.parallel.max(1);
 
