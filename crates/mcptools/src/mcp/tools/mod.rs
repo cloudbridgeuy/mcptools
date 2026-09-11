@@ -4,6 +4,7 @@ mod atlassian;
 mod greprag;
 mod hn;
 mod images;
+mod linear;
 mod md;
 mod pdf;
 mod strand;
@@ -1089,6 +1090,279 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "properties": {}
             }),
         },
+        Tool {
+            name: "linear_auth_status".to_string(),
+            description: "Show the Linear viewer identity for LINEAR_API_KEY. Returns id, name, and email. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        Tool {
+            name: "linear_issue_get".to_string(),
+            description: "Get one Linear issue by id or identifier (e.g. GUZ-85). Returns id, identifier, title, URL, state, parent, and blocked-by relations. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Issue id or identifier (e.g. GUZ-85)"
+                    }
+                },
+                "required": ["id"]
+            }),
+        },
+        Tool {
+            name: "linear_issue_list".to_string(),
+            description: "List Linear issues with filters. Returns nodes with id, identifier, title, state, parent, blocked-by plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "team": {
+                        "type": "string",
+                        "description": "Team id, key, or name"
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Project id or name (names need team)"
+                    },
+                    "assignee": {
+                        "type": "string",
+                        "description": "Assignee user UUID or 'me'"
+                    },
+                    "state": {
+                        "type": "string",
+                        "description": "Workflow state name (e.g. Todo)"
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Label name"
+                    },
+                    "cycle": {
+                        "type": "string",
+                        "description": "Cycle number or id"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Title substring to search"
+                    },
+                    "updatedAfter": {
+                        "type": "string",
+                        "description": "Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Max items per page (default: 25)"
+                    },
+                    "cursor": {
+                        "type": "string",
+                        "description": "Page cursor for pagination"
+                    },
+                    "all": {
+                        "type": "boolean",
+                        "description": "Fetch all pages (up to 50 items)"
+                    }
+                },
+                "required": []
+            }),
+        },
+        Tool {
+            name: "linear_comment_list".to_string(),
+            description: "List comments on one Linear issue. Returns nodes with id, author, body, createdAt plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Issue id or identifier (e.g. GUZ-84)"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Max items per page (default: 25)"
+                    },
+                    "cursor": {
+                        "type": "string",
+                        "description": "Page cursor for pagination"
+                    },
+                    "all": {
+                        "type": "boolean",
+                        "description": "Fetch all pages (up to 50 items)"
+                    }
+                },
+                "required": ["id"]
+            }),
+        },
+        Tool {
+            name: "linear_relation_list".to_string(),
+            description: "List relations on one Linear issue. Returns nodes with id, type, issue, related issue, direction plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Issue id or identifier (e.g. GUZ-84)"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Max items per page (default: 25)"
+                    },
+                    "cursor": {
+                        "type": "string",
+                        "description": "Page cursor for pagination"
+                    },
+                    "all": {
+                        "type": "boolean",
+                        "description": "Fetch all pages (up to 50 items)"
+                    }
+                },
+                "required": ["id"]
+            }),
+        },
+        Tool {
+            name: "linear_team_list".to_string(),
+            description: "List Linear teams. Returns nodes with id, key, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "number",
+                        "description": "Max items per page (default: 25)"
+                    },
+                    "cursor": {
+                        "type": "string",
+                        "description": "Page cursor for pagination"
+                    },
+                    "all": {
+                        "type": "boolean",
+                        "description": "Fetch all pages (up to 50 items)"
+                    }
+                },
+                "required": []
+            }),
+        },
+        Tool {
+            name: "linear_team_get".to_string(),
+            description: "Get one Linear team by id, key, or name. Returns id, key, name. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "Team id, key, or name"
+                    }
+                },
+                "required": ["selector"]
+            }),
+        },
+        Tool {
+            name: "linear_project_list".to_string(),
+            description: "List Linear projects in a team. Returns nodes with id, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "team": {
+                        "type": "string",
+                        "description": "Team id, key, or name"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Max items per page (default: 25)"
+                    },
+                    "cursor": {
+                        "type": "string",
+                        "description": "Page cursor for pagination"
+                    },
+                    "all": {
+                        "type": "boolean",
+                        "description": "Fetch all pages (up to 50 items)"
+                    }
+                },
+                "required": ["team"]
+            }),
+        },
+        Tool {
+            name: "linear_project_get".to_string(),
+            description: "Get one Linear project by id or name within a team. Returns id, name. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Project id or name"
+                    },
+                    "team": {
+                        "type": "string",
+                        "description": "Team id, key, or name"
+                    }
+                },
+                "required": ["id", "team"]
+            }),
+        },
+        Tool {
+            name: "linear_user_list".to_string(),
+            description: "List Linear users matching a name query. Returns nodes with id, name, email plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Name substring to search"
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Max items per page (default: 25)"
+                    },
+                    "cursor": {
+                        "type": "string",
+                        "description": "Page cursor for pagination"
+                    }
+                },
+                "required": ["query"]
+            }),
+        },
+        Tool {
+            name: "linear_state_list".to_string(),
+            description: "List workflow states in a Linear team. Returns nodes with id, name, type plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "team": {
+                        "type": "string",
+                        "description": "Team id, key, or name"
+                    }
+                },
+                "required": ["team"]
+            }),
+        },
+        Tool {
+            name: "linear_label_list".to_string(),
+            description: "List labels in a Linear team. Returns nodes with id, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "team": {
+                        "type": "string",
+                        "description": "Team id, key, or name"
+                    }
+                },
+                "required": ["team"]
+            }),
+        },
+        Tool {
+            name: "linear_cycle_list".to_string(),
+            description: "List cycles in a Linear team. Returns nodes with id, number, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "team": {
+                        "type": "string",
+                        "description": "Team id, key, or name"
+                    }
+                },
+                "required": ["team"]
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -1183,6 +1457,21 @@ pub async fn handle_tools_call(
         "atlas_tree_view" => atlas::handle_atlas_tree_view(params.arguments, global).await,
         "atlas_peek" => atlas::handle_atlas_peek(params.arguments, global).await,
         "atlas_status" => atlas::handle_atlas_status(params.arguments, global).await,
+        "linear_auth_status" => linear::handle_linear_auth_status(params.arguments, global).await,
+        "linear_issue_get" => linear::handle_linear_issue_get(params.arguments, global).await,
+        "linear_issue_list" => linear::handle_linear_issue_list(params.arguments, global).await,
+        "linear_comment_list" => linear::handle_linear_comment_list(params.arguments, global).await,
+        "linear_relation_list" => {
+            linear::handle_linear_relation_list(params.arguments, global).await
+        }
+        "linear_team_list" => linear::handle_linear_team_list(params.arguments, global).await,
+        "linear_team_get" => linear::handle_linear_team_get(params.arguments, global).await,
+        "linear_project_list" => linear::handle_linear_project_list(params.arguments, global).await,
+        "linear_project_get" => linear::handle_linear_project_get(params.arguments, global).await,
+        "linear_user_list" => linear::handle_linear_user_list(params.arguments, global).await,
+        "linear_state_list" => linear::handle_linear_state_list(params.arguments, global).await,
+        "linear_label_list" => linear::handle_linear_label_list(params.arguments, global).await,
+        "linear_cycle_list" => linear::handle_linear_cycle_list(params.arguments, global).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),
