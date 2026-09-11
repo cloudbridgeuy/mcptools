@@ -82,6 +82,8 @@ pub enum IssueRelationsCommands {
     List(RelationsListOptions),
     /// Add a relation from one issue to another
     Add(RelationsAddOptions),
+    /// Remove a relation from one issue to another
+    Remove(RelationsRemoveOptions),
 }
 
 #[derive(Debug, clap::Args, Clone)]
@@ -137,6 +139,21 @@ pub struct RelationsListOptions {
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct RelationsAddOptions {
+    /// Source issue id or identifier (e.g. GUZ-84)
+    pub source: String,
+    /// Target related issue id or identifier
+    #[arg(long)]
+    pub related: String,
+    /// Relation type
+    #[arg(long = "type", value_name = "TYPE")]
+    pub rel_type: String,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct RelationsRemoveOptions {
     /// Source issue id or identifier (e.g. GUZ-84)
     pub source: String,
     /// Target related issue id or identifier
@@ -382,6 +399,7 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
             IssueCommands::Relations(cmd) => match cmd {
                 IssueRelationsCommands::List(options) => relations_list_handler(options).await,
                 IssueRelationsCommands::Add(options) => relations_add_handler(options).await,
+                IssueRelationsCommands::Remove(options) => relations_remove_handler(options).await,
             },
         },
         Commands::Teams(cmd) => match cmd {
@@ -725,6 +743,30 @@ async fn relations_add_handler(options: RelationsAddOptions) -> Result<()> {
         ]);
         table.printstd();
         println!("status: {}", status);
+    }
+    Ok(())
+}
+
+async fn relations_remove_handler(options: RelationsRemoveOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let deleted = relations::relation_remove_by_triple(
+        &client,
+        &options.source,
+        &options.related,
+        &options.rel_type,
+    )
+    .await?;
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({"deleted_relation_id": deleted}))?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID"]);
+        table.add_row(prettytable::row![deleted]);
+        table.printstd();
     }
     Ok(())
 }

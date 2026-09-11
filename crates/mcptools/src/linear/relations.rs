@@ -5,6 +5,8 @@ pub const RELATIONS_QUERY: &str = "query IssueRelations($id: String!, $first: In
 
 pub const RELATION_CREATE_MUTATION: &str = "mutation IssueRelationCreate($input: IssueRelationCreateInput!) { issueRelationCreate(input: $input) { success issueRelation { id type issue { id identifier } relatedIssue { id identifier } } } }";
 
+pub const RELATION_DELETE_MUTATION: &str = "mutation IssueRelationDelete($id: String!) { issueRelationDelete(id: $id) { success entityId } }";
+
 pub async fn relations_list_data(
     client: &reqwest::Client,
     issue: &str,
@@ -86,6 +88,117 @@ pub async fn relation_add_data(
         )
     })?;
     parse_relation_create(data, from, to, kind).map(|relation| (relation, true))
+}
+
+pub async fn relation_remove_by_triple(
+    client: &reqwest::Client,
+    source: &str,
+    target: &str,
+    rel_type: &str,
+) -> Result<String> {
+    let from = source.trim();
+    let to = target.trim();
+    let kind = rel_type.trim();
+    if from.is_empty() || to.is_empty() {
+        return Err(eyre!("Linear issue id must not be empty"));
+    }
+    if kind != "blocks" && kind != "related" {
+        return Err(eyre!("relation type must be one of: blocks, related"));
+    }
+    if from.to_lowercase() == to.to_lowercase() {
+        return Err(eyre!("cannot relate issue '{}' to itself", from));
+    }
+    let want_source = from.to_lowercase();
+    let want_target = to.to_lowercase();
+    let mut matches = Vec::new();
+    let mut seen = 0usize;
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = relations_list_data(client, from, 25, cursor.clone()).await?;
+        seen += page.nodes.len();
+        matches.extend(
+            page.nodes
+                .iter()
+                .filter(|node| triple_matches(node, &want_source, &want_target, kind))
+                .cloned(),
+        );
+        match page
+            .page_info
+            .has_next
+            .then(|| page.page_info.end_cursor.clone())
+            .flatten()
+        {
+            Some(next) if seen < 50 => cursor = Some(next),
+            _ => break,
+        }
+    }
+    let target_relation = select_single_match(matches, from, to, kind)?;
+    let data = execute(
+        client,
+        RELATION_DELETE_MUTATION,
+        serde_json::json!({"id": target_relation.id}),
+    )
+    .await
+    .map_err(|e| {
+        eyre!(
+            "{}; re-list relations for '{}' and match the triple to reconcile",
+            e,
+            from
+        )
+    })?;
+    parse_relation_delete(data, &target_relation.id)
+}
+
+fn select_single_match(
+    matches: Vec<mcptools_core::linear::IssueRelation>,
+    source: &str,
+    target: &str,
+    rel_type: &str,
+) -> Result<mcptools_core::linear::IssueRelation> {
+    match matches.len() {
+        0 => Err(eyre!(
+            "no such relation: '{}' {} '{}'",
+            source,
+            rel_type,
+            target
+        )),
+        1 => Ok(matches.into_iter().next().unwrap()),
+        _ => {
+            let ids = matches
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(eyre!(
+                "multiple relations match '{}' {} '{}': {}",
+                source,
+                rel_type,
+                target,
+                ids
+            ))
+        }
+    }
+}
+
+fn parse_relation_delete(data: serde_json::Value, fallback_id: &str) -> Result<String> {
+    let payload = match data.get("issueRelationDelete") {
+        None | Some(serde_json::Value::Null) => {
+            return Err(eyre!("Linear response missing relations field"));
+        }
+        Some(payload) => payload,
+    };
+    if !payload
+        .get("success")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(eyre!("relation deletion failed"));
+    }
+    Ok(payload
+        .get("entityId")
+        .and_then(serde_json::Value::as_str)
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| fallback_id.to_string()))
 }
 
 fn triple_matches(
@@ -226,6 +339,96 @@ mod tests {
                 .unwrap_err();
             assert!(err.to_string().contains("blocks, related"), "{rel_type}");
         }
+    }
+
+    #[tokio::test]
+    async fn remove_rejects_empty_ids_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        let err = relation_remove_by_triple(&client, "   ", "GUZ-81", "related")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+        let err = relation_remove_by_triple(&client, "GUZ-84", "", "related")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[tokio::test]
+    async fn remove_rejects_self_relation_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        for (source, target) in [("GUZ-84", "GUZ-84"), ("GUZ-84", "guz-84")] {
+            let err = relation_remove_by_triple(&client, source, target, "related")
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("itself"), "{source}/{target}");
+        }
+    }
+
+    #[tokio::test]
+    async fn remove_rejects_unsupported_type_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        for rel_type in ["", "blocked-by", "duplicate", "Blocks"] {
+            let err = relation_remove_by_triple(&client, "GUZ-84", "GUZ-81", rel_type)
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("blocks, related"), "{rel_type}");
+        }
+    }
+
+    #[test]
+    fn selects_single_match_or_refuses_zero_and_many() {
+        let edge = mcptools_core::linear::IssueRelation {
+            id: "r1".to_string(),
+            rel_type: "related".to_string(),
+            issue: "GUZ-84".to_string(),
+            related_issue: "GUZ-81".to_string(),
+            direction: "outgoing".to_string(),
+        };
+        let err = select_single_match(vec![], "GUZ-84", "GUZ-81", "related").unwrap_err();
+        assert!(err.to_string().contains("no such relation"));
+        let picked =
+            select_single_match(vec![edge.clone()], "GUZ-84", "GUZ-81", "related").unwrap();
+        assert_eq!(picked.id, "r1");
+        let second = mcptools_core::linear::IssueRelation {
+            id: "r2".to_string(),
+            ..edge.clone()
+        };
+        let err =
+            select_single_match(vec![edge, second], "GUZ-84", "GUZ-81", "related").unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("multiple relations"), "{text}");
+        assert!(text.contains("r1"), "{text}");
+        assert!(text.contains("r2"), "{text}");
+    }
+
+    #[test]
+    fn parses_deleted_relation_payload() {
+        let data = serde_json::json!({"issueRelationDelete": {"success": true, "entityId": "r9"}});
+        assert_eq!(parse_relation_delete(data, "r9").unwrap(), "r9");
+        let data = serde_json::json!({"issueRelationDelete": {"success": true}});
+        assert_eq!(parse_relation_delete(data, "r9").unwrap(), "r9");
+    }
+
+    #[test]
+    fn rejects_failed_or_missing_delete_payload() {
+        let err = parse_relation_delete(serde_json::json!({}), "r9").unwrap_err();
+        assert!(err.to_string().contains("missing relations"));
+        let err = parse_relation_delete(
+            serde_json::json!({"issueRelationDelete": {"success": false}}),
+            "r9",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("deletion failed"));
     }
 
     #[test]
