@@ -1363,6 +1363,140 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                 "required": ["team"]
             }),
         },
+        Tool {
+            name: "linear_issue_create".to_string(),
+            description: "Create a Linear issue in a team. Returns id, identifier, title, URL, state, parent. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "team": {
+                        "type": "string",
+                        "description": "Team id, key, or name"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Issue title"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Issue description"
+                    },
+                    "state": {
+                        "type": "string",
+                        "description": "Workflow state name or UUID"
+                    },
+                    "assignee": {
+                        "type": "string",
+                        "description": "Assignee user UUID or 'me'"
+                    }
+                },
+                "required": ["team", "title"]
+            }),
+        },
+        Tool {
+            name: "linear_issue_update".to_string(),
+            description: "Update a Linear issue by id or identifier. Needs at least one of title, description, state, assignee, parent, clearParent. Returns the updated issue. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Issue id or identifier (e.g. GUZ-85)"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "New title"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "New description"
+                    },
+                    "state": {
+                        "type": "string",
+                        "description": "Workflow state name or UUID (names need team)"
+                    },
+                    "team": {
+                        "type": "string",
+                        "description": "Team id, key, or name for state lookup"
+                    },
+                    "assignee": {
+                        "type": "string",
+                        "description": "Assignee user UUID or 'me'"
+                    },
+                    "parent": {
+                        "type": "string",
+                        "description": "Parent issue id or identifier"
+                    },
+                    "clearParent": {
+                        "type": "boolean",
+                        "description": "Clear the parent issue (cannot combine with parent)"
+                    }
+                },
+                "required": ["id"]
+            }),
+        },
+        Tool {
+            name: "linear_comment_create".to_string(),
+            description: "Create a comment on a Linear issue. Returns id, body, URL, author, createdAt. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Issue id or identifier (e.g. GUZ-84)"
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Comment body text (must not be empty)"
+                    }
+                },
+                "required": ["id", "body"]
+            }),
+        },
+        Tool {
+            name: "linear_relation_add".to_string(),
+            description: "Add a relation between two Linear issues. Type is 'blocks' or 'related'. Returns status created or already_exists plus the relation. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Source issue id or identifier (e.g. GUZ-84)"
+                    },
+                    "related": {
+                        "type": "string",
+                        "description": "Related issue id or identifier"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Relation type: blocks or related"
+                    }
+                },
+                "required": ["source", "related", "type"]
+            }),
+        },
+        Tool {
+            name: "linear_relation_remove".to_string(),
+            description: "Remove a relation between two Linear issues matched by source, related, type triple. Returns the deleted relation id. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Source issue id or identifier (e.g. GUZ-84)"
+                    },
+                    "related": {
+                        "type": "string",
+                        "description": "Related issue id or identifier"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Relation type: blocks or related"
+                    }
+                },
+                "required": ["source", "related", "type"]
+            }),
+        },
     ];
 
     let result = ToolsList { tools };
@@ -1472,6 +1606,15 @@ pub async fn handle_tools_call(
         "linear_state_list" => linear::handle_linear_state_list(params.arguments, global).await,
         "linear_label_list" => linear::handle_linear_label_list(params.arguments, global).await,
         "linear_cycle_list" => linear::handle_linear_cycle_list(params.arguments, global).await,
+        "linear_issue_create" => linear::handle_linear_issue_create(params.arguments, global).await,
+        "linear_issue_update" => linear::handle_linear_issue_update(params.arguments, global).await,
+        "linear_comment_create" => {
+            linear::handle_linear_comment_create(params.arguments, global).await
+        }
+        "linear_relation_add" => linear::handle_linear_relation_add(params.arguments, global).await,
+        "linear_relation_remove" => {
+            linear::handle_linear_relation_remove(params.arguments, global).await
+        }
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),

@@ -74,6 +74,29 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `bitbucket_pr_list` | List Bitbucket PRs |
 | `bitbucket_pr_read` | Read PR details/diff |
 
+### Linear
+
+| Tool | Description |
+|------|-------------|
+| `linear_auth_status` | Show Linear viewer identity |
+| `linear_issue_get` | Get one Linear issue |
+| `linear_issue_list` | List Linear issues with filters |
+| `linear_issue_create` | Create a Linear issue |
+| `linear_issue_update` | Update a Linear issue |
+| `linear_comment_list` | List comments on an issue |
+| `linear_comment_create` | Create a comment on an issue |
+| `linear_relation_list` | List relations on an issue |
+| `linear_relation_add` | Add a relation between issues |
+| `linear_relation_remove` | Remove a relation by triple |
+| `linear_team_list` | List Linear teams |
+| `linear_team_get` | Get one Linear team |
+| `linear_project_list` | List projects in a team |
+| `linear_project_get` | Get one project in a team |
+| `linear_user_list` | List users matching a query |
+| `linear_state_list` | List workflow states in a team |
+| `linear_label_list` | List labels in a team |
+| `linear_cycle_list` | List cycles in a team |
+
 ### HackerNews
 
 | Tool | Description |

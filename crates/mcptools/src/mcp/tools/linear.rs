@@ -428,6 +428,172 @@ pub async fn handle_linear_label_list(
     text_result(serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info}))
 }
 
+pub async fn handle_linear_issue_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct Args {
+        team: String,
+        title: String,
+        description: Option<String>,
+        state: Option<String>,
+        assignee: Option<String>,
+    }
+    let args: Args = parse_args(arguments)?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_issue_create: team={}, title={}",
+            args.team, args.title
+        );
+    }
+    let client = linear_client()?;
+    let created = crate::linear::issue::issue_create_data(
+        &client,
+        &args.team,
+        &args.title,
+        args.description.as_deref(),
+        args.state.as_deref(),
+        args.assignee.as_deref(),
+    )
+    .await
+    .map_err(exec)?;
+    text_result(created)
+}
+
+pub async fn handle_linear_issue_update(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct Args {
+        id: String,
+        title: Option<String>,
+        description: Option<String>,
+        state: Option<String>,
+        team: Option<String>,
+        assignee: Option<String>,
+        parent: Option<String>,
+        #[serde(default, rename = "clearParent", alias = "clear_parent")]
+        clear_parent: bool,
+    }
+    let args: Args = parse_args(arguments)?;
+    if args.parent.is_some() && args.clear_parent {
+        return Err(exec(color_eyre::eyre::eyre!(
+            "Linear issue update accepts only one of parent or clearParent"
+        )));
+    }
+    if global.verbose {
+        eprintln!("Calling linear_issue_update: id={}", args.id);
+    }
+    let parent = if args.clear_parent {
+        Some(None)
+    } else {
+        args.parent.map(Some)
+    };
+    let client = linear_client()?;
+    let updated = crate::linear::issue::issue_update_data(
+        &client,
+        &args.id,
+        args.title.as_deref(),
+        args.description.as_deref(),
+        args.state.as_deref(),
+        args.team.as_deref(),
+        args.assignee.as_deref(),
+        parent,
+    )
+    .await
+    .map_err(exec)?;
+    text_result(updated)
+}
+
+pub async fn handle_linear_comment_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct Args {
+        id: String,
+        body: String,
+    }
+    let args: Args = parse_args(arguments)?;
+    if global.verbose {
+        eprintln!("Calling linear_comment_create: id={}", args.id);
+    }
+    let body = crate::linear::comments::normalize_comment_body(&args.body).map_err(exec)?;
+    let client = linear_client()?;
+    let created = crate::linear::comments::comment_create_data(&client, &args.id, &body)
+        .await
+        .map_err(exec)?;
+    text_result(created)
+}
+
+pub async fn handle_linear_relation_add(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct Args {
+        source: String,
+        related: String,
+        #[serde(rename = "type")]
+        rel_type: String,
+    }
+    let args: Args = parse_args(arguments)?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_relation_add: source={}, related={}, type={}",
+            args.source, args.related, args.rel_type
+        );
+    }
+    let client = linear_client()?;
+    let (relation, created) = crate::linear::relations::relation_add_data(
+        &client,
+        &args.source,
+        &args.related,
+        &args.rel_type,
+    )
+    .await
+    .map_err(exec)?;
+    text_result(serde_json::json!({
+        "status": if created { "created" } else { "already_exists" },
+        "id": relation.id,
+        "type": relation.rel_type,
+        "issue": relation.issue,
+        "relatedIssue": relation.related_issue,
+    }))
+}
+
+pub async fn handle_linear_relation_remove(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    #[derive(Deserialize)]
+    struct Args {
+        source: String,
+        related: String,
+        #[serde(rename = "type")]
+        rel_type: String,
+    }
+    let args: Args = parse_args(arguments)?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_relation_remove: source={}, related={}, type={}",
+            args.source, args.related, args.rel_type
+        );
+    }
+    let client = linear_client()?;
+    let deleted = crate::linear::relations::relation_remove_by_triple(
+        &client,
+        &args.source,
+        &args.related,
+        &args.rel_type,
+    )
+    .await
+    .map_err(exec)?;
+    text_result(serde_json::json!({"deleted_relation_id": deleted}))
+}
+
 pub async fn handle_linear_cycle_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
