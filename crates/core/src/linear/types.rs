@@ -443,6 +443,10 @@ pub fn comment_create_input(issue_id: &str, body: &str) -> serde_json::Value {
     serde_json::json!({"issueId": issue_id.trim(), "body": body.trim()})
 }
 
+pub fn relation_add_input(issue: &str, related: &str, rel_type: &str) -> serde_json::Value {
+    serde_json::json!({"issueId": issue.trim(), "relatedIssueId": related.trim(), "type": rel_type.trim()})
+}
+
 pub fn transform_comment_create(data: serde_json::Value) -> Result<Comment, LinearError> {
     let payload = match data.get("commentCreate") {
         None | Some(serde_json::Value::Null) => return Err(LinearError::MissingComments),
@@ -1424,6 +1428,15 @@ mod tests {
         assert_eq!(
             value,
             serde_json::json!({"issueId": "GUZ-84", "body": "progress note"})
+        );
+    }
+
+    #[test]
+    fn relation_add_input_trims_and_shapes_payload() {
+        let value = relation_add_input("  GUZ-84  ", "  GUZ-85  ", "  blocks  ");
+        assert_eq!(
+            value,
+            serde_json::json!({"issueId": "GUZ-84", "relatedIssueId": "GUZ-85", "type": "blocks"})
         );
     }
 

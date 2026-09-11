@@ -80,6 +80,8 @@ pub enum IssueCommentsCommands {
 pub enum IssueRelationsCommands {
     /// List relations on one issue
     List(RelationsListOptions),
+    /// Add a relation from one issue to another
+    Add(RelationsAddOptions),
 }
 
 #[derive(Debug, clap::Args, Clone)]
@@ -128,6 +130,21 @@ pub struct RelationsListOptions {
     /// Fetch all pages (up to 50 items)
     #[arg(long)]
     pub all: bool,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct RelationsAddOptions {
+    /// Source issue id or identifier (e.g. GUZ-84)
+    pub source: String,
+    /// Target related issue id or identifier
+    #[arg(long)]
+    pub related: String,
+    /// Relation type
+    #[arg(long = "type", value_name = "TYPE")]
+    pub rel_type: String,
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
@@ -364,6 +381,7 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
             },
             IssueCommands::Relations(cmd) => match cmd {
                 IssueRelationsCommands::List(options) => relations_list_handler(options).await,
+                IssueRelationsCommands::Add(options) => relations_add_handler(options).await,
             },
         },
         Commands::Teams(cmd) => match cmd {
@@ -660,6 +678,53 @@ async fn relations_list_handler(options: RelationsListOptions) -> Result<()> {
             page_info.has_next,
             page_info.end_cursor.as_deref().unwrap_or("")
         );
+    }
+    Ok(())
+}
+
+async fn relations_add_handler(options: RelationsAddOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let (relation, created) = relations::relation_add_data(
+        &client,
+        &options.source,
+        &options.related,
+        &options.rel_type,
+    )
+    .await?;
+    let status = match created {
+        true => "created",
+        false => "already_exists",
+    };
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "status": status,
+                "id": relation.id,
+                "type": relation.rel_type,
+                "issue": relation.issue,
+                "relatedIssue": relation.related_issue,
+            }))?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row![
+            "ID",
+            "Type",
+            "Issue",
+            "Related",
+            "Direction"
+        ]);
+        table.add_row(prettytable::row![
+            relation.id,
+            relation.rel_type,
+            relation.issue,
+            relation.related_issue,
+            relation.direction
+        ]);
+        table.printstd();
+        println!("status: {}", status);
     }
     Ok(())
 }
