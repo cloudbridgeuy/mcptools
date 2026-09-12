@@ -21,7 +21,7 @@ def parse_trials(raw):
     return [float(v) for v in raw.split(",") if v]
 
 
-def render_record(env, trials, counts, old):
+def render_record(env, trials, counts, old, enrichment=None, tasks=None):
     structural = {}
     for name in ("initial", "incremental", "tree", "peek"):
         median, spread = summarize(trials[name])
@@ -33,15 +33,88 @@ def render_record(env, trials, counts, old):
     structural["files"] = counts["files"]
     structural["dirs"] = counts["dirs"]
     structural["symbols"] = counts["symbols"]
-    return {"env": env, "structural": structural, "old_single_local_runs_s": old}
+    record = {"env": env, "structural": structural, "old_single_local_runs_s": old}
+    if enrichment is not None:
+        record["enrichment"] = enrichment
+    if tasks is not None:
+        record["tasks"] = tasks
+    return record
+
+
+def enrichment_ok(provider, model, requests, elapsed_s, primer_sha256, parallel):
+    return {
+        "status": "ok",
+        "provider": provider,
+        "model": model,
+        "requests": requests,
+        "elapsed_s": round(elapsed_s, 3),
+        "primer_sha256": primer_sha256,
+        "parallel": parallel,
+    }
+
+
+def enrichment_missing(provider, model, reason):
+    return {
+        "status": "missing",
+        "provider": provider,
+        "model": model,
+        "reason": reason,
+    }
+
+
+def parse_task(raw):
+    name, target_file, target_symbol, trials_raw, correct_raw = raw.split("|", 4)
+    values = [float(v) for v in trials_raw.split(",") if v]
+    median, spread = summarize(values)
+    return {
+        "task": name,
+        "target_file": target_file,
+        "target_symbol": target_symbol,
+        "time_to_context_s": {
+            "median": round(median, 3),
+            "spread": round(spread, 3),
+            "trials": values,
+        },
+        "correct": correct_raw == "1",
+    }
+
+
+def count_descriptions(db_path):
+    import sqlite3
+
+    failed_marker = "[description failed]"
+    db = sqlite3.connect(db_path)
+    try:
+        files = db.execute(
+            "SELECT short_description FROM files"
+        ).fetchall()
+        dirs = db.execute(
+            "SELECT short_description FROM directories"
+        ).fetchall()
+    finally:
+        db.close()
+    described = lambda rows: sum(1 for (s,) in rows if s and s != failed_marker)
+    failed = lambda rows: sum(1 for (s,) in rows if s == failed_marker)
+    return {
+        "files_described": described(files),
+        "files_failed": failed(files),
+        "dirs_described": described(dirs),
+        "dirs_failed": failed(dirs),
+    }
 
 
 def render_console(record):
     env = record["env"]
     structural = record["structural"]
     old = record["old_single_local_runs_s"]
+    gated = "enrichment" in record
+    title = (
+        "atlas baseline (gated enrichment, explicit provider)"
+        if gated
+        else "atlas baseline (structural only, no model calls)"
+    )
     lines = [
-        "atlas baseline (structural only, no model calls)",
+        title,
         "mcptools rev: " + env["mcptools_rev"] + env["mcptools_dirty"],
         "llm_stream rev: " + env["llm_stream_rev"] + env["llm_stream_dirty"],
         "binary: " + env["binary_version"],
@@ -72,8 +145,49 @@ def render_console(record):
             + format(old[name], ".3f")
             + "s)"
         )
-    lines.append("enrichment: not built yet")
+    if not gated:
+        lines.append("enrichment: not built yet")
+        return "\n".join(lines) + "\n"
+    lines.append(render_enrichment_line(record["enrichment"]))
+    for task in record.get("tasks", []):
+        lines.append(render_task_line(task))
     return "\n".join(lines) + "\n"
+
+
+def render_enrichment_line(enrichment):
+    if enrichment["status"] == "ok":
+        return (
+            "enrichment: ok (provider "
+            + enrichment["provider"]
+            + " model "
+            + enrichment["model"]
+            + ", "
+            + str(enrichment["requests"])
+            + " requests, "
+            + format(enrichment["elapsed_s"], ".3f")
+            + "s elapsed)"
+        )
+    return "enrichment: missing (" + enrichment["reason"] + ")"
+
+
+def render_task_line(task):
+    timing = task["time_to_context_s"]
+    return (
+        "task "
+        + task["task"]
+        + ": "
+        + format(timing["median"], ".3f")
+        + "s median spread "
+        + format(timing["spread"], ".3f")
+        + "s over "
+        + str(len(timing["trials"]))
+        + " trials target "
+        + task["target_file"]
+        + " :: "
+        + task["target_symbol"]
+        + " correct="
+        + ("true" if task["correct"] else "false")
+    )
 
 
 def build_parser():
@@ -95,6 +209,16 @@ def build_parser():
     parser.add_argument("--dirs", type=int, required=True)
     parser.add_argument("--symbols", type=int, required=True)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--provider", default="")
+    parser.add_argument("--model", default="")
+    parser.add_argument("--enrich-status", default="")
+    parser.add_argument("--enrich-reason", default="")
+    parser.add_argument("--enrich-requests", type=int, default=0)
+    parser.add_argument("--enrich-elapsed", type=float, default=0.0)
+    parser.add_argument("--enrich-primer-sha", default="")
+    parser.add_argument("--enrich-parallel", type=int, default=0)
+    parser.add_argument("--task", action="append", default=[])
+    parser.add_argument("--count-db", default="")
     return parser
 
 
@@ -119,7 +243,24 @@ def main(argv):
     }
     counts = {"files": args.files, "dirs": args.dirs, "symbols": args.symbols}
     old = {"initial": 0.262, "incremental": 0.051, "tree": 0.015, "peek": 0.075}
-    record = render_record(env, trials, counts, old)
+    enrichment = None
+    tasks = None
+    if args.enrich_status:
+        if args.enrich_status == "ok":
+            enrichment = enrichment_ok(
+                args.provider,
+                args.model,
+                args.enrich_requests,
+                args.enrich_elapsed,
+                args.enrich_primer_sha,
+                args.enrich_parallel,
+            )
+        else:
+            enrichment = enrichment_missing(
+                args.provider, args.model, args.enrich_reason
+            )
+        tasks = [parse_task(raw) for raw in args.task]
+    record = render_record(env, trials, counts, old, enrichment, tasks)
     if args.json:
         sys.stderr.write(render_console(record))
         sys.stdout.write(json.dumps(record, indent=2) + "\n")
@@ -129,4 +270,8 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    if "--count-db" in sys.argv[1:]:
+        target = sys.argv[sys.argv.index("--count-db") + 1]
+        sys.stdout.write(json.dumps(count_descriptions(target)) + "\n")
+    else:
+        sys.exit(main(sys.argv[1:]))
