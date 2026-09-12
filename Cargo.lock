@@ -2043,7 +2043,6 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "shlex",
  "tempfile",
  "terminal_size",
  "thiserror 2.0.18",

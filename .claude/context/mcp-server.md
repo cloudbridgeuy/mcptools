@@ -111,12 +111,6 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `md_fetch` | Fetch page as Markdown |
 | `md_toc` | Extract table of contents |
 
-### Strand
-
-| Tool | Description |
-|------|-------------|
-| `generate_code` | Generate Rust code via local Ollama model |
-
 ### PDF
 
 | Tool | Description |

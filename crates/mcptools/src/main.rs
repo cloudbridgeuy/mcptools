@@ -7,7 +7,6 @@ mod agent;
 mod atlas;
 mod atlassian;
 mod error;
-mod greprag;
 mod hn;
 mod images;
 mod linear;
@@ -16,7 +15,6 @@ mod mcp;
 mod md;
 mod pdf;
 mod prelude;
-mod strand;
 mod upgrade;
 
 #[derive(Debug, clap::Parser)]
@@ -52,9 +50,6 @@ pub enum SubCommands {
     /// Atlassian (Jira, Confluence) operations
     Atlassian(Box<crate::atlassian::App>),
 
-    /// Retrieve relevant code context from a repository using GrepRAG
-    GrepRag(crate::greprag::App),
-
     /// HackerNews (news.ycombinator.com) operations
     HN(crate::hn::App),
 
@@ -69,9 +64,6 @@ pub enum SubCommands {
 
     /// PDF document navigation and extraction
     Pdf(crate::pdf::App),
-
-    /// Local Rust code generation using Ollama
-    Strand(crate::strand::App),
 
     Linear(crate::linear::App),
 
@@ -90,13 +82,11 @@ async fn main() -> Result<()> {
         SubCommands::Agent(sub_app) => crate::agent::run(sub_app, app.global).await,
         SubCommands::Atlas(sub_app) => crate::atlas::run(sub_app, app.global).await,
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(*sub_app, app.global).await,
-        SubCommands::GrepRag(sub_app) => crate::greprag::run(sub_app, app.global).await,
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
         SubCommands::Images(sub_app) => crate::images::run(sub_app, app.global).await,
         SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,
         SubCommands::MD(sub_app) => crate::md::run(sub_app, app.global).await,
         SubCommands::Pdf(sub_app) => crate::pdf::run(sub_app, app.global).await,
-        SubCommands::Strand(sub_app) => crate::strand::run(sub_app, app.global).await,
         SubCommands::Linear(sub_app) => crate::linear::run(sub_app, app.global).await,
         SubCommands::Upgrade(sub_app) => crate::upgrade::run(sub_app, app.global).await,
     }

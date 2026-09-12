@@ -1,13 +1,11 @@
 mod annotations;
 mod atlas;
 mod atlassian;
-mod greprag;
 mod hn;
 mod images;
 mod linear;
 mod md;
 mod pdf;
-mod strand;
 
 use serde::{Deserialize, Serialize};
 
@@ -734,71 +732,6 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
                     }
                 },
                 "required": ["workspace", "repo"]
-            }),
-        },
-        Tool {
-            name: "generate_code".to_string(),
-            description: "Generate Rust code using a local Ollama model. Accepts an instruction, optional context, and optional file paths for context. Returns raw Rust source code. Requires a running Ollama instance with the specified model.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "instruction": {
-                        "type": "string",
-                        "description": "The instruction describing what Rust code to generate or modify"
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "Additional context for the generation (e.g., project description, constraints)"
-                    },
-                    "files": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "File paths to read and include as context for the model"
-                    },
-                    "ollama_url": {
-                        "type": "string",
-                        "description": "Ollama base URL (default: http://localhost:11434)"
-                    },
-                    "model": {
-                        "type": "string",
-                        "description": "Model name for code generation (default: maternion/strand-rust-coder)"
-                    },
-                    "system_prompt": {
-                        "type": "string",
-                        "description": "Optional system prompt to override the model's default behavior"
-                    }
-                },
-                "required": ["instruction"]
-            }),
-        },
-        Tool {
-            name: "greprag_retrieve".to_string(),
-            description: "Retrieve relevant cross-file code context from a repository. Pass a code snippet you're working with and get back the most relevant code from across the repo — function definitions, type declarations, usages, and related logic. Use this when you need to understand how a symbol is defined or used elsewhere, find related code before making changes, or gather context for a code review. Powered by a local Ollama model + ripgrep + BM25 ranking. Requires a running Ollama instance with the greprag model.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "local_context": {
-                        "type": "string",
-                        "description": "The code snippet to find cross-file references for. Paste the actual code you're looking at — function calls, type usages, imports, etc."
-                    },
-                    "repo_path": {
-                        "type": "string",
-                        "description": "Path to the repository to search (default: current directory)"
-                    },
-                    "token_budget": {
-                        "type": "integer",
-                        "description": "Maximum token budget for returned context. Use lower values (1000-2000) for focused results, higher (4000-8000) for broader context (default: 4096)"
-                    },
-                    "ollama_url": {
-                        "type": "string",
-                        "description": "Ollama base URL (default: http://localhost:11434)"
-                    },
-                    "model": {
-                        "type": "string",
-                        "description": "Model name for query generation (default: greprag)"
-                    }
-                },
-                "required": ["local_context"]
             }),
         },
         Tool {
@@ -1565,11 +1498,9 @@ pub async fn handle_tools_call(
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
         "md_toc" => md::handle_md_toc(params.arguments, global).await,
-        "generate_code" => strand::handle_generate_code(params.arguments, global).await,
         "images_generate" => images::handle_images_generate(params.arguments, global).await,
         "images_edit" => images::handle_images_edit(params.arguments, global).await,
         "images_vary" => images::handle_images_vary(params.arguments, global).await,
-        "greprag_retrieve" => greprag::handle_greprag_retrieve(params.arguments, global).await,
         "ui_annotations_list" => {
             annotations::handle_ui_annotations_list(params.arguments, global).await
         }

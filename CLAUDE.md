@@ -70,9 +70,7 @@ For detailed usage of each feature, see the context files:
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
-- **[Strand](.claude/context/strand.md)** - Local Rust code generation via Ollama
 - **[Atlas](.claude/context/atlas.md)** - Codebase navigation for AI agents; symbol index, tree view, peek, status; MCP tools + primer resource
-- **[GrepRAG](.claude/context/greprag.md)** - Code context retrieval via local model + ripgrep
 - **[Images](.claude/context/images.md)** - ChatGPT Images 2.5 generation, editing, variations; subscription or API key
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
@@ -188,31 +186,6 @@ mcptools md toc https://docs.example.com
 mcptools md fetch https://docs.example.com --selector "main"
 ```
 
-### Strand
-
-```bash
-mcptools strand generate "Write a function that adds two numbers"
-mcptools strand generate "Add error handling" --files src/lib.rs src/types.rs
-mcptools strand generate "Refactor this" --system-prompt "Focus on readability"
-```
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
-| `STRAND_MODEL` | `maternion/strand-rust-coder` | Default model name |
-| `STRAND_SYSTEM_PROMPT` | — | Optional system prompt override |
-
-### GrepRAG
-
-```bash
-mcptools grep-rag retrieve "self.deck.draw()" --repo-path ./my-project
-```
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
-| `GREPRAG_MODEL` | `greprag` | Default model name |
-
 ### MCP Server
 
 ```bash
@@ -224,4 +197,3 @@ mcptools mcp sse     # For web clients
 
 - [Atlassian Setup](docs/ATLASSIAN_SETUP.md) - Detailed setup instructions
 - [Atlassian Quick Start](docs/ATLASSIAN_QUICK_START.md) - Quick reference
-- [GrepRAG Setup](docs/GREPRAG_SETUP.md) - Model download and Ollama import

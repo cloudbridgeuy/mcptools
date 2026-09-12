@@ -12,8 +12,6 @@ Useful MCP Tools to use with LLM Coding Agents
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
 - **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
 - **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)
-- **Strand**: Generate Rust code via local Ollama model (`generate_code`)
-- **GrepRAG**: Retrieve relevant code context from a repository using a local model + ripgrep + BM25 ranking (`greprag_retrieve`)
 - **Images**: Generate, edit, and vary images with ChatGPT Images 2.5 via subscription or API key (`images_generate`, `images_edit`, `images_vary`)
 - **UI Annotations**: Query and manage UI annotations from a calendsync dev server (`ui_annotations_list`, `ui_annotations_get`, `ui_annotations_resolve`, `ui_annotations_clear`)
 
@@ -872,72 +870,6 @@ Get document metadata including title, author, page count, and creator.
 }
 ```
 
-### Strand Tools
-
-#### generate_code
-
-Generate Rust code via a local Ollama model. The model outputs raw Rust code without markdown fences or explanations.
-
-**Parameters:**
-
-- `instruction` (string, required) - What code to generate
-- `context` (string, optional) - Additional context for code generation
-- `files` (array of strings, optional) - File paths to include as context
-- `ollama_url` (string, optional) - Ollama API base URL (default: `http://localhost:11434`)
-- `model` (string, optional) - Model name (default: `maternion/strand-rust-coder`)
-- `system_prompt` (string, optional) - Optional system prompt to override the model's default behavior
-
-**Example:**
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "generate_code",
-    "arguments": {
-      "instruction": "Write a function that adds two numbers",
-      "files": ["src/lib.rs", "src/types.rs"]
-    }
-  }
-}
-```
-
-### GrepRAG Tools
-
-#### greprag_retrieve
-
-Retrieve relevant code context from a repository. Uses a local Ollama model to generate regex patterns from a code snippet, executes them as ripgrep commands, ranks results with BM25, merges overlapping snippets, and returns the top results within a token budget.
-
-**Parameters:**
-
-- `local_context` (string, required) - The code snippet to find cross-file references for
-- `repo_path` (string, optional) - Path to the repository to search (default: `.`)
-- `token_budget` (integer, optional) - Maximum token budget for returned context (default: `4096`)
-- `ollama_url` (string, optional) - Ollama API base URL (default: `http://localhost:11434`)
-- `model` (string, optional) - Model name for query generation (default: `greprag`)
-
-**Example:**
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "greprag_retrieve",
-    "arguments": {
-      "local_context": "let code = extract_code(&response);",
-      "repo_path": "./my-project",
-      "token_budget": 2048
-    }
-  }
-}
-```
-
-**Requires:** A running Ollama instance with the `greprag` model. See [docs/GREPRAG_SETUP.md](docs/GREPRAG_SETUP.md) for setup instructions.
-
 ### Images Tools
 
 Generate, edit, and vary images with the GPT Image 2.5 models (`gpt-image-2.5-flare` default, `gpt-image-2.5-sunburst` for premium precision). Defaults to the ChatGPT subscription (llm-stream `auth.json`); pass `api: "openai"` with `OPENAI_API_KEY` for the metered API.
@@ -1355,48 +1287,6 @@ mcptools pdf image document.pdf --random --section s-1-0
 # Get document metadata
 mcptools pdf info document.pdf
 ```
-
-### Strand
-
-```bash
-# Basic code generation
-mcptools strand generate "Write a function that adds two numbers"
-
-# With file context
-mcptools strand generate "Add error handling" --files src/lib.rs src/types.rs
-
-# Custom model/URL
-mcptools strand generate "Write a hello world" \
-  --model codellama \
-  --ollama-url http://localhost:11434
-```
-
-### GrepRAG
-
-```bash
-# Retrieve code context for a snippet
-mcptools grep-rag retrieve "self.deck.draw()" --repo-path ./my-project
-
-# With custom token budget
-mcptools grep-rag retrieve "fn process(input: &str)" \
-  --repo-path ./src \
-  --token-budget 2048
-
-# Custom model/URL
-mcptools grep-rag retrieve "let result = parse(&input);" \
-  --repo-path . \
-  --model greprag \
-  --ollama-url http://localhost:11434
-```
-
-**Environment Variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
-| `GREPRAG_MODEL` | `greprag` | Default model name |
-
-**Requires:** A running Ollama instance with the `greprag` model. See [docs/GREPRAG_SETUP.md](docs/GREPRAG_SETUP.md) for setup instructions.
 
 ### Images
 
