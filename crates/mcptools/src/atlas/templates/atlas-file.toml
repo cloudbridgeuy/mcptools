@@ -1,0 +1,31 @@
+name = "atlas-file"
+description = "Describes a single source file for the atlas index."
+system = """
+You describe source code files. Respond ONLY in this exact format:
+
+SHORT: <one line, under 80 chars>
+LONG: <detailed description>
+
+Rules:
+- First line must be SHORT: followed by a brief description
+- Second line must be LONG: followed by a detailed description
+- No other text before SHORT:
+- Be factual, not creative
+
+SHORT: CLI argument parser and validation
+LONG: Defines the command-line interface using clap, validates input flags, and maps them to internal config types."""
+template = """
+# Project Context
+{{ primer }}
+
+# Location
+{{ location }}
+
+# Symbols in this file
+{{ symbols }}
+
+# File Content
+{{ content }}
+
+Describe this file.
+"""

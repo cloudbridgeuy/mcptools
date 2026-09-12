@@ -4,6 +4,8 @@
 //! into [`RepoFacts`], and calls [`plan_setup`]. Execution and all I/O live
 //! in the imperative shell (`crates/mcptools/src/atlas/cli/setup.rs`).
 
+use std::path::{Path, PathBuf};
+
 /// Opening marker of the managed hook block.
 pub const HOOK_MARKER_START: &str = "# >>> mcptools atlas >>>";
 /// Closing marker of the managed hook block.
@@ -81,6 +83,7 @@ pub struct SetupFlags {
     pub no_hooks: bool,
     pub no_skills: bool,
     pub no_claude_md: bool,
+    pub no_templates: bool,
 }
 
 /// Everything the planner needs to know about the repository.
@@ -93,6 +96,7 @@ pub struct RepoFacts {
     pub skill_content: Option<String>,
     /// Content of the project `CLAUDE.md`, if it exists.
     pub claude_md_content: Option<String>,
+    pub file_template_content: Option<String>,
 }
 
 /// Templates embedded in the binary, passed in by the shell.
@@ -100,6 +104,7 @@ pub struct RepoFacts {
 pub struct Templates<'a> {
     pub skill: &'a str,
     pub claude_md_snippet: &'a str,
+    pub atlas_file: &'a str,
 }
 
 /// Which setup step an action belongs to.
@@ -108,6 +113,7 @@ pub enum SetupStep {
     Hooks,
     Skill,
     ClaudeMd,
+    Templates,
 }
 
 impl SetupStep {
@@ -116,6 +122,7 @@ impl SetupStep {
             SetupStep::Hooks => "post-commit hook",
             SetupStep::Skill => "atlas-navigation skill",
             SetupStep::ClaudeMd => "CLAUDE.md section",
+            SetupStep::Templates => "llm-stream template atlas-file",
         }
     }
 }
@@ -195,6 +202,7 @@ pub enum SetupAction {
     AppendHookBlock { content: String },
     WriteSkill { content: String },
     WriteClaudeMd { content: String },
+    WriteTemplate { path: PathBuf, content: String },
     Skip { step: SetupStep, reason: SkipReason },
     LeaveAlone { reason: UntouchableReason },
 }
@@ -252,6 +260,7 @@ pub fn plan_setup(
     facts: &RepoFacts,
     flags: &SetupFlags,
     templates: &Templates,
+    templates_dir: &Path,
 ) -> Vec<SetupAction> {
     let hook_action = if flags.no_hooks {
         SetupAction::Skip {
@@ -331,7 +340,42 @@ pub fn plan_setup(
         }
     };
 
-    vec![hook_action, skill_action, claude_md_action]
+    let template_action = plan_file_template(
+        facts.file_template_content.as_deref(),
+        flags,
+        templates,
+        templates_dir,
+    );
+
+    vec![hook_action, skill_action, claude_md_action, template_action]
+}
+
+fn plan_file_template(
+    existing: Option<&str>,
+    flags: &SetupFlags,
+    templates: &Templates,
+    templates_dir: &Path,
+) -> SetupAction {
+    if flags.no_templates {
+        return SetupAction::Skip {
+            step: SetupStep::Templates,
+            reason: SkipReason::Flag,
+        };
+    }
+    match template_status(existing, templates.atlas_file) {
+        TemplateStatus::Absent => SetupAction::WriteTemplate {
+            path: templates_dir.join("atlas-file.toml"),
+            content: templates.atlas_file.to_string(),
+        },
+        TemplateStatus::Current => SetupAction::Skip {
+            step: SetupStep::Templates,
+            reason: SkipReason::AlreadyInstalled,
+        },
+        TemplateStatus::UserEdited => SetupAction::Skip {
+            step: SetupStep::Templates,
+            reason: SkipReason::UserEdited,
+        },
+    }
 }
 
 fn action_row(action: &SetupAction, executed: bool) -> String {
@@ -355,6 +399,10 @@ fn action_row(action: &SetupAction, executed: bool) -> String {
         SetupAction::WriteClaudeMd { .. } => {
             let verb = if executed { "wrote" } else { "write" };
             format!("{}: {verb}", SetupStep::ClaudeMd.label())
+        }
+        SetupAction::WriteTemplate { .. } => {
+            let verb = if executed { "installed" } else { "install" };
+            format!("{}: {verb}", SetupStep::Templates.label())
         }
         SetupAction::Skip { step, reason } => {
             format!("{}: {}", step.label(), reason.label())
@@ -489,7 +537,12 @@ mod tests {
         Templates {
             skill: "SKILL TPL v1",
             claude_md_snippet: "SNIPPET v1",
+            atlas_file: "FILE TPL v1",
         }
+    }
+
+    fn templates_dir() -> &'static Path {
+        Path::new("/cfg/templates")
     }
 
     fn facts(hook_content: Option<&str>) -> RepoFacts {
@@ -498,6 +551,7 @@ mod tests {
             hook_content: hook_content.map(str::to_string),
             skill_content: None,
             claude_md_content: None,
+            file_template_content: None,
         }
     }
 
@@ -636,8 +690,9 @@ mod tests {
             hook_content: None,
             skill_content: None,
             claude_md_content: None,
+            file_template_content: None,
         };
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[0],
             SetupAction::LeaveAlone {
@@ -653,8 +708,9 @@ mod tests {
             hook_content: None,
             skill_content: None,
             claude_md_content: None,
+            file_template_content: None,
         };
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[0],
             SetupAction::LeaveAlone {
@@ -670,8 +726,9 @@ mod tests {
             hook_content: None,
             skill_content: None,
             claude_md_content: None,
+            file_template_content: None,
         };
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[0],
             SetupAction::LeaveAlone {
@@ -687,12 +744,13 @@ mod tests {
             hook_content: None,
             skill_content: None,
             claude_md_content: None,
+            file_template_content: None,
         };
         let flags = SetupFlags {
             no_hooks: true,
             ..Default::default()
         };
-        let actions = plan_setup(&f, &flags, &no_templates());
+        let actions = plan_setup(&f, &flags, &no_templates(), templates_dir());
         assert_eq!(
             actions[0],
             SetupAction::Skip {
@@ -738,9 +796,11 @@ mod tests {
                 hook_content: None,
                 skill_content: None,
                 claude_md_content: None,
+                file_template_content: None,
             },
             &SetupFlags::default(),
             &no_templates(),
+            templates_dir(),
         );
         assert_eq!(format_manual_instructions(&actions), None);
     }
@@ -762,7 +822,12 @@ mod tests {
 
     #[test]
     fn plan_creates_hook_when_absent() {
-        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(
+            &facts(None),
+            &SetupFlags::default(),
+            &no_templates(),
+            templates_dir(),
+        );
         assert_eq!(
             actions[0],
             SetupAction::CreateHook {
@@ -775,7 +840,7 @@ mod tests {
     fn plan_appends_when_plain_without_marker() {
         let existing = "#!/bin/sh\nnpm run lint\n";
         let f = facts(Some(existing));
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[0],
             SetupAction::AppendHookBlock {
@@ -788,7 +853,7 @@ mod tests {
     fn plan_skips_when_marker_present() {
         let content = splice_hook_block(None);
         let f = facts(Some(&content));
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[0],
             SetupAction::Skip {
@@ -805,7 +870,7 @@ mod tests {
             no_hooks: true,
             ..Default::default()
         };
-        let actions = plan_setup(&f, &flags, &no_templates());
+        let actions = plan_setup(&f, &flags, &no_templates(), templates_dir());
         assert_eq!(
             actions[0],
             SetupAction::Skip {
@@ -817,7 +882,12 @@ mod tests {
 
     #[test]
     fn plan_output_describes_each_action() {
-        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(
+            &facts(None),
+            &SetupFlags::default(),
+            &no_templates(),
+            templates_dir(),
+        );
         let out = format_setup_plan(&actions);
         assert!(out.contains("post-commit hook"));
         assert!(out.contains("create"));
@@ -825,7 +895,12 @@ mod tests {
 
     #[test]
     fn plan_writes_skill_when_absent() {
-        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(
+            &facts(None),
+            &SetupFlags::default(),
+            &no_templates(),
+            templates_dir(),
+        );
         assert_eq!(
             actions[1],
             SetupAction::WriteSkill {
@@ -838,7 +913,7 @@ mod tests {
     fn plan_skips_skill_when_current() {
         let mut f = facts(None);
         f.skill_content = Some("SKILL TPL v1\n".to_string());
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[1],
             SetupAction::Skip {
@@ -852,7 +927,7 @@ mod tests {
     fn plan_keeps_user_edited_skill() {
         let mut f = facts(None);
         f.skill_content = Some("SKILL TPL v1 + my edits".to_string());
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[1],
             SetupAction::Skip {
@@ -868,7 +943,7 @@ mod tests {
             no_skills: true,
             ..Default::default()
         };
-        let actions = plan_setup(&facts(None), &flags, &no_templates());
+        let actions = plan_setup(&facts(None), &flags, &no_templates(), templates_dir());
         assert_eq!(
             actions[1],
             SetupAction::Skip {
@@ -882,7 +957,7 @@ mod tests {
     fn plan_writes_claude_md_when_no_marker() {
         let mut f = facts(None);
         f.claude_md_content = Some("# My Project\n".to_string());
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[2],
             SetupAction::WriteClaudeMd {
@@ -893,7 +968,12 @@ mod tests {
 
     #[test]
     fn plan_creates_claude_md_when_file_absent() {
-        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(
+            &facts(None),
+            &SetupFlags::default(),
+            &no_templates(),
+            templates_dir(),
+        );
         assert_eq!(
             actions[2],
             SetupAction::WriteClaudeMd {
@@ -906,7 +986,7 @@ mod tests {
     fn plan_skips_claude_md_when_block_current() {
         let mut f = facts(None);
         f.claude_md_content = Some(splice_claude_md(Some("# P\n"), "SNIPPET v1"));
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[2],
             SetupAction::Skip {
@@ -921,7 +1001,7 @@ mod tests {
         let mut f = facts(None);
         let installed = splice_claude_md(Some("# P\n"), "SNIPPET v1");
         f.claude_md_content = Some(installed.replace("SNIPPET v1", "SNIPPET v1 edited"));
-        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[2],
             SetupAction::Skip {
@@ -937,7 +1017,7 @@ mod tests {
             no_claude_md: true,
             ..Default::default()
         };
-        let actions = plan_setup(&facts(None), &flags, &no_templates());
+        let actions = plan_setup(&facts(None), &flags, &no_templates(), templates_dir());
         assert_eq!(
             actions[2],
             SetupAction::Skip {
@@ -945,6 +1025,79 @@ mod tests {
                 reason: SkipReason::Flag
             }
         );
+    }
+
+    #[test]
+    fn plan_writes_file_template_when_absent() {
+        let actions = plan_setup(
+            &facts(None),
+            &SetupFlags::default(),
+            &no_templates(),
+            templates_dir(),
+        );
+        assert_eq!(
+            actions[3],
+            SetupAction::WriteTemplate {
+                path: PathBuf::from("/cfg/templates/atlas-file.toml"),
+                content: "FILE TPL v1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn plan_skips_file_template_when_current() {
+        let mut f = facts(None);
+        f.file_template_content = Some("FILE TPL v1\n".to_string());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
+        assert_eq!(
+            actions[3],
+            SetupAction::Skip {
+                step: SetupStep::Templates,
+                reason: SkipReason::AlreadyInstalled
+            }
+        );
+    }
+
+    #[test]
+    fn plan_keeps_user_edited_file_template() {
+        let mut f = facts(None);
+        f.file_template_content = Some("FILE TPL v1 + my edits".to_string());
+        let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
+        assert_eq!(
+            actions[3],
+            SetupAction::Skip {
+                step: SetupStep::Templates,
+                reason: SkipReason::UserEdited
+            }
+        );
+    }
+
+    #[test]
+    fn plan_skips_file_template_on_flag() {
+        let flags = SetupFlags {
+            no_templates: true,
+            ..Default::default()
+        };
+        let actions = plan_setup(&facts(None), &flags, &no_templates(), templates_dir());
+        assert_eq!(
+            actions[3],
+            SetupAction::Skip {
+                step: SetupStep::Templates,
+                reason: SkipReason::Flag
+            }
+        );
+    }
+
+    #[test]
+    fn summary_names_file_template_row() {
+        let actions = plan_setup(
+            &facts(None),
+            &SetupFlags::default(),
+            &no_templates(),
+            templates_dir(),
+        );
+        let out = format_setup_summary(&actions);
+        assert!(out.contains("llm-stream template atlas-file: installed"));
     }
 
     #[test]
@@ -966,7 +1119,12 @@ mod tests {
 
     #[test]
     fn warnings_none_when_no_user_edits() {
-        let actions = plan_setup(&facts(None), &SetupFlags::default(), &no_templates());
+        let actions = plan_setup(
+            &facts(None),
+            &SetupFlags::default(),
+            &no_templates(),
+            templates_dir(),
+        );
         assert_eq!(format_warnings(&actions), None);
     }
 

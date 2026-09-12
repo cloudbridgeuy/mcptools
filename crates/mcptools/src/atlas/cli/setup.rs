@@ -4,12 +4,14 @@ use mcptools_core::atlas::{
     format_warnings, parse_hook_state, plan_setup, ManagerFiles, RepoFacts, SetupAction,
     SetupFlags, Templates,
 };
+use mcptools_core::llm_stream::resolve_paths;
 use std::path::{Path, PathBuf};
 
 use crate::atlas::cli::index::find_git_root;
 
 const SKILL_TEMPLATE: &str = include_str!("../templates/SKILL.md");
 const CLAUDE_MD_SNIPPET: &str = include_str!("../templates/claude-md-snippet.md");
+const ATLAS_FILE_TEMPLATE: &str = include_str!("../templates/atlas-file.toml");
 const SKILL_REL_PATH: &str = ".claude/skills/atlas-navigation/SKILL.md";
 
 #[derive(Debug, clap::Args)]
@@ -23,6 +25,9 @@ pub struct SetupOptions {
     /// Skip the CLAUDE.md atlas section
     #[arg(long)]
     pub no_claude_md: bool,
+    /// Skip installing llm-stream templates
+    #[arg(long)]
+    pub no_templates: bool,
     /// Print what would be done without doing it
     #[arg(long)]
     pub dry_run: bool,
@@ -58,23 +63,28 @@ pub async fn run(opts: SetupOptions, _global: crate::Global) -> Result<()> {
 
     let skill_path = root.join(SKILL_REL_PATH);
     let claude_md_path = root.join("CLAUDE.md");
+    let templates_dir = resolve_paths()?.config_dir.join("templates");
+    let file_template_path = templates_dir.join("atlas-file.toml");
 
     let facts = RepoFacts {
         hook_state: parse_hook_state(is_symlink, &managers, hook_bytes.as_deref()),
         hook_content,
         skill_content: read_optional(&skill_path)?,
         claude_md_content: read_optional(&claude_md_path)?,
+        file_template_content: read_optional(&file_template_path)?,
     };
     let flags = SetupFlags {
         no_hooks: opts.no_hooks,
         no_skills: opts.no_skills,
         no_claude_md: opts.no_claude_md,
+        no_templates: opts.no_templates,
     };
     let templates = Templates {
         skill: SKILL_TEMPLATE,
         claude_md_snippet: CLAUDE_MD_SNIPPET,
+        atlas_file: ATLAS_FILE_TEMPLATE,
     };
-    let actions = plan_setup(&facts, &flags, &templates);
+    let actions = plan_setup(&facts, &flags, &templates, &templates_dir);
 
     if opts.dry_run {
         crate::prelude::println!("{}", format_setup_plan(&actions));
@@ -123,6 +133,7 @@ fn execute(
         }
         SetupAction::WriteSkill { content } => write_with_parents(skill_path, content)?,
         SetupAction::WriteClaudeMd { content } => write_with_parents(claude_md_path, content)?,
+        SetupAction::WriteTemplate { path, content } => write_with_parents(path, content)?,
         SetupAction::Skip { .. } | SetupAction::LeaveAlone { .. } => {}
     }
     Ok(())
