@@ -9,12 +9,14 @@ TRIALS=3
 REPO="$HOME/Projects/Rust/llm_stream"
 PEEK_TARGET="crates/llm_stream/src/claude.rs"
 JSON_OUT=0
+WRITE=0
+PINNED_GRAFT=""
 PROVIDER=""
 MODEL=""
 ENRICH_PARALLEL=4
 
 usage() {
-  echo "usage: run_baseline.sh [--trials N] [--repo PATH] [--peek PATH] [--json] [--provider NAME --model NAME]"
+  echo "usage: run_baseline.sh [--trials N] [--repo PATH] [--peek PATH] [--json] [--provider NAME --model NAME] [--write] [--graft-rev REV]"
 }
 
 while [ $# -gt 0 ]; do
@@ -23,6 +25,8 @@ while [ $# -gt 0 ]; do
     --repo) REPO="$2"; shift 2 ;;
     --peek) PEEK_TARGET="$2"; shift 2 ;;
     --json) JSON_OUT=1; shift ;;
+    --write) WRITE=1; shift ;;
+    --graft-rev) PINNED_GRAFT="$2"; shift 2 ;;
     --provider) PROVIDER="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     --help) usage; exit 0 ;;
@@ -128,7 +132,70 @@ ARGS=(--mc-rev "$MC_REV" --mc-dirty "$MC_DIRTY" --ls-rev "$LS_REV" --ls-dirty "$
 if [ "$JSON_OUT" -eq 1 ]; then
   ARGS+=(--json)
 fi
+graft_verify() {
+  local rev="$PINNED_GRAFT"
+  local dir="$RUN_DIR/graft"
+  local fetched
+  local queries
+  mkdir -p "$dir"
+  if [ -z "$rev" ]; then
+    rev="$(git ls-remote https://github.com/trailhq/Graft HEAD | cut -f1)"
+  fi
+  if [ -z "$rev" ]; then
+    echo "graft rev resolve failed" >&2
+    exit 1
+  fi
+  if [ ! -d "$dir/.git" ]; then
+    git init -q "$dir" || exit 1
+  fi
+  if ! git -C "$dir" fetch -q --depth 1 https://github.com/trailhq/Graft HEAD; then
+    echo "graft fetch failed" >&2
+    exit 1
+  fi
+  fetched="$(git -C "$dir" rev-parse FETCH_HEAD)"
+  if [ "$fetched" != "$rev" ]; then
+    echo "graft rev mismatch: ls-remote $rev fetch $fetched" >&2
+    exit 1
+  fi
+  if ! git -C "$dir" checkout -q FETCH_HEAD -- src/graph/build.ts src/cli.ts; then
+    echo "graft checkout failed" >&2
+    exit 1
+  fi
+  queries="$(git -C "$dir" ls-tree -r FETCH_HEAD --name-only | sed -n 's|^src/graph/queries/\(.*\)\.scm$|\1|p' | paste -sd, -)"
+  GRAFT_ARGS=(--graft-rev "$rev" --graft-build "$dir/src/graph/build.ts" --graft-cli "$dir/src/cli.ts" --graft-queries "$queries")
+}
+
+render_and_write() {
+  local date
+  local dest
+  local run
+  local json
+  local out
+  date="$(date +%F)"
+  dest="$SCRIPT_DIR/baseline-$date"
+  run="$(basename "$RUN_DIR")"
+  if [ "$JSON_OUT" -eq 1 ]; then
+    json="$(python3 "$RENDER" "${ARGS[@]}" "${GRAFT_ARGS[@]}" --artifact-date "$date" --run-dir "$run" --json 2>"$RUN_DIR/console.err")"
+    cat "$RUN_DIR/console.err" >&2
+    printf '%s\n' "$json" > "$dest.json"
+    printf '%s\n' "$json"
+    python3 "$RENDER" "${ARGS[@]}" "${GRAFT_ARGS[@]}" --artifact-date "$date" --run-dir "$run" --markdown 2>/dev/null > "$dest.md"
+  else
+    out="$(python3 "$RENDER" "${ARGS[@]}" "${GRAFT_ARGS[@]}" --artifact-date "$date" --run-dir "$run")"
+    printf '%s\n' "$out"
+    python3 "$RENDER" "${ARGS[@]}" "${GRAFT_ARGS[@]}" --artifact-date "$date" --run-dir "$run" --json 2>/dev/null > "$dest.json"
+    python3 "$RENDER" "${ARGS[@]}" "${GRAFT_ARGS[@]}" --artifact-date "$date" --run-dir "$run" --markdown 2>/dev/null > "$dest.md"
+  fi
+  echo "artifact: $dest.json $dest.md" >&2
+  echo "temp db: $RUN_DIR" >&2
+}
+
 if [ -z "$PROVIDER" ]; then
+  if [ "$WRITE" -eq 1 ]; then
+    graft_verify
+    render_and_write
+    exit 0
+  fi
   python3 "$RENDER" "${ARGS[@]}"
   echo "temp db: $RUN_DIR" >&2
   echo "enrichment stage: not built yet" >&2
@@ -212,6 +279,11 @@ fi
 ARGS+=(--task "$(score_task locate-claude-runner crates/llm_stream/src/claude.rs 'pub async fn run')")
 ARGS+=(--task "$(score_task locate-entry-point crates/llm_stream/src/main.rs 'async fn main')")
 ARGS+=(--task "$(score_task locate-auth-login crates/llm_stream/src/auth/flow.rs 'pub fn login')")
+if [ "$WRITE" -eq 1 ]; then
+  graft_verify
+  render_and_write
+  exit 0
+fi
 python3 "$RENDER" "${ARGS[@]}"
 echo "temp db: $RUN_DIR" >&2
 echo "graft/artifact stage: not built yet" >&2

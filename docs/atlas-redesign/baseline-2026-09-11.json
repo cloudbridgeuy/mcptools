@@ -1,0 +1,145 @@
+{
+  "env": {
+    "mcptools_rev": "d5f0b565343e619c84341bbc3d8ac26d97fbeb12",
+    "mcptools_dirty": " (dirty)",
+    "llm_stream_rev": "6d4270c98ef46dd4c55d3b62c5727f55ab82ba7d",
+    "llm_stream_dirty": " (dirty)",
+    "binary_version": "mcptools 1.11.0",
+    "file_count": 89,
+    "dir_count": 25,
+    "hardware": "arm64 Apple M1 Max",
+    "cache_state": "no primer; no local db; fresh temp db per trial"
+  },
+  "structural": {
+    "initial_s": {
+      "median": 0.26,
+      "spread": 0.064,
+      "trials": [
+        0.311,
+        0.247,
+        0.26
+      ]
+    },
+    "incremental_s": {
+      "median": 0.037,
+      "spread": 0.003,
+      "trials": [
+        0.039,
+        0.036,
+        0.037
+      ]
+    },
+    "tree_s": {
+      "median": 0.011,
+      "spread": 0.001,
+      "trials": [
+        0.011,
+        0.01,
+        0.011
+      ]
+    },
+    "peek_s": {
+      "median": 0.01,
+      "spread": 0.001,
+      "trials": [
+        0.011,
+        0.01,
+        0.01
+      ]
+    },
+    "files": 89,
+    "dirs": 22,
+    "symbols": 527
+  },
+  "old_single_local_runs_s": {
+    "initial": 0.262,
+    "incremental": 0.051,
+    "tree": 0.015,
+    "peek": 0.075
+  },
+  "enrichment": {
+    "status": "missing",
+    "provider": "chatgpt",
+    "model": "test",
+    "reason": "provider 'chatgpt' unsupported (atlas enriches through ollama only)"
+  },
+  "tasks": [
+    {
+      "task": "locate-claude-runner",
+      "target_file": "crates/llm_stream/src/claude.rs",
+      "target_symbol": "pub async fn run",
+      "time_to_context_s": {
+        "median": 0.01,
+        "spread": 0.001,
+        "trials": [
+          0.01,
+          0.009,
+          0.01
+        ]
+      },
+      "correct": true
+    },
+    {
+      "task": "locate-entry-point",
+      "target_file": "crates/llm_stream/src/main.rs",
+      "target_symbol": "async fn main",
+      "time_to_context_s": {
+        "median": 0.01,
+        "spread": 0.001,
+        "trials": [
+          0.01,
+          0.009,
+          0.01
+        ]
+      },
+      "correct": true
+    },
+    {
+      "task": "locate-auth-login",
+      "target_file": "crates/llm_stream/src/auth/flow.rs",
+      "target_symbol": "pub fn login",
+      "time_to_context_s": {
+        "median": 0.009,
+        "spread": 0.001,
+        "trials": [
+          0.01,
+          0.009,
+          0.009
+        ]
+      },
+      "correct": true
+    }
+  ],
+  "graft": {
+    "rev": "f9e65396e638e517aecae0d731017f53084d70ed",
+    "source": "https://github.com/trailhq/Graft",
+    "files": [
+      {
+        "path": "src/graph/build.ts",
+        "sha256": "4ac53f4c00655e08a7107af0e7ec08258328fc3143ce8f4694e04694d9e2864b"
+      },
+      {
+        "path": "src/cli.ts",
+        "sha256": "04981da20c8ee321090f6578c167e033de4e904b08f4be3e1cb2d5b143ac6986"
+      }
+    ],
+    "separation": true,
+    "checkpointing": "extract cache written before enrichment; meaning pass checkpoints via writeGraph and folds prior meaning back by body_hash",
+    "scope": "discoverScopes plus scopeOf; sub-scopes below MIN_SCOPE_NODES merge into root; onlyDirs filter recorded in fingerprint",
+    "discovery": "walkDir over readIncludeDirs roots with onlyDirs filter; cli workspace parent federates queries across git children",
+    "unsupported": [
+      "no speed advantage over atlas claimed",
+      "no correctness advantage claimed",
+      "workload and mechanisms only"
+    ],
+    "limits": [
+      "build header scopes the M1 walk to TS/Python source files",
+      "tree-sitter grammars shipped at pinned rev: c, c_sharp, clojure, cpp, dart, elixir, java, kotlin, lua, nix, php, ruby, rust, scala, solidity, swift",
+      "per-file parse failures recorded; unknown files stay empty"
+    ]
+  },
+  "meta": {
+    "date": "2026-09-11",
+    "run_dir": "atlas-baseline-26954"
+  }
+}
