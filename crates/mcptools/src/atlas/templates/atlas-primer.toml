@@ -1,0 +1,10 @@
+name = "atlas-primer"
+description = "Restructures raw project context into a concise mental model."
+system = ""
+template = """
+The following is raw context about a project:
+
+{{ raw_primer }}
+
+Please restructure this into a concise mental model of the project. Focus on: the project's purpose, architecture patterns, key modules, and conventions. Keep it brief and factual.
+"""

@@ -97,6 +97,8 @@ pub struct RepoFacts {
     /// Content of the project `CLAUDE.md`, if it exists.
     pub claude_md_content: Option<String>,
     pub file_template_content: Option<String>,
+    pub dir_template_content: Option<String>,
+    pub primer_template_content: Option<String>,
 }
 
 /// Templates embedded in the binary, passed in by the shell.
@@ -105,6 +107,8 @@ pub struct Templates<'a> {
     pub skill: &'a str,
     pub claude_md_snippet: &'a str,
     pub atlas_file: &'a str,
+    pub atlas_dir: &'a str,
+    pub atlas_primer: &'a str,
 }
 
 /// Which setup step an action belongs to.
@@ -114,6 +118,8 @@ pub enum SetupStep {
     Skill,
     ClaudeMd,
     Templates,
+    TemplateDir,
+    TemplatePrimer,
 }
 
 impl SetupStep {
@@ -123,6 +129,8 @@ impl SetupStep {
             SetupStep::Skill => "atlas-navigation skill",
             SetupStep::ClaudeMd => "CLAUDE.md section",
             SetupStep::Templates => "llm-stream template atlas-file",
+            SetupStep::TemplateDir => "llm-stream template atlas-dir",
+            SetupStep::TemplatePrimer => "llm-stream template atlas-primer",
         }
     }
 }
@@ -340,39 +348,65 @@ pub fn plan_setup(
         }
     };
 
-    let template_action = plan_file_template(
-        facts.file_template_content.as_deref(),
-        flags,
-        templates,
-        templates_dir,
-    );
-
-    vec![hook_action, skill_action, claude_md_action, template_action]
+    let template_specs = [
+        (
+            SetupStep::Templates,
+            templates.atlas_file,
+            facts.file_template_content.as_deref(),
+            "atlas-file.toml",
+        ),
+        (
+            SetupStep::TemplateDir,
+            templates.atlas_dir,
+            facts.dir_template_content.as_deref(),
+            "atlas-dir.toml",
+        ),
+        (
+            SetupStep::TemplatePrimer,
+            templates.atlas_primer,
+            facts.primer_template_content.as_deref(),
+            "atlas-primer.toml",
+        ),
+    ];
+    let mut actions = vec![hook_action, skill_action, claude_md_action];
+    for (step, current, existing, filename) in template_specs {
+        actions.push(plan_template_file(
+            step,
+            existing,
+            current,
+            filename,
+            templates_dir,
+            flags.no_templates,
+        ));
+    }
+    actions
 }
 
-fn plan_file_template(
+fn plan_template_file(
+    step: SetupStep,
     existing: Option<&str>,
-    flags: &SetupFlags,
-    templates: &Templates,
+    current: &str,
+    filename: &str,
     templates_dir: &Path,
+    skipped_by_flag: bool,
 ) -> SetupAction {
-    if flags.no_templates {
+    if skipped_by_flag {
         return SetupAction::Skip {
-            step: SetupStep::Templates,
+            step,
             reason: SkipReason::Flag,
         };
     }
-    match template_status(existing, templates.atlas_file) {
+    match template_status(existing, current) {
         TemplateStatus::Absent => SetupAction::WriteTemplate {
-            path: templates_dir.join("atlas-file.toml"),
-            content: templates.atlas_file.to_string(),
+            path: templates_dir.join(filename),
+            content: current.to_string(),
         },
         TemplateStatus::Current => SetupAction::Skip {
-            step: SetupStep::Templates,
+            step,
             reason: SkipReason::AlreadyInstalled,
         },
         TemplateStatus::UserEdited => SetupAction::Skip {
-            step: SetupStep::Templates,
+            step,
             reason: SkipReason::UserEdited,
         },
     }
@@ -400,9 +434,13 @@ fn action_row(action: &SetupAction, executed: bool) -> String {
             let verb = if executed { "wrote" } else { "write" };
             format!("{}: {verb}", SetupStep::ClaudeMd.label())
         }
-        SetupAction::WriteTemplate { .. } => {
+        SetupAction::WriteTemplate { path, .. } => {
             let verb = if executed { "installed" } else { "install" };
-            format!("{}: {verb}", SetupStep::Templates.label())
+            let name = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("template");
+            format!("llm-stream template {name}: {verb}")
         }
         SetupAction::Skip { step, reason } => {
             format!("{}: {}", step.label(), reason.label())
@@ -538,6 +576,8 @@ mod tests {
             skill: "SKILL TPL v1",
             claude_md_snippet: "SNIPPET v1",
             atlas_file: "FILE TPL v1",
+            atlas_dir: "DIR TPL v1",
+            atlas_primer: "PRIMER TPL v1",
         }
     }
 
@@ -552,6 +592,8 @@ mod tests {
             skill_content: None,
             claude_md_content: None,
             file_template_content: None,
+            dir_template_content: None,
+            primer_template_content: None,
         }
     }
 
@@ -691,6 +733,8 @@ mod tests {
             skill_content: None,
             claude_md_content: None,
             file_template_content: None,
+            dir_template_content: None,
+            primer_template_content: None,
         };
         let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
@@ -709,6 +753,8 @@ mod tests {
             skill_content: None,
             claude_md_content: None,
             file_template_content: None,
+            dir_template_content: None,
+            primer_template_content: None,
         };
         let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
@@ -727,6 +773,8 @@ mod tests {
             skill_content: None,
             claude_md_content: None,
             file_template_content: None,
+            dir_template_content: None,
+            primer_template_content: None,
         };
         let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
@@ -745,6 +793,8 @@ mod tests {
             skill_content: None,
             claude_md_content: None,
             file_template_content: None,
+            dir_template_content: None,
+            primer_template_content: None,
         };
         let flags = SetupFlags {
             no_hooks: true,
@@ -797,6 +847,8 @@ mod tests {
                 skill_content: None,
                 claude_md_content: None,
                 file_template_content: None,
+                dir_template_content: None,
+                primer_template_content: None,
             },
             &SetupFlags::default(),
             &no_templates(),
@@ -1089,7 +1141,60 @@ mod tests {
     }
 
     #[test]
-    fn summary_names_file_template_row() {
+    fn plan_writes_all_three_templates_when_absent() {
+        let actions = plan_setup(
+            &facts(None),
+            &SetupFlags::default(),
+            &no_templates(),
+            templates_dir(),
+        );
+        assert_eq!(
+            &actions[3..],
+            &[
+                SetupAction::WriteTemplate {
+                    path: PathBuf::from("/cfg/templates/atlas-file.toml"),
+                    content: "FILE TPL v1".to_string()
+                },
+                SetupAction::WriteTemplate {
+                    path: PathBuf::from("/cfg/templates/atlas-dir.toml"),
+                    content: "DIR TPL v1".to_string()
+                },
+                SetupAction::WriteTemplate {
+                    path: PathBuf::from("/cfg/templates/atlas-primer.toml"),
+                    content: "PRIMER TPL v1".to_string()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn plan_skips_all_three_templates_on_flag() {
+        let flags = SetupFlags {
+            no_templates: true,
+            ..Default::default()
+        };
+        let actions = plan_setup(&facts(None), &flags, &no_templates(), templates_dir());
+        assert_eq!(
+            &actions[3..],
+            &[
+                SetupAction::Skip {
+                    step: SetupStep::Templates,
+                    reason: SkipReason::Flag
+                },
+                SetupAction::Skip {
+                    step: SetupStep::TemplateDir,
+                    reason: SkipReason::Flag
+                },
+                SetupAction::Skip {
+                    step: SetupStep::TemplatePrimer,
+                    reason: SkipReason::Flag
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn summary_names_each_template_row() {
         let actions = plan_setup(
             &facts(None),
             &SetupFlags::default(),
@@ -1098,6 +1203,8 @@ mod tests {
         );
         let out = format_setup_summary(&actions);
         assert!(out.contains("llm-stream template atlas-file: installed"));
+        assert!(out.contains("llm-stream template atlas-dir: installed"));
+        assert!(out.contains("llm-stream template atlas-primer: installed"));
     }
 
     #[test]

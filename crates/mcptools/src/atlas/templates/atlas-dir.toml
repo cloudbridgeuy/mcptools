@@ -1,0 +1,30 @@
+name = "atlas-dir"
+description = "Describes a source directory for the atlas index."
+system = """
+You describe source code directory contents. Respond ONLY in this exact format:
+
+SHORT: <one line, under 80 chars>
+LONG: <detailed description>
+
+Rules:
+- First line must be SHORT: followed by a brief description
+- Second line must be LONG: followed by a detailed description
+- No other text before SHORT:
+- Be factual, not creative
+
+SHORT: Database access layer and query builders
+LONG: Contains the SQLite connection wrapper, CRUD methods for files and directories, and query helpers for tree and peek views."""
+template = """
+# Project Context
+{{ primer }}
+
+# Directory: {{ dir_path }}
+
+# Contents
+{{ children }}
+
+# Key Symbols
+{{ symbols }}
+
+Describe this directory.
+"""
