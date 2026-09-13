@@ -59,9 +59,7 @@ pub async fn handle_linear_auth_status(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct NoArgs {}
-    let _args: Option<NoArgs> =
+    let _args: Option<crate::linear::args::AuthStatusArgs> =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
     let _ = _args;
     if global.verbose {
@@ -78,11 +76,7 @@ pub async fn handle_linear_issue_get(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        id: String,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::IssueGetArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_issue_get: id={}", args.id);
     }
@@ -97,22 +91,7 @@ pub async fn handle_linear_issue_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        team: Option<String>,
-        project: Option<String>,
-        assignee: Option<String>,
-        state: Option<String>,
-        label: Option<String>,
-        cycle: Option<String>,
-        query: Option<String>,
-        #[serde(rename = "updatedAfter")]
-        updated_after: Option<String>,
-        limit: Option<u32>,
-        cursor: Option<String>,
-        all: Option<bool>,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::IssueListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!(
             "Calling linear_issue_list: team={:?}, project={:?}, limit={:?}",
@@ -160,14 +139,7 @@ pub async fn handle_linear_comment_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        id: String,
-        limit: Option<u32>,
-        cursor: Option<String>,
-        all: Option<bool>,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::CommentListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_comment_list: id={}", args.id);
     }
@@ -200,14 +172,7 @@ pub async fn handle_linear_relation_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        id: String,
-        limit: Option<u32>,
-        cursor: Option<String>,
-        all: Option<bool>,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::RelationListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_relation_list: id={}", args.id);
     }
@@ -240,13 +205,7 @@ pub async fn handle_linear_team_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        limit: Option<u32>,
-        cursor: Option<String>,
-        all: Option<bool>,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::TeamListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_team_list");
     }
@@ -278,27 +237,24 @@ pub async fn handle_linear_team_get(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        selector: Option<String>,
-        team: Option<String>,
-        id: Option<String>,
-    }
-    let args: Args = parse_args(arguments)?;
-    let selector = args
-        .selector
-        .or(args.team)
-        .or(args.id)
-        .ok_or(JsonRpcError {
-            code: -32602,
-            message: "Must provide 'selector'".to_string(),
-            data: None,
-        })?;
+    let args: crate::linear::args::TeamGetArgs = parse_args(arguments)?;
+    let selector = [
+        args.selector.as_str(),
+        args.team.as_deref().unwrap_or(""),
+        args.id.as_deref().unwrap_or(""),
+    ]
+    .into_iter()
+    .find(|s| !s.trim().is_empty())
+    .ok_or(JsonRpcError {
+        code: -32602,
+        message: "Must provide 'selector'".to_string(),
+        data: None,
+    })?;
     if global.verbose {
         eprintln!("Calling linear_team_get: selector={}", selector);
     }
     let client = linear_client()?;
-    let team = crate::linear::discover::teams_get_data(&client, &selector)
+    let team = crate::linear::discover::teams_get_data(&client, selector)
         .await
         .map_err(exec)?;
     text_result(team)
@@ -308,14 +264,7 @@ pub async fn handle_linear_project_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        team: String,
-        limit: Option<u32>,
-        cursor: Option<String>,
-        all: Option<bool>,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::ProjectListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_project_list: team={}", args.team);
     }
@@ -348,12 +297,7 @@ pub async fn handle_linear_project_get(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        id: String,
-        team: String,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::ProjectGetArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_project_get: id={}", args.id);
     }
@@ -368,13 +312,7 @@ pub async fn handle_linear_user_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        query: String,
-        limit: Option<u32>,
-        cursor: Option<String>,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::UserListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_user_list: query={}", args.query);
     }
@@ -394,11 +332,7 @@ pub async fn handle_linear_state_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        team: String,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::StateListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_state_list: team={}", args.team);
     }
@@ -413,11 +347,7 @@ pub async fn handle_linear_label_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        team: String,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::LabelListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_label_list: team={}", args.team);
     }
@@ -432,15 +362,7 @@ pub async fn handle_linear_issue_create(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        team: String,
-        title: String,
-        description: Option<String>,
-        state: Option<String>,
-        assignee: Option<String>,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::IssueCreateArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!(
             "Calling linear_issue_create: team={}, title={}",
@@ -465,20 +387,9 @@ pub async fn handle_linear_issue_update(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        id: String,
-        title: Option<String>,
-        description: Option<String>,
-        state: Option<String>,
-        team: Option<String>,
-        assignee: Option<String>,
-        parent: Option<String>,
-        #[serde(default, rename = "clearParent", alias = "clear_parent")]
-        clear_parent: bool,
-    }
-    let args: Args = parse_args(arguments)?;
-    if args.parent.is_some() && args.clear_parent {
+    let args: crate::linear::args::IssueUpdateArgs = parse_args(arguments)?;
+    let clear_parent = args.clear_parent.unwrap_or(false);
+    if args.parent.is_some() && clear_parent {
         return Err(exec(color_eyre::eyre::eyre!(
             "Linear issue update accepts only one of parent or clearParent"
         )));
@@ -486,7 +397,7 @@ pub async fn handle_linear_issue_update(
     if global.verbose {
         eprintln!("Calling linear_issue_update: id={}", args.id);
     }
-    let parent = if args.clear_parent {
+    let parent = if clear_parent {
         Some(None)
     } else {
         args.parent.map(Some)
@@ -511,12 +422,7 @@ pub async fn handle_linear_comment_create(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        id: String,
-        body: String,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::CommentCreateArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_comment_create: id={}", args.id);
     }
@@ -532,14 +438,7 @@ pub async fn handle_linear_relation_add(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        source: String,
-        related: String,
-        #[serde(rename = "type")]
-        rel_type: String,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::RelationAddArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!(
             "Calling linear_relation_add: source={}, related={}, type={}",
@@ -568,14 +467,7 @@ pub async fn handle_linear_relation_remove(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        source: String,
-        related: String,
-        #[serde(rename = "type")]
-        rel_type: String,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::RelationRemoveArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!(
             "Calling linear_relation_remove: source={}, related={}, type={}",
@@ -598,11 +490,7 @@ pub async fn handle_linear_cycle_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        team: String,
-    }
-    let args: Args = parse_args(arguments)?;
+    let args: crate::linear::args::CycleListArgs = parse_args(arguments)?;
     if global.verbose {
         eprintln!("Calling linear_cycle_list: team={}", args.team);
     }

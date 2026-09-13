@@ -6,6 +6,7 @@ mod images;
 mod linear;
 mod md;
 mod pdf;
+pub mod schema;
 
 use serde::{Deserialize, Serialize};
 
@@ -1026,409 +1027,92 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
         Tool {
             name: "linear_auth_status".to_string(),
             description: "Show the Linear viewer identity for LINEAR_API_KEY. Returns id, name, and email. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::AuthStatusArgs>(),
         },
         Tool {
             name: "linear_issue_get".to_string(),
             description: "Get one Linear issue by id or identifier (e.g. GUZ-85). Returns id, identifier, title, URL, state, parent, and blocked-by relations. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Issue id or identifier (e.g. GUZ-85)"
-                    }
-                },
-                "required": ["id"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::IssueGetArgs>(),
         },
         Tool {
             name: "linear_issue_list".to_string(),
             description: "List Linear issues with filters. Returns nodes with id, identifier, title, state, parent, blocked-by plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "team": {
-                        "type": "string",
-                        "description": "Team id, key, or name"
-                    },
-                    "project": {
-                        "type": "string",
-                        "description": "Project id or name (names need team)"
-                    },
-                    "assignee": {
-                        "type": "string",
-                        "description": "Assignee user UUID or 'me'"
-                    },
-                    "state": {
-                        "type": "string",
-                        "description": "Workflow state name (e.g. Todo)"
-                    },
-                    "label": {
-                        "type": "string",
-                        "description": "Label name"
-                    },
-                    "cycle": {
-                        "type": "string",
-                        "description": "Cycle number or id"
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Title substring to search"
-                    },
-                    "updatedAfter": {
-                        "type": "string",
-                        "description": "Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Max items per page (default: 25)"
-                    },
-                    "cursor": {
-                        "type": "string",
-                        "description": "Page cursor for pagination"
-                    },
-                    "all": {
-                        "type": "boolean",
-                        "description": "Fetch all pages (up to 50 items)"
-                    }
-                },
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::IssueListArgs>(),
         },
         Tool {
             name: "linear_comment_list".to_string(),
             description: "List comments on one Linear issue. Returns nodes with id, author, body, createdAt plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Issue id or identifier (e.g. GUZ-84)"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Max items per page (default: 25)"
-                    },
-                    "cursor": {
-                        "type": "string",
-                        "description": "Page cursor for pagination"
-                    },
-                    "all": {
-                        "type": "boolean",
-                        "description": "Fetch all pages (up to 50 items)"
-                    }
-                },
-                "required": ["id"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::CommentListArgs>(),
         },
         Tool {
             name: "linear_relation_list".to_string(),
             description: "List relations on one Linear issue. Returns nodes with id, type, issue, related issue, direction plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Issue id or identifier (e.g. GUZ-84)"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Max items per page (default: 25)"
-                    },
-                    "cursor": {
-                        "type": "string",
-                        "description": "Page cursor for pagination"
-                    },
-                    "all": {
-                        "type": "boolean",
-                        "description": "Fetch all pages (up to 50 items)"
-                    }
-                },
-                "required": ["id"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::RelationListArgs>(),
         },
         Tool {
             name: "linear_team_list".to_string(),
             description: "List Linear teams. Returns nodes with id, key, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "number",
-                        "description": "Max items per page (default: 25)"
-                    },
-                    "cursor": {
-                        "type": "string",
-                        "description": "Page cursor for pagination"
-                    },
-                    "all": {
-                        "type": "boolean",
-                        "description": "Fetch all pages (up to 50 items)"
-                    }
-                },
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::TeamListArgs>(),
         },
         Tool {
             name: "linear_team_get".to_string(),
             description: "Get one Linear team by id, key, or name. Returns id, key, name. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "selector": {
-                        "type": "string",
-                        "description": "Team id, key, or name"
-                    }
-                },
-                "required": ["selector"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::TeamGetArgs>(),
         },
         Tool {
             name: "linear_project_list".to_string(),
             description: "List Linear projects in a team. Returns nodes with id, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "team": {
-                        "type": "string",
-                        "description": "Team id, key, or name"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Max items per page (default: 25)"
-                    },
-                    "cursor": {
-                        "type": "string",
-                        "description": "Page cursor for pagination"
-                    },
-                    "all": {
-                        "type": "boolean",
-                        "description": "Fetch all pages (up to 50 items)"
-                    }
-                },
-                "required": ["team"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::ProjectListArgs>(),
         },
         Tool {
             name: "linear_project_get".to_string(),
             description: "Get one Linear project by id or name within a team. Returns id, name. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Project id or name"
-                    },
-                    "team": {
-                        "type": "string",
-                        "description": "Team id, key, or name"
-                    }
-                },
-                "required": ["id", "team"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::ProjectGetArgs>(),
         },
         Tool {
             name: "linear_user_list".to_string(),
             description: "List Linear users matching a name query. Returns nodes with id, name, email plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Name substring to search"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Max items per page (default: 25)"
-                    },
-                    "cursor": {
-                        "type": "string",
-                        "description": "Page cursor for pagination"
-                    }
-                },
-                "required": ["query"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::UserListArgs>(),
         },
         Tool {
             name: "linear_state_list".to_string(),
             description: "List workflow states in a Linear team. Returns nodes with id, name, type plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "team": {
-                        "type": "string",
-                        "description": "Team id, key, or name"
-                    }
-                },
-                "required": ["team"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::StateListArgs>(),
         },
         Tool {
             name: "linear_label_list".to_string(),
             description: "List labels in a Linear team. Returns nodes with id, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "team": {
-                        "type": "string",
-                        "description": "Team id, key, or name"
-                    }
-                },
-                "required": ["team"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::LabelListArgs>(),
         },
         Tool {
             name: "linear_cycle_list".to_string(),
             description: "List cycles in a Linear team. Returns nodes with id, number, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "team": {
-                        "type": "string",
-                        "description": "Team id, key, or name"
-                    }
-                },
-                "required": ["team"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::CycleListArgs>(),
         },
         Tool {
             name: "linear_issue_create".to_string(),
             description: "Create a Linear issue in a team. Returns id, identifier, title, URL, state, parent. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "team": {
-                        "type": "string",
-                        "description": "Team id, key, or name"
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "Issue title"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Issue description"
-                    },
-                    "state": {
-                        "type": "string",
-                        "description": "Workflow state name or UUID"
-                    },
-                    "assignee": {
-                        "type": "string",
-                        "description": "Assignee user UUID or 'me'"
-                    }
-                },
-                "required": ["team", "title"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::IssueCreateArgs>(),
         },
         Tool {
             name: "linear_issue_update".to_string(),
             description: "Update a Linear issue by id or identifier. Needs at least one of title, description, state, assignee, parent, clearParent. Returns the updated issue. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Issue id or identifier (e.g. GUZ-85)"
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "New title"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "New description"
-                    },
-                    "state": {
-                        "type": "string",
-                        "description": "Workflow state name or UUID (names need team)"
-                    },
-                    "team": {
-                        "type": "string",
-                        "description": "Team id, key, or name for state lookup"
-                    },
-                    "assignee": {
-                        "type": "string",
-                        "description": "Assignee user UUID or 'me'"
-                    },
-                    "parent": {
-                        "type": "string",
-                        "description": "Parent issue id or identifier"
-                    },
-                    "clearParent": {
-                        "type": "boolean",
-                        "description": "Clear the parent issue (cannot combine with parent)"
-                    }
-                },
-                "required": ["id"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::IssueUpdateArgs>(),
         },
         Tool {
             name: "linear_comment_create".to_string(),
             description: "Create a comment on a Linear issue. Returns id, body, URL, author, createdAt. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Issue id or identifier (e.g. GUZ-84)"
-                    },
-                    "body": {
-                        "type": "string",
-                        "description": "Comment body text (must not be empty)"
-                    }
-                },
-                "required": ["id", "body"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::CommentCreateArgs>(),
         },
         Tool {
             name: "linear_relation_add".to_string(),
             description: "Add a relation between two Linear issues. Type is 'blocks' or 'related'. Returns status created or already_exists plus the relation. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "source": {
-                        "type": "string",
-                        "description": "Source issue id or identifier (e.g. GUZ-84)"
-                    },
-                    "related": {
-                        "type": "string",
-                        "description": "Related issue id or identifier"
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "Relation type: blocks or related"
-                    }
-                },
-                "required": ["source", "related", "type"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::RelationAddArgs>(),
         },
         Tool {
             name: "linear_relation_remove".to_string(),
             description: "Remove a relation between two Linear issues matched by source, related, type triple. Returns the deleted relation id. Requires LINEAR_API_KEY environment variable.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "source": {
-                        "type": "string",
-                        "description": "Source issue id or identifier (e.g. GUZ-84)"
-                    },
-                    "related": {
-                        "type": "string",
-                        "description": "Related issue id or identifier"
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "Relation type: blocks or related"
-                    }
-                },
-                "required": ["source", "related", "type"]
-            }),
+            input_schema: schema::input_schema_for::<crate::linear::args::RelationRemoveArgs>(),
         },
     ];
 
