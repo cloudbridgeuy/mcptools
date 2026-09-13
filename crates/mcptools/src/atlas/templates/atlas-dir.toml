@@ -1,5 +1,6 @@
 name = "atlas-dir"
 description = "Describes a source directory for the atlas index."
+default_vars = { primer = "", dir_path = "", children = "", symbols = "" }
 system = """
 You describe source code directory contents. Respond ONLY in this exact format:
 

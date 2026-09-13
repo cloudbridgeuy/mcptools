@@ -9,8 +9,8 @@ use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlas::{
-    affected_directories, compute_change_set, content_hash, directory_system_prompt,
-    format_dry_run_update, DirectoryEntry, FileEntry,
+    affected_directories, compute_change_set, content_hash, format_dry_run_update, DirectoryEntry,
+    FileEntry,
 };
 
 use super::index::{
@@ -243,7 +243,11 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
     let total_dirs = directories.len() as u64;
     let progress = progress_bar(total_files + total_dirs, "Updating descriptions...");
 
-    let dir_system = directory_system_prompt();
+    let templates_dir = mcptools_core::llm_stream::resolve_paths()?
+        .config_dir
+        .join("templates");
+    let file_template = mcptools_core::atlas::load(&templates_dir, "atlas-file")?;
+    let dir_template = mcptools_core::atlas::load(&templates_dir, "atlas-dir")?;
     let mut file_desc_count = 0u32;
     let mut file_fail_count = 0u32;
     let mut dir_desc_count = 0u32;
@@ -258,6 +262,7 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
                     &root,
                     &config,
                     &primer,
+                    &file_template,
                     Arc::clone(file_provider),
                     file_paths,
                     parallel,
@@ -273,7 +278,7 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
 
         // Step B: Re-describe this directory.
         if let Some(ref dir_provider) = dir_provider_opt {
-            match describe_directory(&db, dir_provider, &primer, dir_system, dir_path).await {
+            match describe_directory(&db, dir_provider, &primer, &dir_template, dir_path).await {
                 Ok(true) => {
                     dir_desc_count += 1;
                     progress.set_message(truncate_for_display(

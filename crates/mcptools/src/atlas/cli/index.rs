@@ -12,8 +12,8 @@ use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlas::{
-    build_directory_prompt, content_hash, directory_system_prompt, format_dry_run_index,
-    DirectoryEntry, DryRunEntry, FileEntry, IndexTier,
+    content_hash, format_dry_run_index, format_symbol, render, render_system, truncate_to_tokens,
+    DirectoryEntry, DryRunEntry, FileEntry, IndexTier, LoadedTemplate, Symbol,
 };
 
 #[derive(Debug, clap::Parser)]
@@ -186,6 +186,12 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         return Ok(());
     }
 
+    let templates_dir = mcptools_core::llm_stream::resolve_paths()?
+        .config_dir
+        .join("templates");
+    let file_template = mcptools_core::atlas::load(&templates_dir, "atlas-file")?;
+    let dir_template = mcptools_core::atlas::load(&templates_dir, "atlas-dir")?;
+
     let files_to_describe: Vec<PathBuf> = if opts.incremental {
         let needed: std::collections::HashSet<PathBuf> =
             db.files_needing_descriptions()?.into_iter().collect();
@@ -234,7 +240,6 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         "Generating descriptions (bottom-up)...",
     );
 
-    let dir_system = directory_system_prompt();
     let mut file_desc_count = 0u32;
     let mut file_fail_count = 0u32;
     let mut dir_desc_count = 0u32;
@@ -249,6 +254,7 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
                     &root,
                     &config,
                     &primer,
+                    &file_template,
                     Arc::clone(file_provider),
                     file_paths,
                     parallel,
@@ -265,7 +271,7 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
 
         // Step B: Describe this directory
         if let Some(ref dir_provider) = dir_provider_opt {
-            match describe_directory(&db, dir_provider, &primer, dir_system, dir_path).await {
+            match describe_directory(&db, dir_provider, &primer, &dir_template, dir_path).await {
                 Ok(true) => {
                     dir_desc_count += 1;
                     progress.set_message(truncate_for_display(
@@ -302,6 +308,57 @@ pub(crate) fn collect_directories_bottom_up(db: &Database) -> Result<Vec<PathBuf
     Ok(paths)
 }
 
+fn location_value(tree_path: &[(PathBuf, Option<&str>)]) -> String {
+    if tree_path.is_empty() {
+        return "(no path context available)".to_string();
+    }
+    tree_path
+        .iter()
+        .map(|(dir, desc)| match desc {
+            Some(d) => format!("- {} — {}", dir.display(), d),
+            None => format!("- {}", dir.display()),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn symbols_value(symbols: &[Symbol]) -> String {
+    if symbols.is_empty() {
+        return "(no symbols extracted)".to_string();
+    }
+    symbols
+        .iter()
+        .map(|sym| format_symbol(sym).trim_end_matches('\n').to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn children_value(children: &[(PathBuf, bool, Option<&str>)]) -> String {
+    if children.is_empty() {
+        return "(empty directory)".to_string();
+    }
+    children
+        .iter()
+        .map(|(name, is_dir, desc)| {
+            let kind = if *is_dir { "dir" } else { "file" };
+            match desc {
+                Some(d) => format!("- [{}] {} — {}", kind, name.display(), d),
+                None => format!("- [{}] {}", kind, name.display()),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn content_value(content: &str, max_tokens: usize) -> String {
+    let truncated = truncate_to_tokens(content, max_tokens);
+    if truncated.len() < content.len() {
+        format!("{truncated}\n... (truncated)")
+    } else {
+        truncated.to_string()
+    }
+}
+
 /// Result of a single LLM description attempt.
 enum DescResult {
     Ok {
@@ -321,7 +378,7 @@ pub(crate) async fn describe_directory(
     db: &Database,
     provider: &RigProvider,
     primer: &str,
-    system: &str,
+    template: &LoadedTemplate,
     dir_path: &Path,
 ) -> Result<bool> {
     let children = db.directory_children(dir_path)?;
@@ -332,9 +389,16 @@ pub(crate) async fn describe_directory(
         .map(|c| (c.path.clone(), c.is_dir, c.short_description.as_deref()))
         .collect();
 
-    let prompt = build_directory_prompt(primer, dir_path, &children_tuples, &aggregated_symbols);
+    let vars = serde_json::json!({
+        "primer": primer,
+        "dir_path": dir_path.display().to_string(),
+        "children": children_value(&children_tuples),
+        "symbols": symbols_value(&aggregated_symbols),
+    });
+    let system = render_system(template, &vars)?;
+    let prompt = render(template, &vars)?;
 
-    let response = match provider.generate(system, &prompt).await {
+    let response = match provider.generate(&system, &prompt).await {
         Ok(r) => r,
         Err(e) => {
             crate::prelude::eprintln!(
@@ -373,6 +437,7 @@ pub(crate) async fn generate_descriptions(
     root: &Path,
     config: &mcptools_core::atlas::AtlasConfig,
     primer: &str,
+    template: &LoadedTemplate,
     provider: Arc<RigProvider>,
     indexed_paths: &[PathBuf],
     parallel: usize,
@@ -385,8 +450,7 @@ pub(crate) async fn generate_descriptions(
     }
 
     // Pre-build all prompts sequentially (needs DB for tree_path and symbols).
-    let system = mcptools_core::atlas::file_system_prompt();
-    let mut work_items: Vec<(PathBuf, String)> = Vec::with_capacity(indexed_paths.len());
+    let mut work_items: Vec<(PathBuf, String, String)> = Vec::with_capacity(indexed_paths.len());
 
     for file_path in indexed_paths {
         let tree_path = db.tree_path_to(file_path)?;
@@ -398,35 +462,34 @@ pub(crate) async fn generate_descriptions(
             .map(|(p, d)| (p.clone(), d.as_deref()))
             .collect();
 
-        let prompt = mcptools_core::atlas::build_file_prompt(
-            primer,
-            &tree_path_refs,
-            &symbols,
-            &content,
-            config.max_file_tokens,
-        );
+        let vars = serde_json::json!({
+            "primer": primer,
+            "location": location_value(&tree_path_refs),
+            "symbols": symbols_value(&symbols),
+            "content": content_value(&content, config.max_file_tokens),
+        });
+        let system = render_system(template, &vars)?;
+        let prompt = render(template, &vars)?;
 
-        work_items.push((file_path.clone(), prompt));
+        work_items.push((file_path.clone(), system, prompt));
     }
 
     // Fan-out: feed work items to N workers via a channel.
-    let (work_tx, work_rx) = async_channel::bounded::<(PathBuf, String)>(parallel * 2);
+    let (work_tx, work_rx) = async_channel::bounded::<(PathBuf, String, String)>(parallel * 2);
     // Fan-in: workers send results back to the writer.
     let (result_tx, mut result_rx) = mpsc::channel::<DescResult>(parallel * 2);
 
     // Spawn N worker tasks.
-    let system: Arc<str> = Arc::from(system);
     let mut worker_handles = Vec::with_capacity(parallel);
 
     for _ in 0..parallel {
         let rx = work_rx.clone();
         let tx = result_tx.clone();
         let prov = Arc::clone(&provider);
-        let sys = Arc::clone(&system);
 
         worker_handles.push(tokio::spawn(async move {
-            while let Ok((path, prompt)) = rx.recv().await {
-                let result = match prov.generate(&sys, &prompt).await {
+            while let Ok((path, system, prompt)) = rx.recv().await {
+                let result = match prov.generate(&system, &prompt).await {
                     Ok(response) => match mcptools_core::atlas::parse_description(&response) {
                         Ok(desc) => DescResult::Ok {
                             path,

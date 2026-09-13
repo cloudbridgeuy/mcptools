@@ -1,5 +1,6 @@
 name = "atlas-file"
 description = "Describes a single source file for the atlas index."
+default_vars = { primer = "", location = "", symbols = "", content = "" }
 system = """
 You describe source code files. Respond ONLY in this exact format:
 

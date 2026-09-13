@@ -1,5 +1,6 @@
 name = "atlas-primer"
 description = "Restructures raw project context into a concise mental model."
+default_vars = { raw_primer = "" }
 system = ""
 template = """
 The following is raw context about a project:

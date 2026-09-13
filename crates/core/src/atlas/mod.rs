@@ -5,6 +5,7 @@ pub mod parse;
 pub mod prompts;
 pub mod setup;
 pub mod symbols;
+pub mod templates;
 pub mod tree_view;
 pub mod types;
 
@@ -15,10 +16,7 @@ pub use config::{
 };
 pub use hash::content_hash;
 pub use parse::{parse_description, parse_stdin_line, FileDescription, ParseDescriptionError};
-pub use prompts::{
-    build_directory_prompt, build_file_prompt, build_primer_refinement_prompt,
-    directory_system_prompt, estimate_tokens, file_system_prompt, truncate_to_tokens,
-};
+pub use prompts::{estimate_tokens, format_symbol, truncate_to_tokens};
 pub use setup::{
     detect_managers, extract_claude_md_block, format_manual_instructions, format_setup_plan,
     format_setup_summary, format_warnings, hook_block, manual_instructions, parse_hook_state,
@@ -28,6 +26,7 @@ pub use setup::{
     HOOK_MARKER_START,
 };
 pub use symbols::extract_symbols;
+pub use templates::{load, render, render_system, LoadedTemplate, Template, TemplateError};
 pub use tree_view::{
     extract_parent_paths, format_directory_peek, format_dry_run_index, format_dry_run_update,
     format_elapsed, format_peek, format_status, format_tree, sort_tree_entries, DryRunEntry,
