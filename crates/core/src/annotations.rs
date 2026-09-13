@@ -1,9 +1,10 @@
 use std::fmt::Write;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// A UI annotation from the calendsync dev overlay.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DevAnnotation {
     pub id: String,
     pub timestamp: String,
@@ -25,7 +26,7 @@ pub struct DevAnnotation {
     pub resolution_summary: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct BoundingBox {
     pub top: f64,
     pub left: f64,
@@ -33,7 +34,7 @@ pub struct BoundingBox {
     pub height: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ComputedStyles {
     pub color: String,
     pub background_color: String,
@@ -48,13 +49,13 @@ pub struct ComputedStyles {
 }
 
 /// API response for the list endpoint.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ListAnnotationsResponse {
     pub annotations: Vec<DevAnnotation>,
     pub summary: AnnotationSummary,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AnnotationSummary {
     pub total: usize,
     pub pending: usize,

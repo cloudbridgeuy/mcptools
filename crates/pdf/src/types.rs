@@ -1,10 +1,11 @@
 use std::fmt;
 use std::str::FromStr;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SectionId(String);
 
 impl SectionId {
@@ -33,7 +34,7 @@ impl fmt::Display for SectionId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HeadingLevel(u8);
 
 impl HeadingLevel {
@@ -57,7 +58,7 @@ impl TryFrom<u8> for HeadingLevel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ImageId(String);
 
 impl ImageId {
@@ -76,7 +77,7 @@ impl fmt::Display for ImageId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum ImageFormat {
     Jpeg,
     Png,
@@ -103,7 +104,7 @@ impl fmt::Display for ImageFormat {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct DocumentTree {
     pub title: String,
     pub metadata: DocumentMetadata,
@@ -113,7 +114,7 @@ pub struct DocumentTree {
     pub total_images: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct Section {
     pub id: SectionId,
     pub level: HeadingLevel,
@@ -125,12 +126,12 @@ pub struct Section {
     pub page_range: (usize, usize),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct SectionIndex {
     pub entries: Vec<IndexEntry>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct IndexEntry {
     pub id: SectionId,
     pub level: HeadingLevel,
@@ -140,7 +141,7 @@ pub struct IndexEntry {
     pub image_count: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct SectionContent {
     pub id: SectionId,
     pub title: String,
@@ -148,13 +149,13 @@ pub struct SectionContent {
     pub images: Vec<ImageRef>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct ImageRef {
     pub id: ImageId,
     pub format: ImageFormat,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct EnrichedImageRef {
     pub id: ImageId,
     pub format: ImageFormat,
@@ -170,7 +171,7 @@ pub struct ImageData {
     pub bytes: Vec<u8>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
 pub struct DocumentMetadata {
     pub title: Option<String>,
     pub author: Option<String>,
@@ -230,7 +231,7 @@ impl ClassifiedBlock {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum PeekPosition {
     Beginning,
     Middle,
@@ -263,7 +264,7 @@ impl FromStr for PeekPosition {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PeekContent {
     pub id: Option<SectionId>,
     pub title: String,

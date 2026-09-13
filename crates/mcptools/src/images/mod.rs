@@ -5,9 +5,10 @@ use mcptools_core::images::{
     self, EditParams, GenerateParams, ImagesResponse, CHAT_MAINLINE_DEFAULT, CODEX_RESPONSES_URL,
     DEFAULT_BASE_URL, DEFAULT_MODEL, MAX_INPUT_IMAGES, VARY_PROMPT,
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct SavedOutput {
     pub files: Vec<String>,
     pub model: String,

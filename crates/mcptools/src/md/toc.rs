@@ -1,6 +1,7 @@
 use crate::prelude::{eprintln, println, *};
 use colored::Colorize;
 use regex::Regex;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::IsTerminal;
 
@@ -48,7 +49,7 @@ pub enum OutputFormat {
     Json,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TocEntry {
     pub level: usize,
     pub text: String,
@@ -56,7 +57,7 @@ pub struct TocEntry {
     pub char_limit: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct TocOutput {
     pub url: String,
     pub title: Option<String>,

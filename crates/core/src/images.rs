@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_MODEL: &str = "gpt-image-2.5-flare";
@@ -55,7 +56,7 @@ pub struct ImageData {
     pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TokenDetails {
     #[serde(default)]
     pub image_tokens: u32,
@@ -63,7 +64,7 @@ pub struct TokenDetails {
     pub text_tokens: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Usage {
     #[serde(default)]
     pub input_tokens: u32,

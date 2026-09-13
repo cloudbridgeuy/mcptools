@@ -1,4 +1,5 @@
 use regex::Regex;
+use schemars::JsonSchema;
 use scraper::{Html, Selector as CssSelector};
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +12,7 @@ pub enum SelectionStrategy {
     N,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MdPaginationInfo {
     pub current_page: usize,
     pub total_pages: usize,
@@ -20,7 +21,7 @@ pub struct MdPaginationInfo {
     pub has_more: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FetchOutput {
     pub url: String,
     pub title: Option<String>,

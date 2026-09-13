@@ -2435,6 +2435,7 @@ dependencies = [
  "lopdf",
  "rand 0.8.5",
  "regex",
+ "schemars",
  "serde",
  "thiserror 2.0.18",
  "unicode-normalization",

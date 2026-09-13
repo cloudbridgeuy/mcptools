@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use regex::Regex;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// HackerNews item from API
@@ -22,7 +23,7 @@ pub struct HnItem {
 }
 
 /// Individual list item output
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ListItem {
     pub id: u64,
     pub title: Option<String>,
@@ -34,7 +35,7 @@ pub struct ListItem {
 }
 
 /// Pagination metadata for list output
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ListPaginationInfo {
     pub current_page: usize,
     pub total_pages: usize,
@@ -45,7 +46,7 @@ pub struct ListPaginationInfo {
 }
 
 /// Complete list output with items and pagination
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ListOutput {
     pub story_type: String,
     pub items: Vec<ListItem>,
@@ -53,7 +54,7 @@ pub struct ListOutput {
 }
 
 /// Post output with comments and pagination
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct PostOutput {
     pub id: u64,
     pub title: Option<String>,
@@ -68,7 +69,7 @@ pub struct PostOutput {
 }
 
 /// Individual comment output
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct CommentOutput {
     pub id: u64,
     pub author: Option<String>,
@@ -78,7 +79,7 @@ pub struct CommentOutput {
 }
 
 /// Threaded comment output with nested replies
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ThreadedCommentOutput {
     pub id: u64,
     pub author: Option<String>,
@@ -89,7 +90,7 @@ pub struct ThreadedCommentOutput {
 }
 
 /// Pagination metadata for post reading
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct PaginationInfo {
     pub current_page: usize,
     pub total_pages: usize,
