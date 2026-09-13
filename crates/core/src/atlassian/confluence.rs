@@ -1,5 +1,6 @@
 //! Transformation functions for Confluence API responses
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Confluence page response from API
@@ -48,8 +49,7 @@ pub struct ConfluenceSearchResponse {
     pub total_size: usize,
 }
 
-/// Output structure for a single page
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct PageOutput {
     pub id: String,
     pub title: String,
@@ -58,8 +58,7 @@ pub struct PageOutput {
     pub content: Option<String>,
 }
 
-/// Output structure for search command
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct SearchOutput {
     pub pages: Vec<PageOutput>,
     pub total: usize,

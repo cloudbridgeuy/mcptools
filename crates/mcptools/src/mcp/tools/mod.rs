@@ -114,7 +114,7 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
     let tools = vec![
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::SearchOutput>()),
             name: "jira_search".to_string(),
             description: "Search Jira issues using JQL (Jira Query Language) or a saved query. Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -141,7 +141,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::confluence::SearchOutput>()),
             name: "confluence_search".to_string(),
             description: "Search Confluence pages using CQL (Confluence Query Language). Returns a list of pages matching the query with title, type, URL, and optionally the plain text content. Requires CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, and CONFLUENCE_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -296,7 +296,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::TicketOutput>()),
             name: "jira_create".to_string(),
             description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, and sprint assignment. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -339,7 +339,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::TicketOutput>()),
             name: "jira_get".to_string(),
             description: "Get detailed information about a Jira ticket. Returns comprehensive information about a specific issue using its issue key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -354,7 +354,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::UpdateOutput>()),
             name: "jira_update".to_string(),
             description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Description (markdown), and Sprint assignment. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -397,7 +397,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::CommentOutput>()),
             name: "jira_comment_add".to_string(),
             description: "Post a comment on a Jira ticket. Supports markdown in the comment body (bold, italic, headings, lists, code blocks, links) which is automatically converted to Atlassian Document Format. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -416,7 +416,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::CommentListOutput>()),
             name: "jira_comment_list".to_string(),
             description: "List all comments on a Jira ticket. Returns comment details including ID, author, body text, and creation date. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -431,7 +431,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::CommentOutput>()),
             name: "jira_comment_update".to_string(),
             description: "Update an existing comment on a Jira ticket. Supports markdown in the comment body. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -454,7 +454,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::CommentDeleteOutput>()),
             name: "jira_comment_delete".to_string(),
             description: "Delete a comment from a Jira ticket by comment ID. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -473,7 +473,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::SprintListOutput>()),
             name: "jira_sprint_list".to_string(),
             description: "List sprints for a Jira board. Returns sprint metadata including ID, name, state, and dates. Use this to discover sprint IDs and names before assigning issues to sprints via jira_update or jira_create. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -492,7 +492,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::AttachmentListOutput>()),
             name: "jira_attachment_list".to_string(),
             description: "List all attachments on a Jira ticket. Returns attachment metadata including ID, filename, size, MIME type, and creation date. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -507,7 +507,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::AttachmentDownloadOutput>()),
             name: "jira_attachment_download".to_string(),
             description: "Download a specific attachment from a Jira ticket by attachment ID. Use jira_attachment_list first to get attachment IDs. Saves to a temp file by default, or to a specified output path. Returns the saved file path.".to_string(),
             input_schema: serde_json::json!({
@@ -530,7 +530,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::AttachmentListOutput>()),
             name: "jira_attachment_upload".to_string(),
             description: "Upload one or more files as attachments to a Jira ticket. Accepts an array of local file paths. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -550,7 +550,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::QueryListOutput>()),
             name: "jira_query_list".to_string(),
             description: "List all saved Jira queries. Returns a list of query names stored in ~/.config/mcptools/queries/".to_string(),
             input_schema: serde_json::json!({
@@ -560,7 +560,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::QueryStatusOutput>()),
             name: "jira_query_save".to_string(),
             description: "Save a Jira JQL query with a name for later reuse. Queries are stored in ~/.config/mcptools/queries/ as .jql files.".to_string(),
             input_schema: serde_json::json!({
@@ -583,7 +583,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::QueryStatusOutput>()),
             name: "jira_query_delete".to_string(),
             description: "Delete a saved Jira query by name. Removes the query from ~/.config/mcptools/queries/".to_string(),
             input_schema: serde_json::json!({
@@ -598,7 +598,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::QueryLoadOutput>()),
             name: "jira_query_load".to_string(),
             description: "Load and display the contents of a saved Jira query. Returns the query name and the JQL query text.".to_string(),
             input_schema: serde_json::json!({
@@ -613,7 +613,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRListOutput>()),
             name: "bitbucket_pr_list".to_string(),
             description: "List pull requests for a Bitbucket repository. Returns PR details including ID, title, author, state, and branches. Supports filtering by state and pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -641,7 +641,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PROutput>()),
             name: "bitbucket_pr_read".to_string(),
             description: "Read details of a specific Bitbucket pull request including diff, diffstat, and comments. Use lineLimit to control diff output size (default: 500 lines, use -1 for unlimited). Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -676,7 +676,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCreateOutput>()),
             name: "bitbucket_pr_create".to_string(),
             description: "Create a new pull request in a Bitbucket repository. Requires repo, title, and source branch. Optionally specify destination branch (defaults to repo's main branch), description, and whether to close the source branch after merge. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -711,7 +711,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::WorkspaceListOutput>()),
             name: "bitbucket_workspace_list".to_string(),
             description: "List Bitbucket workspaces accessible to the authenticated user. Returns workspace slugs and names. Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -730,7 +730,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::RepoListOutput>()),
             name: "bitbucket_repo_list".to_string(),
             description: "List repositories in a Bitbucket workspace. Returns repository names, full names, and clone URLs (SSH and HTTPS). Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -753,7 +753,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::BranchListOutput>()),
             name: "bitbucket_repo_branches".to_string(),
             description: "List branches in a Bitbucket repository. Returns branch names, latest commit hash, date, message, and author. Supports filtering and sorting. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({

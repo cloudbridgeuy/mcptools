@@ -1,5 +1,6 @@
 //! Transformation functions for Jira API responses
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Jira issue response from API
@@ -27,7 +28,7 @@ pub struct JiraStatus {
 }
 
 /// Jira assignee field
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, JsonSchema)]
 pub struct JiraAssignee {
     #[serde(rename = "displayName", default)]
     pub display_name: Option<String>,
@@ -57,8 +58,7 @@ pub struct JiraSearchResponse {
     pub max_results: Option<u64>,
 }
 
-/// Output structure for a single issue
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
 pub struct IssueOutput {
     pub key: String,
     pub summary: String,
@@ -67,8 +67,7 @@ pub struct IssueOutput {
     pub assignee: Option<String>,
 }
 
-/// Output structure for search command
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct SearchOutput {
     pub issues: Vec<IssueOutput>,
     pub total: usize,
@@ -127,8 +126,7 @@ pub struct JiraExtendedIssueResponse {
     pub fields: JiraExtendedFields,
 }
 
-/// Comment on a Jira ticket
-#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct JiraComment {
     #[serde(rename = "id")]
     pub comment_id: String,
@@ -139,8 +137,7 @@ pub struct JiraComment {
     pub author: Option<JiraAssignee>,
 }
 
-/// Output structure for detailed ticket information
-#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct TicketOutput {
     pub key: String,
     pub summary: String,
@@ -170,8 +167,7 @@ pub struct JiraAttachmentResponse {
     pub content: String,
 }
 
-/// Output struct for displaying attachment information
-#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct AttachmentOutput {
     pub id: String,
     pub filename: String,
@@ -181,8 +177,7 @@ pub struct AttachmentOutput {
     pub created: String,
 }
 
-/// Output structure for a Jira comment (used by add, list, update)
-#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct CommentOutput {
     pub ticket_key: String,
     pub comment_id: String,
@@ -467,8 +462,7 @@ pub struct JiraUser {
 /// See: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-user-search/#api-rest-api-3-users-search-get
 pub type JiraUserSearchResponse = Vec<JiraUser>;
 
-/// Field update result (success or error)
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct FieldUpdateResult {
     pub field: String,
     pub success: bool,
@@ -476,8 +470,7 @@ pub struct FieldUpdateResult {
     pub error: Option<String>,
 }
 
-/// Output structure for update command
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct UpdateOutput {
     pub ticket_key: String,
     pub fields_updated: Vec<FieldUpdateResult>,
@@ -1020,8 +1013,7 @@ pub struct JiraSprintListResponse {
     pub values: Vec<JiraSprintResponse>,
 }
 
-/// Output structure for a sprint after transformation
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct SprintOutput {
     pub id: u64,
     pub name: String,
@@ -1031,8 +1023,7 @@ pub struct SprintOutput {
     pub complete_date: Option<String>,
 }
 
-/// Output structure for a list of sprints
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct SprintListOutput {
     pub sprints: Vec<SprintOutput>,
     pub total: usize,
@@ -1070,6 +1061,45 @@ pub fn find_sprint_by_name(sprints: &[JiraSprintResponse], target_name: &str) ->
         .iter()
         .find(|s| s.name.eq_ignore_ascii_case(target_name))
         .map(|s| s.id)
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct QueryListOutput {
+    pub queries: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct QueryStatusOutput {
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct QueryLoadOutput {
+    pub name: String,
+    pub query: String,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct AttachmentListOutput {
+    pub attachments: Vec<AttachmentOutput>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct AttachmentDownloadOutput {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct CommentListOutput {
+    pub comments: Vec<CommentOutput>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct CommentDeleteOutput {
+    pub deleted: bool,
+    pub issue_key: String,
+    pub comment_id: String,
 }
 
 #[cfg(test)]

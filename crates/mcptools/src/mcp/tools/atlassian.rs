@@ -1,9 +1,8 @@
 use crate::prelude::{eprintln, *};
 use serde::Deserialize;
 
-use super::{CallToolResult, Content, JsonRpcError};
+use super::JsonRpcError;
 
-/// Handle Jira search command via MCP
 pub async fn handle_jira_search(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -29,9 +28,7 @@ pub async fn handle_jira_search(
             data: None,
         })?;
 
-    // Resolve query: either use provided query or load saved query
     let resolved_query = if let Some(query_name) = args.query_name {
-        // Load saved query
         let home = env::var("HOME")
             .ok()
             .map(PathBuf::from)
@@ -66,14 +63,12 @@ pub async fn handle_jira_search(
         );
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
         data: None,
     })?;
 
-    // Call the Jira module's data function
     let search_data = crate::atlassian::jira::search_issues_data(
         resolved_query,
         args.limit.unwrap_or(10),
@@ -87,27 +82,9 @@ pub async fn handle_jira_search(
         data: None,
     })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&search_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(search_data)
 }
 
-/// Handle Confluence search command via MCP
 pub async fn handle_confluence_search(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -134,14 +111,12 @@ pub async fn handle_confluence_search(
         );
     }
 
-    // Create config from environment for MCP path
     let config = crate::atlassian::ConfluenceConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
         data: None,
     })?;
 
-    // Call the Confluence module's data function
     let search_data = crate::atlassian::confluence::search_pages_data(
         args.query,
         args.limit.unwrap_or(10),
@@ -154,27 +129,9 @@ pub async fn handle_confluence_search(
         data: None,
     })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&search_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(search_data)
 }
 
-/// Handle Jira get command via MCP
 pub async fn handle_jira_get(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -196,14 +153,12 @@ pub async fn handle_jira_get(
         eprintln!("Calling jira_get: issueKey={}", args.issue_key);
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
         data: None,
     })?;
 
-    // Call the Jira module's data function
     let ticket_data = crate::atlassian::jira::get_ticket_data(args.issue_key, &config)
         .await
         .map_err(|e| JsonRpcError {
@@ -212,27 +167,9 @@ pub async fn handle_jira_get(
             data: None,
         })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&ticket_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(ticket_data)
 }
 
-/// Handle Jira sprint list command via MCP
 pub async fn handle_jira_sprint_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -260,7 +197,6 @@ pub async fn handle_jira_sprint_list(
         );
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -279,26 +215,9 @@ pub async fn handle_jira_sprint_list(
         data: None,
     })?;
 
-    let json_string = serde_json::to_string_pretty(&sprints).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(sprints)
 }
 
-/// Handle Jira update command via MCP
 pub async fn handle_jira_update(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -339,7 +258,6 @@ pub async fn handle_jira_update(
         );
     }
 
-    // Build UpdateOptions from MCP arguments
     let update_options = crate::atlassian::jira::update::UpdateOptions {
         ticket_key: args.ticket_key,
         status: args.status,
@@ -352,14 +270,12 @@ pub async fn handle_jira_update(
         json: true, // MCP always returns JSON
     };
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
         data: None,
     })?;
 
-    // Call the Jira module's data function
     let update_data = crate::atlassian::jira::update_ticket_data(update_options, &config)
         .await
         .map_err(|e| JsonRpcError {
@@ -368,27 +284,9 @@ pub async fn handle_jira_update(
             data: None,
         })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&update_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(update_data)
 }
 
-/// Handle Jira create command via MCP
 pub async fn handle_jira_create(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -432,7 +330,6 @@ pub async fn handle_jira_create(
         );
     }
 
-    // Build CreateOptions from MCP arguments
     let create_options = crate::atlassian::jira::create::CreateOptions {
         summary: args.summary,
         description: args.description,
@@ -445,14 +342,12 @@ pub async fn handle_jira_create(
         json: true, // MCP always returns JSON
     };
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
         data: None,
     })?;
 
-    // Call the Jira module's data function
     let create_data = crate::atlassian::jira::create_ticket_data(create_options, &config)
         .await
         .map_err(|e| JsonRpcError {
@@ -461,27 +356,9 @@ pub async fn handle_jira_create(
             data: None,
         })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&create_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(create_data)
 }
 
-/// Handle Jira query list command via MCP
 pub async fn handle_jira_query_list(
     _arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -510,29 +387,11 @@ pub async fn handle_jira_query_list(
         data: None,
     })?;
 
-    let json_string = serde_json::to_string_pretty(&serde_json::json!({
-        "queries": queries_list
-    }))
-    .map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
+    super::to_dual_result(mcptools_core::atlassian::jira::QueryListOutput {
+        queries: queries_list,
     })
 }
 
-/// Handle Jira query save command via MCP
 pub async fn handle_jira_query_save(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -587,30 +446,12 @@ pub async fn handle_jira_query_save(
         data: None,
     })?;
 
-    let json_string = serde_json::to_string_pretty(&serde_json::json!({
-        "status": "success",
-        "message": format!("Query '{}' saved", args.name)
-    }))
-    .map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
+    super::to_dual_result(mcptools_core::atlassian::jira::QueryStatusOutput {
+        status: "success".to_string(),
+        message: format!("Query '{}' saved", args.name),
     })
 }
 
-/// Handle Jira query delete command via MCP
 pub async fn handle_jira_query_delete(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -653,30 +494,12 @@ pub async fn handle_jira_query_delete(
         data: None,
     })?;
 
-    let json_string = serde_json::to_string_pretty(&serde_json::json!({
-        "status": "success",
-        "message": format!("Query '{}' deleted", args.name)
-    }))
-    .map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
+    super::to_dual_result(mcptools_core::atlassian::jira::QueryStatusOutput {
+        status: "success".to_string(),
+        message: format!("Query '{}' deleted", args.name),
     })
 }
 
-/// Handle Jira query load command via MCP
 pub async fn handle_jira_query_load(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -719,30 +542,12 @@ pub async fn handle_jira_query_load(
         data: None,
     })?;
 
-    let json_string = serde_json::to_string_pretty(&serde_json::json!({
-        "name": args.name,
-        "query": query
-    }))
-    .map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
+    super::to_dual_result(mcptools_core::atlassian::jira::QueryLoadOutput {
+        name: args.name,
+        query,
     })
 }
 
-/// Handle Bitbucket PR list command via MCP
 pub async fn handle_bitbucket_pr_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -774,7 +579,6 @@ pub async fn handle_bitbucket_pr_list(
         );
     }
 
-    // Build ListPRParams from MCP arguments
     let params = ListPRParams {
         repo: args.repo,
         states: args.state,
@@ -783,14 +587,12 @@ pub async fn handle_bitbucket_pr_list(
         base_url_override: None,
     };
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
         data: None,
     })?;
 
-    // Call the Bitbucket module's data function (no spinner for MCP)
     let list_data = list_pr_data(params, &config, None)
         .await
         .map_err(|e| JsonRpcError {
@@ -799,27 +601,9 @@ pub async fn handle_bitbucket_pr_list(
             data: None,
         })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(list_data)
 }
 
-/// Handle Bitbucket PR read command via MCP
 pub async fn handle_bitbucket_pr_read(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -856,7 +640,6 @@ pub async fn handle_bitbucket_pr_read(
         );
     }
 
-    // Build ReadPRParams from MCP arguments
     let params = ReadPRParams {
         repo: args.repo,
         pr_number: args.pr_number,
@@ -868,14 +651,12 @@ pub async fn handle_bitbucket_pr_read(
         no_diff: args.no_diff.unwrap_or(false),
     };
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
         data: None,
     })?;
 
-    // Call the Bitbucket module's data function (no spinner for MCP)
     let mut pr_data = read_pr_data(params, &config, None)
         .await
         .map_err(|e| JsonRpcError {
@@ -884,8 +665,6 @@ pub async fn handle_bitbucket_pr_read(
             data: None,
         })?;
 
-    // Apply line limit to diff content if specified
-    // Default to 500 lines, -1 means unlimited
     let line_limit = args.line_limit.unwrap_or(500);
     if line_limit >= 0 {
         if let Some(ref diff_content) = pr_data.diff_content {
@@ -901,27 +680,9 @@ pub async fn handle_bitbucket_pr_read(
         }
     }
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&pr_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(pr_data)
 }
 
-/// Handle Bitbucket PR creation command via MCP
 pub async fn handle_bitbucket_pr_create(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -957,7 +718,6 @@ pub async fn handle_bitbucket_pr_create(
         );
     }
 
-    // Build CreatePRParams from MCP arguments (source_branch always present — Parse Don't Validate)
     let params = CreatePRParams {
         repo: args.repo,
         title: args.title,
@@ -968,14 +728,12 @@ pub async fn handle_bitbucket_pr_create(
         base_url_override: None,
     };
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
         data: None,
     })?;
 
-    // Call the Bitbucket module's data function (no spinner for MCP)
     let pr_data = create_pr_data(params, &config, None)
         .await
         .map_err(|e| JsonRpcError {
@@ -984,27 +742,9 @@ pub async fn handle_bitbucket_pr_create(
             data: None,
         })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&pr_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(pr_data)
 }
 
-/// Handle Jira attachment list command via MCP
 pub async fn handle_jira_attachment_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1028,7 +768,6 @@ pub async fn handle_jira_attachment_list(
         eprintln!("Calling jira_attachment_list: issueKey={}", args.issue_key);
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1043,26 +782,9 @@ pub async fn handle_jira_attachment_list(
             data: None,
         })?;
 
-    let json_string = serde_json::to_string_pretty(&attachments).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(mcptools_core::atlassian::jira::AttachmentListOutput { attachments })
 }
 
-/// Handle Jira attachment download command via MCP
 pub async fn handle_jira_attachment_download(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1093,7 +815,6 @@ pub async fn handle_jira_attachment_download(
         );
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1115,28 +836,11 @@ pub async fn handle_jira_attachment_download(
         data: None,
     })?;
 
-    let json_string =
-        serde_json::to_string_pretty(&serde_json::json!({ "path": path.display().to_string() }))
-            .map_err(|e| JsonRpcError {
-                code: -32603,
-                message: format!("Serialization error: {e}"),
-                data: None,
-            })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
+    super::to_dual_result(mcptools_core::atlassian::jira::AttachmentDownloadOutput {
+        path: path.display().to_string(),
     })
 }
 
-/// Handle Jira attachment upload command via MCP
 pub async fn handle_jira_attachment_upload(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1165,7 +869,6 @@ pub async fn handle_jira_attachment_upload(
         );
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1186,26 +889,11 @@ pub async fn handle_jira_attachment_upload(
             data: None,
         })?;
 
-    let json_string = serde_json::to_string_pretty(&uploads).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
+    super::to_dual_result(mcptools_core::atlassian::jira::AttachmentListOutput {
+        attachments: uploads,
     })
 }
 
-/// Handle Jira comment add command via MCP
 pub async fn handle_jira_comment_add(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1234,7 +922,6 @@ pub async fn handle_jira_comment_add(
         );
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1249,26 +936,9 @@ pub async fn handle_jira_comment_add(
             data: None,
         })?;
 
-    let json_string = serde_json::to_string_pretty(&output).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(output)
 }
 
-/// Handle Jira comment list command via MCP
 pub async fn handle_jira_comment_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1292,7 +962,6 @@ pub async fn handle_jira_comment_list(
         eprintln!("Calling jira_comment_list: issueKey={}", args.issue_key);
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1307,26 +976,9 @@ pub async fn handle_jira_comment_list(
             data: None,
         })?;
 
-    let json_string = serde_json::to_string_pretty(&comments).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(mcptools_core::atlassian::jira::CommentListOutput { comments })
 }
 
-/// Handle Jira comment update command via MCP
 pub async fn handle_jira_comment_update(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1357,7 +1009,6 @@ pub async fn handle_jira_comment_update(
         );
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1377,26 +1028,9 @@ pub async fn handle_jira_comment_update(
         data: None,
     })?;
 
-    let json_string = serde_json::to_string_pretty(&output).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(output)
 }
 
-/// Handle Jira comment delete command via MCP
 pub async fn handle_jira_comment_delete(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1425,7 +1059,6 @@ pub async fn handle_jira_comment_delete(
         );
     }
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1444,31 +1077,13 @@ pub async fn handle_jira_comment_delete(
         data: None,
     })?;
 
-    let json_string = serde_json::to_string_pretty(&serde_json::json!({
-        "deleted": true,
-        "issue_key": args.issue_key,
-        "comment_id": args.comment_id
-    }))
-    .map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
+    super::to_dual_result(mcptools_core::atlassian::jira::CommentDeleteOutput {
+        deleted: true,
+        issue_key: args.issue_key,
+        comment_id: args.comment_id,
     })
 }
 
-/// Handle Bitbucket workspace list command via MCP
 pub async fn handle_bitbucket_workspace_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1504,7 +1119,6 @@ pub async fn handle_bitbucket_workspace_list(
         base_url_override: None,
     };
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1519,26 +1133,9 @@ pub async fn handle_bitbucket_workspace_list(
             data: None,
         })?;
 
-    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(list_data)
 }
 
-/// Handle Bitbucket repo list command via MCP
 pub async fn handle_bitbucket_repo_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1576,7 +1173,6 @@ pub async fn handle_bitbucket_repo_list(
         base_url_override: None,
     };
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1591,26 +1187,9 @@ pub async fn handle_bitbucket_repo_list(
             data: None,
         })?;
 
-    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(list_data)
 }
 
-/// Handle Bitbucket repo branches command via MCP
 pub async fn handle_bitbucket_repo_branches(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1654,7 +1233,6 @@ pub async fn handle_bitbucket_repo_branches(
         base_url_override: None,
     };
 
-    // Get config from environment (MCP server path)
     let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Configuration error: {e}"),
@@ -1669,21 +1247,5 @@ pub async fn handle_bitbucket_repo_branches(
             data: None,
         })?;
 
-    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(list_data)
 }

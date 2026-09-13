@@ -1,5 +1,6 @@
 //! Transformation functions for Bitbucket API responses
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -180,8 +181,7 @@ pub struct BitbucketCommitFile {
 // Output Domain Types (Clean models for display)
 // =============================================================================
 
-/// Output structure for PR read command
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct PROutput {
     pub id: u64,
     pub title: String,
@@ -204,8 +204,7 @@ pub struct PROutput {
     pub comments: Vec<CommentOutput>,
 }
 
-/// Output structure for a single comment
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct CommentOutput {
     pub id: u64,
     pub author: String,
@@ -216,8 +215,7 @@ pub struct CommentOutput {
     pub inline_line: Option<u32>,
 }
 
-/// Output structure for diff statistics
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct DiffstatOutput {
     pub files: Vec<FileStatOutput>,
     pub total_files: usize,
@@ -225,8 +223,7 @@ pub struct DiffstatOutput {
     pub total_deletions: u32,
 }
 
-/// Output structure for a single file's diff statistics
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct FileStatOutput {
     pub path: String,
     pub old_path: Option<String>, // For renames
@@ -427,8 +424,7 @@ pub struct BitbucketPRListResponse {
     pub previous: Option<String>,
 }
 
-/// Simplified PR info for list display
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct PRListItem {
     pub id: u64,
     pub title: String,
@@ -438,8 +434,7 @@ pub struct PRListItem {
     pub destination_branch: String,
 }
 
-/// Output structure for PR list command
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct PRListOutput {
     pub pull_requests: Vec<PRListItem>,
     pub next_page: Option<String>,
@@ -450,8 +445,7 @@ pub struct PRListOutput {
 // PR Create Types
 // =============================================================================
 
-/// Output structure for PR create command
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct PRCreateOutput {
     pub id: u64,
     pub title: String,
@@ -520,16 +514,14 @@ pub struct BitbucketWorkspace {
     pub uuid: Option<String>,
 }
 
-/// Output structure for workspace list command
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct WorkspaceListOutput {
     pub workspaces: Vec<WorkspaceItem>,
     pub next_page: Option<String>,
     pub total_count: Option<u32>,
 }
 
-/// Simplified workspace info for list display
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct WorkspaceItem {
     pub slug: String,
     pub name: String,
@@ -605,16 +597,14 @@ pub struct BitbucketCloneLink {
     pub href: String,
 }
 
-/// Output structure for repository list command
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct RepoListOutput {
     pub repositories: Vec<RepoItem>,
     pub next_page: Option<String>,
     pub total_count: Option<u32>,
 }
 
-/// Simplified repository info for list display
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct RepoItem {
     pub slug: String,
     pub name: String,
@@ -712,16 +702,14 @@ pub struct BitbucketBranchAuthor {
     pub raw: Option<String>,
 }
 
-/// Output structure for branch list command
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct BranchListOutput {
     pub branches: Vec<BranchItem>,
     pub next_page: Option<String>,
     pub total_count: Option<u32>,
 }
 
-/// Simplified branch info for list display
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
 pub struct BranchItem {
     pub name: String,
     pub commit_hash: Option<String>,
