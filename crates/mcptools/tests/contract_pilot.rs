@@ -66,7 +66,24 @@ fn mcp_contract_pilot() {
             "atlas_peek",
             "atlas_status",
             "atlas_tree_view",
-            "linear_issue_get"
+            "linear_auth_status",
+            "linear_comment_create",
+            "linear_comment_list",
+            "linear_cycle_list",
+            "linear_issue_create",
+            "linear_issue_get",
+            "linear_issue_list",
+            "linear_issue_update",
+            "linear_label_list",
+            "linear_project_get",
+            "linear_project_list",
+            "linear_relation_add",
+            "linear_relation_list",
+            "linear_relation_remove",
+            "linear_state_list",
+            "linear_team_get",
+            "linear_team_list",
+            "linear_user_list",
         ]
     );
 }

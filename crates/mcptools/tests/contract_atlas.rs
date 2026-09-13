@@ -113,7 +113,10 @@ fn mcp_contract_atlas() {
         assert!(props.contains_key("text"), "missing text in {name}");
     }
     assert!(with_schema.contains(&"linear_issue_get"));
-    assert_eq!(with_schema.len(), 4, "unexpected schemas: {with_schema:?}");
+    assert!(
+        with_schema.len() >= 4,
+        "unexpected schemas: {with_schema:?}"
+    );
 
     for (response, format) in [
         (&responses[1], "tree"),

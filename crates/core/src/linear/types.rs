@@ -1,34 +1,34 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Viewer {
     pub id: String,
     pub name: String,
     pub email: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Team {
     pub id: String,
     pub key: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Project {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct User {
     pub id: String,
     pub name: String,
     pub email: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowState {
     pub id: String,
     pub name: String,
@@ -36,13 +36,13 @@ pub struct WorkflowState {
     pub state_type: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Label {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Cycle {
     pub id: String,
     pub number: u32,
@@ -55,7 +55,7 @@ pub struct Paginated<T> {
     pub page_info: PageInfo,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueMini {
     pub id: String,
     pub identifier: String,
@@ -95,7 +95,167 @@ impl From<IssueMini> for IssueGetOutput {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IssueListOutput {
+    pub nodes: Vec<IssueMini>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<IssueMini>> for IssueListOutput {
+    fn from(paged: Paginated<IssueMini>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CommentListOutput {
+    pub nodes: Vec<Comment>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<Comment>> for CommentListOutput {
+    fn from(paged: Paginated<Comment>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RelationListOutput {
+    pub nodes: Vec<IssueRelation>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<IssueRelation>> for RelationListOutput {
+    fn from(paged: Paginated<IssueRelation>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TeamListOutput {
+    pub nodes: Vec<Team>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<Team>> for TeamListOutput {
+    fn from(paged: Paginated<Team>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ProjectListOutput {
+    pub nodes: Vec<Project>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<Project>> for ProjectListOutput {
+    fn from(paged: Paginated<Project>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UserListOutput {
+    pub nodes: Vec<User>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<User>> for UserListOutput {
+    fn from(paged: Paginated<User>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StateListOutput {
+    pub nodes: Vec<WorkflowState>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<WorkflowState>> for StateListOutput {
+    fn from(paged: Paginated<WorkflowState>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LabelListOutput {
+    pub nodes: Vec<Label>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<Label>> for LabelListOutput {
+    fn from(paged: Paginated<Label>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CycleListOutput {
+    pub nodes: Vec<Cycle>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<Cycle>> for CycleListOutput {
+    fn from(paged: Paginated<Cycle>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RelationAddOutput {
+    pub status: String,
+    pub id: String,
+    #[serde(rename = "type")]
+    pub rel_type: String,
+    pub issue: String,
+    #[serde(rename = "relatedIssue")]
+    pub related_issue: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RelationRemoveOutput {
+    pub deleted_relation_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Comment {
     pub id: String,
     pub body: String,
@@ -104,7 +264,7 @@ pub struct Comment {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueRelation {
     pub id: String,
     pub rel_type: String,
@@ -113,7 +273,7 @@ pub struct IssueRelation {
     pub direction: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PageInfo {
     #[serde(rename = "hasNextPage", alias = "has_next")]
     pub has_next: bool,

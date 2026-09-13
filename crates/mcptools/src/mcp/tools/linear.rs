@@ -1,7 +1,12 @@
 use crate::prelude::{eprintln, *};
 use serde::Deserialize;
 
-use super::{CallToolResult, Content, JsonRpcError};
+use super::JsonRpcError;
+use mcptools_core::linear::{
+    CommentListOutput, CycleListOutput, IssueListOutput, LabelListOutput, Paginated,
+    ProjectListOutput, RelationAddOutput, RelationListOutput, RelationRemoveOutput,
+    StateListOutput, TeamListOutput, UserListOutput,
+};
 
 fn invalid(e: serde_json::Error) -> JsonRpcError {
     JsonRpcError {
@@ -25,24 +30,6 @@ fn exec(e: color_eyre::eyre::Report) -> JsonRpcError {
         message: format!("Tool execution error: {e}"),
         data: None,
     }
-}
-
-fn text_result(data: impl serde::Serialize) -> Result<serde_json::Value, JsonRpcError> {
-    let text = serde_json::to_string_pretty(&data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text }],
-        is_error: None,
-    };
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
 }
 
 fn parse_args<T: for<'de> Deserialize<'de>>(
@@ -70,7 +57,7 @@ pub async fn handle_linear_auth_status(
     let viewer = crate::linear::auth::auth_status_data(&client)
         .await
         .map_err(exec)?;
-    text_result(viewer)
+    super::to_dual_result(viewer)
 }
 
 pub async fn handle_linear_issue_get(
@@ -133,7 +120,7 @@ pub async fn handle_linear_issue_list(
         cursor = page_info.end_cursor.clone();
     }
     nodes.truncate(50);
-    text_result(serde_json::json!({"nodes": nodes, "pageInfo": page_info}))
+    super::to_dual_result(IssueListOutput::from(Paginated { nodes, page_info }))
 }
 
 pub async fn handle_linear_comment_list(
@@ -166,7 +153,7 @@ pub async fn handle_linear_comment_list(
         cursor = page_info.end_cursor.clone();
     }
     nodes.truncate(50);
-    text_result(serde_json::json!({"nodes": nodes, "pageInfo": page_info}))
+    super::to_dual_result(CommentListOutput::from(Paginated { nodes, page_info }))
 }
 
 pub async fn handle_linear_relation_list(
@@ -199,7 +186,7 @@ pub async fn handle_linear_relation_list(
         cursor = page_info.end_cursor.clone();
     }
     nodes.truncate(50);
-    text_result(serde_json::json!({"nodes": nodes, "pageInfo": page_info}))
+    super::to_dual_result(RelationListOutput::from(Paginated { nodes, page_info }))
 }
 
 pub async fn handle_linear_team_list(
@@ -231,7 +218,7 @@ pub async fn handle_linear_team_list(
         cursor = page_info.end_cursor.clone();
     }
     nodes.truncate(50);
-    text_result(serde_json::json!({"nodes": nodes, "pageInfo": page_info}))
+    super::to_dual_result(TeamListOutput::from(Paginated { nodes, page_info }))
 }
 
 pub async fn handle_linear_team_get(
@@ -258,7 +245,7 @@ pub async fn handle_linear_team_get(
     let team = crate::linear::discover::teams_get_data(&client, selector)
         .await
         .map_err(exec)?;
-    text_result(team)
+    super::to_dual_result(team)
 }
 
 pub async fn handle_linear_project_list(
@@ -291,7 +278,7 @@ pub async fn handle_linear_project_list(
         cursor = page_info.end_cursor.clone();
     }
     nodes.truncate(50);
-    text_result(serde_json::json!({"nodes": nodes, "pageInfo": page_info}))
+    super::to_dual_result(ProjectListOutput::from(Paginated { nodes, page_info }))
 }
 
 pub async fn handle_linear_project_get(
@@ -306,7 +293,7 @@ pub async fn handle_linear_project_get(
     let item = crate::linear::discover::projects_get_data(&client, &args.id, &args.team)
         .await
         .map_err(exec)?;
-    text_result(item)
+    super::to_dual_result(item)
 }
 
 pub async fn handle_linear_user_list(
@@ -326,7 +313,7 @@ pub async fn handle_linear_user_list(
     )
     .await
     .map_err(exec)?;
-    text_result(serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info}))
+    super::to_dual_result(UserListOutput::from(data))
 }
 
 pub async fn handle_linear_state_list(
@@ -341,7 +328,7 @@ pub async fn handle_linear_state_list(
     let data = crate::linear::discover::states_list_data(&client, &args.team)
         .await
         .map_err(exec)?;
-    text_result(serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info}))
+    super::to_dual_result(StateListOutput::from(data))
 }
 
 pub async fn handle_linear_label_list(
@@ -356,7 +343,7 @@ pub async fn handle_linear_label_list(
     let data = crate::linear::discover::labels_list_data(&client, &args.team)
         .await
         .map_err(exec)?;
-    text_result(serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info}))
+    super::to_dual_result(LabelListOutput::from(data))
 }
 
 pub async fn handle_linear_issue_create(
@@ -381,7 +368,7 @@ pub async fn handle_linear_issue_create(
     )
     .await
     .map_err(exec)?;
-    text_result(created)
+    super::to_dual_result(created)
 }
 
 pub async fn handle_linear_issue_update(
@@ -416,7 +403,7 @@ pub async fn handle_linear_issue_update(
     )
     .await
     .map_err(exec)?;
-    text_result(updated)
+    super::to_dual_result(updated)
 }
 
 pub async fn handle_linear_comment_create(
@@ -432,7 +419,7 @@ pub async fn handle_linear_comment_create(
     let created = crate::linear::comments::comment_create_data(&client, &args.id, &body)
         .await
         .map_err(exec)?;
-    text_result(created)
+    super::to_dual_result(created)
 }
 
 pub async fn handle_linear_relation_add(
@@ -455,13 +442,17 @@ pub async fn handle_linear_relation_add(
     )
     .await
     .map_err(exec)?;
-    text_result(serde_json::json!({
-        "status": if created { "created" } else { "already_exists" },
-        "id": relation.id,
-        "type": relation.rel_type,
-        "issue": relation.issue,
-        "relatedIssue": relation.related_issue,
-    }))
+    super::to_dual_result(RelationAddOutput {
+        status: if created {
+            "created".to_string()
+        } else {
+            "already_exists".to_string()
+        },
+        id: relation.id,
+        rel_type: relation.rel_type,
+        issue: relation.issue,
+        related_issue: relation.related_issue,
+    })
 }
 
 pub async fn handle_linear_relation_remove(
@@ -484,7 +475,9 @@ pub async fn handle_linear_relation_remove(
     )
     .await
     .map_err(exec)?;
-    text_result(serde_json::json!({"deleted_relation_id": deleted}))
+    super::to_dual_result(RelationRemoveOutput {
+        deleted_relation_id: deleted,
+    })
 }
 
 pub async fn handle_linear_cycle_list(
@@ -499,5 +492,5 @@ pub async fn handle_linear_cycle_list(
     let data = crate::linear::discover::cycles_list_data(&client, &args.team)
         .await
         .map_err(exec)?;
-    text_result(serde_json::json!({"nodes": data.nodes, "pageInfo": data.page_info}))
+    super::to_dual_result(CycleListOutput::from(data))
 }
