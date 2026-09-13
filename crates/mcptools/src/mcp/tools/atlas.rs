@@ -1,6 +1,13 @@
-use serde::Deserialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-use super::{CallToolResult, Content, JsonRpcError};
+use super::JsonRpcError;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AtlasTextOutput {
+    pub format: String,
+    pub text: String,
+}
 
 pub async fn handle_atlas_tree_view(
     arguments: Option<serde_json::Value>,
@@ -20,7 +27,10 @@ pub async fn handle_atlas_tree_view(
         .map_err(to_internal_error)?;
 
     let output = mcptools_core::atlas::format_tree(&entries, true);
-    call_tool_result_text(&output)
+    super::to_dual_result(AtlasTextOutput {
+        format: "tree".to_string(),
+        text: output,
+    })
 }
 
 pub async fn handle_atlas_peek(
@@ -45,7 +55,10 @@ pub async fn handle_atlas_peek(
         }
     };
 
-    call_tool_result_text(&output)
+    super::to_dual_result(AtlasTextOutput {
+        format: "peek".to_string(),
+        text: output,
+    })
 }
 
 pub async fn handle_atlas_status(
@@ -58,7 +71,10 @@ pub async fn handle_atlas_status(
         crate::atlas::data::atlas_status_data(&db, &config, &root).map_err(to_internal_error)?;
 
     let output = mcptools_core::atlas::format_status(&status, true);
-    call_tool_result_text(&output)
+    super::to_dual_result(AtlasTextOutput {
+        format: "status".to_string(),
+        text: output,
+    })
 }
 
 fn parse_args<T: serde::de::DeserializeOwned>(
@@ -105,19 +121,4 @@ fn to_internal_error(e: color_eyre::eyre::Report) -> JsonRpcError {
         message: format!("Tool execution error: {e}"),
         data: None,
     }
-}
-
-fn call_tool_result_text(text: &str) -> Result<serde_json::Value, JsonRpcError> {
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text {
-            text: text.to_string(),
-        }],
-        is_error: None,
-    };
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
 }

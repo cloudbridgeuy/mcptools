@@ -1060,7 +1060,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<atlas::AtlasTextOutput>()),
             name: "atlas_tree_view".to_string(),
             description: "Browse an annotated directory tree of the codebase. Each entry includes a short description of what the file or directory contains. Use this to navigate unfamiliar codebases — start at the root, then drill into directories of interest.".to_string(),
             input_schema: serde_json::json!({
@@ -1072,7 +1072,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<atlas::AtlasTextOutput>()),
             name: "atlas_peek".to_string(),
             description: "Get a detailed summary of a file or directory. For files: long description, extracted symbols with signatures. For directories: long description, children with descriptions, aggregated symbols. Use this after tree_view to understand a specific file before reading it.".to_string(),
             input_schema: serde_json::json!({
@@ -1084,7 +1084,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<atlas::AtlasTextOutput>()),
             name: "atlas_status".to_string(),
             description: "Check the health of the Atlas codebase index. Shows when it was last updated, how many files are tracked, and whether descriptions are available.".to_string(),
             input_schema: serde_json::json!({
