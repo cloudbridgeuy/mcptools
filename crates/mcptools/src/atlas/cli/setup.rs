@@ -142,7 +142,9 @@ fn execute(
         SetupAction::WriteSkill { content } => write_with_parents(skill_path, content)?,
         SetupAction::WriteClaudeMd { content } => write_with_parents(claude_md_path, content)?,
         SetupAction::WriteTemplate { path, content } => write_with_parents(path, content)?,
-        SetupAction::Skip { .. } | SetupAction::LeaveAlone { .. } => {}
+        SetupAction::Skip { .. }
+        | SetupAction::WarnTemplate { .. }
+        | SetupAction::LeaveAlone { .. } => {}
     }
     Ok(())
 }

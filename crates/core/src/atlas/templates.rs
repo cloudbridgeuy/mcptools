@@ -50,15 +50,19 @@ pub fn load(templates_dir: &Path, name: &str) -> Result<LoadedTemplate, Template
     parse(&path, &raw)
 }
 
+pub fn validate(toml_str: &str) -> Result<Template, String> {
+    let template: Template = toml::from_str(toml_str).map_err(|e| e.to_string())?;
+    if !(template.default_vars.is_null() || template.default_vars.is_object()) {
+        return Err("default_vars must be a table".to_string());
+    }
+    Ok(template)
+}
+
 fn parse(path: &Path, raw: &str) -> Result<LoadedTemplate, TemplateError> {
-    let malformed = |reason: String| TemplateError::Malformed {
+    let template = validate(raw).map_err(|reason| TemplateError::Malformed {
         path: path.to_path_buf(),
         reason,
-    };
-    let template: Template = toml::from_str(raw).map_err(|e| malformed(e.to_string()))?;
-    if !(template.default_vars.is_null() || template.default_vars.is_object()) {
-        return Err(malformed("default_vars must be a table".to_string()));
-    }
+    })?;
     Ok(LoadedTemplate {
         template,
         raw: raw.to_string(),

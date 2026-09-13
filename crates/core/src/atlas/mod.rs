@@ -22,11 +22,13 @@ pub use setup::{
     format_setup_summary, format_warnings, hook_block, manual_instructions, parse_hook_state,
     plan_setup, splice_claude_md, splice_hook_block, template_status, HookState, Manager,
     ManagerFiles, RepoFacts, SetupAction, SetupFlags, SetupStep, SkipReason, TemplateStatus,
-    Templates, UntouchableReason, CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START, HOOK_MARKER_END,
-    HOOK_MARKER_START,
+    Templates, UntouchableReason, WarnReason, CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START,
+    HOOK_MARKER_END, HOOK_MARKER_START,
 };
 pub use symbols::extract_symbols;
-pub use templates::{load, render, render_system, LoadedTemplate, Template, TemplateError};
+pub use templates::{
+    load, render, render_system, validate, LoadedTemplate, Template, TemplateError,
+};
 pub use tree_view::{
     extract_parent_paths, format_directory_peek, format_dry_run_index, format_dry_run_update,
     format_elapsed, format_peek, format_status, format_tree, sort_tree_entries, DryRunEntry,

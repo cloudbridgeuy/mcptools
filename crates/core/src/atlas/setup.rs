@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use super::templates::validate;
+
 /// Opening marker of the managed hook block.
 pub const HOOK_MARKER_START: &str = "# >>> mcptools atlas >>>";
 /// Closing marker of the managed hook block.
@@ -211,8 +213,25 @@ pub enum SetupAction {
     WriteSkill { content: String },
     WriteClaudeMd { content: String },
     WriteTemplate { path: PathBuf, content: String },
+    WarnTemplate { step: SetupStep, reason: WarnReason },
     Skip { step: SetupStep, reason: SkipReason },
     LeaveAlone { reason: UntouchableReason },
+}
+
+/// Why setup refuses to install a template.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarnReason {
+    Malformed,
+    Collision,
+}
+
+impl WarnReason {
+    pub fn label(self) -> &'static str {
+        match self {
+            WarnReason::Malformed => "embedded template is malformed",
+            WarnReason::Collision => "existing file defines a different template",
+        }
+    }
 }
 
 fn new_hook() -> String {
@@ -396,6 +415,24 @@ fn plan_template_file(
             reason: SkipReason::Flag,
         };
     }
+    let current_template = match validate(current) {
+        Ok(template) => template,
+        Err(_) => {
+            return SetupAction::WarnTemplate {
+                step,
+                reason: WarnReason::Malformed,
+            }
+        }
+    };
+    let collides = existing
+        .and_then(|raw| validate(raw).ok())
+        .is_some_and(|existing| existing.name != current_template.name);
+    if collides {
+        return SetupAction::WarnTemplate {
+            step,
+            reason: WarnReason::Collision,
+        };
+    }
     match template_status(existing, current) {
         TemplateStatus::Absent => SetupAction::WriteTemplate {
             path: templates_dir.join(filename),
@@ -441,6 +478,9 @@ fn action_row(action: &SetupAction, executed: bool) -> String {
                 .and_then(|stem| stem.to_str())
                 .unwrap_or("template");
             format!("llm-stream template {name}: {verb}")
+        }
+        SetupAction::WarnTemplate { step, reason } => {
+            format!("{}: not installed ({})", step.label(), reason.label())
         }
         SetupAction::Skip { step, reason } => {
             format!("{}: {}", step.label(), reason.label())
@@ -557,6 +597,11 @@ pub fn format_warnings(actions: &[SetupAction]) -> Option<String> {
                 "warning: {} was edited by hand; not overwritten",
                 step.label()
             )),
+            SetupAction::WarnTemplate { step, reason } => Some(format!(
+                "warning: {} — {}; not installed",
+                step.label(),
+                reason.label()
+            )),
             _ => None,
         })
         .collect();
@@ -575,9 +620,9 @@ mod tests {
         Templates {
             skill: "SKILL TPL v1",
             claude_md_snippet: "SNIPPET v1",
-            atlas_file: "FILE TPL v1",
-            atlas_dir: "DIR TPL v1",
-            atlas_primer: "PRIMER TPL v1",
+            atlas_file: "name = \"atlas-file\"\ntemplate = \"FILE TPL v1\"\n",
+            atlas_dir: "name = \"atlas-dir\"\ntemplate = \"DIR TPL v1\"\n",
+            atlas_primer: "name = \"atlas-primer\"\ntemplate = \"PRIMER TPL v1\"\n",
         }
     }
 
@@ -1091,7 +1136,7 @@ mod tests {
             actions[3],
             SetupAction::WriteTemplate {
                 path: PathBuf::from("/cfg/templates/atlas-file.toml"),
-                content: "FILE TPL v1".to_string()
+                content: no_templates().atlas_file.to_string()
             }
         );
     }
@@ -1099,7 +1144,7 @@ mod tests {
     #[test]
     fn plan_skips_file_template_when_current() {
         let mut f = facts(None);
-        f.file_template_content = Some("FILE TPL v1\n".to_string());
+        f.file_template_content = Some(format!("{}\n", no_templates().atlas_file));
         let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[3],
@@ -1113,7 +1158,8 @@ mod tests {
     #[test]
     fn plan_keeps_user_edited_file_template() {
         let mut f = facts(None);
-        f.file_template_content = Some("FILE TPL v1 + my edits".to_string());
+        f.file_template_content =
+            Some("name = \"atlas-file\"\ntemplate = \"my edits\"\n".to_string());
         let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
             actions[3],
@@ -1153,15 +1199,15 @@ mod tests {
             &[
                 SetupAction::WriteTemplate {
                     path: PathBuf::from("/cfg/templates/atlas-file.toml"),
-                    content: "FILE TPL v1".to_string()
+                    content: no_templates().atlas_file.to_string()
                 },
                 SetupAction::WriteTemplate {
                     path: PathBuf::from("/cfg/templates/atlas-dir.toml"),
-                    content: "DIR TPL v1".to_string()
+                    content: no_templates().atlas_dir.to_string()
                 },
                 SetupAction::WriteTemplate {
                     path: PathBuf::from("/cfg/templates/atlas-primer.toml"),
-                    content: "PRIMER TPL v1".to_string()
+                    content: no_templates().atlas_primer.to_string()
                 },
             ]
         );
@@ -1233,6 +1279,73 @@ mod tests {
             templates_dir(),
         );
         assert_eq!(format_warnings(&actions), None);
+    }
+
+    #[test]
+    fn plan_warns_when_embedded_asset_malformed() {
+        let mut f = facts(None);
+        f.file_template_content = Some("name = \"atlas-file\"\ntemplate = \"body\"\n".to_string());
+        let mut templates = no_templates();
+        templates.atlas_file = "not = [valid";
+        let actions = plan_setup(&f, &SetupFlags::default(), &templates, templates_dir());
+        assert_eq!(
+            actions[3],
+            SetupAction::WarnTemplate {
+                step: SetupStep::Templates,
+                reason: WarnReason::Malformed
+            }
+        );
+    }
+
+    #[test]
+    fn plan_warns_when_existing_file_holds_a_different_template() {
+        let mut f = facts(None);
+        f.file_template_content = Some("name = \"foreign\"\ntemplate = \"mine\"\n".to_string());
+        let mut templates = no_templates();
+        templates.atlas_file = "name = \"atlas-file\"\ntemplate = \"body\"\n";
+        let actions = plan_setup(&f, &SetupFlags::default(), &templates, templates_dir());
+        assert_eq!(
+            actions[3],
+            SetupAction::WarnTemplate {
+                step: SetupStep::Templates,
+                reason: WarnReason::Collision
+            }
+        );
+    }
+
+    #[test]
+    fn plan_keeps_user_edited_file_template_when_unparsable() {
+        let mut f = facts(None);
+        f.file_template_content = Some("FILE TPL v1 + my edits".to_string());
+        let mut templates = no_templates();
+        templates.atlas_file = "name = \"atlas-file\"\ntemplate = \"body\"\n";
+        let actions = plan_setup(&f, &SetupFlags::default(), &templates, templates_dir());
+        assert_eq!(
+            actions[3],
+            SetupAction::Skip {
+                step: SetupStep::Templates,
+                reason: SkipReason::UserEdited
+            }
+        );
+    }
+
+    #[test]
+    fn warnings_listed_for_template_warn_reasons() {
+        let actions = vec![
+            SetupAction::WarnTemplate {
+                step: SetupStep::Templates,
+                reason: WarnReason::Malformed,
+            },
+            SetupAction::WarnTemplate {
+                step: SetupStep::TemplateDir,
+                reason: WarnReason::Collision,
+            },
+        ];
+        let text = format_warnings(&actions).expect("warnings expected");
+        assert!(text.contains("atlas-file"));
+        assert!(text.contains("malformed"));
+        assert!(text.contains("atlas-dir"));
+        assert!(text.contains("different template"));
     }
 
     #[test]
