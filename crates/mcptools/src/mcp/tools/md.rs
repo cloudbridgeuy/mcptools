@@ -76,6 +76,7 @@ pub async fn handle_md_fetch(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -171,6 +172,7 @@ pub async fn handle_md_toc(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };

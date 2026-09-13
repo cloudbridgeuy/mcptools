@@ -54,6 +54,7 @@ pub async fn handle_ui_annotations_list(
     );
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text }],
         is_error: None,
     };
@@ -116,6 +117,7 @@ pub async fn handle_ui_annotations_get(
     let text = mcptools_core::annotations::format_annotation_detail(&annotation);
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text }],
         is_error: None,
     };
@@ -174,6 +176,7 @@ pub async fn handle_ui_annotations_resolve(
     }
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text {
             text: format!("Annotation {} marked as resolved.", args.id),
         }],
@@ -235,6 +238,7 @@ pub async fn handle_ui_annotations_clear(
         .unwrap_or(0);
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text {
             text: format!("Cleared {cleared} annotation(s)."),
         }],

@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -65,6 +66,33 @@ pub struct IssueMini {
     pub parent: Option<String>,
     #[serde(default)]
     pub blocked_by: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IssueGetOutput {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub url: String,
+    pub state: String,
+    #[serde(default)]
+    pub parent: Option<String>,
+    #[serde(default)]
+    pub blocked_by: Vec<String>,
+}
+
+impl From<IssueMini> for IssueGetOutput {
+    fn from(issue: IssueMini) -> Self {
+        Self {
+            id: issue.id,
+            identifier: issue.identifier,
+            title: issue.title,
+            url: issue.url,
+            state: issue.state,
+            parent: issue.parent,
+            blocked_by: issue.blocked_by,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

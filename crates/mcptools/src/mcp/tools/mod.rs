@@ -55,6 +55,8 @@ pub struct CallToolParams {
 #[derive(Debug, Serialize)]
 pub struct CallToolResult {
     pub content: Vec<Content>,
+    #[serde(rename = "structuredContent", skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<serde_json::Value>,
     #[serde(rename = "isError", skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
 }
@@ -64,6 +66,29 @@ pub struct CallToolResult {
 pub enum Content {
     #[serde(rename = "text")]
     Text { text: String },
+}
+
+pub fn to_dual_result(value: impl Serialize) -> Result<serde_json::Value, JsonRpcError> {
+    let structured = serde_json::to_value(&value).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+    let text = serde_json::to_string_pretty(&structured).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+    let result = CallToolResult {
+        content: vec![Content::Text { text }],
+        structured_content: Some(structured),
+        is_error: None,
+    };
+    serde_json::to_value(result).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Internal error: {e}"),
+        data: None,
+    })
 }
 
 pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
@@ -89,6 +114,7 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
     let tools = vec![
         Tool {
+            output_schema: None,
             name: "jira_search".to_string(),
             description: "Search Jira issues using JQL (Jira Query Language) or a saved query. Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -115,6 +141,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "confluence_search".to_string(),
             description: "Search Confluence pages using CQL (Confluence Query Language). Returns a list of pages matching the query with title, type, URL, and optionally the plain text content. Requires CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, and CONFLUENCE_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -133,6 +160,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "hn_read_item".to_string(),
             description: "Read a HackerNews post and its comments. Accepts HackerNews item ID (e.g., '8863') or full URL (e.g., 'https://news.ycombinator.com/item?id=8863'). Returns post details with paginated comments.".to_string(),
             input_schema: serde_json::json!({
@@ -159,6 +187,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "hn_list_items".to_string(),
             description: "List HackerNews stories with pagination. Supports different story types: top, new, best, ask, show, job. Returns a paginated list of stories with their details.".to_string(),
             input_schema: serde_json::json!({
@@ -182,6 +211,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "md_fetch".to_string(),
             description: "Fetch a web page using headless Chrome, wait for all XHR requests to complete (network idle), and convert the HTML to Markdown. Supports CSS selector filtering to extract specific page elements. Returns the page title, markdown content, selector metadata, and fetch statistics.".to_string(),
             input_schema: serde_json::json!({
@@ -229,6 +259,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "md_toc".to_string(),
             description: "Extract table of contents from a web page by parsing markdown headings (H1-H6). Fetches the page using headless Chrome, converts to markdown, and extracts all heading levels with their character offsets and limits. Each TOC entry includes char_offset and char_limit values that can be used with md_fetch to extract specific sections. Sections are defined as heading + content until the next same-or-higher-level heading. Supports CSS selector filtering to extract TOC from specific page elements.".to_string(),
             input_schema: serde_json::json!({
@@ -265,6 +296,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_create".to_string(),
             description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, and sprint assignment. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -307,6 +339,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_get".to_string(),
             description: "Get detailed information about a Jira ticket. Returns comprehensive information about a specific issue using its issue key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -321,6 +354,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_update".to_string(),
             description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Description (markdown), and Sprint assignment. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -363,6 +397,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_comment_add".to_string(),
             description: "Post a comment on a Jira ticket. Supports markdown in the comment body (bold, italic, headings, lists, code blocks, links) which is automatically converted to Atlassian Document Format. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -381,6 +416,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_comment_list".to_string(),
             description: "List all comments on a Jira ticket. Returns comment details including ID, author, body text, and creation date. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -395,6 +431,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_comment_update".to_string(),
             description: "Update an existing comment on a Jira ticket. Supports markdown in the comment body. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -417,6 +454,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_comment_delete".to_string(),
             description: "Delete a comment from a Jira ticket by comment ID. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -435,6 +473,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_sprint_list".to_string(),
             description: "List sprints for a Jira board. Returns sprint metadata including ID, name, state, and dates. Use this to discover sprint IDs and names before assigning issues to sprints via jira_update or jira_create. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -453,6 +492,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_attachment_list".to_string(),
             description: "List all attachments on a Jira ticket. Returns attachment metadata including ID, filename, size, MIME type, and creation date. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -467,6 +507,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_attachment_download".to_string(),
             description: "Download a specific attachment from a Jira ticket by attachment ID. Use jira_attachment_list first to get attachment IDs. Saves to a temp file by default, or to a specified output path. Returns the saved file path.".to_string(),
             input_schema: serde_json::json!({
@@ -489,6 +530,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_attachment_upload".to_string(),
             description: "Upload one or more files as attachments to a Jira ticket. Accepts an array of local file paths. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: serde_json::json!({
@@ -508,6 +550,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_query_list".to_string(),
             description: "List all saved Jira queries. Returns a list of query names stored in ~/.config/mcptools/queries/".to_string(),
             input_schema: serde_json::json!({
@@ -517,6 +560,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_query_save".to_string(),
             description: "Save a Jira JQL query with a name for later reuse. Queries are stored in ~/.config/mcptools/queries/ as .jql files.".to_string(),
             input_schema: serde_json::json!({
@@ -539,6 +583,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_query_delete".to_string(),
             description: "Delete a saved Jira query by name. Removes the query from ~/.config/mcptools/queries/".to_string(),
             input_schema: serde_json::json!({
@@ -553,6 +598,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "jira_query_load".to_string(),
             description: "Load and display the contents of a saved Jira query. Returns the query name and the JQL query text.".to_string(),
             input_schema: serde_json::json!({
@@ -567,6 +613,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "bitbucket_pr_list".to_string(),
             description: "List pull requests for a Bitbucket repository. Returns PR details including ID, title, author, state, and branches. Supports filtering by state and pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -594,6 +641,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "bitbucket_pr_read".to_string(),
             description: "Read details of a specific Bitbucket pull request including diff, diffstat, and comments. Use lineLimit to control diff output size (default: 500 lines, use -1 for unlimited). Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -628,6 +676,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "bitbucket_pr_create".to_string(),
             description: "Create a new pull request in a Bitbucket repository. Requires repo, title, and source branch. Optionally specify destination branch (defaults to repo's main branch), description, and whether to close the source branch after merge. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -662,6 +711,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "bitbucket_workspace_list".to_string(),
             description: "List Bitbucket workspaces accessible to the authenticated user. Returns workspace slugs and names. Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -680,6 +730,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "bitbucket_repo_list".to_string(),
             description: "List repositories in a Bitbucket workspace. Returns repository names, full names, and clone URLs (SSH and HTTPS). Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -702,6 +753,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "bitbucket_repo_branches".to_string(),
             description: "List branches in a Bitbucket repository. Returns branch names, latest commit hash, date, message, and author. Supports filtering and sorting. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: serde_json::json!({
@@ -736,6 +788,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "ui_annotations_list".to_string(),
             description: "List all UI annotations from the calendsync dev server. Returns selector, component name, note, and resolution status for each annotation.".to_string(),
             input_schema: serde_json::json!({
@@ -750,6 +803,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "ui_annotations_get".to_string(),
             description: "Get a single UI annotation by ID with full details including computed styles, bounding box, and optional screenshot.".to_string(),
             input_schema: serde_json::json!({
@@ -768,6 +822,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "ui_annotations_resolve".to_string(),
             description: "Mark a UI annotation as resolved with a summary of the changes made.".to_string(),
             input_schema: serde_json::json!({
@@ -790,6 +845,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "ui_annotations_clear".to_string(),
             description: "Clear all UI annotations from the dev server.".to_string(),
             input_schema: serde_json::json!({
@@ -804,6 +860,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "pdf_toc".to_string(),
             description: "Parse a PDF file and return its document tree (table of contents) with section IDs, headings, content previews, and image counts. Use the section IDs with pdf_read to read specific sections.".to_string(),
             input_schema: serde_json::json!({
@@ -818,6 +875,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "pdf_read".to_string(),
             description: "Read a section of a PDF document as Markdown, or the entire document if no section specified. Returns the section title, rendered Markdown text, and image references.".to_string(),
             input_schema: serde_json::json!({
@@ -836,6 +894,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "pdf_peek".to_string(),
             description: "Sample a text snippet from a PDF section at a given position (beginning, middle, ending, random) without reading the full content. Returns the snippet with total character count so you know how much content remains. Defaults to the whole document if no section specified.".to_string(),
             input_schema: serde_json::json!({
@@ -863,6 +922,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "pdf_images".to_string(),
             description: "List all images in a PDF section or the whole document. Returns image IDs, formats, section IDs, section titles, and page numbers. Use with pdf_image to extract specific images. NOTE: PDFs often reuse decorative images (logos, backgrounds, headers) across many pages — the same image ID will appear on multiple pages. To find meaningful content images (screenshots, diagrams, photos), filter out IDs that repeat across many pages and focus on IDs that appear only within the target section.".to_string(),
             input_schema: serde_json::json!({
@@ -881,6 +941,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "pdf_image".to_string(),
             description: "Extract a specific image from a PDF document by ID, or pick a random image. Returns the image as base64-encoded data with format information. Optionally scope to a section.".to_string(),
             input_schema: serde_json::json!({
@@ -907,6 +968,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "pdf_info".to_string(),
             description: "Get metadata about a PDF document including title, author, page count, and creator.".to_string(),
             input_schema: serde_json::json!({
@@ -921,6 +983,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "images_generate".to_string(),
             description: "Generate images with ChatGPT Images 2.5 (gpt-image-2.5-flare default, gpt-image-2.5-sunburst for premium precision). Text-to-image via POST /v1/images/generations. Saves PNG/JPEG/WebP files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
             input_schema: serde_json::json!({
@@ -944,6 +1007,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "images_edit".to_string(),
             description: "Edit ChatGPT Images 2.5 images with a prompt plus 1-16 reference images and optional mask via POST /v1/images/edits. Preserves subject/composition outside the edit. Saves files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
             input_schema: serde_json::json!({
@@ -970,6 +1034,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "images_vary".to_string(),
             description: "Create variations of ChatGPT Images 2.5 images anchored to 1-16 reference images. Same as images_edit with a default variation prompt when prompt is omitted. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
             input_schema: serde_json::json!({
@@ -995,6 +1060,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "atlas_tree_view".to_string(),
             description: "Browse an annotated directory tree of the codebase. Each entry includes a short description of what the file or directory contains. Use this to navigate unfamiliar codebases — start at the root, then drill into directories of interest.".to_string(),
             input_schema: serde_json::json!({
@@ -1006,6 +1072,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "atlas_peek".to_string(),
             description: "Get a detailed summary of a file or directory. For files: long description, extracted symbols with signatures. For directories: long description, children with descriptions, aggregated symbols. Use this after tree_view to understand a specific file before reading it.".to_string(),
             input_schema: serde_json::json!({
@@ -1017,6 +1084,7 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "atlas_status".to_string(),
             description: "Check the health of the Atlas codebase index. Shows when it was last updated, how many files are tracked, and whether descriptions are available.".to_string(),
             input_schema: serde_json::json!({
@@ -1025,91 +1093,111 @@ pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
             }),
         },
         Tool {
+            output_schema: None,
             name: "linear_auth_status".to_string(),
             description: "Show the Linear viewer identity for LINEAR_API_KEY. Returns id, name, and email. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::AuthStatusArgs>(),
         },
         Tool {
+            output_schema: Some(schema::input_schema_for::<
+                mcptools_core::linear::IssueGetOutput,
+            >()),
             name: "linear_issue_get".to_string(),
             description: "Get one Linear issue by id or identifier (e.g. GUZ-85). Returns id, identifier, title, URL, state, parent, and blocked-by relations. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueGetArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_issue_list".to_string(),
             description: "List Linear issues with filters. Returns nodes with id, identifier, title, state, parent, blocked-by plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_comment_list".to_string(),
             description: "List comments on one Linear issue. Returns nodes with id, author, body, createdAt plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::CommentListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_relation_list".to_string(),
             description: "List relations on one Linear issue. Returns nodes with id, type, issue, related issue, direction plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::RelationListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_team_list".to_string(),
             description: "List Linear teams. Returns nodes with id, key, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::TeamListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_team_get".to_string(),
             description: "Get one Linear team by id, key, or name. Returns id, key, name. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::TeamGetArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_project_list".to_string(),
             description: "List Linear projects in a team. Returns nodes with id, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_project_get".to_string(),
             description: "Get one Linear project by id or name within a team. Returns id, name. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectGetArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_user_list".to_string(),
             description: "List Linear users matching a name query. Returns nodes with id, name, email plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::UserListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_state_list".to_string(),
             description: "List workflow states in a Linear team. Returns nodes with id, name, type plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::StateListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_label_list".to_string(),
             description: "List labels in a Linear team. Returns nodes with id, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::LabelListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_cycle_list".to_string(),
             description: "List cycles in a Linear team. Returns nodes with id, number, name plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::CycleListArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_issue_create".to_string(),
             description: "Create a Linear issue in a team. Returns id, identifier, title, URL, state, parent. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueCreateArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_issue_update".to_string(),
             description: "Update a Linear issue by id or identifier. Needs at least one of title, description, state, assignee, parent, clearParent. Returns the updated issue. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueUpdateArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_comment_create".to_string(),
             description: "Create a comment on a Linear issue. Returns id, body, URL, author, createdAt. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::CommentCreateArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_relation_add".to_string(),
             description: "Add a relation between two Linear issues. Type is 'blocks' or 'related'. Returns status created or already_exists plus the relation. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::RelationAddArgs>(),
         },
         Tool {
+            output_schema: None,
             name: "linear_relation_remove".to_string(),
             description: "Remove a relation between two Linear issues matched by source, related, type triple. Returns the deleted relation id. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::RelationRemoveArgs>(),
@@ -1235,5 +1323,29 @@ pub async fn handle_tools_call(
             message: format!("Unknown tool: {}", params.name),
             data: None,
         }),
+    }
+}
+
+#[cfg(test)]
+mod dual_tests {
+    use super::*;
+
+    #[test]
+    fn dual_result_carries_text_and_structured() {
+        let value = to_dual_result(serde_json::json!({"identifier": "GUZ-85"})).unwrap();
+        assert_eq!(
+            value
+                .get("structuredContent")
+                .and_then(|v| v.get("identifier")),
+            Some(&serde_json::json!("GUZ-85"))
+        );
+        let text = value
+            .get("content")
+            .and_then(|v| v.get(0))
+            .and_then(|v| v.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert!(text.contains("GUZ-85"));
+        assert!(value.get("isError").is_none());
     }
 }

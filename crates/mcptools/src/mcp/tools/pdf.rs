@@ -31,6 +31,7 @@ fn to_text_result(value: &impl serde::Serialize) -> Result<serde_json::Value, Js
         .map_err(|e| internal_err(format!("Serialization error: {e}")))?;
 
     serde_json::to_value(CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json }],
         is_error: None,
     })

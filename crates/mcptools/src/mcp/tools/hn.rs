@@ -51,6 +51,7 @@ pub async fn handle_hn_read_item(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -110,6 +111,7 @@ pub async fn handle_hn_list_items(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };

@@ -109,6 +109,7 @@ fn to_internal_error(e: color_eyre::eyre::Report) -> JsonRpcError {
 
 fn call_tool_result_text(text: &str) -> Result<serde_json::Value, JsonRpcError> {
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text {
             text: text.to_string(),
         }],

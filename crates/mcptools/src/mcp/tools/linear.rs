@@ -34,6 +34,7 @@ fn text_result(data: impl serde::Serialize) -> Result<serde_json::Value, JsonRpc
         data: None,
     })?;
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text }],
         is_error: None,
     };
@@ -84,7 +85,7 @@ pub async fn handle_linear_issue_get(
     let found = crate::linear::issue::issue_get_data(&client, &args.id)
         .await
         .map_err(exec)?;
-    text_result(found)
+    super::to_dual_result(mcptools_core::linear::IssueGetOutput::from(found))
 }
 
 pub async fn handle_linear_issue_list(

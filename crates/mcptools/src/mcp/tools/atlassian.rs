@@ -95,6 +95,7 @@ pub async fn handle_jira_search(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -161,6 +162,7 @@ pub async fn handle_confluence_search(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -218,6 +220,7 @@ pub async fn handle_jira_get(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -283,6 +286,7 @@ pub async fn handle_jira_sprint_list(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -372,6 +376,7 @@ pub async fn handle_jira_update(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -464,6 +469,7 @@ pub async fn handle_jira_create(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -514,6 +520,7 @@ pub async fn handle_jira_query_list(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -591,6 +598,7 @@ pub async fn handle_jira_query_save(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -656,6 +664,7 @@ pub async fn handle_jira_query_delete(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -721,6 +730,7 @@ pub async fn handle_jira_query_load(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -797,6 +807,7 @@ pub async fn handle_bitbucket_pr_list(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -898,6 +909,7 @@ pub async fn handle_bitbucket_pr_read(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -980,6 +992,7 @@ pub async fn handle_bitbucket_pr_create(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1037,6 +1050,7 @@ pub async fn handle_jira_attachment_list(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1110,6 +1124,7 @@ pub async fn handle_jira_attachment_download(
             })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1178,6 +1193,7 @@ pub async fn handle_jira_attachment_upload(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1240,6 +1256,7 @@ pub async fn handle_jira_comment_add(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1297,6 +1314,7 @@ pub async fn handle_jira_comment_list(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1366,6 +1384,7 @@ pub async fn handle_jira_comment_update(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1437,6 +1456,7 @@ pub async fn handle_jira_comment_delete(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1506,6 +1526,7 @@ pub async fn handle_bitbucket_workspace_list(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1577,6 +1598,7 @@ pub async fn handle_bitbucket_repo_list(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };
@@ -1654,6 +1676,7 @@ pub async fn handle_bitbucket_repo_branches(
     })?;
 
     let result = CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text: json_string }],
         is_error: None,
     };

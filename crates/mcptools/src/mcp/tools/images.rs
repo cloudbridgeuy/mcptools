@@ -23,6 +23,7 @@ fn exec_err(e: impl std::fmt::Display) -> JsonRpcError {
 fn to_result(value: &impl serde::Serialize) -> Result<serde_json::Value, JsonRpcError> {
     let text = serde_json::to_string_pretty(value).map_err(exec_err)?;
     serde_json::to_value(CallToolResult {
+        structured_content: None,
         content: vec![Content::Text { text }],
         is_error: None,
     })
