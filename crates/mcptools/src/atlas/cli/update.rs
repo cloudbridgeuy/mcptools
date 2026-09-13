@@ -16,7 +16,7 @@ use mcptools_core::atlas::{
 use super::index::{
     collect_directories_bottom_up, describe_directory, ensure_parent_dir, epoch_now, find_git_root,
     finish_message, generate_descriptions, msg_width, print_elapsed, progress_bar,
-    truncate_for_display,
+    record_template_identity, truncate_for_display,
 };
 
 #[derive(Debug, clap::Parser)]
@@ -248,6 +248,7 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
         .join("templates");
     let file_template = mcptools_core::atlas::load(&templates_dir, "atlas-file")?;
     let dir_template = mcptools_core::atlas::load(&templates_dir, "atlas-dir")?;
+    record_template_identity(&db, &[&file_template, &dir_template])?;
     let mut file_desc_count = 0u32;
     let mut file_fail_count = 0u32;
     let mut dir_desc_count = 0u32;

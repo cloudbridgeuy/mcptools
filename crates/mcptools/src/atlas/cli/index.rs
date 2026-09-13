@@ -191,6 +191,7 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         .join("templates");
     let file_template = mcptools_core::atlas::load(&templates_dir, "atlas-file")?;
     let dir_template = mcptools_core::atlas::load(&templates_dir, "atlas-dir")?;
+    record_template_identity(&db, &[&file_template, &dir_template])?;
 
     let files_to_describe: Vec<PathBuf> = if opts.incremental {
         let needed: std::collections::HashSet<PathBuf> =
@@ -306,6 +307,14 @@ pub(crate) fn collect_directories_bottom_up(db: &Database) -> Result<Vec<PathBuf
     let mut paths: Vec<PathBuf> = dirs.into_iter().map(|d| d.path).collect();
     paths.sort_by_key(|p| Reverse(p.components().count()));
     Ok(paths)
+}
+
+pub(crate) fn record_template_identity(db: &Database, templates: &[&LoadedTemplate]) -> Result<()> {
+    for template in templates {
+        let key = format!("template:{}:hash", template.template.name);
+        db.set_metadata(&key, &content_hash(template.raw.as_bytes()).hex())?;
+    }
+    Ok(())
 }
 
 fn location_value(tree_path: &[(PathBuf, Option<&str>)]) -> String {
@@ -681,4 +690,51 @@ pub(crate) fn epoch_now() -> String {
     let secs = duration.as_secs();
     // Simple epoch-seconds representation; good enough for ordering.
     format!("{secs}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mcptools_core::atlas::Template;
+
+    fn loaded_template(name: &str, raw: &str) -> LoadedTemplate {
+        LoadedTemplate {
+            template: Template {
+                name: name.to_string(),
+                description: None,
+                system: None,
+                template: "body".to_string(),
+                default_vars: serde_json::json!({}),
+            },
+            raw: raw.to_string(),
+        }
+    }
+
+    #[test]
+    fn template_identity_records_raw_hash_per_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("atlas.db")).unwrap();
+        let raw = "name = \"atlas-file\"\ntemplate = \"body\"\n";
+        let file = loaded_template("atlas-file", raw);
+        let dir_t = loaded_template("atlas-dir", "name = \"atlas-dir\"\n");
+
+        record_template_identity(&db, &[&file, &dir_t]).unwrap();
+
+        assert_eq!(
+            db.get_metadata("template:atlas-file:hash")
+                .unwrap()
+                .as_deref(),
+            Some(content_hash(raw.as_bytes()).hex().as_str())
+        );
+        assert_eq!(
+            db.get_metadata("template:atlas-dir:hash")
+                .unwrap()
+                .as_deref(),
+            Some(
+                content_hash("name = \"atlas-dir\"\n".as_bytes())
+                    .hex()
+                    .as_str()
+            )
+        );
+    }
 }
