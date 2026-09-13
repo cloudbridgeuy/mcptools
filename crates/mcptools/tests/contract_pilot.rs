@@ -54,10 +54,19 @@ fn mcp_contract_pilot() {
         assert!(properties.contains_key(field), "missing {field}");
     }
     assert!(pilot.get("inputSchema").is_some());
-    let rest_without_schema = tools
+    let mut with_schema: Vec<&str> = tools
         .iter()
-        .filter(|t| t.get("name").and_then(|v| v.as_str()) != Some("linear_issue_get"))
         .filter(|t| t.get("outputSchema").is_some())
-        .count();
-    assert_eq!(rest_without_schema, 0);
+        .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
+        .collect();
+    with_schema.sort();
+    assert_eq!(
+        with_schema,
+        vec![
+            "atlas_peek",
+            "atlas_status",
+            "atlas_tree_view",
+            "linear_issue_get"
+        ]
+    );
 }
