@@ -1,4 +1,12 @@
 pub fn input_schema_for<T: schemars::JsonSchema>() -> serde_json::Value {
+    schema_value::<T>()
+}
+
+pub fn output_schema_for<T: schemars::JsonSchema>() -> serde_json::Value {
+    schema_value::<T>()
+}
+
+fn schema_value<T: schemars::JsonSchema>() -> serde_json::Value {
     let schema = schemars::schema_for!(T);
     let mut value = serde_json::to_value(&schema).unwrap_or(serde_json::json!({
         "type": "object",

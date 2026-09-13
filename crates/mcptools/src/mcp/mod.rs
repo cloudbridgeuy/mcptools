@@ -43,8 +43,8 @@ pub struct Tool {
     pub description: String,
     #[serde(rename = "inputSchema")]
     pub input_schema: serde_json::Value,
-    #[serde(rename = "outputSchema", skip_serializing_if = "Option::is_none")]
-    pub output_schema: Option<serde_json::Value>,
+    #[serde(rename = "outputSchema")]
+    pub output_schema: serde_json::Value,
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
