@@ -104,11 +104,11 @@ fn mcp_contract_atlas() {
             .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(name))
             .unwrap();
         let schema = tool.get("outputSchema").unwrap();
-        assert_eq!(
-            schema.get("type").and_then(|v| v.as_str()),
-            Some("object")
-        );
-        let props = schema.get("properties").and_then(|v| v.as_object()).unwrap();
+        assert_eq!(schema.get("type").and_then(|v| v.as_str()), Some("object"));
+        let props = schema
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .unwrap();
         assert!(props.contains_key("format"), "missing format in {name}");
         assert!(props.contains_key("text"), "missing text in {name}");
     }
