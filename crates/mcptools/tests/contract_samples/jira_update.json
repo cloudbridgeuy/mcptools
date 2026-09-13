@@ -1,0 +1,11 @@
+{
+  "ticket_key": "PROJ-1",
+  "fields_updated": [
+    {
+      "field": "summary",
+      "success": true,
+      "value": "New"
+    }
+  ],
+  "partial_failure": false
+}

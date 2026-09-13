@@ -1,0 +1,9 @@
+{
+  "repositories": [
+    {
+      "slug": "repo",
+      "name": "Repo",
+      "full_name": "ws/repo"
+    }
+  ]
+}

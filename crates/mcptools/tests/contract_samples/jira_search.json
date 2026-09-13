@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "key": "PROJ-1",
+      "summary": "Sample bug",
+      "status": "To Do"
+    }
+  ],
+  "total": 1
+}

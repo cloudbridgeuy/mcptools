@@ -1,0 +1,14 @@
+{
+  "nodes": [
+    {
+      "id": "9d1a2b3c-0000-4000-8000-000000000001",
+      "identifier": "GUZ-79",
+      "title": "Wire the thing",
+      "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing",
+      "state": "In Progress"
+    }
+  ],
+  "pageInfo": {
+    "hasNextPage": false
+  }
+}

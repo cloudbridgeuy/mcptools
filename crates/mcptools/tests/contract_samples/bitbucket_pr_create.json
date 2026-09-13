@@ -1,0 +1,9 @@
+{
+  "id": 2,
+  "title": "Feat",
+  "state": "OPEN",
+  "author": "dev",
+  "source_branch": "feat",
+  "destination_branch": "main",
+  "html_link": "https://bitbucket.org/ws/repo/pull-requests/2"
+}

@@ -1,0 +1,14 @@
+{
+  "url": "https://example.com",
+  "title": "Example",
+  "content": "# Hello",
+  "html_length": 128,
+  "fetch_time_ms": 12,
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 1,
+    "total_characters": 7,
+    "limit": 1000,
+    "has_more": false
+  }
+}

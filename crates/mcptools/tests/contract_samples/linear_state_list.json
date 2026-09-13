@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {
+      "id": "s1",
+      "name": "Todo",
+      "type": "unstarted"
+    }
+  ],
+  "pageInfo": {
+    "hasNextPage": false
+  }
+}

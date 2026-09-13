@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {
+      "id": "t1",
+      "key": "GUZ",
+      "name": "Guz"
+    }
+  ],
+  "pageInfo": {
+    "hasNextPage": false
+  }
+}

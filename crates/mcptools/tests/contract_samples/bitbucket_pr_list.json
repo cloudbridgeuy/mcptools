@@ -1,0 +1,12 @@
+{
+  "pull_requests": [
+    {
+      "id": 1,
+      "title": "Fix",
+      "author": "dev",
+      "state": "OPEN",
+      "source_branch": "feat",
+      "destination_branch": "main"
+    }
+  ]
+}

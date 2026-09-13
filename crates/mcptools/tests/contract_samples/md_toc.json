@@ -1,0 +1,13 @@
+{
+  "url": "https://example.com",
+  "title": "Example",
+  "entries": [
+    {
+      "level": 1,
+      "text": "Hello",
+      "char_offset": 0,
+      "char_limit": 5
+    }
+  ],
+  "fetch_time_ms": 12
+}

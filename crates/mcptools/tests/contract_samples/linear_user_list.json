@@ -1,0 +1,11 @@
+{
+  "nodes": [
+    {
+      "id": "u1",
+      "name": "Dev"
+    }
+  ],
+  "pageInfo": {
+    "hasNextPage": false
+  }
+}

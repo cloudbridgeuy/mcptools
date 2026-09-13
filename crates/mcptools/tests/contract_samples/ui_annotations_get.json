@@ -1,0 +1,28 @@
+{
+  "id": "abc-123",
+  "timestamp": "2026-03-03T17:40:15Z",
+  "tag_name": "div",
+  "text_content": "Hello",
+  "element_path": "div.grid > div.entry",
+  "comment": "Fix the font",
+  "is_fixed": false,
+  "component_name": "Entry",
+  "bounding_box": {
+    "top": 10.0,
+    "left": 20.0,
+    "width": 100.0,
+    "height": 50.0
+  },
+  "computed_styles": {
+    "color": "rgb(0, 0, 0)",
+    "background_color": "rgb(255, 255, 255)",
+    "font_size": "16px",
+    "font_family": "Inter",
+    "padding": "8px",
+    "margin": "0px",
+    "width": "200px",
+    "height": "40px",
+    "display": "flex",
+    "position": "relative"
+  }
+}

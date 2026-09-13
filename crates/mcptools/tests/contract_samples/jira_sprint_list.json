@@ -1,0 +1,11 @@
+{
+  "sprints": [
+    {
+      "id": 1,
+      "name": "Sprint 1",
+      "state": "active"
+    }
+  ],
+  "total": 1,
+  "has_more": false
+}

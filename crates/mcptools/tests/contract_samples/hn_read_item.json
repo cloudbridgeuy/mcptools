@@ -1,0 +1,27 @@
+{
+  "id": 8863,
+  "title": "Sample story",
+  "url": "https://example.com",
+  "author": "pg",
+  "score": 100,
+  "time": "2021-01-01 00:00:00 UTC",
+  "text": "Story text",
+  "total_comments": 1,
+  "comments": [
+    {
+      "id": 9001,
+      "author": "sama",
+      "time": "2021-01-01 01:00:00 UTC",
+      "text": "Nice post",
+      "replies_count": 0
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 1,
+    "total_comments": 1,
+    "limit": 10,
+    "next_page_command": null,
+    "prev_page_command": null
+  }
+}

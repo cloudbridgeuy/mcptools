@@ -1,0 +1,11 @@
+{
+  "nodes": [
+    {
+      "id": "c1",
+      "number": 3
+    }
+  ],
+  "pageInfo": {
+    "hasNextPage": false
+  }
+}
