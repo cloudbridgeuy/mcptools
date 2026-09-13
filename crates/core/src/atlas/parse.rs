@@ -148,6 +148,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn file_template_system_example_parses() {
+        let response = "SHORT: CLI argument parser and validation\n\
+                        LONG: Defines the command-line interface using clap, validates input flags, and maps them to internal config types.";
+        let desc = parse_description(response).unwrap();
+        assert_eq!(
+            desc,
+            FileDescription {
+                short: "CLI argument parser and validation".to_string(),
+                long: "Defines the command-line interface using clap, validates input flags, and maps them to internal config types.".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn dir_template_system_example_parses() {
+        let response = "SHORT: Database access layer and query builders\n\
+                        LONG: Contains the SQLite connection wrapper, CRUD methods for files and directories, and query helpers for tree and peek views.";
+        let desc = parse_description(response).unwrap();
+        assert_eq!(
+            desc,
+            FileDescription {
+                short: "Database access layer and query builders".to_string(),
+                long: "Contains the SQLite connection wrapper, CRUD methods for files and directories, and query helpers for tree and peek views.".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn valid_response_parses_correctly() {
         let input =
             "SHORT: A utility module\nLONG: Provides helper functions for string manipulation.";
