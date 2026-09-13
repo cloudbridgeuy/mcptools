@@ -140,7 +140,7 @@ mod tests {
         }
     }
 
-    fn template_vars_cases() -> Vec<(&'static str, Value)> {
+    pub(crate) fn template_vars_cases() -> Vec<(&'static str, Value)> {
         vec![
             (
                 "atlas-file",
@@ -345,5 +345,115 @@ mod tests {
         );
         let loaded = load(dir.path(), "atlas-file").unwrap();
         assert_eq!(render_system(&loaded, &serde_json::json!({})).unwrap(), "");
+    }
+}
+
+#[cfg(test)]
+mod live {
+    use super::tests::template_vars_cases;
+    use super::{load, render_system};
+    use crate::atlas::parse::parse_description;
+    use std::net::TcpStream;
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    const TEMPLATE_NAME: &str = "atlas-file";
+    const DEFAULT_MODEL: &str = "qwen3-coder:30b";
+    const MODEL_ENV: &str = "ATLAS_FILE_MODEL";
+    const OLLAMA_ADDR: &str = "localhost:11434";
+
+    fn config_dir() -> Option<PathBuf> {
+        match std::env::var("LLM_STREAM_CONFIG_DIR") {
+            Ok(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
+            _ => std::env::var("HOME")
+                .ok()
+                .map(|home| PathBuf::from(home).join(".config/llm-stream")),
+        }
+    }
+
+    fn skip(reason: &str) {
+        eprintln!("skipping live test: {reason}");
+    }
+
+    #[test]
+    #[ignore]
+    fn live_atlas_file_response_parses() {
+        let Some(config_dir) = config_dir() else {
+            skip("HOME is not set; cannot locate llm-stream config dir");
+            return;
+        };
+        let templates_dir = config_dir.join("templates");
+        let loaded = match load(&templates_dir, TEMPLATE_NAME) {
+            Ok(loaded) => loaded,
+            Err(_) => {
+                skip(&format!(
+                    "{} not installed in {}; run `mcptools atlas setup`",
+                    TEMPLATE_NAME,
+                    templates_dir.display()
+                ));
+                return;
+            }
+        };
+
+        let (_, vars) = template_vars_cases()
+            .into_iter()
+            .find(|(name, _)| *name == TEMPLATE_NAME)
+            .expect("atlas-file vars fixture");
+
+        let preamble = render_system(&loaded, &vars).unwrap();
+        assert!(preamble.contains("SHORT: <one line, under 80 chars>"));
+        assert!(preamble.contains("LONG: <detailed description>"));
+
+        match Command::new("llm-stream").arg("--version").output() {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                skip("llm-stream binary not found on PATH");
+                return;
+            }
+            Err(e) => panic!("could not execute llm-stream: {e}"),
+        }
+
+        if TcpStream::connect(OLLAMA_ADDR).is_err() {
+            skip(&format!("Ollama unreachable at {OLLAMA_ADDR}"));
+            return;
+        }
+
+        let model = std::env::var(MODEL_ENV).unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+        let vars_json = serde_json::to_string(&vars).unwrap();
+
+        let args: Vec<String> = vec![
+            "--config-dir".into(),
+            config_dir.display().to_string(),
+            "--api".into(),
+            "ollama".into(),
+            "--model".into(),
+            model,
+            "--template".into(),
+            TEMPLATE_NAME.into(),
+            "--quiet".into(),
+            "true".into(),
+            "--vars".into(),
+            vars_json,
+        ];
+        assert!(
+            !args.iter().any(|arg| arg == "--system"),
+            "atlas must never pass --system; the template's system must win"
+        );
+
+        let output = Command::new("llm-stream").args(&args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "llm-stream failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let response = String::from_utf8_lossy(&output.stdout).into_owned();
+        let description = parse_description(&response)
+            .unwrap_or_else(|e| panic!("unparsable live response: {e}\n\n{response}"));
+
+        println!("SHORT: {}", description.short);
+        println!("LONG: {}", description.long);
+        assert!(!description.short.is_empty());
+        assert!(!description.long.is_empty());
     }
 }
