@@ -218,7 +218,6 @@ pub enum SetupAction {
     LeaveAlone { reason: UntouchableReason },
 }
 
-/// Why setup refuses to install a template.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WarnReason {
     Malformed,
