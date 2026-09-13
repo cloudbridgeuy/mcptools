@@ -1,31 +1,69 @@
-use super::{CallToolResult, Content, JsonRpcError};
+use super::JsonRpcError;
+use schemars::JsonSchema;
 use serde::Deserialize;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct MdFetchArgs {
+    pub url: String,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+    #[serde(default)]
+    pub raw_html: Option<bool>,
+    #[serde(default)]
+    pub selector: Option<String>,
+    #[serde(default)]
+    pub strategy: Option<String>,
+    #[serde(default)]
+    pub index: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub page: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct MdTocArgs {
+    pub url: String,
+    #[serde(default)]
+    pub timeout: Option<u64>,
+    #[serde(default)]
+    pub selector: Option<String>,
+    #[serde(default)]
+    pub strategy: Option<String>,
+    #[serde(default)]
+    pub index: Option<usize>,
+    #[serde(default)]
+    pub output: Option<String>,
+}
+
+fn to_strategy(strategy: Option<String>) -> Result<crate::md::SelectionStrategy, JsonRpcError> {
+    match strategy.as_deref() {
+        None | Some("first") => Ok(crate::md::SelectionStrategy::First),
+        Some("last") => Ok(crate::md::SelectionStrategy::Last),
+        Some("all") => Ok(crate::md::SelectionStrategy::All),
+        Some("n") => Ok(crate::md::SelectionStrategy::N),
+        Some(other) => Err(JsonRpcError {
+            code: -32602,
+            message: format!("Invalid strategy: '{other}'. Must be 'first', 'last', 'all', or 'n'"),
+            data: None,
+        }),
+    }
+}
+
+fn invalid_strategy_index() -> JsonRpcError {
+    JsonRpcError {
+        code: -32602,
+        message: "Strategy 'n' requires 'index' parameter".to_string(),
+        data: None,
+    }
+}
 
 pub async fn handle_md_fetch(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct MdFetchArgs {
-        url: String,
-        #[serde(default)]
-        timeout: Option<u64>,
-        #[serde(default)]
-        raw_html: Option<bool>,
-        #[serde(default)]
-        selector: Option<String>,
-        #[serde(default)]
-        strategy: Option<crate::md::SelectionStrategy>,
-        #[serde(default)]
-        index: Option<usize>,
-        #[serde(default)]
-        offset: Option<usize>,
-        #[serde(default)]
-        limit: Option<usize>,
-        #[serde(default)]
-        page: Option<usize>,
-    }
-
     let args: MdFetchArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
             code: -32602,
@@ -33,28 +71,23 @@ pub async fn handle_md_fetch(
             data: None,
         })?;
 
-    // Validate strategy and index combination
-    if matches!(args.strategy, Some(crate::md::SelectionStrategy::N)) && args.index.is_none() {
-        return Err(JsonRpcError {
-            code: -32602,
-            message: "Strategy 'n' requires 'index' parameter".to_string(),
-            data: None,
-        });
+    let strategy = to_strategy(args.strategy)?;
+    if matches!(strategy, crate::md::SelectionStrategy::N) && args.index.is_none() {
+        return Err(invalid_strategy_index());
     }
 
-    // Use spawn_blocking since fetch_and_convert_data is synchronous
     let fetch_data = tokio::task::spawn_blocking(move || {
         crate::md::fetch_and_convert_data(crate::md::FetchConfig {
             url: args.url,
             timeout: args.timeout.unwrap_or(30),
             raw_html: args.raw_html.unwrap_or(false),
             selector: args.selector,
-            strategy: args.strategy.unwrap_or(crate::md::SelectionStrategy::First),
+            strategy,
             index: args.index,
             offset: args.offset.unwrap_or(0),
             limit: args.limit.unwrap_or(1000),
             page: args.page.unwrap_or(1),
-            paginated: true, // MCP always uses pagination for context safety
+            paginated: true,
         })
     })
     .await
@@ -69,44 +102,13 @@ pub async fn handle_md_fetch(
         data: None,
     })?;
 
-    let json_string = serde_json::to_string_pretty(&fetch_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(fetch_data)
 }
 
 pub async fn handle_md_toc(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct MdTocArgs {
-        url: String,
-        #[serde(default)]
-        timeout: Option<u64>,
-        #[serde(default)]
-        selector: Option<String>,
-        #[serde(default)]
-        strategy: Option<crate::md::SelectionStrategy>,
-        #[serde(default)]
-        index: Option<usize>,
-        #[serde(default)]
-        output: Option<String>,
-    }
-
     let args: MdTocArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
             code: -32602,
@@ -114,16 +116,11 @@ pub async fn handle_md_toc(
             data: None,
         })?;
 
-    // Validate strategy and index combination
-    if matches!(args.strategy, Some(crate::md::SelectionStrategy::N)) && args.index.is_none() {
-        return Err(JsonRpcError {
-            code: -32602,
-            message: "Strategy 'n' requires 'index' parameter".to_string(),
-            data: None,
-        });
+    let strategy = to_strategy(args.strategy)?;
+    if matches!(strategy, crate::md::SelectionStrategy::N) && args.index.is_none() {
+        return Err(invalid_strategy_index());
     }
 
-    // Parse output format
     let output_format = match args.output.as_deref() {
         Some("markdown") => crate::md::toc::OutputFormat::Markdown,
         Some("json") => crate::md::toc::OutputFormat::Json,
@@ -139,18 +136,16 @@ pub async fn handle_md_toc(
         }
     };
 
-    // Create TocOptions
     let toc_options = crate::md::TocOptions {
         url: args.url,
         timeout: args.timeout.unwrap_or(30),
         selector: args.selector,
-        strategy: args.strategy.unwrap_or(crate::md::SelectionStrategy::First),
+        strategy,
         index: args.index,
         output: output_format,
         json: false,
     };
 
-    // Use spawn_blocking since extract_toc_data is synchronous
     let toc_data =
         tokio::task::spawn_blocking(move || crate::md::toc::extract_toc_data(toc_options))
             .await
@@ -165,21 +160,5 @@ pub async fn handle_md_toc(
                 data: None,
             })?;
 
-    let json_string = serde_json::to_string_pretty(&toc_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(toc_data)
 }

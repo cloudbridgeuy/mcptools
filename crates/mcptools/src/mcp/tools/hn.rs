@@ -1,20 +1,28 @@
 use crate::prelude::{eprintln, *};
+use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{CallToolResult, Content, JsonRpcError};
+use super::JsonRpcError;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct HnReadItemArgs {
+    pub item: String,
+    pub limit: Option<usize>,
+    pub page: Option<usize>,
+    pub thread: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct HnListItemsArgs {
+    pub story_type: Option<String>,
+    pub limit: Option<usize>,
+    pub page: Option<usize>,
+}
 
 pub async fn handle_hn_read_item(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct HnReadItemArgs {
-        item: String,
-        limit: Option<usize>,
-        page: Option<usize>,
-        thread: Option<String>,
-    }
-
     let args: HnReadItemArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
             code: -32602,
@@ -29,7 +37,6 @@ pub async fn handle_hn_read_item(
         );
     }
 
-    // Call the HN module's data function
     let post_data = crate::hn::read_item_data(
         args.item,
         args.limit.unwrap_or(10),
@@ -43,37 +50,13 @@ pub async fn handle_hn_read_item(
         data: None,
     })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&post_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(post_data)
 }
 
 pub async fn handle_hn_list_items(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct HnListItemsArgs {
-        story_type: Option<String>,
-        limit: Option<usize>,
-        page: Option<usize>,
-    }
-
     let args: HnListItemsArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -90,7 +73,6 @@ pub async fn handle_hn_list_items(
         );
     }
 
-    // Call the HN module's data function
     let list_data = crate::hn::list_items_data(
         args.story_type.unwrap_or("top".to_string()),
         args.limit.unwrap_or(30),
@@ -103,22 +85,5 @@ pub async fn handle_hn_list_items(
         data: None,
     })?;
 
-    // Convert to JSON and wrap in MCP result format
-    let json_string = serde_json::to_string_pretty(&list_data).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Serialization error: {e}"),
-        data: None,
-    })?;
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json_string }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(list_data)
 }

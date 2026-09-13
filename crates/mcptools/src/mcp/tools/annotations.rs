@@ -1,6 +1,41 @@
-use serde::Deserialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-use super::{CallToolResult, Content, JsonRpcError};
+use super::JsonRpcError;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AnnotationsListArgs {
+    pub url: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AnnotationsGetArgs {
+    pub id: String,
+    pub url: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AnnotationsResolveArgs {
+    pub id: String,
+    pub summary: String,
+    pub url: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AnnotationsClearArgs {
+    pub url: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct AnnotationResolveOutput {
+    pub id: String,
+    pub resolved: bool,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct AnnotationClearOutput {
+    pub cleared: u64,
+}
 
 fn resolve_url(url: Option<String>) -> String {
     url.unwrap_or_else(|| {
@@ -8,23 +43,25 @@ fn resolve_url(url: Option<String>) -> String {
     })
 }
 
+fn invalid_args(e: impl std::fmt::Display) -> JsonRpcError {
+    JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {e}"),
+        data: None,
+    }
+}
+
+fn parse_args<T: serde::de::DeserializeOwned>(
+    arguments: Option<serde_json::Value>,
+) -> Result<T, JsonRpcError> {
+    serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid_args)
+}
+
 pub async fn handle_ui_annotations_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        url: Option<String>,
-    }
-
-    let args: Args =
-        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
-            JsonRpcError {
-                code: -32602,
-                message: format!("Invalid arguments: {e}"),
-                data: None,
-            }
-        })?;
+    let args: AnnotationsListArgs = parse_args(arguments)?;
 
     let base_url = resolve_url(args.url);
 
@@ -48,42 +85,14 @@ pub async fn handle_ui_annotations_list(
                 data: None,
             })?;
 
-    let text = mcptools_core::annotations::format_annotations_list(
-        &response.annotations,
-        &response.summary,
-    );
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(response)
 }
 
 pub async fn handle_ui_annotations_get(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        id: String,
-        url: Option<String>,
-    }
-
-    let args: Args =
-        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
-            JsonRpcError {
-                code: -32602,
-                message: format!("Invalid arguments: {e}"),
-                data: None,
-            }
-        })?;
+    let args: AnnotationsGetArgs = parse_args(arguments)?;
 
     let base_url = resolve_url(args.url);
 
@@ -114,40 +123,14 @@ pub async fn handle_ui_annotations_get(
             data: None,
         })?;
 
-    let text = mcptools_core::annotations::format_annotation_detail(&annotation);
-
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(annotation)
 }
 
 pub async fn handle_ui_annotations_resolve(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        id: String,
-        summary: String,
-        url: Option<String>,
-    }
-
-    let args: Args =
-        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
-            JsonRpcError {
-                code: -32602,
-                message: format!("Invalid arguments: {e}"),
-                data: None,
-            }
-        })?;
+    let args: AnnotationsResolveArgs = parse_args(arguments)?;
 
     let base_url = resolve_url(args.url);
 
@@ -175,18 +158,9 @@ pub async fn handle_ui_annotations_resolve(
         });
     }
 
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text {
-            text: format!("Annotation {} marked as resolved.", args.id),
-        }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
+    super::to_dual_result(AnnotationResolveOutput {
+        id: args.id,
+        resolved: true,
     })
 }
 
@@ -194,19 +168,7 @@ pub async fn handle_ui_annotations_clear(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        url: Option<String>,
-    }
-
-    let args: Args =
-        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
-            JsonRpcError {
-                code: -32602,
-                message: format!("Invalid arguments: {e}"),
-                data: None,
-            }
-        })?;
+    let args: AnnotationsClearArgs = parse_args(arguments)?;
 
     let base_url = resolve_url(args.url);
 
@@ -237,17 +199,5 @@ pub async fn handle_ui_annotations_clear(
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
 
-    let result = CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text {
-            text: format!("Cleared {cleared} annotation(s)."),
-        }],
-        is_error: None,
-    };
-
-    serde_json::to_value(result).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Internal error: {e}"),
-        data: None,
-    })
+    super::to_dual_result(AnnotationClearOutput { cleared })
 }

@@ -9,17 +9,25 @@ pub struct AtlasTextOutput {
     pub text: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct AtlasTreeViewArgs {
+    pub path: Option<String>,
+    pub depth: Option<u32>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AtlasPeekArgs {
+    pub path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AtlasStatusArgs {}
+
 pub async fn handle_atlas_tree_view(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        path: Option<String>,
-        depth: Option<u32>,
-    }
-
-    let args: Args = parse_args(arguments)?;
+    let args: AtlasTreeViewArgs = parse_args(arguments)?;
     let (_root, _config, db) = open_atlas()?;
 
     let path = args.path.map(std::path::PathBuf::from);
@@ -37,12 +45,7 @@ pub async fn handle_atlas_peek(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        path: String,
-    }
-
-    let args: Args = parse_args(arguments)?;
+    let args: AtlasPeekArgs = parse_args(arguments)?;
     let (_root, _config, db) = open_atlas()?;
 
     let peek_result = crate::atlas::data::atlas_peek_data(&db, std::path::Path::new(&args.path))

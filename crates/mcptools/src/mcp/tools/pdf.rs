@@ -1,9 +1,68 @@
-use super::{CallToolResult, Content, JsonRpcError};
-use serde::Deserialize;
+use super::JsonRpcError;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
+#[derive(Deserialize, JsonSchema)]
+pub struct PdfTocArgs {
+    pub path: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PdfReadArgs {
+    pub path: String,
+    #[serde(rename = "sectionId")]
+    pub section_id: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PdfPeekArgs {
+    pub path: String,
+    #[serde(rename = "sectionId")]
+    pub section_id: Option<String>,
+    pub position: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PdfImagesArgs {
+    pub path: String,
+    #[serde(rename = "sectionId")]
+    pub section_id: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PdfImageArgs {
+    pub path: String,
+    #[serde(rename = "imageId")]
+    pub image_id: Option<String>,
+    #[serde(rename = "sectionId")]
+    pub section_id: Option<String>,
+    pub random: Option<bool>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PdfInfoArgs {
+    pub path: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct PdfImagesOutput {
+    pub images: Vec<pdf::EnrichedImageRef>,
+}
+
+impl From<Vec<pdf::EnrichedImageRef>> for PdfImagesOutput {
+    fn from(images: Vec<pdf::EnrichedImageRef>) -> Self {
+        PdfImagesOutput { images }
+    }
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct PdfImageOutput {
+    pub id: String,
+    pub format: String,
+    pub data: String,
+    pub size: usize,
+}
 
 const INVALID_PARAMS: i32 = -32602;
 const INTERNAL_ERROR: i32 = -32603;
@@ -26,18 +85,6 @@ fn internal_err(message: String) -> JsonRpcError {
     }
 }
 
-fn to_text_result(value: &impl serde::Serialize) -> Result<serde_json::Value, JsonRpcError> {
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|e| internal_err(format!("Serialization error: {e}")))?;
-
-    serde_json::to_value(CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text: json }],
-        is_error: None,
-    })
-    .map_err(|e| internal_err(format!("Internal error: {e}")))
-}
-
 async fn run_blocking<T, F>(f: F) -> Result<T, JsonRpcError>
 where
     T: Send + 'static,
@@ -49,26 +96,16 @@ where
         .map_err(internal_err)
 }
 
-/// Parse an optional section ID string.
 fn parse_section_id(s: Option<&str>) -> Result<Option<pdf::SectionId>, String> {
     s.map(|id| pdf::SectionId::parse(id).map_err(|e| format!("Invalid section ID: {e}")))
         .transpose()
 }
 
-// ---------------------------------------------------------------------------
-// Handlers
-// ---------------------------------------------------------------------------
-
 pub async fn handle_pdf_toc(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        path: String,
-    }
-
-    let args: Args = parse_args(arguments)?;
+    let args: PdfTocArgs = parse_args(arguments)?;
 
     let tree = run_blocking(move || {
         let bytes = std::fs::read(&args.path).map_err(|e| format!("Failed to read file: {e}"))?;
@@ -76,21 +113,14 @@ pub async fn handle_pdf_toc(
     })
     .await?;
 
-    to_text_result(&tree)
+    super::to_dual_result(tree)
 }
 
 pub async fn handle_pdf_read(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        path: String,
-        #[serde(rename = "sectionId")]
-        section_id: Option<String>,
-    }
-
-    let args: Args = parse_args(arguments)?;
+    let args: PdfReadArgs = parse_args(arguments)?;
 
     let content = run_blocking(move || {
         let bytes = std::fs::read(&args.path).map_err(|e| format!("Failed to read file: {e}"))?;
@@ -99,23 +129,14 @@ pub async fn handle_pdf_read(
     })
     .await?;
 
-    to_text_result(&content)
+    super::to_dual_result(content)
 }
 
 pub async fn handle_pdf_peek(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        path: String,
-        #[serde(rename = "sectionId")]
-        section_id: Option<String>,
-        position: Option<String>,
-        limit: Option<usize>,
-    }
-
-    let args: Args = parse_args(arguments)?;
+    let args: PdfPeekArgs = parse_args(arguments)?;
 
     let content = run_blocking(move || {
         let bytes = std::fs::read(&args.path).map_err(|e| format!("Failed to read file: {e}"))?;
@@ -133,21 +154,14 @@ pub async fn handle_pdf_peek(
     })
     .await?;
 
-    to_text_result(&content)
+    super::to_dual_result(content)
 }
 
 pub async fn handle_pdf_images(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        path: String,
-        #[serde(rename = "sectionId")]
-        section_id: Option<String>,
-    }
-
-    let args: Args = parse_args(arguments)?;
+    let args: PdfImagesArgs = parse_args(arguments)?;
 
     let images = run_blocking(move || {
         let bytes = std::fs::read(&args.path).map_err(|e| format!("Failed to read file: {e}"))?;
@@ -156,24 +170,14 @@ pub async fn handle_pdf_images(
     })
     .await?;
 
-    to_text_result(&images)
+    super::to_dual_result(PdfImagesOutput::from(images))
 }
 
 pub async fn handle_pdf_image(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        path: String,
-        #[serde(rename = "imageId")]
-        image_id: Option<String>,
-        #[serde(rename = "sectionId")]
-        section_id: Option<String>,
-        random: Option<bool>,
-    }
-
-    let args: Args = parse_args(arguments)?;
+    let args: PdfImageArgs = parse_args(arguments)?;
     let random = args.random.unwrap_or(false);
 
     if args.image_id.is_some() && random {
@@ -206,28 +210,23 @@ pub async fn handle_pdf_image(
 
         let img = pdf::get_image(&bytes, &image_id).map_err(|e| format!("PDF error: {e}"))?;
         use base64::Engine;
-        Ok(serde_json::json!({
-            "id": image_id.as_str(),
-            "format": format!("{}", img.format),
-            "data": base64::engine::general_purpose::STANDARD.encode(&img.bytes),
-            "size": img.bytes.len(),
-        }))
+        Ok(PdfImageOutput {
+            id: image_id.as_str().to_string(),
+            format: format!("{}", img.format),
+            data: base64::engine::general_purpose::STANDARD.encode(&img.bytes),
+            size: img.bytes.len(),
+        })
     })
     .await?;
 
-    to_text_result(&result)
+    super::to_dual_result(result)
 }
 
 pub async fn handle_pdf_info(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        path: String,
-    }
-
-    let args: Args = parse_args(arguments)?;
+    let args: PdfInfoArgs = parse_args(arguments)?;
 
     let metadata = run_blocking(move || {
         let bytes = std::fs::read(&args.path).map_err(|e| format!("Failed to read file: {e}"))?;
@@ -235,5 +234,5 @@ pub async fn handle_pdf_info(
     })
     .await?;
 
-    to_text_result(&metadata)
+    super::to_dual_result(metadata)
 }

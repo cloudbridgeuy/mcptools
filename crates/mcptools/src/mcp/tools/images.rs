@@ -1,8 +1,107 @@
-use super::{CallToolResult, Content, JsonRpcError};
+use super::JsonRpcError;
 use mcptools_core::images::{CHAT_MAINLINE_DEFAULT, DEFAULT_BASE_URL, DEFAULT_MODEL};
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::images::{Api, Backend, BackendOpts};
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ImagesGenerateArgs {
+    pub prompt: String,
+    pub model: Option<String>,
+    pub size: Option<String>,
+    pub quality: Option<String>,
+    #[serde(default, rename = "outputFormat")]
+    pub output_format: Option<String>,
+    #[serde(default, rename = "outputCompression")]
+    pub output_compression: Option<u8>,
+    pub background: Option<String>,
+    pub moderation: Option<String>,
+    pub n: Option<u8>,
+    #[serde(default, rename = "outputDir")]
+    pub output_dir: Option<String>,
+    pub api: Option<String>,
+    #[serde(default, rename = "configDir")]
+    pub config_dir: Option<String>,
+    #[serde(default, rename = "apiKey")]
+    pub api_key: Option<String>,
+    #[serde(default, rename = "baseUrl")]
+    pub base_url: Option<String>,
+    #[serde(default, rename = "mainline")]
+    pub mainline: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ImagesEditArgs {
+    pub prompt: String,
+    pub images: Vec<String>,
+    pub mask: Option<String>,
+    pub model: Option<String>,
+    pub size: Option<String>,
+    pub quality: Option<String>,
+    #[serde(default, rename = "outputFormat")]
+    pub output_format: Option<String>,
+    #[serde(default, rename = "outputCompression")]
+    pub output_compression: Option<u8>,
+    pub background: Option<String>,
+    pub moderation: Option<String>,
+    #[serde(default, rename = "inputFidelity")]
+    pub input_fidelity: Option<String>,
+    pub n: Option<u8>,
+    #[serde(default, rename = "outputDir")]
+    pub output_dir: Option<String>,
+    pub api: Option<String>,
+    #[serde(default, rename = "configDir")]
+    pub config_dir: Option<String>,
+    #[serde(default, rename = "apiKey")]
+    pub api_key: Option<String>,
+    #[serde(default, rename = "baseUrl")]
+    pub base_url: Option<String>,
+    #[serde(default, rename = "mainline")]
+    pub mainline: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ImagesVaryArgs {
+    pub images: Vec<String>,
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+    pub size: Option<String>,
+    pub quality: Option<String>,
+    #[serde(default, rename = "outputFormat")]
+    pub output_format: Option<String>,
+    #[serde(default, rename = "outputCompression")]
+    pub output_compression: Option<u8>,
+    pub background: Option<String>,
+    pub moderation: Option<String>,
+    #[serde(default, rename = "inputFidelity")]
+    pub input_fidelity: Option<String>,
+    pub n: Option<u8>,
+    #[serde(default, rename = "outputDir")]
+    pub output_dir: Option<String>,
+    pub api: Option<String>,
+    #[serde(default, rename = "configDir")]
+    pub config_dir: Option<String>,
+    #[serde(default, rename = "apiKey")]
+    pub api_key: Option<String>,
+    #[serde(default, rename = "baseUrl")]
+    pub base_url: Option<String>,
+    #[serde(default, rename = "mainline")]
+    pub mainline: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct BackendArgs {
+    api: Option<String>,
+    #[serde(default, rename = "configDir")]
+    config_dir: Option<String>,
+    #[serde(default, rename = "apiKey")]
+    api_key: Option<String>,
+    #[serde(default, rename = "baseUrl")]
+    base_url: Option<String>,
+    #[serde(default, rename = "mainline")]
+    mainline: Option<String>,
+}
 
 fn invalid(e: impl std::fmt::Display) -> JsonRpcError {
     JsonRpcError {
@@ -18,29 +117,6 @@ fn exec_err(e: impl std::fmt::Display) -> JsonRpcError {
         message: format!("Tool execution error: {e}"),
         data: None,
     }
-}
-
-fn to_result(value: &impl serde::Serialize) -> Result<serde_json::Value, JsonRpcError> {
-    let text = serde_json::to_string_pretty(value).map_err(exec_err)?;
-    serde_json::to_value(CallToolResult {
-        structured_content: None,
-        content: vec![Content::Text { text }],
-        is_error: None,
-    })
-    .map_err(exec_err)
-}
-
-#[derive(Deserialize, Default)]
-struct BackendArgs {
-    api: Option<String>,
-    #[serde(default, rename = "configDir")]
-    config_dir: Option<String>,
-    #[serde(default, rename = "apiKey")]
-    api_key: Option<String>,
-    #[serde(default, rename = "baseUrl")]
-    base_url: Option<String>,
-    #[serde(default, rename = "mainline")]
-    mainline: Option<String>,
 }
 
 fn backend_of(a: &BackendArgs) -> Result<Backend, JsonRpcError> {
@@ -98,26 +174,7 @@ pub async fn handle_images_generate(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        prompt: String,
-        model: Option<String>,
-        size: Option<String>,
-        quality: Option<String>,
-        #[serde(default, rename = "outputFormat")]
-        output_format: Option<String>,
-        #[serde(default, rename = "outputCompression")]
-        output_compression: Option<u8>,
-        background: Option<String>,
-        moderation: Option<String>,
-        n: Option<u8>,
-        #[serde(default, rename = "outputDir")]
-        output_dir: Option<String>,
-        #[serde(flatten)]
-        backend: BackendArgs,
-    }
-
-    let args: Args =
+    let args: ImagesGenerateArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
     let params = mcptools_core::images::GenerateParams {
         prompt: args.prompt,
@@ -132,43 +189,26 @@ pub async fn handle_images_generate(
     };
     let saved = crate::images::generate_data(
         params,
-        backend_of(&args.backend)?,
+        backend_of(&BackendArgs {
+            api: args.api,
+            config_dir: args.config_dir,
+            api_key: args.api_key,
+            base_url: args.base_url,
+            mainline: args.mainline,
+        })?,
         None,
         out_dir(args.output_dir),
     )
     .await
     .map_err(exec_err)?;
-    to_result(&saved)
+    super::to_dual_result(saved)
 }
 
 pub async fn handle_images_edit(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        prompt: String,
-        images: Vec<String>,
-        mask: Option<String>,
-        model: Option<String>,
-        size: Option<String>,
-        quality: Option<String>,
-        #[serde(default, rename = "outputFormat")]
-        output_format: Option<String>,
-        #[serde(default, rename = "outputCompression")]
-        output_compression: Option<u8>,
-        background: Option<String>,
-        moderation: Option<String>,
-        #[serde(default, rename = "inputFidelity")]
-        input_fidelity: Option<String>,
-        n: Option<u8>,
-        #[serde(default, rename = "outputDir")]
-        output_dir: Option<String>,
-        #[serde(flatten)]
-        backend: BackendArgs,
-    }
-
-    let args: Args =
+    let args: ImagesEditArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
     let params = mcptools_core::images::EditParams {
         prompt: args.prompt,
@@ -189,42 +229,26 @@ pub async fn handle_images_edit(
             .map(std::path::PathBuf::from)
             .collect(),
         args.mask.map(std::path::PathBuf::from),
-        backend_of(&args.backend)?,
+        backend_of(&BackendArgs {
+            api: args.api,
+            config_dir: args.config_dir,
+            api_key: args.api_key,
+            base_url: args.base_url,
+            mainline: args.mainline,
+        })?,
         None,
         out_dir(args.output_dir),
     )
     .await
     .map_err(exec_err)?;
-    to_result(&saved)
+    super::to_dual_result(saved)
 }
 
 pub async fn handle_images_vary(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        images: Vec<String>,
-        prompt: Option<String>,
-        model: Option<String>,
-        size: Option<String>,
-        quality: Option<String>,
-        #[serde(default, rename = "outputFormat")]
-        output_format: Option<String>,
-        #[serde(default, rename = "outputCompression")]
-        output_compression: Option<u8>,
-        background: Option<String>,
-        moderation: Option<String>,
-        #[serde(default, rename = "inputFidelity")]
-        input_fidelity: Option<String>,
-        n: Option<u8>,
-        #[serde(default, rename = "outputDir")]
-        output_dir: Option<String>,
-        #[serde(flatten)]
-        backend: BackendArgs,
-    }
-
-    let args: Args =
+    let args: ImagesVaryArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
     let saved = crate::images::vary_data(
         args.images
@@ -241,11 +265,17 @@ pub async fn handle_images_vary(
         args.moderation,
         args.input_fidelity,
         args.n.unwrap_or(1),
-        backend_of(&args.backend)?,
+        backend_of(&BackendArgs {
+            api: args.api,
+            config_dir: args.config_dir,
+            api_key: args.api_key,
+            base_url: args.base_url,
+            mainline: args.mainline,
+        })?,
         None,
         out_dir(args.output_dir),
     )
     .await
     .map_err(exec_err)?;
-    to_result(&saved)
+    super::to_dual_result(saved)
 }
