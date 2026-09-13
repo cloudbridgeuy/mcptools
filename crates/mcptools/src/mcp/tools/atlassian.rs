@@ -1,7 +1,180 @@
 use crate::prelude::{eprintln, *};
+use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::JsonRpcError;
+
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraSearchArgs {
+    query: Option<String>,
+    #[serde(rename = "queryName")]
+    query_name: Option<String>,
+    limit: Option<usize>,
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ConfluenceSearchArgs {
+    query: String,
+    limit: Option<usize>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraGetArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraSprintListArgs {
+    #[serde(rename = "boardId")]
+    board_id: u64,
+    state: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraUpdateArgs {
+    #[serde(rename = "ticketKey")]
+    ticket_key: String,
+    status: Option<String>,
+    priority: Option<String>,
+    #[serde(rename = "issueType")]
+    issue_type: Option<String>,
+    assignee: Option<String>,
+    description: Option<String>,
+    sprint: Option<String>,
+    #[serde(rename = "boardId")]
+    board_id: Option<u64>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraCreateArgs {
+    summary: String,
+    description: Option<String>,
+    project: Option<String>,
+    #[serde(rename = "issueType")]
+    issue_type: Option<String>,
+    priority: Option<String>,
+    assignee: Option<String>,
+    sprint: Option<String>,
+    #[serde(rename = "boardId")]
+    board_id: Option<u64>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraQuerySaveArgs {
+    name: String,
+    query: String,
+    update: Option<bool>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraQueryDeleteArgs {
+    name: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraQueryLoadArgs {
+    name: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketPRListArgs {
+    repo: String,
+    state: Option<Vec<String>>,
+    limit: Option<usize>,
+    #[serde(rename = "nextPage")]
+    next_page: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketPRReadArgs {
+    repo: String,
+    #[serde(rename = "prNumber")]
+    pr_number: u64,
+    limit: Option<usize>,
+    #[serde(rename = "diffLimit")]
+    diff_limit: Option<usize>,
+    #[serde(rename = "lineLimit")]
+    line_limit: Option<i32>,
+    #[serde(rename = "noDiff")]
+    no_diff: Option<bool>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketPRCreateArgs {
+    repo: String,
+    title: String,
+    #[serde(rename = "sourceBranch")]
+    source_branch: String,
+    #[serde(rename = "destinationBranch")]
+    destination_branch: Option<String>,
+    description: Option<String>,
+    #[serde(rename = "closeSourceBranch")]
+    close_source_branch: Option<bool>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraAttachmentListArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraAttachmentDownloadArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+    #[serde(rename = "attachmentId")]
+    attachment_id: String,
+    #[serde(rename = "outputPath")]
+    output_path: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraAttachmentUploadArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+    #[serde(rename = "filePaths")]
+    file_paths: Vec<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraCommentAddArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+    comment: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraCommentListArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraCommentUpdateArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+    #[serde(rename = "commentId")]
+    comment_id: String,
+    comment: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraCommentDeleteArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+    #[serde(rename = "commentId")]
+    comment_id: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketWorkspaceListArgs {
+    limit: Option<usize>,
+    #[serde(rename = "nextPage")]
+    next_page: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketRepoListArgs {
+    workspace: String,
+    limit: Option<usize>,
+    #[serde(rename = "nextPage")]
+    next_page: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketRepoBranchesArgs {
+    workspace: String,
+    repo: String,
+    limit: Option<usize>,
+    #[serde(rename = "nextPage")]
+    next_page: Option<String>,
+    query: Option<String>,
+    sort: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraQueryListArgs {}
 
 pub async fn handle_jira_search(
     arguments: Option<serde_json::Value>,
@@ -10,16 +183,6 @@ pub async fn handle_jira_search(
     use mcptools_core::queries;
     use std::env;
     use std::path::PathBuf;
-
-    #[derive(Deserialize)]
-    struct JiraSearchArgs {
-        query: Option<String>,
-        #[serde(rename = "queryName")]
-        query_name: Option<String>,
-        limit: Option<usize>,
-        #[serde(rename = "nextPageToken")]
-        next_page_token: Option<String>,
-    }
 
     let args: JiraSearchArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
@@ -89,12 +252,6 @@ pub async fn handle_confluence_search(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct ConfluenceSearchArgs {
-        query: String,
-        limit: Option<usize>,
-    }
-
     let args: ConfluenceSearchArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -136,12 +293,6 @@ pub async fn handle_jira_get(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct JiraGetArgs {
-        #[serde(rename = "issueKey")]
-        issue_key: String,
-    }
-
     let args: JiraGetArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
             code: -32602,
@@ -174,13 +325,6 @@ pub async fn handle_jira_sprint_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct JiraSprintListArgs {
-        #[serde(rename = "boardId")]
-        board_id: u64,
-        state: Option<String>,
-    }
-
     let args: JiraSprintListArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -222,21 +366,6 @@ pub async fn handle_jira_update(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct JiraUpdateArgs {
-        #[serde(rename = "ticketKey")]
-        ticket_key: String,
-        status: Option<String>,
-        priority: Option<String>,
-        #[serde(rename = "issueType")]
-        issue_type: Option<String>,
-        assignee: Option<String>,
-        description: Option<String>,
-        sprint: Option<String>,
-        #[serde(rename = "boardId")]
-        board_id: Option<u64>,
-    }
-
     let args: JiraUpdateArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
             code: -32602,
@@ -291,20 +420,6 @@ pub async fn handle_jira_create(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct JiraCreateArgs {
-        summary: String,
-        description: Option<String>,
-        project: Option<String>,
-        #[serde(rename = "issueType")]
-        issue_type: Option<String>,
-        priority: Option<String>,
-        assignee: Option<String>,
-        sprint: Option<String>,
-        #[serde(rename = "boardId")]
-        board_id: Option<u64>,
-    }
-
     let args: JiraCreateArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
             code: -32602,
@@ -400,13 +515,6 @@ pub async fn handle_jira_query_save(
     use std::env;
     use std::path::PathBuf;
 
-    #[derive(Deserialize)]
-    struct JiraQuerySaveArgs {
-        name: String,
-        query: String,
-        update: Option<bool>,
-    }
-
     let args: JiraQuerySaveArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -460,11 +568,6 @@ pub async fn handle_jira_query_delete(
     use std::env;
     use std::path::PathBuf;
 
-    #[derive(Deserialize)]
-    struct JiraQueryDeleteArgs {
-        name: String,
-    }
-
     let args: JiraQueryDeleteArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -508,11 +611,6 @@ pub async fn handle_jira_query_load(
     use std::env;
     use std::path::PathBuf;
 
-    #[derive(Deserialize)]
-    struct JiraQueryLoadArgs {
-        name: String,
-    }
-
     let args: JiraQueryLoadArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -553,15 +651,6 @@ pub async fn handle_bitbucket_pr_list(
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     use crate::atlassian::bitbucket::{list_pr_data, ListPRParams};
-
-    #[derive(Deserialize)]
-    struct BitbucketPRListArgs {
-        repo: String,
-        state: Option<Vec<String>>,
-        limit: Option<usize>,
-        #[serde(rename = "nextPage")]
-        next_page: Option<String>,
-    }
 
     let args: BitbucketPRListArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
@@ -609,20 +698,6 @@ pub async fn handle_bitbucket_pr_read(
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     use crate::atlassian::bitbucket::{read_pr_data, ReadPRParams};
-
-    #[derive(Deserialize)]
-    struct BitbucketPRReadArgs {
-        repo: String,
-        #[serde(rename = "prNumber")]
-        pr_number: u64,
-        limit: Option<usize>,
-        #[serde(rename = "diffLimit")]
-        diff_limit: Option<usize>,
-        #[serde(rename = "lineLimit")]
-        line_limit: Option<i32>,
-        #[serde(rename = "noDiff")]
-        no_diff: Option<bool>,
-    }
 
     let args: BitbucketPRReadArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
@@ -689,19 +764,6 @@ pub async fn handle_bitbucket_pr_create(
 ) -> Result<serde_json::Value, JsonRpcError> {
     use crate::atlassian::bitbucket::{create_pr_data, CreatePRParams};
 
-    #[derive(Deserialize)]
-    struct BitbucketPRCreateArgs {
-        repo: String,
-        title: String,
-        #[serde(rename = "sourceBranch")]
-        source_branch: String,
-        #[serde(rename = "destinationBranch")]
-        destination_branch: Option<String>,
-        description: Option<String>,
-        #[serde(rename = "closeSourceBranch")]
-        close_source_branch: Option<bool>,
-    }
-
     let args: BitbucketPRCreateArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -749,12 +811,6 @@ pub async fn handle_jira_attachment_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct JiraAttachmentListArgs {
-        #[serde(rename = "issueKey")]
-        issue_key: String,
-    }
-
     let args: JiraAttachmentListArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -789,16 +845,6 @@ pub async fn handle_jira_attachment_download(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct JiraAttachmentDownloadArgs {
-        #[serde(rename = "issueKey")]
-        issue_key: String,
-        #[serde(rename = "attachmentId")]
-        attachment_id: String,
-        #[serde(rename = "outputPath")]
-        output_path: Option<String>,
-    }
-
     let args: JiraAttachmentDownloadArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -845,14 +891,6 @@ pub async fn handle_jira_attachment_upload(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct JiraAttachmentUploadArgs {
-        #[serde(rename = "issueKey")]
-        issue_key: String,
-        #[serde(rename = "filePaths")]
-        file_paths: Vec<String>,
-    }
-
     let args: JiraAttachmentUploadArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -898,14 +936,7 @@ pub async fn handle_jira_comment_add(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        #[serde(rename = "issueKey")]
-        issue_key: String,
-        comment: String,
-    }
-
-    let args: Args =
+    let args: JiraCommentAddArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
                 code: -32602,
@@ -943,13 +974,7 @@ pub async fn handle_jira_comment_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        #[serde(rename = "issueKey")]
-        issue_key: String,
-    }
-
-    let args: Args =
+    let args: JiraCommentListArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
                 code: -32602,
@@ -983,16 +1008,7 @@ pub async fn handle_jira_comment_update(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        #[serde(rename = "issueKey")]
-        issue_key: String,
-        #[serde(rename = "commentId")]
-        comment_id: String,
-        comment: String,
-    }
-
-    let args: Args =
+    let args: JiraCommentUpdateArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
                 code: -32602,
@@ -1035,15 +1051,7 @@ pub async fn handle_jira_comment_delete(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    #[derive(Deserialize)]
-    struct Args {
-        #[serde(rename = "issueKey")]
-        issue_key: String,
-        #[serde(rename = "commentId")]
-        comment_id: String,
-    }
-
-    let args: Args =
+    let args: JiraCommentDeleteArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
                 code: -32602,
@@ -1090,13 +1098,6 @@ pub async fn handle_bitbucket_workspace_list(
 ) -> Result<serde_json::Value, JsonRpcError> {
     use crate::atlassian::bitbucket::{list_workspace_data, ListWorkspaceParams};
 
-    #[derive(Deserialize)]
-    struct BitbucketWorkspaceListArgs {
-        limit: Option<usize>,
-        #[serde(rename = "nextPage")]
-        next_page: Option<String>,
-    }
-
     let args: BitbucketWorkspaceListArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
             JsonRpcError {
@@ -1141,14 +1142,6 @@ pub async fn handle_bitbucket_repo_list(
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     use crate::atlassian::bitbucket::{list_repo_data, ListRepoParams};
-
-    #[derive(Deserialize)]
-    struct BitbucketRepoListArgs {
-        workspace: String,
-        limit: Option<usize>,
-        #[serde(rename = "nextPage")]
-        next_page: Option<String>,
-    }
 
     let args: BitbucketRepoListArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
@@ -1195,17 +1188,6 @@ pub async fn handle_bitbucket_repo_branches(
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     use crate::atlassian::bitbucket::{list_branches_data, ListBranchesParams};
-
-    #[derive(Deserialize)]
-    struct BitbucketRepoBranchesArgs {
-        workspace: String,
-        repo: String,
-        limit: Option<usize>,
-        #[serde(rename = "nextPage")]
-        next_page: Option<String>,
-        query: Option<String>,
-        sort: Option<String>,
-    }
 
     let args: BitbucketRepoBranchesArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
