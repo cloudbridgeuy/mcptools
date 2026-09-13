@@ -111,986 +111,466 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
     })
 }
 
+mod atlassian_args {
+    #![allow(dead_code)]
+
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraSearchArgs {
+        query: Option<String>,
+        #[serde(rename = "queryName")]
+        query_name: Option<String>,
+        limit: Option<usize>,
+        #[serde(rename = "nextPageToken")]
+        next_page_token: Option<String>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct ConfluenceSearchArgs {
+        query: String,
+        limit: Option<usize>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraCreateArgs {
+        summary: String,
+        description: Option<String>,
+        project: Option<String>,
+        #[serde(rename = "issueType")]
+        issue_type: Option<String>,
+        priority: Option<String>,
+        assignee: Option<String>,
+        sprint: Option<String>,
+        #[serde(rename = "boardId")]
+        board_id: Option<u64>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraGetArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraUpdateArgs {
+        #[serde(rename = "ticketKey")]
+        ticket_key: String,
+        status: Option<String>,
+        priority: Option<String>,
+        #[serde(rename = "issueType")]
+        issue_type: Option<String>,
+        assignee: Option<String>,
+        description: Option<String>,
+        sprint: Option<String>,
+        #[serde(rename = "boardId")]
+        board_id: Option<u64>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraCommentAddArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        comment: String,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraCommentListArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraCommentUpdateArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        #[serde(rename = "commentId")]
+        comment_id: String,
+        comment: String,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraCommentDeleteArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        #[serde(rename = "commentId")]
+        comment_id: String,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraSprintListArgs {
+        #[serde(rename = "boardId")]
+        board_id: u64,
+        state: Option<String>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraAttachmentListArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraAttachmentDownloadArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        #[serde(rename = "attachmentId")]
+        attachment_id: String,
+        #[serde(rename = "outputPath")]
+        output_path: Option<String>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraAttachmentUploadArgs {
+        #[serde(rename = "issueKey")]
+        issue_key: String,
+        #[serde(rename = "filePaths")]
+        file_paths: Vec<String>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraQueryListArgs {}
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraQuerySaveArgs {
+        name: String,
+        query: String,
+        update: Option<bool>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraQueryDeleteArgs {
+        name: String,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct JiraQueryLoadArgs {
+        name: String,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct BitbucketPrListArgs {
+        repo: String,
+        state: Option<Vec<String>>,
+        limit: Option<usize>,
+        #[serde(rename = "nextPage")]
+        next_page: Option<String>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct BitbucketPrReadArgs {
+        repo: String,
+        #[serde(rename = "prNumber")]
+        pr_number: u64,
+        limit: Option<usize>,
+        #[serde(rename = "diffLimit")]
+        diff_limit: Option<usize>,
+        #[serde(rename = "lineLimit")]
+        line_limit: Option<i32>,
+        #[serde(rename = "noDiff")]
+        no_diff: Option<bool>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct BitbucketPrCreateArgs {
+        repo: String,
+        title: String,
+        #[serde(rename = "sourceBranch")]
+        source_branch: String,
+        #[serde(rename = "destinationBranch")]
+        destination_branch: Option<String>,
+        description: Option<String>,
+        #[serde(rename = "closeSourceBranch")]
+        close_source_branch: Option<bool>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct BitbucketWorkspaceListArgs {
+        limit: Option<usize>,
+        #[serde(rename = "nextPage")]
+        next_page: Option<String>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct BitbucketRepoListArgs {
+        workspace: String,
+        limit: Option<usize>,
+        #[serde(rename = "nextPage")]
+        next_page: Option<String>,
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    pub struct BitbucketRepoBranchesArgs {
+        workspace: String,
+        repo: String,
+        limit: Option<usize>,
+        #[serde(rename = "nextPage")]
+        next_page: Option<String>,
+        query: Option<String>,
+        sort: Option<String>,
+    }
+}
+
 pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
     let tools = vec![
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::SearchOutput>()),
             name: "jira_search".to_string(),
             description: "Search Jira issues using JQL (Jira Query Language) or a saved query. Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "JQL query to search issues (e.g., 'project = PROJ AND status = Open')"
-                    },
-                    "queryName": {
-                        "type": "string",
-                        "description": "Name of a saved query to execute instead of providing raw JQL"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum number of results to return (default: 10, max: 100)"
-                    },
-                    "nextPageToken": {
-                        "type": "string",
-                        "description": "Pagination token for fetching the next page. Use the nextPageToken from the previous response to get additional results. Tokens expire after 7 days."
-                    }
-                },
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraSearchArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::confluence::SearchOutput>()),
             name: "confluence_search".to_string(),
             description: "Search Confluence pages using CQL (Confluence Query Language). Returns a list of pages matching the query with title, type, URL, and optionally the plain text content. Requires CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, and CONFLUENCE_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "CQL query to search pages (e.g., 'space = SPACE AND text ~ \"keyword\"')"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum number of results to return (default: 10)"
-                    }
-                },
-                "required": ["query"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::ConfluenceSearchArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::hn::PostOutput>()),
             name: "hn_read_item".to_string(),
             description: "Read a HackerNews post and its comments. Accepts HackerNews item ID (e.g., '8863') or full URL (e.g., 'https://news.ycombinator.com/item?id=8863'). Returns post details with paginated comments.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "item": {
-                        "type": "string",
-                        "description": "HackerNews item ID or URL"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Number of comments per page (default: 10)"
-                    },
-                    "page": {
-                        "type": "number",
-                        "description": "Page number, 1-indexed (default: 1)"
-                    },
-                    "thread": {
-                        "type": "string",
-                        "description": "Comment thread ID to read (optional)"
-                    }
-                },
-                "required": ["item"]
-            }),
+            input_schema: schema::input_schema_for::<hn::HnReadItemArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::hn::ListOutput>()),
             name: "hn_list_items".to_string(),
             description: "List HackerNews stories with pagination. Supports different story types: top, new, best, ask, show, job. Returns a paginated list of stories with their details.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "story_type": {
-                        "type": "string",
-                        "description": "Type of stories to list: top, new, best, ask, show, job (default: top)",
-                        "enum": ["top", "new", "best", "ask", "show", "job"]
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Number of stories per page (default: 30)"
-                    },
-                    "page": {
-                        "type": "number",
-                        "description": "Page number, 1-indexed (default: 1)"
-                    }
-                },
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<hn::HnListItemsArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::md::FetchOutput>()),
             name: "md_fetch".to_string(),
             description: "Fetch a web page using headless Chrome, wait for all XHR requests to complete (network idle), and convert the HTML to Markdown. Supports CSS selector filtering to extract specific page elements. Returns the page title, markdown content, selector metadata, and fetch statistics.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "URL of the web page to fetch"
-                    },
-                    "timeout": {
-                        "type": "number",
-                        "description": "Timeout in seconds (default: 30)"
-                    },
-                    "raw_html": {
-                        "type": "boolean",
-                        "description": "Return raw HTML instead of converting to Markdown (default: false)"
-                    },
-                    "selector": {
-                        "type": "string",
-                        "description": "CSS selector to filter page content (e.g., 'article', 'div.content', 'main'). When provided, only content matching this selector will be converted. Returns an error if no elements match."
-                    },
-                    "strategy": {
-                        "type": "string",
-                        "description": "Selection strategy when multiple elements match the selector (default: 'first')",
-                        "enum": ["first", "last", "all", "n"]
-                    },
-                    "index": {
-                        "type": "number",
-                        "description": "Index for 'n' strategy (0-indexed). Required when strategy is 'n'. Specifies which matching element to select."
-                    },
-                    "offset": {
-                        "type": "number",
-                        "description": "Character offset to start from (default: 0). When provided, takes precedence over page parameter. Use with limit to extract specific sections."
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Number of characters per page (default: 1000). Used for pagination to prevent overwhelming the LLM context."
-                    },
-                    "page": {
-                        "type": "number",
-                        "description": "Page number, 1-indexed (default: 1). Ignored if offset is provided. Use pagination metadata in response to navigate to other pages."
-                    }
-                },
-                "required": ["url"]
-            }),
+            input_schema: schema::input_schema_for::<md::MdFetchArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<crate::md::toc::TocOutput>()),
             name: "md_toc".to_string(),
             description: "Extract table of contents from a web page by parsing markdown headings (H1-H6). Fetches the page using headless Chrome, converts to markdown, and extracts all heading levels with their character offsets and limits. Each TOC entry includes char_offset and char_limit values that can be used with md_fetch to extract specific sections. Sections are defined as heading + content until the next same-or-higher-level heading. Supports CSS selector filtering to extract TOC from specific page elements.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "URL of the web page to fetch"
-                    },
-                    "timeout": {
-                        "type": "number",
-                        "description": "Timeout in seconds (default: 30)"
-                    },
-                    "selector": {
-                        "type": "string",
-                        "description": "CSS selector to filter page content (e.g., 'article', 'div.content', 'main'). When provided, only content matching this selector will be used for TOC extraction. Returns an error if no elements match."
-                    },
-                    "strategy": {
-                        "type": "string",
-                        "description": "Selection strategy when multiple elements match the selector (default: 'first')",
-                        "enum": ["first", "last", "all", "n"]
-                    },
-                    "index": {
-                        "type": "number",
-                        "description": "Index for 'n' strategy (0-indexed). Required when strategy is 'n'. Specifies which matching element to select."
-                    },
-                    "output": {
-                        "type": "string",
-                        "description": "Output format: 'indented' (2 spaces per level), 'markdown' (nested list), or 'json' (structured data). Default: 'indented'",
-                        "enum": ["indented", "markdown", "json"]
-                    }
-                },
-                "required": ["url"]
-            }),
+            input_schema: schema::input_schema_for::<md::MdTocArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::TicketOutput>()),
             name: "jira_create".to_string(),
             description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, and sprint assignment. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "summary": {
-                        "type": "string",
-                        "description": "Title/summary of the ticket (required)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Description of the ticket"
-                    },
-                    "project": {
-                        "type": "string",
-                        "description": "Project key (default: PROD)"
-                    },
-                    "issueType": {
-                        "type": "string",
-                        "description": "Issue type (e.g., 'Bug', 'Story', 'Epic', 'Task')"
-                    },
-                    "priority": {
-                        "type": "string",
-                        "description": "Priority (e.g., 'Highest', 'High', 'Medium', 'Low', 'Lowest')"
-                    },
-                    "assignee": {
-                        "type": "string",
-                        "description": "Assignee (email, display name, account ID, or \"me\" for current user)"
-                    },
-                    "sprint": {
-                        "type": "string",
-                        "description": "Sprint name to assign the issue to after creation (resolves name to ID automatically)"
-                    },
-                    "boardId": {
-                        "type": "number",
-                        "description": "Board ID for sprint operations (required when sprint is provided)"
-                    }
-                },
-                "required": ["summary"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraCreateArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::TicketOutput>()),
             name: "jira_get".to_string(),
             description: "Get detailed information about a Jira ticket. Returns comprehensive information about a specific issue using its issue key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "issueKey": {
-                        "type": "string",
-                        "description": "Unique identifier for the Jira issue (e.g., 'PROJ-123')"
-                    }
-                },
-                "required": ["issueKey"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraGetArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::UpdateOutput>()),
             name: "jira_update".to_string(),
             description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Description (markdown), and Sprint assignment. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "ticketKey": {
-                        "type": "string",
-                        "description": "Ticket key (e.g., PROJ-123)"
-                    },
-                    "status": {
-                        "type": "string",
-                        "description": "New status (e.g., 'In Progress', 'Done')"
-                    },
-                    "priority": {
-                        "type": "string",
-                        "description": "New priority (e.g., 'High', 'Low')"
-                    },
-                    "issueType": {
-                        "type": "string",
-                        "description": "New issue type (e.g., 'Story', 'Bug', 'Epic')"
-                    },
-                    "assignee": {
-                        "type": "string",
-                        "description": "New assignee (email, display name, account ID, or \"me\" for current user)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "New description for the ticket (supports markdown: headings, bold, italic, lists, code blocks, inline code, links)"
-                    },
-                    "sprint": {
-                        "type": "string",
-                        "description": "Sprint name to assign the issue to (resolves name to ID automatically)"
-                    },
-                    "boardId": {
-                        "type": "number",
-                        "description": "Board ID for sprint operations (required when sprint is provided)"
-                    }
-                },
-                "required": ["ticketKey"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraUpdateArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::CommentOutput>()),
             name: "jira_comment_add".to_string(),
             description: "Post a comment on a Jira ticket. Supports markdown in the comment body (bold, italic, headings, lists, code blocks, links) which is automatically converted to Atlassian Document Format. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "issueKey": {
-                        "type": "string",
-                        "description": "The Jira issue key (e.g., PROJ-123)"
-                    },
-                    "comment": {
-                        "type": "string",
-                        "description": "Comment body text (supports markdown: headings, bold, italic, lists, code blocks, inline code, links)"
-                    }
-                },
-                "required": ["issueKey", "comment"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraCommentAddArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::CommentListOutput>()),
             name: "jira_comment_list".to_string(),
             description: "List all comments on a Jira ticket. Returns comment details including ID, author, body text, and creation date. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "issueKey": {
-                        "type": "string",
-                        "description": "The Jira issue key (e.g., PROJ-123)"
-                    }
-                },
-                "required": ["issueKey"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraCommentListArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::CommentOutput>()),
             name: "jira_comment_update".to_string(),
             description: "Update an existing comment on a Jira ticket. Supports markdown in the comment body. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "issueKey": {
-                        "type": "string",
-                        "description": "The Jira issue key (e.g., PROJ-123)"
-                    },
-                    "commentId": {
-                        "type": "string",
-                        "description": "The comment ID to update"
-                    },
-                    "comment": {
-                        "type": "string",
-                        "description": "New comment body text (supports markdown)"
-                    }
-                },
-                "required": ["issueKey", "commentId", "comment"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraCommentUpdateArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::CommentDeleteOutput>()),
             name: "jira_comment_delete".to_string(),
             description: "Delete a comment from a Jira ticket by comment ID. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "issueKey": {
-                        "type": "string",
-                        "description": "The Jira issue key (e.g., PROJ-123)"
-                    },
-                    "commentId": {
-                        "type": "string",
-                        "description": "The comment ID to delete"
-                    }
-                },
-                "required": ["issueKey", "commentId"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraCommentDeleteArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::SprintListOutput>()),
             name: "jira_sprint_list".to_string(),
             description: "List sprints for a Jira board. Returns sprint metadata including ID, name, state, and dates. Use this to discover sprint IDs and names before assigning issues to sprints via jira_update or jira_create. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "boardId": {
-                        "type": "number",
-                        "description": "Jira board ID"
-                    },
-                    "state": {
-                        "type": "string",
-                        "description": "Comma-separated sprint states to filter (default: 'active,future'). Options: active, future, closed."
-                    }
-                },
-                "required": ["boardId"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraSprintListArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::AttachmentListOutput>()),
             name: "jira_attachment_list".to_string(),
             description: "List all attachments on a Jira ticket. Returns attachment metadata including ID, filename, size, MIME type, and creation date. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "issueKey": {
-                        "type": "string",
-                        "description": "The Jira issue key (e.g., PROJ-123)"
-                    }
-                },
-                "required": ["issueKey"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraAttachmentListArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::AttachmentDownloadOutput>()),
             name: "jira_attachment_download".to_string(),
             description: "Download a specific attachment from a Jira ticket by attachment ID. Use jira_attachment_list first to get attachment IDs. Saves to a temp file by default, or to a specified output path. Returns the saved file path.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "issueKey": {
-                        "type": "string",
-                        "description": "The Jira issue key (e.g., PROJ-123)"
-                    },
-                    "attachmentId": {
-                        "type": "string",
-                        "description": "The attachment ID to download"
-                    },
-                    "outputPath": {
-                        "type": "string",
-                        "description": "Optional file path to save the attachment to. Defaults to a temp directory."
-                    }
-                },
-                "required": ["issueKey", "attachmentId"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraAttachmentDownloadArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::AttachmentListOutput>()),
             name: "jira_attachment_upload".to_string(),
             description: "Upload one or more files as attachments to a Jira ticket. Accepts an array of local file paths. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "issueKey": {
-                        "type": "string",
-                        "description": "The Jira issue key (e.g., PROJ-123)"
-                    },
-                    "filePaths": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Array of local file paths to upload"
-                    }
-                },
-                "required": ["issueKey", "filePaths"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraAttachmentUploadArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::QueryListOutput>()),
             name: "jira_query_list".to_string(),
             description: "List all saved Jira queries. Returns a list of query names stored in ~/.config/mcptools/queries/".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraQueryListArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::QueryStatusOutput>()),
             name: "jira_query_save".to_string(),
             description: "Save a Jira JQL query with a name for later reuse. Queries are stored in ~/.config/mcptools/queries/ as .jql files.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Name for the saved query (alphanumeric, hyphens, underscores only)"
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "JQL query to save"
-                    },
-                    "update": {
-                        "type": "boolean",
-                        "description": "If true, overwrites an existing query with the same name (default: false)"
-                    }
-                },
-                "required": ["name", "query"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraQuerySaveArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::QueryStatusOutput>()),
             name: "jira_query_delete".to_string(),
             description: "Delete a saved Jira query by name. Removes the query from ~/.config/mcptools/queries/".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Name of the saved query to delete"
-                    }
-                },
-                "required": ["name"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraQueryDeleteArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::jira::QueryLoadOutput>()),
             name: "jira_query_load".to_string(),
             description: "Load and display the contents of a saved Jira query. Returns the query name and the JQL query text.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Name of the saved query to load"
-                    }
-                },
-                "required": ["name"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::JiraQueryLoadArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRListOutput>()),
             name: "bitbucket_pr_list".to_string(),
             description: "List pull requests for a Bitbucket repository. Returns PR details including ID, title, author, state, and branches. Supports filtering by state and pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository in workspace/repo_slug format (e.g., 'myworkspace/myrepo')"
-                    },
-                    "state": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Filter by PR state(s): OPEN, MERGED, DECLINED, SUPERSEDED"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum number of results per page (default: 10)"
-                    },
-                    "nextPage": {
-                        "type": "string",
-                        "description": "Pagination URL for fetching the next page of results"
-                    }
-                },
-                "required": ["repo"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::BitbucketPrListArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PROutput>()),
             name: "bitbucket_pr_read".to_string(),
             description: "Read details of a specific Bitbucket pull request including diff, diffstat, and comments. Use lineLimit to control diff output size (default: 500 lines, use -1 for unlimited). Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository in workspace/repo_slug format (e.g., 'myworkspace/myrepo')"
-                    },
-                    "prNumber": {
-                        "type": "number",
-                        "description": "Pull request number"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum number of comments per page (default: 100)"
-                    },
-                    "diffLimit": {
-                        "type": "number",
-                        "description": "Maximum number of diffstat entries per page (default: 500)"
-                    },
-                    "lineLimit": {
-                        "type": "number",
-                        "description": "Truncate diff output to N lines (default: 500, use -1 for unlimited)"
-                    },
-                    "noDiff": {
-                        "type": "boolean",
-                        "description": "Skip fetching diff content entirely (default: false)"
-                    }
-                },
-                "required": ["repo", "prNumber"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::BitbucketPrReadArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCreateOutput>()),
             name: "bitbucket_pr_create".to_string(),
             description: "Create a new pull request in a Bitbucket repository. Requires repo, title, and source branch. Optionally specify destination branch (defaults to repo's main branch), description, and whether to close the source branch after merge. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository in workspace/repo_slug format (e.g., 'myworkspace/myrepo')"
-                    },
-                    "title": {
-                        "type": "string",
-                        "description": "Title of the pull request"
-                    },
-                    "sourceBranch": {
-                        "type": "string",
-                        "description": "Source branch name"
-                    },
-                    "destinationBranch": {
-                        "type": "string",
-                        "description": "Destination branch name (defaults to repo's main branch if omitted)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Description of the pull request"
-                    },
-                    "closeSourceBranch": {
-                        "type": "boolean",
-                        "description": "Whether to close the source branch after merge (default: false)"
-                    }
-                },
-                "required": ["repo", "title", "sourceBranch"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::BitbucketPrCreateArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::WorkspaceListOutput>()),
             name: "bitbucket_workspace_list".to_string(),
             description: "List Bitbucket workspaces accessible to the authenticated user. Returns workspace slugs and names. Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum number of results per page (default: 10)"
-                    },
-                    "nextPage": {
-                        "type": "string",
-                        "description": "Pagination URL for fetching the next page of results"
-                    }
-                },
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::BitbucketWorkspaceListArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::RepoListOutput>()),
             name: "bitbucket_repo_list".to_string(),
             description: "List repositories in a Bitbucket workspace. Returns repository names, full names, and clone URLs (SSH and HTTPS). Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "workspace": {
-                        "type": "string",
-                        "description": "Workspace slug (e.g., 'my-workspace')"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum number of results per page (default: 10)"
-                    },
-                    "nextPage": {
-                        "type": "string",
-                        "description": "Pagination URL for fetching the next page of results"
-                    }
-                },
-                "required": ["workspace"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::BitbucketRepoListArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::atlassian::bitbucket::BranchListOutput>()),
             name: "bitbucket_repo_branches".to_string(),
             description: "List branches in a Bitbucket repository. Returns branch names, latest commit hash, date, message, and author. Supports filtering and sorting. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "workspace": {
-                        "type": "string",
-                        "description": "Workspace slug (e.g., 'my-workspace')"
-                    },
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository slug (e.g., 'my-repo')"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum number of results per page (default: 10)"
-                    },
-                    "nextPage": {
-                        "type": "string",
-                        "description": "Pagination URL for fetching the next page of results"
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Bitbucket query filter (e.g., 'name ~ \"feature\"')"
-                    },
-                    "sort": {
-                        "type": "string",
-                        "description": "Sort field (e.g., '-target.date' for newest first)"
-                    }
-                },
-                "required": ["workspace", "repo"]
-            }),
+            input_schema: schema::input_schema_for::<atlassian_args::BitbucketRepoBranchesArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::annotations::ListAnnotationsResponse>()),
             name: "ui_annotations_list".to_string(),
             description: "List all UI annotations from the calendsync dev server. Returns selector, component name, note, and resolution status for each annotation.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "Dev server URL (default: CALENDSYNC_DEV_URL env or http://localhost:3000)"
-                    }
-                },
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<annotations::AnnotationsListArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<mcptools_core::annotations::DevAnnotation>()),
             name: "ui_annotations_get".to_string(),
             description: "Get a single UI annotation by ID with full details including computed styles, bounding box, and optional screenshot.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Annotation ID"
-                    },
-                    "url": {
-                        "type": "string",
-                        "description": "Dev server URL (default: CALENDSYNC_DEV_URL env or http://localhost:3000)"
-                    }
-                },
-                "required": ["id"]
-            }),
+            input_schema: schema::input_schema_for::<annotations::AnnotationsGetArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<annotations::AnnotationResolveOutput>()),
             name: "ui_annotations_resolve".to_string(),
             description: "Mark a UI annotation as resolved with a summary of the changes made.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "Annotation ID to resolve"
-                    },
-                    "summary": {
-                        "type": "string",
-                        "description": "Summary of what was done to address the annotation"
-                    },
-                    "url": {
-                        "type": "string",
-                        "description": "Dev server URL (default: CALENDSYNC_DEV_URL env or http://localhost:3000)"
-                    }
-                },
-                "required": ["id", "summary"]
-            }),
+            input_schema: schema::input_schema_for::<annotations::AnnotationsResolveArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<annotations::AnnotationClearOutput>()),
             name: "ui_annotations_clear".to_string(),
             description: "Clear all UI annotations from the dev server.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "Dev server URL (default: CALENDSYNC_DEV_URL env or http://localhost:3000)"
-                    }
-                },
-                "required": []
-            }),
+            input_schema: schema::input_schema_for::<annotations::AnnotationsClearArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<::pdf::DocumentTree>()),
             name: "pdf_toc".to_string(),
             description: "Parse a PDF file and return its document tree (table of contents) with section IDs, headings, content previews, and image counts. Use the section IDs with pdf_read to read specific sections.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute path to the PDF file"
-                    }
-                },
-                "required": ["path"]
-            }),
+            input_schema: schema::input_schema_for::<pdf::PdfTocArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<::pdf::SectionContent>()),
             name: "pdf_read".to_string(),
             description: "Read a section of a PDF document as Markdown, or the entire document if no section specified. Returns the section title, rendered Markdown text, and image references.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute path to the PDF file"
-                    },
-                    "sectionId": {
-                        "type": "string",
-                        "description": "Section ID from pdf_toc (e.g., 's-1-0'). Omit for whole document."
-                    }
-                },
-                "required": ["path"]
-            }),
+            input_schema: schema::input_schema_for::<pdf::PdfReadArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<::pdf::PeekContent>()),
             name: "pdf_peek".to_string(),
             description: "Sample a text snippet from a PDF section at a given position (beginning, middle, ending, random) without reading the full content. Returns the snippet with total character count so you know how much content remains. Defaults to the whole document if no section specified.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute path to the PDF file"
-                    },
-                    "sectionId": {
-                        "type": "string",
-                        "description": "Section ID from pdf_toc (e.g., 's-1-0'). Omit for whole document."
-                    },
-                    "position": {
-                        "type": "string",
-                        "enum": ["beginning", "middle", "ending", "random"],
-                        "description": "Where to sample from (default: beginning)"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "Maximum characters to return (default: 500)"
-                    }
-                },
-                "required": ["path"]
-            }),
+            input_schema: schema::input_schema_for::<pdf::PdfPeekArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<pdf::PdfImagesOutput>()),
             name: "pdf_images".to_string(),
             description: "List all images in a PDF section or the whole document. Returns image IDs, formats, section IDs, section titles, and page numbers. Use with pdf_image to extract specific images. NOTE: PDFs often reuse decorative images (logos, backgrounds, headers) across many pages — the same image ID will appear on multiple pages. To find meaningful content images (screenshots, diagrams, photos), filter out IDs that repeat across many pages and focus on IDs that appear only within the target section.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute path to the PDF file"
-                    },
-                    "sectionId": {
-                        "type": "string",
-                        "description": "Section ID from pdf_toc. Omit for all images."
-                    }
-                },
-                "required": ["path"]
-            }),
+            input_schema: schema::input_schema_for::<pdf::PdfImagesArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<pdf::PdfImageOutput>()),
             name: "pdf_image".to_string(),
             description: "Extract a specific image from a PDF document by ID, or pick a random image. Returns the image as base64-encoded data with format information. Optionally scope to a section.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute path to the PDF file"
-                    },
-                    "imageId": {
-                        "type": "string",
-                        "description": "Image ID (XObject name from the PDF). Required unless random is true."
-                    },
-                    "sectionId": {
-                        "type": "string",
-                        "description": "Section ID to scope image selection (used with random)"
-                    },
-                    "random": {
-                        "type": "boolean",
-                        "description": "Pick a random image. Cannot be used with imageId."
-                    }
-                },
-                "required": ["path"]
-            }),
+            input_schema: schema::input_schema_for::<pdf::PdfImageArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<::pdf::DocumentMetadata>()),
             name: "pdf_info".to_string(),
             description: "Get metadata about a PDF document including title, author, page count, and creator.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Absolute path to the PDF file"
-                    }
-                },
-                "required": ["path"]
-            }),
+            input_schema: schema::input_schema_for::<pdf::PdfInfoArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<crate::images::SavedOutput>()),
             name: "images_generate".to_string(),
             description: "Generate images with ChatGPT Images 2.5 (gpt-image-2.5-flare default, gpt-image-2.5-sunburst for premium precision). Text-to-image via POST /v1/images/generations. Saves PNG/JPEG/WebP files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "prompt": { "type": "string", "description": "Text description of the image" },
-                    "model": { "type": "string", "description": "gpt-image-2.5-flare (default) or gpt-image-2.5-sunburst" },
-                    "size": { "type": "string", "description": "auto, 1024x1024, 1536x1024, 1024x1536, or custom WIDTHxHEIGHT" },
-                    "quality": { "type": "string", "description": "auto, low, medium, high, xhigh, max" },
-                    "outputFormat": { "type": "string", "description": "png, jpeg, webp (default png)" },
-                    "outputCompression": { "type": "integer", "description": "0-100 for jpeg/webp" },
-                    "background": { "type": "string", "description": "auto, transparent, opaque" },
-                    "moderation": { "type": "string", "description": "auto or low" },
-                    "n": { "type": "integer", "description": "1-10 images (default 1). ChatGPT subscription always returns 1." },
-                    "outputDir": { "type": "string", "description": "Directory for output files (default .)" },
-                    "api": { "type": "string", "description": "chatgpt (default, uses subscription) or openai (uses OPENAI_API_KEY)" },
-                    "configDir": { "type": "string", "description": "llm-stream config dir holding auth.json" },
-                    "mainline": { "type": "string", "description": "Chat model fronting the image tool (default gpt-5.6-sol)" }
-                },
-                "required": ["prompt"]
-            }),
+            input_schema: schema::input_schema_for::<images::ImagesGenerateArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<crate::images::SavedOutput>()),
             name: "images_edit".to_string(),
             description: "Edit ChatGPT Images 2.5 images with a prompt plus 1-16 reference images and optional mask via POST /v1/images/edits. Preserves subject/composition outside the edit. Saves files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "prompt": { "type": "string", "description": "Edit instruction" },
-                    "images": { "type": "array", "items": { "type": "string" }, "description": "Input image file paths (1-16)" },
-                    "mask": { "type": "string", "description": "Mask PNG path (alpha channel marks edit area)" },
-                    "model": { "type": "string", "description": "gpt-image-2.5-flare (default) or gpt-image-2.5-sunburst" },
-                    "size": { "type": "string", "description": "auto, 1024x1024, 1536x1024, 1024x1536, or custom WIDTHxHEIGHT" },
-                    "quality": { "type": "string", "description": "auto, low, medium, high, xhigh, max" },
-                    "outputFormat": { "type": "string", "description": "png, jpeg, webp (default png)" },
-                    "outputCompression": { "type": "integer", "description": "0-100 for jpeg/webp" },
-                    "background": { "type": "string", "description": "auto, transparent, opaque" },
-                    "moderation": { "type": "string", "description": "auto or low" },
-                    "inputFidelity": { "type": "string", "description": "high or low fidelity to inputs" },
-                    "n": { "type": "integer", "description": "1-10 images (default 1). ChatGPT subscription always returns 1." },
-                    "outputDir": { "type": "string", "description": "Directory for output files (default .)" },
-                    "api": { "type": "string", "description": "chatgpt (default, uses subscription) or openai (uses OPENAI_API_KEY)" },
-                    "configDir": { "type": "string", "description": "llm-stream config dir holding auth.json" },
-                    "mainline": { "type": "string", "description": "Chat model fronting the image tool (default gpt-5.6-sol)" }
-                },
-                "required": ["prompt", "images"]
-            }),
+            input_schema: schema::input_schema_for::<images::ImagesEditArgs>()
         },
         Tool {
-            output_schema: None,
+            output_schema: Some(schema::input_schema_for::<crate::images::SavedOutput>()),
             name: "images_vary".to_string(),
             description: "Create variations of ChatGPT Images 2.5 images anchored to 1-16 reference images. Same as images_edit with a default variation prompt when prompt is omitted. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "images": { "type": "array", "items": { "type": "string" }, "description": "Input image file paths (1-16)" },
-                    "prompt": { "type": "string", "description": "Optional variation instruction (default preserves subject/style)" },
-                    "model": { "type": "string", "description": "gpt-image-2.5-flare (default) or gpt-image-2.5-sunburst" },
-                    "size": { "type": "string", "description": "auto, 1024x1024, 1536x1024, 1024x1536, or custom WIDTHxHEIGHT" },
-                    "quality": { "type": "string", "description": "auto, low, medium, high, xhigh, max" },
-                    "outputFormat": { "type": "string", "description": "png, jpeg, webp (default png)" },
-                    "outputCompression": { "type": "integer", "description": "0-100 for jpeg/webp" },
-                    "background": { "type": "string", "description": "auto, transparent, opaque" },
-                    "moderation": { "type": "string", "description": "auto or low" },
-                    "inputFidelity": { "type": "string", "description": "high or low fidelity to inputs" },
-                    "n": { "type": "integer", "description": "1-10 images (default 1). ChatGPT subscription always returns 1." },
-                    "outputDir": { "type": "string", "description": "Directory for output files (default .)" },
-                    "api": { "type": "string", "description": "chatgpt (default, uses subscription) or openai (uses OPENAI_API_KEY)" },
-                    "configDir": { "type": "string", "description": "llm-stream config dir holding auth.json" },
-                    "mainline": { "type": "string", "description": "Chat model fronting the image tool (default gpt-5.6-sol)" }
-                },
-                "required": ["images"]
-            }),
+            input_schema: schema::input_schema_for::<images::ImagesVaryArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<atlas::AtlasTextOutput>()),
             name: "atlas_tree_view".to_string(),
             description: "Browse an annotated directory tree of the codebase. Each entry includes a short description of what the file or directory contains. Use this to navigate unfamiliar codebases — start at the root, then drill into directories of interest.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Directory path relative to repo root. Default: repo root." },
-                    "depth": { "type": "integer", "description": "How many levels deep to show. Default: 1." }
-                }
-            }),
+            input_schema: schema::input_schema_for::<atlas::AtlasTreeViewArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<atlas::AtlasTextOutput>()),
             name: "atlas_peek".to_string(),
             description: "Get a detailed summary of a file or directory. For files: long description, extracted symbols with signatures. For directories: long description, children with descriptions, aggregated symbols. Use this after tree_view to understand a specific file before reading it.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "File or directory path relative to repo root." }
-                },
-                "required": ["path"]
-            }),
+            input_schema: schema::input_schema_for::<atlas::AtlasPeekArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<atlas::AtlasTextOutput>()),
             name: "atlas_status".to_string(),
             description: "Check the health of the Atlas codebase index. Shows when it was last updated, how many files are tracked, and whether descriptions are available.".to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {}
-            }),
+            input_schema: schema::input_schema_for::<atlas::AtlasStatusArgs>()
         },
         Tool {
             output_schema: Some(schema::input_schema_for::<mcptools_core::linear::Viewer>()),
