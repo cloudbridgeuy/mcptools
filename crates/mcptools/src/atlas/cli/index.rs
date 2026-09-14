@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use crate::atlas::config::load_config;
 use crate::atlas::db::Database;
 use crate::atlas::fs::walk_repo;
-use crate::atlas::llm::RigProvider;
+use crate::atlas::llm::{failure_report, LlmStreamProvider};
 use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -160,31 +160,8 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         }
     };
 
-    let file_provider_opt = match crate::atlas::llm::create_file_provider(&config) {
-        Ok(p) => Some(Arc::new(p)),
-        Err(e) => {
-            crate::prelude::eprintln!(
-                "File LLM provider unavailable: {e}. Skipping file descriptions."
-            );
-            None
-        }
-    };
-
-    let dir_provider_opt = match crate::atlas::llm::create_directory_provider(&config) {
-        Ok(p) => Some(p),
-        Err(e) => {
-            crate::prelude::eprintln!(
-                "Directory LLM provider unavailable: {e}. Skipping directory descriptions."
-            );
-            None
-        }
-    };
-
-    if file_provider_opt.is_none() && dir_provider_opt.is_none() {
-        crate::prelude::eprintln!("structural-only, enrichment pending");
-        print_elapsed(start);
-        return Ok(());
-    }
+    let file_provider = Arc::new(LlmStreamProvider::new(&config.file_llm));
+    let dir_provider = LlmStreamProvider::new(&config.directory_llm);
 
     let templates_dir = mcptools_core::llm_stream::resolve_paths()?
         .config_dir
@@ -249,40 +226,33 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     for dir_path in &directories {
         // Step A: Describe files in this directory
         if let Some(file_paths) = files_by_dir.get(dir_path) {
-            if let Some(ref file_provider) = file_provider_opt {
-                let (success, failed) = generate_descriptions(
-                    &db,
-                    &root,
-                    &config,
-                    &primer,
-                    &file_template,
-                    Arc::clone(file_provider),
-                    file_paths,
-                    parallel,
-                    &progress,
-                )
-                .await?;
-                file_desc_count += success;
-                file_fail_count += failed;
-            } else {
-                // No file provider — still advance progress for these files
-                progress.inc(file_paths.len() as u64);
-            }
+            let (success, failed) = generate_descriptions(
+                &db,
+                &root,
+                &config,
+                &primer,
+                &file_template,
+                Arc::clone(&file_provider),
+                file_paths,
+                parallel,
+                &progress,
+            )
+            .await?;
+            file_desc_count += success;
+            file_fail_count += failed;
         }
 
         // Step B: Describe this directory
-        if let Some(ref dir_provider) = dir_provider_opt {
-            match describe_directory(&db, dir_provider, &primer, &dir_template, dir_path).await {
-                Ok(true) => {
-                    dir_desc_count += 1;
-                    progress.set_message(truncate_for_display(
-                        &dir_path.display().to_string(),
-                        msg_width(),
-                    ));
-                }
-                Ok(false) => dir_fail_count += 1,
-                Err(e) => return Err(e),
+        match describe_directory(&db, &dir_provider, &primer, &dir_template, dir_path).await {
+            Ok(true) => {
+                dir_desc_count += 1;
+                progress.set_message(truncate_for_display(
+                    &dir_path.display().to_string(),
+                    msg_width(),
+                ));
             }
+            Ok(false) => dir_fail_count += 1,
+            Err(e) => return Err(e),
         }
         progress.inc(1);
     }
@@ -377,7 +347,7 @@ enum DescResult {
     },
     Err {
         path: PathBuf,
-        error: String,
+        message: String,
     },
 }
 
@@ -385,7 +355,7 @@ enum DescResult {
 /// a recoverable failure (parse error or LLM error), and `Err` for DB errors.
 pub(crate) async fn describe_directory(
     db: &Database,
-    provider: &RigProvider,
+    provider: &LlmStreamProvider,
     primer: &str,
     template: &LoadedTemplate,
     dir_path: &Path,
@@ -411,8 +381,9 @@ pub(crate) async fn describe_directory(
         Ok(r) => r,
         Err(e) => {
             crate::prelude::eprintln!(
-                "warning: LLM call failed for directory {}: {e}",
-                dir_path.display()
+                "warning: LLM call failed for directory {}: {}",
+                dir_path.display(),
+                failure_report(&e)
             );
             db.update_directory_description(dir_path, "[description failed]", "")?;
             return Ok(false);
@@ -447,7 +418,7 @@ pub(crate) async fn generate_descriptions(
     config: &mcptools_core::atlas::AtlasConfig,
     primer: &str,
     template: &LoadedTemplate,
-    provider: Arc<RigProvider>,
+    provider: Arc<LlmStreamProvider>,
     indexed_paths: &[PathBuf],
     parallel: usize,
     progress: &ProgressBar,
@@ -507,12 +478,12 @@ pub(crate) async fn generate_descriptions(
                         },
                         Err(e) => DescResult::Err {
                             path,
-                            error: e.to_string(),
+                            message: e.to_string(),
                         },
                     },
                     Err(e) => DescResult::Err {
                         path,
-                        error: e.to_string(),
+                        message: failure_report(&e),
                     },
                 };
                 if tx.send(result).await.is_err() {
@@ -548,11 +519,11 @@ pub(crate) async fn generate_descriptions(
                     msg_width(),
                 ));
             }
-            DescResult::Err { path, error } => {
+            DescResult::Err { path, message } => {
                 db.update_file_description(&path, "[description failed]", "")?;
                 progress.suspend(|| {
                     crate::prelude::eprintln!(
-                        "warning: description failed for {}: {error}",
+                        "warning: description failed for {}: {message}",
                         path.display()
                     );
                 });
