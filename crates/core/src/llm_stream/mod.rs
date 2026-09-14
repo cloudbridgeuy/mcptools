@@ -22,6 +22,7 @@ pub struct LlmStreamRequest {
     pub provider: String,
     pub model: String,
     pub reasoning_effort: String,
+    pub base_url: Option<String>,
 }
 
 impl Default for LlmStreamRequest {
@@ -33,6 +34,7 @@ impl Default for LlmStreamRequest {
             provider: "chatgpt".to_string(),
             model: "gpt-5.6-luna".to_string(),
             reasoning_effort: "low".to_string(),
+            base_url: None,
         }
     }
 }
@@ -88,6 +90,10 @@ pub fn machine_argv(req: &LlmStreamRequest) -> Vec<String> {
         "--model".to_string(),
         req.model.clone(),
     ];
+    if let Some(base_url) = req.base_url.as_deref().and_then(non_empty) {
+        argv.push("--api-base-url".to_string());
+        argv.push(base_url.to_string());
+    }
     if let Some(system) = req.system.as_deref().and_then(non_empty) {
         argv.push("--system".to_string());
         argv.push(system.to_string());
@@ -309,6 +315,23 @@ mod tests {
         };
         let argv = machine_argv(&req);
         assert!(!argv.iter().any(|a| a == "--reasoning-effort"));
+    }
+
+    #[test]
+    fn argv_base_url_emits_api_base_url_flag() {
+        let req = LlmStreamRequest {
+            base_url: Some("http://127.0.0.1:11434".to_string()),
+            ..LlmStreamRequest::new("Q")
+        };
+        let argv = machine_argv(&req);
+        let pos = argv.iter().position(|a| a == "--api-base-url").unwrap();
+        assert_eq!(argv[pos + 1], "http://127.0.0.1:11434");
+    }
+
+    #[test]
+    fn argv_no_base_url_omits_api_base_url_flag() {
+        let argv = machine_argv(&LlmStreamRequest::new("Q"));
+        assert!(!argv.iter().any(|a| a == "--api-base-url"));
     }
 
     #[test]

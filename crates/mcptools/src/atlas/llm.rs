@@ -8,6 +8,7 @@ const PROMPT_POSITIONAL: &str = "enrich";
 pub struct LlmStreamProvider {
     provider: String,
     model: String,
+    base_url: Option<String>,
 }
 
 impl LlmStreamProvider {
@@ -15,11 +16,19 @@ impl LlmStreamProvider {
         Self {
             provider: provider_name(config.kind),
             model: config.model.as_str().to_string(),
+            base_url: config.base_url.as_ref().map(|url| url.as_str().to_string()),
         }
     }
 
     pub async fn generate(&self, system: &str, prompt: &str) -> Result<String, ContractError> {
-        run(request(&self.provider, &self.model, system, prompt)).await
+        run(request(
+            &self.provider,
+            &self.model,
+            self.base_url.as_deref(),
+            system,
+            prompt,
+        ))
+        .await
     }
 }
 
@@ -29,7 +38,13 @@ fn provider_name(kind: LlmProviderKind) -> String {
     }
 }
 
-fn request(provider: &str, model: &str, system: &str, prompt: &str) -> LlmStreamRequest {
+fn request(
+    provider: &str,
+    model: &str,
+    base_url: Option<&str>,
+    system: &str,
+    prompt: &str,
+) -> LlmStreamRequest {
     LlmStreamRequest {
         system: Some(system.to_string()),
         prompt: PROMPT_POSITIONAL.to_string(),
@@ -37,6 +52,7 @@ fn request(provider: &str, model: &str, system: &str, prompt: &str) -> LlmStream
         provider: provider.to_string(),
         model: model.to_string(),
         reasoning_effort: String::new(),
+        base_url: base_url.map(str::to_string),
     }
 }
 
@@ -68,10 +84,25 @@ mod tests {
             .file_llm
     }
 
+    fn ollama_config_with_url(model: &str, url: &str) -> LlmProviderConfig {
+        let mut env = HashMap::new();
+        env.insert("ATLAS_FILE_MODEL".to_string(), model.to_string());
+        env.insert("OLLAMA_URL".to_string(), url.to_string());
+        mcptools_core::atlas::parse_config(None, &env)
+            .unwrap()
+            .file_llm
+    }
+
     #[test]
     fn ollama_kind_maps_to_ollama_provider_and_config_model() {
         let provider = LlmStreamProvider::new(&ollama_config("atlas"));
-        let req = request(&provider.provider, &provider.model, "be brief", "body");
+        let req = request(
+            &provider.provider,
+            &provider.model,
+            provider.base_url.as_deref(),
+            "be brief",
+            "body",
+        );
         assert_eq!(req.provider, "ollama");
         assert_eq!(req.model, "atlas");
         assert_eq!(req.system.as_deref(), Some("be brief"));
@@ -80,9 +111,26 @@ mod tests {
     }
 
     #[test]
+    fn request_carries_configured_base_url() {
+        let provider =
+            LlmStreamProvider::new(&ollama_config_with_url("atlas", "http://127.0.0.1:9"));
+        let req = request(
+            &provider.provider,
+            &provider.model,
+            provider.base_url.as_deref(),
+            "be brief",
+            "body",
+        );
+        assert_eq!(req.base_url.as_deref(), Some("http://127.0.0.1:9"));
+        let argv = mcptools_core::llm_stream::machine_argv(&req);
+        let pos = argv.iter().position(|a| a == "--api-base-url").unwrap();
+        assert_eq!(argv[pos + 1], "http://127.0.0.1:9");
+    }
+
+    #[test]
     fn argv_omits_reasoning_effort_and_keeps_system() {
         let argv = mcptools_core::llm_stream::machine_argv(&request(
-            "ollama", "atlas", "be brief", "body",
+            "ollama", "atlas", None, "be brief", "body",
         ));
         assert!(!argv.contains(&"--reasoning-effort".to_string()));
         assert!(argv.contains(&"--system".to_string()));
