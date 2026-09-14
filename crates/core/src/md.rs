@@ -170,7 +170,7 @@ pub fn calculate_pagination(
         } else {
             total_characters.div_ceil(limit)
         };
-        let current_page = if limit > 0 { (offset / limit) + 1 } else { 1 };
+        let current_page = offset.checked_div(limit).map(|d| d + 1).unwrap_or(1);
         (total_pages, start_offset, end_offset, current_page)
     } else if limit >= total_characters {
         // Single page case

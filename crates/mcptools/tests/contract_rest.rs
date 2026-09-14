@@ -78,6 +78,77 @@ fn assert_dual_envelope(structured: serde_json::Value) {
     assert_eq!(&parsed, result.get("structuredContent").unwrap());
 }
 
+fn sample(name: &str) -> serde_json::Value {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("contract_samples")
+        .join(format!("{name}.json"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("missing recorded sample for {name}"));
+    serde_json::from_str(&text).unwrap_or_else(|_| panic!("bad JSON sample for {name}"))
+}
+
+#[test]
+fn mcp_contract_rest_typed_outputs() {
+    let response = tools_list();
+    let all = tools(&response);
+
+    let props = find(&all, "pdf_toc")
+        .get("outputSchema")
+        .and_then(|s| s.get("properties"))
+        .and_then(|v| v.as_object())
+        .unwrap();
+    assert!(props.contains_key("sections"));
+    let props = find(&all, "ui_annotations_list")
+        .get("outputSchema")
+        .and_then(|s| s.get("properties"))
+        .and_then(|v| v.as_object())
+        .unwrap();
+    assert!(props.contains_key("annotations"));
+
+    let recorded = sample("pdf_toc");
+    let output: pdf::DocumentTree = serde_json::from_value(recorded).unwrap();
+    assert_eq!(output.title, "Doc");
+    assert_eq!(output.sections.len(), 1);
+    assert_dual_envelope(serde_json::to_value(&output).unwrap());
+
+    let recorded = sample("pdf_images");
+    let output: pdf::PdfImagesOutput = serde_json::from_value(recorded.clone()).unwrap();
+    assert_eq!(output.images.len(), 1);
+    assert_eq!(output.images[0].section_title, "Intro");
+    assert_eq!(&serde_json::to_value(&output).unwrap(), &recorded);
+    assert_dual_envelope(recorded);
+
+    let recorded = sample("images_generate");
+    let files = recorded.get("files").and_then(|v| v.as_array()).unwrap();
+    assert_eq!(files.len(), 1);
+    for key in ["files", "model", "size", "quality", "output_format"] {
+        assert!(
+            recorded.get(key).is_some(),
+            "missing {key} in images_generate"
+        );
+    }
+    assert_dual_envelope(recorded);
+
+    let recorded = sample("ui_annotations_list");
+    let output: mcptools_core::annotations::ListAnnotationsResponse =
+        serde_json::from_value(recorded).unwrap();
+    assert_eq!(output.annotations.len(), 1);
+    assert_eq!(output.annotations[0].id, "abc-123");
+    assert_dual_envelope(serde_json::to_value(&output).unwrap());
+
+    let recorded = sample("ui_annotations_resolve");
+    assert_eq!(
+        recorded.get("resolved").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_dual_envelope(recorded);
+
+    let recorded = sample("ui_annotations_clear");
+    assert!(recorded.get("cleared").and_then(|v| v.as_u64()).is_some());
+    assert_dual_envelope(recorded);
+}
+
 fn recorded_hn_post() -> serde_json::Value {
     serde_json::json!({
         "id": 8863,

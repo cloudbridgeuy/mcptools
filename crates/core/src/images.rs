@@ -194,6 +194,7 @@ pub fn mime_for_filename(name: &str) -> &str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_image_tool(
     image_model: &str,
     action: &str,

@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use mcptools_core::linear::IssueGetOutput;
 use mcptools_core::linear::IssueListOutput;
 
 fn binary() -> PathBuf {
@@ -29,6 +30,69 @@ fn tools_list() -> serde_json::Value {
     reader.read_line(&mut line).unwrap();
     child.wait().unwrap();
     serde_json::from_str(&line).unwrap()
+}
+
+fn recorded_issue_get() -> serde_json::Value {
+    serde_json::json!({
+        "id": "9d1a2b3c-0000-4000-8000-000000000001",
+        "identifier": "GUZ-79",
+        "title": "Wire the thing",
+        "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing",
+        "state": "In Progress",
+        "parent": serde_json::Value::Null,
+        "blocked_by": [],
+    })
+}
+
+#[test]
+fn mcp_contract_linear_issue_get() {
+    let response = tools_list();
+    let tools = response
+        .get("result")
+        .and_then(|v| v.get("tools"))
+        .and_then(|v| v.as_array())
+        .unwrap();
+    let tool = tools
+        .iter()
+        .find(|t| t.get("name").and_then(|v| v.as_str()) == Some("linear_issue_get"))
+        .unwrap();
+    let schema = tool
+        .get("outputSchema")
+        .unwrap_or_else(|| panic!("missing outputSchema in linear_issue_get"));
+    assert_eq!(
+        schema.get("type").and_then(|v| v.as_str()),
+        Some("object"),
+        "bad schema type in linear_issue_get"
+    );
+    let props = schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .unwrap();
+    assert!(props.contains_key("identifier"));
+    assert!(props.contains_key("title"));
+
+    let sample = recorded_issue_get();
+    let output: IssueGetOutput = serde_json::from_value(sample.clone()).unwrap();
+    assert_eq!(output.identifier, "GUZ-79");
+    assert_eq!(output.title, "Wire the thing");
+    let structured = serde_json::to_value(&output).unwrap();
+    assert_eq!(&structured, &sample);
+    let text = serde_json::to_string_pretty(&structured).unwrap();
+    let result = serde_json::json!({
+        "content": [{"type": "text", "text": text}],
+        "structuredContent": structured,
+    });
+    let parsed: serde_json::Value = serde_json::from_str(
+        result
+            .get("content")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .and_then(|c| c.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(&parsed, result.get("structuredContent").unwrap());
 }
 
 fn recorded_issue_list() -> serde_json::Value {
