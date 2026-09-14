@@ -431,6 +431,20 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
     }
 }
 
+fn truncate_description(text: &str) -> String {
+    let flat: String = text
+        .chars()
+        .map(|c| match c {
+            '\n' | '\r' => ' ',
+            _ => c,
+        })
+        .collect();
+    match flat.chars().count() <= 120 {
+        true => flat,
+        false => flat.chars().take(119).collect::<String>() + "…",
+    }
+}
+
 async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
@@ -446,7 +460,8 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
             "URL",
             "State",
             "Parent",
-            "BlockedBy"
+            "BlockedBy",
+            "Description"
         ]);
         table.add_row(prettytable::row![
             found.id,
@@ -455,7 +470,12 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
             found.url,
             found.state,
             found.parent.as_deref().unwrap_or(""),
-            found.blocked_by.join(", ")
+            found.blocked_by.join(", "),
+            found
+                .description
+                .as_deref()
+                .map(truncate_description)
+                .unwrap_or_default()
         ]);
         table.printstd();
     }
@@ -1101,4 +1121,30 @@ async fn cycles_list_handler(options: TeamScopedListOptions) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_description_flattens_and_limits_to_120_chars() {
+        assert_eq!(truncate_description("short"), "short");
+        assert_eq!(truncate_description("a\nb\r\nc"), "a b  c");
+        let out = truncate_description(&"x".repeat(121));
+        assert_eq!(out.chars().count(), 120);
+        assert!(out.ends_with('…'));
+        let out = truncate_description(&("é".repeat(120) + "x"));
+        assert_eq!(out.chars().count(), 120);
+        assert!(out.ends_with('…'));
+        assert_eq!(truncate_description(&"y".repeat(120)).chars().count(), 120);
+        let absent: Option<String> = None;
+        assert_eq!(
+            absent
+                .as_deref()
+                .map(truncate_description)
+                .unwrap_or_default(),
+            ""
+        );
+    }
 }
