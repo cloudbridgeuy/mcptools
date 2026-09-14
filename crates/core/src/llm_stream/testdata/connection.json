@@ -1,0 +1,9 @@
+{
+  "contract_version": 1,
+  "category": "connection",
+  "http_status": null,
+  "retryable": true,
+  "retry_after_raw": null,
+  "retry_after_seconds": null,
+  "message": "unable to stream the api\ncaused by: Eventsource Client error: http error: connection closed before message completed\ncaused by: http error: connection closed before message completed"
+}

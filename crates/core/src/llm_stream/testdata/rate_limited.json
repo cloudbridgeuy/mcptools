@@ -1,0 +1,9 @@
+{
+  "contract_version": 1,
+  "category": "rate_limited",
+  "http_status": 429,
+  "retryable": true,
+  "retry_after_raw": "120",
+  "retry_after_seconds": 120,
+  "message": "the provider returned HTTP 429; retry after 120"
+}

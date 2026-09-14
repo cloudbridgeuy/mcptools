@@ -1,0 +1,9 @@
+{
+  "contract_version": 1,
+  "category": "provider_failed",
+  "http_status": null,
+  "retryable": null,
+  "retry_after_raw": null,
+  "retry_after_seconds": null,
+  "message": "boom"
+}

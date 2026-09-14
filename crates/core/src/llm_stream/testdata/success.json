@@ -1,0 +1,7 @@
+{
+  "contract_version": 1,
+  "answer": "hello",
+  "provider": "claude",
+  "model": "",
+  "usage": null
+}

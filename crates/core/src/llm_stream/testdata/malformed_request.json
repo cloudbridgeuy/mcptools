@@ -1,0 +1,9 @@
+{
+  "contract_version": 1,
+  "category": "malformed_request",
+  "http_status": null,
+  "retryable": null,
+  "retry_after_raw": null,
+  "retry_after_seconds": null,
+  "message": "machine mode needs a prompt"
+}

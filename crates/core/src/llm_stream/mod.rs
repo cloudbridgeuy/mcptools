@@ -1,6 +1,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+pub mod envelope;
+
+pub use envelope::{
+    parse_envelope, ContractEnvelope, FailureCategory, MachineFailure, MachineSuccess,
+    ProtocolError, SUPPORTED_CONTRACT_VERSION,
+};
+
 pub const LLM_STREAM_TIMEOUT_SECS: u64 = 120;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,8 +15,31 @@ pub struct LlmStreamRequest {
     pub system: Option<String>,
     pub prompt: String,
     pub stdin: Option<String>,
-    pub template: Option<String>,
-    pub vars: Option<serde_json::Value>,
+    pub provider: String,
+    pub model: String,
+    pub reasoning_effort: String,
+}
+
+impl Default for LlmStreamRequest {
+    fn default() -> Self {
+        Self {
+            system: None,
+            prompt: String::new(),
+            stdin: None,
+            provider: "chatgpt".to_string(),
+            model: "gpt-5.6-luna".to_string(),
+            reasoning_effort: "low".to_string(),
+        }
+    }
+}
+
+impl LlmStreamRequest {
+    pub fn new(prompt: impl Into<String>) -> Self {
+        Self {
+            prompt: prompt.into(),
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,41 +48,48 @@ pub struct ResolvedPaths {
     pub config_dir: PathBuf,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ContractError {
-    #[error("llm-stream binary not found on PATH; set LLM_STREAM_BIN or install llm-stream")]
-    BinaryMissing,
-    #[error("template not found: {0}")]
-    TemplateNotFound(String),
+    #[error("llm-stream protocol violation: {0}")]
+    Protocol(String),
+    #[error("llm-stream is rate limited; retry after {retry_after_seconds:?} seconds")]
+    RateLimited { retry_after_seconds: Option<u64> },
+    #[error("llm-stream quota exhausted")]
+    QuotaExhausted,
+    #[error("llm-stream provider returned HTTP {status:?}")]
+    ProviderHttp { status: Option<u16> },
+    #[error("llm-stream connection failed: {0}")]
+    Connection(String),
+    #[error("llm-stream failed: {0}")]
+    ProviderFailed(String),
     #[error("llm-stream authentication required. Run: llm-stream --login")]
     AuthRequired,
+    #[error("llm-stream binary not found on PATH; set LLM_STREAM_BIN or install llm-stream")]
+    BinaryMissing,
     #[error("llm-stream timed out after 120s")]
     TimedOut,
-    #[error("{0}")]
-    Failed(String),
 }
 
-pub fn build_argv(req: &LlmStreamRequest) -> Vec<String> {
+pub fn machine_argv(req: &LlmStreamRequest) -> Vec<String> {
     let mut argv = vec![
-        "llm-stream".to_string(),
+        "--machine".to_string(),
         "--no-color".to_string(),
         "--quiet".to_string(),
         "true".to_string(),
         "--no-cache".to_string(),
-        "--preset".to_string(),
-        "luna".to_string(),
+        "--api".to_string(),
+        req.provider.clone(),
+        "--model".to_string(),
+        req.model.clone(),
     ];
     if let Some(system) = req.system.as_deref().and_then(non_empty) {
         argv.push("--system".to_string());
         argv.push(system.to_string());
     }
-    if let Some(template) = req.template.as_deref().and_then(non_empty) {
-        argv.push("--template".to_string());
-        argv.push(template.to_string());
-        if let Some(vars) = &req.vars {
-            argv.push("--vars".to_string());
-            argv.push(serde_json::to_string(vars).unwrap_or_else(|_| "{}".to_string()));
-        }
+    let effort = req.reasoning_effort.trim();
+    if !effort.is_empty() {
+        argv.push("--reasoning-effort".to_string());
+        argv.push(effort.to_string());
     }
     argv.push(req.prompt.clone());
     argv
@@ -63,28 +100,11 @@ pub fn resolve_paths() -> Result<ResolvedPaths, ContractError> {
     Ok(resolve_paths_from(&env))
 }
 
-pub fn parse_answer(stdout: &str) -> Result<String, ContractError> {
-    if stdout.is_empty() {
-        return Err(ContractError::Failed(
-            "llm-stream returned empty output".to_string(),
-        ));
-    }
-    Ok(stdout.to_string())
-}
-
-pub fn template_not_found_detail(stderr: &str) -> Option<String> {
-    if stderr.to_lowercase().contains("template not found") {
-        Some(stderr.trim().to_string())
-    } else {
-        None
-    }
-}
-
 pub fn classify_spawn_error(e: &std::io::Error) -> ContractError {
     if e.kind() == std::io::ErrorKind::NotFound {
         ContractError::BinaryMissing
     } else {
-        ContractError::Failed(e.to_string())
+        ContractError::ProviderFailed(e.to_string())
     }
 }
 
@@ -123,109 +143,88 @@ fn non_empty(s: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    fn request(prompt: &str) -> LlmStreamRequest {
-        LlmStreamRequest {
-            system: None,
-            prompt: prompt.to_string(),
-            stdin: None,
-            template: None,
-            vars: None,
-        }
-    }
 
     #[test]
     fn argv_minimal_order() {
-        let argv = build_argv(&request("Q"));
+        let argv = machine_argv(&LlmStreamRequest::new("Q"));
         assert_eq!(
             argv,
             vec![
-                "llm-stream",
+                "--machine",
                 "--no-color",
                 "--quiet",
                 "true",
                 "--no-cache",
-                "--preset",
-                "luna",
+                "--api",
+                "chatgpt",
+                "--model",
+                "gpt-5.6-luna",
+                "--reasoning-effort",
+                "low",
                 "Q"
             ]
         );
     }
 
     #[test]
-    fn argv_full_order() {
+    fn argv_explicit_provider_model_effort() {
         let req = LlmStreamRequest {
-            system: Some("S".to_string()),
-            prompt: "Q".to_string(),
-            stdin: Some("CTX".to_string()),
-            template: Some("T".to_string()),
-            vars: Some(json!({"k": "v"})),
+            provider: "claude".to_string(),
+            model: "claude-sonnet-5".to_string(),
+            reasoning_effort: "high".to_string(),
+            ..LlmStreamRequest::new("Q")
         };
-        let argv = build_argv(&req);
-        assert_eq!(
-            argv,
-            vec![
-                "llm-stream",
-                "--no-color",
-                "--quiet",
-                "true",
-                "--no-cache",
-                "--preset",
-                "luna",
-                "--system",
-                "S",
-                "--template",
-                "T",
-                "--vars",
-                r#"{"k":"v"}"#,
-                "Q"
-            ]
-        );
-    }
-
-    #[test]
-    fn argv_vars_ignored_without_template() {
-        let req = LlmStreamRequest {
-            vars: Some(json!({"k": "v"})),
-            ..request("Q")
-        };
-        let argv = build_argv(&req);
-        assert!(!argv.iter().any(|a| a == "--vars"));
-        assert_eq!(argv.last().unwrap(), "Q");
+        let argv = machine_argv(&req);
+        let api_pos = argv.iter().position(|a| a == "--api").unwrap();
+        assert_eq!(argv[api_pos + 1], "claude");
+        let model_pos = argv.iter().position(|a| a == "--model").unwrap();
+        assert_eq!(argv[model_pos + 1], "claude-sonnet-5");
+        let effort_pos = argv.iter().position(|a| a == "--reasoning-effort").unwrap();
+        assert_eq!(argv[effort_pos + 1], "high");
     }
 
     #[test]
     fn argv_stdin_not_in_argv() {
         let req = LlmStreamRequest {
             stdin: Some("CTX".to_string()),
-            ..request("Q")
+            ..LlmStreamRequest::new("Q")
         };
-        let argv = build_argv(&req);
+        let argv = machine_argv(&req);
         assert!(!argv.iter().any(|a| a == "CTX"));
+    }
+
+    #[test]
+    fn argv_prompt_is_last() {
+        let argv = machine_argv(&LlmStreamRequest::new("Q"));
+        assert_eq!(argv.last().unwrap(), "Q");
+    }
+
+    #[test]
+    fn argv_no_preset_no_template_no_vars() {
+        let argv = machine_argv(&LlmStreamRequest::new("Q"));
+        for flag in ["--preset", "--template", "--vars"] {
+            assert!(!argv.iter().any(|a| a == flag));
+        }
     }
 
     #[test]
     fn argv_blank_system_skipped() {
         let req = LlmStreamRequest {
             system: Some("   ".to_string()),
-            ..request("Q")
+            ..LlmStreamRequest::new("Q")
         };
-        let argv = build_argv(&req);
+        let argv = machine_argv(&req);
         assert!(!argv.iter().any(|a| a == "--system"));
     }
 
     #[test]
-    fn vars_serialized_compact() {
+    fn argv_empty_reasoning_effort_omits_flag() {
         let req = LlmStreamRequest {
-            template: Some("T".to_string()),
-            vars: Some(json!({"a": 1, "b": [1, 2], "c": {"d": true}})),
-            ..request("Q")
+            reasoning_effort: "  ".to_string(),
+            ..LlmStreamRequest::new("Q")
         };
-        let argv = build_argv(&req);
-        let pos = argv.iter().position(|a| a == "--vars").unwrap();
-        assert_eq!(argv[pos + 1], r#"{"a":1,"b":[1,2],"c":{"d":true}}"#);
-        assert!(!argv[pos + 1].contains(' '));
+        let argv = machine_argv(&req);
+        assert!(!argv.iter().any(|a| a == "--reasoning-effort"));
     }
 
     #[test]
@@ -262,35 +261,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_answer_passthrough() {
-        assert_eq!(parse_answer("OK\n").unwrap(), "OK\n");
-    }
-
-    #[test]
-    fn parse_answer_empty_fails() {
-        assert!(matches!(parse_answer(""), Err(ContractError::Failed(_))));
-    }
-
-    #[test]
-    fn template_detail_found() {
-        assert_eq!(
-            template_not_found_detail("Error: template not found: foo"),
-            Some("Error: template not found: foo".to_string())
-        );
-    }
-
-    #[test]
-    fn template_detail_case_insensitive() {
-        assert!(template_not_found_detail("Template Not Found").is_some());
-    }
-
-    #[test]
-    fn template_detail_absent() {
-        assert_eq!(template_not_found_detail("boom"), None);
-        assert_eq!(template_not_found_detail(""), None);
-    }
-
-    #[test]
     fn spawn_not_found_is_binary_missing() {
         let e = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
         assert!(matches!(
@@ -300,9 +270,12 @@ mod tests {
     }
 
     #[test]
-    fn spawn_other_is_failed() {
+    fn spawn_other_is_provider_failed() {
         let e = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
-        assert!(matches!(classify_spawn_error(&e), ContractError::Failed(_)));
+        assert!(matches!(
+            classify_spawn_error(&e),
+            ContractError::ProviderFailed(_)
+        ));
     }
 
     #[test]

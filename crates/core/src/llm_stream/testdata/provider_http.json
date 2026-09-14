@@ -1,0 +1,9 @@
+{
+  "contract_version": 1,
+  "category": "provider_http",
+  "http_status": 500,
+  "retryable": null,
+  "retry_after_raw": null,
+  "retry_after_seconds": null,
+  "message": "the provider returned HTTP 500"
+}
