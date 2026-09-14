@@ -62,6 +62,8 @@ pub struct IssueMini {
     pub title: String,
     pub url: String,
     pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub parent: Option<String>,
     #[serde(default)]
@@ -75,6 +77,8 @@ pub struct IssueGetOutput {
     pub title: String,
     pub url: String,
     pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub parent: Option<String>,
     #[serde(default)]
@@ -89,6 +93,7 @@ impl From<IssueMini> for IssueGetOutput {
             title: issue.title,
             url: issue.url,
             state: issue.state,
+            description: issue.description,
             parent: issue.parent,
             blocked_by: issue.blocked_by,
         }
@@ -375,6 +380,7 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
                 title: raw.title,
                 url: raw.url,
                 state: raw.state.name,
+                description: present_text(raw.description),
                 parent: raw.parent.map(|parent| parent.identifier),
                 blocked_by: raw
                     .inverse_relations
@@ -405,6 +411,7 @@ pub fn transform_issues(data: serde_json::Value) -> Result<Paginated<IssueMini>,
                         title: raw.title,
                         url: raw.url,
                         state: raw.state.name,
+                        description: present_text(raw.description),
                         parent: raw.parent.map(|parent| parent.identifier),
                         blocked_by: raw
                             .inverse_relations
@@ -885,6 +892,10 @@ pub fn transform_issue_update(data: serde_json::Value) -> Result<IssueMini, Line
     }
 }
 
+fn present_text(value: Option<String>) -> Option<String> {
+    value.filter(|text| !text.trim().is_empty())
+}
+
 fn non_blank(value: &str) -> Option<&str> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -908,6 +919,8 @@ struct RawIssue {
     title: String,
     url: String,
     state: RawState,
+    #[serde(default)]
+    description: Option<String>,
     #[serde(default)]
     parent: Option<RawParent>,
     #[serde(default, rename = "inverseRelations")]
@@ -1190,6 +1203,7 @@ mod tests {
             "title": "Wire the thing",
             "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing",
             "state": {"name": "In Progress"},
+            "description": "Fix **auth** flow",
             "parent": {"identifier": "GUZ-78"},
             "inverseRelations": {"nodes": [
                 {"type": "blocks", "issue": {"identifier": "GUZ-80"}},
@@ -1205,9 +1219,66 @@ mod tests {
                 title: "Wire the thing".to_string(),
                 url: "https://linear.app/acme/issue/GUZ-79/wire-the-thing".to_string(),
                 state: "In Progress".to_string(),
+                description: Some("Fix **auth** flow".to_string()),
                 parent: Some("GUZ-78".to_string()),
                 blocked_by: vec!["GUZ-80".to_string()],
             }
+        );
+    }
+
+    #[test]
+    fn transform_issue_maps_null_missing_and_blank_description_to_none() {
+        let base = serde_json::json!({
+            "id": "u1",
+            "identifier": "GUZ-1",
+            "title": "T",
+            "url": "https://linear.app/x/issue/GUZ-1/t",
+            "state": {"name": "Todo"},
+        });
+        for description in [
+            serde_json::json!(null),
+            serde_json::json!(""),
+            serde_json::json!("   "),
+        ] {
+            let mut raw = base.clone();
+            raw["description"] = description;
+            assert_eq!(
+                transform_issue(serde_json::json!({"issue": raw}))
+                    .unwrap()
+                    .description,
+                None
+            );
+        }
+        assert_eq!(
+            transform_issue(serde_json::json!({"issue": base}))
+                .unwrap()
+                .description,
+            None
+        );
+    }
+
+    #[test]
+    fn issue_mini_omits_absent_description_in_json() {
+        let issue = IssueMini {
+            id: "u1".to_string(),
+            identifier: "GUZ-1".to_string(),
+            title: "T".to_string(),
+            url: "https://linear.app/x/issue/GUZ-1/t".to_string(),
+            state: "Todo".to_string(),
+            description: None,
+            parent: None,
+            blocked_by: Vec::new(),
+        };
+        let value = serde_json::to_value(&issue).unwrap();
+        assert!(value.get("description").is_none());
+        let issue = IssueMini {
+            description: Some("Fix **auth** flow".to_string()),
+            ..issue
+        };
+        let value = serde_json::to_value(&issue).unwrap();
+        assert_eq!(
+            value.get("description").and_then(|v| v.as_str()),
+            Some("Fix **auth** flow")
         );
     }
 
@@ -1251,6 +1322,7 @@ mod tests {
             title: "T".to_string(),
             url: "https://linear.app/x/issue/GUZ-79/t".to_string(),
             state: "Todo".to_string(),
+            description: None,
             parent: Some("GUZ-78".to_string()),
             blocked_by: vec!["GUZ-80".to_string()],
         };
