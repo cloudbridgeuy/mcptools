@@ -84,16 +84,16 @@ Parent: ATLAS-00. Priority: high.
 
 Area: llm_stream / required prerequisite
 
-Add a minimal versioned machine interface over existing provider dispatch and template rendering. MCPTools must receive structured success/error information without parsing human stderr. Preserve the ordinary interactive CLI.
+Add a minimal versioned machine interface over existing provider dispatch. The caller renders prompts in-process (GUZ-24); the contract carries rendered prompt text, not template identity. MCPTools must receive structured success/error information without parsing human stderr. Preserve the ordinary interactive CLI.
 
 Acceptance criteria:
 
-- [ ] Specify and test one request containing template name/path identity, JSON variables, explicit provider/model options, and optional context. Carry large variables through stdin or a file, not an unbounded command-line argument.
-- [ ] Return answer text plus resolved provider/model/template identity on success. Expose usage only when the provider supplies it; absent usage is unknown.
+- [ ] Specify and test one request containing rendered prompt text, explicit provider/model options, and optional context. Carry large input through stdin or a file, not an unbounded command-line argument.
+- [ ] Return answer text plus resolved provider/model identity on success. Expose usage only when the provider supplies it; absent usage is unknown.
 - [ ] Return typed failure metadata: category, provider HTTP status if available, retryability, Retry-After raw/normalized value when available, and a safe message. Preserve nonzero exit for failed requests, including failures after partial streamed output.
 - [ ] Carry HTTP 429 and Retry-After from HTTP providers through existing error types. Distinguish temporary limits from known permanent quota exhaustion. Mark unavailable metadata explicitly for CLI-backed providers; do not invent a status from arbitrary model text.
-- [ ] Use a fresh conversation with no response-history writes. Preserve configured credentials/auth refresh and explicit provider settings; prevent unrelated templates, presets, history, or user system prompts from contaminating the request.
-- [ ] Test malformed requests, missing/malformed templates, 401/403/404/429/5xx, connection errors, partial output then failure, and child provider failure even when that child exits zero.
+- [ ] Use a fresh conversation with no response-history writes. Preserve configured credentials/auth refresh and explicit provider settings; prevent unrelated presets, history, or user system prompts from contaminating the request.
+- [ ] Test malformed requests, 401/403/404/429/5xx, connection errors, partial output then failure, and child provider failure even when that child exits zero.
 - [ ] Preserve machine stdout framing and keep diagnostics separate. A pure text request cannot enable provider tools, hooks, or repository edits implicitly; verify effective tool-disable controls for CLI-backed providers.
 
 Prerequisites: none.
@@ -103,6 +103,7 @@ Evidence:
 - llm_stream crates/llm_stream/src/main.rs, prelude.rs, config.rs, error.rs, claude.rs, and provider adapters.
 - Current top-level main exits 1 on errors; Claude result.is_error is already parsed. Preserve this behavior.
 - Current --no-cache prevents conversation writes but startup still creates config/templates/cache directories. An isolated config directory alone would lose existing authentication.
+- Reopened 2026-09-14: validation audit found no contract work on llm_stream 6d4270c9. Scope narrowed per GUZ-20 decision: prompt-text-in; template rendering stays caller-side.
 
 ## ATLAS-03: Ship and install Atlas templates for llm-stream
 
