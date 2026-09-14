@@ -1,6 +1,8 @@
 use super::JsonRpcError;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+pub use ::pdf::{PdfImageOutput, PdfImagesOutput};
 
 #[derive(Deserialize, JsonSchema)]
 pub struct PdfTocArgs {
@@ -43,25 +45,6 @@ pub struct PdfImageArgs {
 #[derive(Deserialize, JsonSchema)]
 pub struct PdfInfoArgs {
     pub path: String,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct PdfImagesOutput {
-    pub images: Vec<pdf::EnrichedImageRef>,
-}
-
-impl From<Vec<pdf::EnrichedImageRef>> for PdfImagesOutput {
-    fn from(images: Vec<pdf::EnrichedImageRef>) -> Self {
-        PdfImagesOutput { images }
-    }
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct PdfImageOutput {
-    pub id: String,
-    pub format: String,
-    pub data: String,
-    pub size: usize,
 }
 
 const INVALID_PARAMS: i32 = -32602;

@@ -164,6 +164,25 @@ pub struct EnrichedImageRef {
     pub page: usize,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+pub struct PdfImagesOutput {
+    pub images: Vec<EnrichedImageRef>,
+}
+
+impl From<Vec<EnrichedImageRef>> for PdfImagesOutput {
+    fn from(images: Vec<EnrichedImageRef>) -> Self {
+        PdfImagesOutput { images }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+pub struct PdfImageOutput {
+    pub id: String,
+    pub format: String,
+    pub data: String,
+    pub size: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct ImageData {
     pub id: ImageId,
