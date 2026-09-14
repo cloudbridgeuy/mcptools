@@ -10,6 +10,10 @@ pub use envelope::{
 
 pub const LLM_STREAM_TIMEOUT_SECS: u64 = 120;
 
+pub const LLM_STREAM_OUTPUT_LIMIT_BYTES: usize = 8 * 1024 * 1024;
+
+const SECRET_KEY_MARKERS: [&str; 4] = ["key", "token", "secret", "password"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LlmStreamRequest {
     pub system: Option<String>,
@@ -68,6 +72,8 @@ pub enum ContractError {
     BinaryMissing,
     #[error("llm-stream timed out after 120s")]
     TimedOut,
+    #[error("llm-stream call cancelled")]
+    Cancelled,
 }
 
 pub fn machine_argv(req: &LlmStreamRequest) -> Vec<String> {
@@ -105,6 +111,84 @@ pub fn classify_spawn_error(e: &std::io::Error) -> ContractError {
         ContractError::BinaryMissing
     } else {
         ContractError::ProviderFailed(e.to_string())
+    }
+}
+
+pub fn validate_contract_version(reported: i64) -> Result<(), ContractError> {
+    if reported == SUPPORTED_CONTRACT_VERSION {
+        Ok(())
+    } else {
+        Err(ContractError::Protocol(format!(
+            "llm-stream reports contract version {reported}; this build supports contract version {SUPPORTED_CONTRACT_VERSION}; upgrade llm-stream or mcptools"
+        )))
+    }
+}
+
+pub fn is_secret_env_key(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    SECRET_KEY_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+pub fn secret_env_values(env: &HashMap<String, String>) -> Vec<String> {
+    let mut values: Vec<String> = env
+        .iter()
+        .filter(|(name, value)| is_secret_env_key(name) && !value.trim().is_empty())
+        .map(|(_, value)| value.clone())
+        .collect();
+    values.sort();
+    values.dedup();
+    values
+}
+
+pub fn secret_auth_values(raw: &str) -> Vec<String> {
+    let value: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+    let Some(object) = value.as_object() else {
+        return Vec::new();
+    };
+    object
+        .iter()
+        .filter_map(|(name, value)| {
+            let is_token = name.to_ascii_lowercase().contains("token");
+            if is_token {
+                value.as_str().map(str::to_string)
+            } else {
+                None
+            }
+        })
+        .filter(|token| !token.trim().is_empty())
+        .collect()
+}
+
+pub fn redact(text: &str, secrets: &[String]) -> String {
+    let mut redacted = text.to_string();
+    for secret in secrets {
+        if secret.trim().is_empty() {
+            continue;
+        }
+        if redacted.contains(secret.as_str()) {
+            redacted = redacted.replace(secret.as_str(), "[redacted]");
+        }
+    }
+    redacted
+}
+
+impl ContractError {
+    pub fn redacted(self, secrets: &[String]) -> Self {
+        match self {
+            ContractError::Protocol(message) => ContractError::Protocol(redact(&message, secrets)),
+            ContractError::Connection(message) => {
+                ContractError::Connection(redact(&message, secrets))
+            }
+            ContractError::ProviderFailed(message) => {
+                ContractError::ProviderFailed(redact(&message, secrets))
+            }
+            other => other,
+        }
     }
 }
 
@@ -283,6 +367,104 @@ mod tests {
         assert_eq!(
             ContractError::TimedOut.to_string(),
             "llm-stream timed out after 120s"
+        );
+    }
+
+    #[test]
+    fn cancelled_display() {
+        assert_eq!(
+            ContractError::Cancelled.to_string(),
+            "llm-stream call cancelled"
+        );
+    }
+
+    #[test]
+    fn version_match_is_ok() {
+        assert!(validate_contract_version(SUPPORTED_CONTRACT_VERSION).is_ok());
+    }
+
+    #[test]
+    fn version_mismatch_names_both_versions() {
+        let error = validate_contract_version(SUPPORTED_CONTRACT_VERSION + 1).unwrap_err();
+        assert!(
+            error.to_string().contains("reports contract version 2")
+                && error.to_string().contains("supports contract version 1")
+                && error.to_string().contains("upgrade")
+        );
+    }
+
+    #[test]
+    fn secret_env_key_matches_markers_case_insensitively() {
+        for name in [
+            "OPENAI_API_KEY",
+            "GITHUB_TOKEN",
+            "MY_SECRET",
+            "DB_PASSWORD",
+            "anthropic_api_key",
+        ] {
+            assert!(is_secret_env_key(name), "{name}");
+        }
+        assert!(!is_secret_env_key("HOME"));
+        assert!(!is_secret_env_key("PATH"));
+    }
+
+    #[test]
+    fn secret_env_values_collect_and_dedupe() {
+        let mut env = HashMap::new();
+        env.insert("OPENAI_API_KEY".to_string(), "sk-1".to_string());
+        env.insert("GITHUB_TOKEN".to_string(), "gh-1".to_string());
+        env.insert("HOME".to_string(), "/home/me".to_string());
+        env.insert("EMPTY_SECRET".to_string(), "   ".to_string());
+        assert_eq!(
+            secret_env_values(&env),
+            vec!["gh-1".to_string(), "sk-1".to_string()]
+        );
+    }
+
+    #[test]
+    fn secret_auth_values_extract_token_fields() {
+        let raw =
+            r#"{"access_token":"at","refresh_token":"rt","id_token":"it","account_id":"acct"}"#;
+        assert_eq!(
+            secret_auth_values(raw),
+            vec!["at".to_string(), "it".to_string(), "rt".to_string()]
+        );
+    }
+
+    #[test]
+    fn secret_auth_values_tolerates_malformed_json() {
+        assert!(secret_auth_values("not json").is_empty());
+    }
+
+    #[test]
+    fn redact_replaces_every_secret() {
+        let secrets = vec!["sk-abc".to_string(), "hunter2".to_string()];
+        let out = redact("OPENAI_API_KEY=sk-abc pass=hunter2 plain", &secrets);
+        assert_eq!(out, "OPENAI_API_KEY=[redacted] pass=[redacted] plain");
+    }
+
+    #[test]
+    fn redact_ignores_empty_secrets() {
+        assert_eq!(
+            redact("plain", &["".to_string(), "  ".to_string()]),
+            "plain"
+        );
+    }
+
+    #[test]
+    fn redacted_rewrites_string_variants_only() {
+        let secrets = vec!["sk-abc".to_string()];
+        assert_eq!(
+            ContractError::ProviderFailed("key sk-abc".to_string()).redacted(&secrets),
+            ContractError::ProviderFailed("key [redacted]".to_string())
+        );
+        assert_eq!(
+            ContractError::Protocol("sk-abc".to_string()).redacted(&secrets),
+            ContractError::Protocol("[redacted]".to_string())
+        );
+        assert_eq!(
+            ContractError::TimedOut.redacted(&secrets),
+            ContractError::TimedOut
         );
     }
 }
