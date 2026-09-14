@@ -261,6 +261,9 @@ async fn terminate(child: &mut tokio::process::Child) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command as StdCommand;
+
+    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[tokio::test]
     async fn timeout_kills_slow_child() {
@@ -280,29 +283,185 @@ mod tests {
         assert!(!status.success());
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn live_missing_binary() {
-        let req = LlmStreamRequest::new("say OK");
-        let err = run(req).await.unwrap_err();
-        assert!(matches!(err, ContractError::BinaryMissing));
+    fn env_map() -> HashMap<String, String> {
+        std::env::vars().collect()
+    }
+
+    fn atlas_model(env: &HashMap<String, String>) -> String {
+        mcptools_core::atlas::parse_config(None, env)
+            .unwrap()
+            .file_llm
+            .model
+            .as_str()
+            .to_string()
+    }
+
+    fn atlas_base_url(env: &HashMap<String, String>) -> String {
+        mcptools_core::atlas::parse_config(None, env)
+            .unwrap()
+            .file_llm
+            .base_url
+            .map(|url| url.as_str().to_string())
+            .unwrap_or_else(|| "http://localhost:11434".to_string())
+    }
+
+    fn binary_contract_version(binary: &Path) -> Option<i64> {
+        let output = StdCommand::new(binary)
+            .arg("--contract-version")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+    }
+
+    fn live_binary_guard(paths: &ResolvedPaths) -> bool {
+        let Some(version) = binary_contract_version(&paths.binary) else {
+            eprintln!(
+                "skipping: no runnable llm-stream binary at {}; set LLM_STREAM_BIN to a machine-mode build",
+                paths.binary.display()
+            );
+            return false;
+        };
+        assert_eq!(version, 1, "llm-stream --contract-version must report 1");
+        true
+    }
+
+    async fn ollama_available_models(base_url: &str) -> Option<Vec<String>> {
+        let response = reqwest::Client::new()
+            .get(format!("{base_url}/api/tags"))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+            .ok()?;
+        let value: serde_json::Value = response.json().await.ok()?;
+        Some(
+            value
+                .get("models")?
+                .as_array()?
+                .iter()
+                .filter_map(|model| model.get("name").and_then(|name| name.as_str()))
+                .map(str::to_string)
+                .collect(),
+        )
+    }
+
+    fn ollama_serves_model(models: &[String], model: &str) -> bool {
+        models
+            .iter()
+            .any(|name| name == model || name.strip_suffix(":latest") == Some(model))
+    }
+
+    fn restore_env(name: &str, previous: Option<String>) {
+        match previous {
+            Some(value) => std::env::set_var(name, value),
+            None => std::env::remove_var(name),
+        }
     }
 
     #[tokio::test]
     #[ignore]
-    async fn live_stdin_pipe() {
+    async fn live_ollama_envelope_parses_with_non_empty_answer() {
+        let _guard = SERIAL.lock().await;
+        let env = env_map();
+        let paths = resolve_paths().unwrap();
+        if !live_binary_guard(&paths) {
+            return;
+        }
+        let model = atlas_model(&env);
+        let base_url = atlas_base_url(&env);
+        let Some(models) = ollama_available_models(&base_url).await else {
+            eprintln!(
+                "skipping: Ollama is not reachable at {base_url}; start it with `ollama serve`"
+            );
+            return;
+        };
+        if !ollama_serves_model(&models, &model) {
+            eprintln!(
+                "skipping: model {model} is not available in Ollama at {base_url}; set ATLAS_FILE_MODEL to an available model or pull it with `ollama pull {model}`; available: {models:?}"
+            );
+            return;
+        }
         let req = LlmStreamRequest {
-            stdin: Some("context: sky is blue".to_string()),
-            ..LlmStreamRequest::new("say OK")
+            provider: "ollama".to_string(),
+            model: model.clone(),
+            reasoning_effort: String::new(),
+            ..LlmStreamRequest::new("Reply with exactly: OK")
+        };
+        let output = StdCommand::new(&paths.binary)
+            .args(machine_argv(&req))
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "llm-stream exited with {:?}; stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let success = parse_envelope(&stdout).unwrap().into_result().unwrap();
+        println!("contract_version: {}", success.contract_version);
+        println!("provider: {}", success.provider);
+        println!("model: {}", success.model);
+        println!("usage: {:?}", success.usage);
+        println!("answer: {}", success.answer);
+        assert_eq!(success.contract_version, 1);
+        assert_eq!(success.provider, "ollama");
+        assert_eq!(success.model, model);
+        assert!(!success.answer.trim().is_empty());
+        let req = LlmStreamRequest {
+            stdin: Some("Context: the sky is blue.".to_string()),
+            ..req
         };
         let answer = run(req).await.unwrap();
+        println!("answer: {answer}");
         assert!(!answer.trim().is_empty());
     }
 
     #[tokio::test]
     #[ignore]
-    async fn live_answer_stdout() {
-        let answer = run(LlmStreamRequest::new("say OK")).await.unwrap();
+    async fn live_unresolved_binary_reports_binary_missing() {
+        let _guard = SERIAL.lock().await;
+        let empty_dir = tempfile::TempDir::new().unwrap();
+        let previous_bin = std::env::var("LLM_STREAM_BIN").ok();
+        let previous_path = std::env::var("PATH").ok();
+        std::env::remove_var("LLM_STREAM_BIN");
+        std::env::set_var("PATH", empty_dir.path());
+        let result = run(LlmStreamRequest::new("say OK")).await;
+        restore_env("LLM_STREAM_BIN", previous_bin);
+        restore_env("PATH", previous_path);
+        drop(empty_dir);
+        match result {
+            Err(ContractError::BinaryMissing) => {}
+            other => panic!(
+                "expected BinaryMissing with LLM_STREAM_BIN unset and an llm-stream-free PATH, got {other:?}"
+            ),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_chatgpt_signed_in_answers_non_empty() {
+        let _guard = SERIAL.lock().await;
+        let paths = resolve_paths().unwrap();
+        if !live_binary_guard(&paths) {
+            return;
+        }
+        let signed_in = std::fs::read_to_string(paths.config_dir.join("auth.json"))
+            .map(|raw| !secret_auth_values(&raw).is_empty())
+            .unwrap_or(false);
+        if !signed_in {
+            eprintln!(
+                "skipping: signed out of chatgpt (no tokens in {}); run `llm-stream --login` to enable the live chatgpt check",
+                paths.config_dir.join("auth.json").display()
+            );
+            return;
+        }
+        let answer = run(LlmStreamRequest::new("Reply with exactly: OK"))
+            .await
+            .unwrap();
+        println!("answer: {answer}");
         assert!(!answer.trim().is_empty());
     }
 }
