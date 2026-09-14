@@ -32,6 +32,7 @@ pub async fn issue_get_data(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve_issue_filter(
     client: &reqwest::Client,
     team: Option<&str>,
@@ -174,6 +175,7 @@ pub async fn issue_create_data(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn issue_update_data(
     client: &reqwest::Client,
     id: &str,

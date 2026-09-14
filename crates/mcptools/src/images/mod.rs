@@ -728,6 +728,7 @@ pub async fn edit_data(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn vary_data(
     image_paths: Vec<std::path::PathBuf>,
     prompt: Option<String>,
