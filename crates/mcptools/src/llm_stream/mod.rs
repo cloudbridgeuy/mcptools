@@ -134,20 +134,23 @@ async fn run_attempt(
     command.process_group(0);
     let mut child = command.spawn().map_err(|e| classify_spawn_error(&e))?;
     if let Some(stdin_text) = req.stdin.as_deref() {
-        let mut pipe = child.stdin.take().ok_or_else(|| {
-            ContractError::ProviderFailed("llm-stream stdin pipe unavailable".to_string())
-        })?;
+        let mut pipe = child
+            .stdin
+            .take()
+            .ok_or_else(|| ContractError::Local("llm-stream stdin pipe unavailable".to_string()))?;
         pipe.write_all(stdin_text.as_bytes())
             .await
-            .map_err(|e| ContractError::ProviderFailed(e.to_string()))?;
+            .map_err(|e| ContractError::Local(e.to_string()))?;
     }
     drop(child.stdin.take());
-    let mut stdout_pipe = child.stdout.take().ok_or_else(|| {
-        ContractError::ProviderFailed("llm-stream stdout unavailable".to_string())
-    })?;
-    let mut stderr_pipe = child.stderr.take().ok_or_else(|| {
-        ContractError::ProviderFailed("llm-stream stderr unavailable".to_string())
-    })?;
+    let mut stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| ContractError::Local("llm-stream stdout unavailable".to_string()))?;
+    let mut stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or_else(|| ContractError::Local("llm-stream stderr unavailable".to_string()))?;
     let drained_bytes = Arc::new(AtomicU64::new(0));
     let (stdout_bytes, stderr_bytes, status) = tokio::select! {
         _ = &mut cancel => {
@@ -170,7 +173,7 @@ async fn run_attempt(
                     child
                         .wait()
                         .await
-                        .map_err(|e| ContractError::ProviderFailed(e.to_string()))
+                        .map_err(|e| ContractError::Local(e.to_string()))
                 },
             )
             .await
@@ -213,7 +216,7 @@ async fn read_capped(
         let read = pipe
             .read(&mut chunk)
             .await
-            .map_err(|e| ContractError::ProviderFailed(e.to_string()))?;
+            .map_err(|e| ContractError::Local(e.to_string()))?;
         if read == 0 {
             return Ok(collected);
         }
@@ -480,15 +483,19 @@ mod stub_tests {
         Box::pin(std::future::pending())
     }
 
-    fn write_stub(dir: &Path, name: &str, version: &str, body: &str) -> PathBuf {
+    fn write_stub_mode(dir: &Path, name: &str, version: &str, body: &str, mode: u32) -> PathBuf {
         let path = dir.join(name);
         let script = format!(
             "#!/bin/sh\nif [ \"$1\" = \"--contract-version\" ]; then\necho {version}\nexit 0\nfi\n{body}\n"
         );
         std::fs::write(&path, script).unwrap();
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
         path
+    }
+
+    fn write_stub(dir: &Path, name: &str, version: &str, body: &str) -> PathBuf {
+        write_stub_mode(dir, name, version, body, 0o755)
     }
 
     fn paths_for(binary: &Path, config_dir: &Path) -> ResolvedPaths {
@@ -526,6 +533,32 @@ mod stub_tests {
             std::thread::sleep(Duration::from_millis(100));
         }
         panic!("process matching {pattern} survived");
+    }
+
+    #[tokio::test]
+    async fn non_executable_stub_is_local() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let binary = write_stub_mode(
+            dir.path(),
+            "locked",
+            "1",
+            &format!("echo '{SUCCESS_ENVELOPE}'"),
+            0o644,
+        );
+        let error = serial_run(
+            LlmStreamRequest::new("say OK"),
+            paths_for(&binary, dir.path()),
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, ContractError::Local(_)));
+        assert!(
+            error
+                .to_string()
+                .starts_with("llm-stream local runner failed"),
+            "{error}"
+        );
     }
 
     #[tokio::test]

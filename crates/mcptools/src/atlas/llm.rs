@@ -67,6 +67,7 @@ pub fn failure_report(error: &ContractError) -> String {
             }
         },
         ContractError::Connection(_) => f!("{error}; verify Ollama is reachable (ollama serve)"),
+        ContractError::Local(_) => f!("{error}"),
         other => f!("{other}"),
     }
 }
@@ -142,6 +143,18 @@ mod tests {
         let report = failure_report(&ContractError::Connection("refused".to_string()));
         assert!(report.contains("llm-stream connection failed"), "{report}");
         assert!(report.contains("Ollama"), "{report}");
+    }
+
+    #[test]
+    fn local_failure_passes_display_through() {
+        let report = failure_report(&ContractError::Local("denied".to_string()));
+        assert_eq!(report, "llm-stream local runner failed: denied");
+    }
+
+    #[test]
+    fn provider_failed_failure_passes_display_through() {
+        let report = failure_report(&ContractError::ProviderFailed("boom".to_string()));
+        assert_eq!(report, "llm-stream failed: boom");
     }
 
     #[test]

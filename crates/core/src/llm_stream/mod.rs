@@ -70,6 +70,8 @@ pub enum ContractError {
     ProviderFailed(String),
     #[error("llm-stream authentication required. Run: llm-stream --login")]
     AuthRequired,
+    #[error("llm-stream local runner failed: {0}")]
+    Local(String),
     #[error("llm-stream binary not found on PATH; set LLM_STREAM_BIN or install llm-stream")]
     BinaryMissing,
     #[error("llm-stream timed out after 120s")]
@@ -116,7 +118,7 @@ pub fn classify_spawn_error(e: &std::io::Error) -> ContractError {
     if e.kind() == std::io::ErrorKind::NotFound {
         ContractError::BinaryMissing
     } else {
-        ContractError::ProviderFailed(e.to_string())
+        ContractError::Local(e.to_string())
     }
 }
 
@@ -193,6 +195,7 @@ impl ContractError {
             ContractError::ProviderFailed(message) => {
                 ContractError::ProviderFailed(redact(&message, secrets))
             }
+            ContractError::Local(message) => ContractError::Local(redact(&message, secrets)),
             other => other,
         }
     }
@@ -377,12 +380,19 @@ mod tests {
     }
 
     #[test]
-    fn spawn_other_is_provider_failed() {
+    fn spawn_other_is_local() {
         let e = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
-        assert!(matches!(
-            classify_spawn_error(&e),
-            ContractError::ProviderFailed(_)
-        ));
+        let error = classify_spawn_error(&e);
+        assert!(matches!(error, ContractError::Local(_)));
+        assert_eq!(error.to_string(), "llm-stream local runner failed: denied");
+    }
+
+    #[test]
+    fn local_display_names_the_local_runner() {
+        assert_eq!(
+            ContractError::Local("boom".to_string()).to_string(),
+            "llm-stream local runner failed: boom"
+        );
     }
 
     #[test]
@@ -484,6 +494,10 @@ mod tests {
         assert_eq!(
             ContractError::Protocol("sk-abc".to_string()).redacted(&secrets),
             ContractError::Protocol("[redacted]".to_string())
+        );
+        assert_eq!(
+            ContractError::Local("key sk-abc".to_string()).redacted(&secrets),
+            ContractError::Local("key [redacted]".to_string())
         );
         assert_eq!(
             ContractError::TimedOut.redacted(&secrets),

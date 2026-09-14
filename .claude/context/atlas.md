@@ -183,7 +183,7 @@ See [Atlas Setup](../../docs/ATLAS_SETUP.md) for Ollama model download and Model
 | `config.rs` | `load_config(repo_root)` — reads `.mcptools/config.toml`, collects env vars, delegates to core parser |
 | `db.rs` | SQLite storage: `Database::open`, insert/query symbols and files |
 | `fs.rs` | `walk_repo(root)` — gitignore-aware file walker, skips `.git/`, `node_modules/`, `target/`, binary files |
-| `llm.rs` | `create_file_provider(config)` — Ollama-backed LLM provider via rig |
+| `llm.rs` | `LlmStreamProvider::generate`, `request`, `failure_report` — run llm-stream in machine mode and map failures |
 | `parser.rs` | `parse_and_extract(path, source)` — tree-sitter grammar registry and extraction bridge |
 | `cli/init.rs` | `atlas init` handler: primer creation via editor + LLM refinement |
 | `cli/index.rs` | `atlas index` handler: full repo scan, progress reporting, LLM descriptions |
