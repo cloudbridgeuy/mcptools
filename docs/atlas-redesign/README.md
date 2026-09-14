@@ -10,11 +10,11 @@ Prepared 2026-09-08 for the existing **MCPTools** Linear project.
 - The optional primer belongs to the operator. MCPTools does not rewrite it.
 - `enrich [path]` performs explicit, scoped model work with preview, saved progress, cache reuse, and clear partial failure.
 - `atlas-file` and `atlas-directory` are **llm-stream templates**, not presets. Provider/model selection is separate.
-- One shared llm-stream process runner replaces direct Ollama calls in Atlas, GrepRAG, and Strand.
+- One dedicated llm-stream process runner replaces the direct Ollama calls in Atlas.
 - Atlas owns bounded retries and scheduling. llm-stream exposes reliable error metadata, including 429 and Retry-After when available.
 - CLI/MCP and supported harness instructions work with structural data alone and expose stale or incomplete enrichment.
 
-There are **22 implementation/evaluation tasks plus one parent initiative**, with **56 blocking dependencies**. Each task contains scope, acceptance checks, prerequisite keys, priority, and source evidence where applicable. Cross-repository llm_stream prerequisites stay in the MCPTools project, as requested. Task keys below are local import keys; Linear will assign its own issue identifiers.
+There are **21 issues: 20 implementation/evaluation tasks plus one parent initiative**, with **46 blocking dependencies**. Each task contains scope, acceptance checks, prerequisite keys, priority, and source evidence where applicable. Cross-repository llm_stream prerequisites stay in the MCPTools project, as requested. Task keys below are local import keys; Linear will assign its own issue identifiers.
 
 No new project, team, labels, assignees, dates, or workflow states are invented. Existing project selection is resolved at import time. Priority 2 means high; priority 3 means normal.
 

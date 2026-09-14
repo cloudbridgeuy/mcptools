@@ -8,7 +8,7 @@ These are local import keys, not existing Linear issue IDs. Publication status: 
 | ATLAS-01 | Record Atlas baseline and verify relevant Graft mechanisms | Normal | — |
 | ATLAS-02 | Expose a reliable automation contract from llm-stream | High | — |
 | ATLAS-03 | Ship and install Atlas templates for llm-stream | High | ATLAS-02 |
-| ATLAS-04 | Add the shared llm-stream process runner | High | ATLAS-02 |
+| ATLAS-04 | Add the Atlas llm-stream process runner | High | ATLAS-02 |
 | ATLAS-05 | Replace Atlas Ollama configuration with template and runner settings | High | ATLAS-02, ATLAS-03 |
 | ATLAS-06 | Handle 429 with bounded retries and shared cooldowns | High | ATLAS-02, ATLAS-04, ATLAS-05 |
 | ATLAS-07 | Make Atlas initialization and structural refresh model-free | High | — |
@@ -21,10 +21,8 @@ These are local import keys, not existing Linear issue IDs. Publication status: 
 | ATLAS-14 | Keep structural data fresh across edits, deletions, and worktrees | High | ATLAS-07, ATLAS-09 |
 | ATLAS-15 | Provide a focused Atlas query and predictable CLI/MCP results | High | ATLAS-13, ATLAS-14 |
 | ATLAS-16 | Install Atlas guidance for Codex and Claude harnesses | High | ATLAS-03, ATLAS-07, ATLAS-08, ATLAS-15 |
-| ATLAS-17 | Migrate GrepRAG to llm-stream and an explicit template | High | ATLAS-03, ATLAS-04, ATLAS-05 |
-| ATLAS-18 | Migrate Strand to llm-stream with a portable prompt contract | High | ATLAS-03, ATLAS-04, ATLAS-05 |
-| ATLAS-19 | Remove obsolete Ollama clients, assets, and dependency wiring | Normal | ATLAS-11, ATLAS-17, ATLAS-18 |
-| ATLAS-20 | Verify the complete workflow under failures and concurrency | High | ATLAS-06, ATLAS-11, ATLAS-12, ATLAS-13, ATLAS-14, ATLAS-16, ATLAS-17, ATLAS-18 |
+| ATLAS-19 | Remove obsolete Ollama clients, assets, and dependency wiring | Normal | ATLAS-11 |
+| ATLAS-20 | Verify the complete workflow under failures and concurrency | High | ATLAS-06, ATLAS-11, ATLAS-12, ATLAS-13, ATLAS-14, ATLAS-16 |
 | ATLAS-21 | Measure Atlas usefulness and enrichment cost after redesign | Normal | ATLAS-01, ATLAS-12, ATLAS-15, ATLAS-16, ATLAS-20 |
 | ATLAS-22 | Publish migration instructions and the complete operator flow | Normal | ATLAS-19, ATLAS-20, ATLAS-21 |
 
@@ -34,7 +32,7 @@ Parent: none. Priority: high.
 
 Area: Initiative
 
-Deliver the agreed Atlas workflow and replace direct Ollama integrations in Atlas, GrepRAG, and Strand with a shared llm-stream process runner. Use Atlas llm-stream templates, not presets, for prompt definitions. All work, including prerequisites in the llm_stream repository, belongs in the existing MCPTools Linear project.
+Deliver the agreed Atlas workflow and replace the direct Ollama integration in Atlas with a dedicated llm-stream process runner. Use Atlas llm-stream templates, not presets, for prompt definitions. All work, including prerequisites in the llm_stream repository, belongs in the existing MCPTools Linear project.
 
 Acceptance criteria:
 
@@ -42,7 +40,7 @@ Acceptance criteria:
 - [ ] Primer is optional operator-owned context; MCPTools never rewrites its contents.
 - [ ] enrich [path] is explicit, scoped, previewable, bounded, resumable, and tolerant of rate limits without hiding failure.
 - [ ] Atlas file/directory instructions are versioned llm-stream templates; provider/model/auth choices are independent.
-- [ ] All three model consumers use the shared runner; no direct Ollama client, special Ollama model, or Rig dependency remains for these commands.
+- [ ] Atlas uses the dedicated runner; no direct Ollama client, special Ollama model, or Rig dependency remains for Atlas commands.
 - [ ] CLI/MCP/harness integration is usable with structural data alone, exposes freshness and partial completion, and passes the measured evaluation.
 - [ ] Release includes migration guidance, implementation in both repositories where required, offline failure coverage, and recorded before/after evidence.
 
@@ -130,13 +128,13 @@ Evidence:
 - llm_stream crates/llm_stream/src/config.rs:42; prelude.rs template loading/rendering.
 - mcptools crates/core/src/atlas/prompts.rs; crates/mcptools/src/atlas/templates/ currently contains harness instructions, not model templates.
 
-## ATLAS-04: Add the shared llm-stream process runner
+## ATLAS-04: Add the Atlas llm-stream process runner
 
 Parent: ATLAS-00. Priority: high.
 
 Area: MCPTools / shared runtime
 
-Create one small subprocess adapter for Atlas, GrepRAG, and Strand. Reuse the existing async runtime and standard process facilities. Delegate provider transport/auth to llm-stream.
+Create one small subprocess adapter for Atlas. Reuse the existing async runtime and standard process facilities. Delegate provider transport/auth to llm-stream.
 
 Acceptance criteria:
 
@@ -152,7 +150,7 @@ Prerequisites: ATLAS-02.
 
 Evidence:
 
-- Existing direct clients: crates/mcptools/src/atlas/llm.rs, greprag/mod.rs, strand/mod.rs.
+- Existing direct client: crates/mcptools/src/atlas/llm.rs.
 - tokio::process and async infrastructure are already installed.
 
 ## ATLAS-05: Replace Atlas Ollama configuration with template and runner settings
@@ -441,59 +439,13 @@ Evidence:
 - atlas/cli/setup.rs currently targets .claude/skills/atlas-navigation/SKILL.md and CLAUDE.md.
 - crates/core/src/atlas/setup*.rs and bundled atlas/templates harness assets.
 
-## ATLAS-17: Migrate GrepRAG to llm-stream and an explicit template
-
-Parent: ATLAS-00. Priority: high.
-
-Area: MCPTools / GrepRAG
-
-Replace GrepRAG's direct Ollama/Rig calls with the shared runner. Preserve retrieval behavior by making its model instructions explicit and consistent with its output parser.
-
-Acceptance criteria:
-
-- [ ] Create a versioned llm-stream template for query generation; inspect the existing fine-tuned/Modelfile assumptions rather than copying a model name.
-- [ ] Resolve the current instruction mismatch: models/greprag/Modelfile asks for regex patterns while code parses rg commands. Select one documented output contract and update prompt/parser fixtures together.
-- [ ] Move provider/model selection to the runner configuration; remove required greprag Ollama model and Ollama URL coupling from CLI/MCP.
-- [ ] Preserve repository scope, allowed rg execution, ranking, deduplication and token-budget behavior. Model text never becomes unrestricted shell execution.
-- [ ] Surface runner/timeouts/provider failures honestly. Reuse shared classification without introducing a second hidden retry layer.
-- [ ] Compare representative retrieval outputs and correct-file recall before/after with at least the chosen non-Ollama provider when accessible; retain offline contract fixtures.
-
-Prerequisites: ATLAS-03, ATLAS-04, ATLAS-05.
-
-Evidence:
-
-- crates/mcptools/src/greprag/mod.rs; crates/core/src/greprag.rs or greprag modules; models/greprag/Modelfile; docs/GREPRAG_SETUP.md.
-
-## ATLAS-18: Migrate Strand to llm-stream with a portable prompt contract
-
-Parent: ATLAS-00. Priority: high.
-
-Area: MCPTools / Strand
-
-Replace Strand's direct Ollama/Rig calls with the shared runner. Extract the intended behavior from its current specialized model and caller/parser contract.
-
-Acceptance criteria:
-
-- [ ] Define a versioned llm-stream template reproducing the requested Strand behavior with a general provider; document any fine-tuned-model behavior that cannot be assumed portable.
-- [ ] Preserve expected output and existing optional user instruction semantics without silently overriding the template system prompt.
-- [ ] Migrate CLI and MCP provider/model configuration and return errors through the shared runner.
-- [ ] Remove the mandatory maternion/strand-rust-coder/Ollama setup assumption; require explicit model selection rather than hidden remote fallback.
-- [ ] Test prompt rendering, output contract, malformed/partial responses, timeout, and provider errors offline.
-- [ ] Compare the relevant existing Strand workload using the selected non-Ollama provider when accessible, and report quality limits rather than claiming equivalence without evidence.
-
-Prerequisites: ATLAS-03, ATLAS-04, ATLAS-05.
-
-Evidence:
-
-- crates/mcptools/src/strand/mod.rs; crates/mcptools/src/mcp/tools/strand.rs and registration callers.
-
 ## ATLAS-19: Remove obsolete Ollama clients, assets, and dependency wiring
 
 Parent: ATLAS-00. Priority: normal.
 
 Area: MCPTools / cleanup
 
-After all callers migrate, delete the legacy direct-client code and obsolete setup assumptions. Avoid maintaining two provider stacks.
+After Atlas migrates, delete the legacy direct-client code and obsolete setup assumptions. Avoid maintaining two provider stacks.
 
 Acceptance criteria:
 
@@ -501,14 +453,14 @@ Acceptance criteria:
 - [ ] Remove rig-core from affected manifests and update Cargo.lock only after confirming no remaining consumer needs it.
 - [ ] Retire or clearly relocate obsolete required Modelfiles/model-download setup and stale flags; preserve unrelated product functionality and user changes.
 - [ ] Update CLI/MCP registration signatures and examples together; compilation catches missed consumers.
-- [ ] Verify a clean install can initialize/query Atlas without Ollama and can enrich/run GrepRAG/Strand with llm-stream using an explicitly selected non-Ollama provider.
+- [ ] Verify a clean install can initialize/query Atlas without Ollama and can enrich with llm-stream using an explicitly selected non-Ollama provider.
 - [ ] Run relevant crate tests and build checks; no new code comments or unrelated sweeps.
 
-Prerequisites: ATLAS-11, ATLAS-17, ATLAS-18.
+Prerequisites: ATLAS-11.
 
 Evidence:
 
-- Cargo.toml; crates/mcptools/Cargo.toml; models/atlas; models/greprag; direct clients identified across three commands.
+- Cargo.toml; crates/mcptools/Cargo.toml; models/atlas; direct Atlas clients.
 
 ## ATLAS-20: Verify the complete workflow under failures and concurrency
 
@@ -527,7 +479,7 @@ Acceptance criteria:
 - [ ] Cover concurrent queries/update/enrich, stale input commits, DB migration, deletion/rename, worktree roots, Unicode paths, and oversized prompt input.
 - [ ] Keep fixtures independent of model wording and avoid timing-flaky wall-clock sleeps. Live provider validation records provider/model and any usage/cost; unavailable access is reported as a limitation.
 
-Prerequisites: ATLAS-06, ATLAS-11, ATLAS-12, ATLAS-13, ATLAS-14, ATLAS-16, ATLAS-17, ATLAS-18.
+Prerequisites: ATLAS-06, ATLAS-11, ATLAS-12, ATLAS-13, ATLAS-14, ATLAS-16.
 
 ## ATLAS-21: Measure Atlas usefulness and enrichment cost after redesign
 
@@ -560,10 +512,10 @@ Acceptance criteria:
 
 - [ ] Document init, optional manually authored primer, template installation, explicit provider/model selection, enrich preview, scoped enrich, status, retries, resume, update and query examples.
 - [ ] Explain atlas-file/atlas-directory templates using the actual llm-stream schema and variable precedence. No preset setup or mandatory Ollama download remains.
-- [ ] Provide migration examples for existing Atlas config/database/template overrides and GrepRAG/Strand callers, including removed flags and environment variables.
+- [ ] Provide migration examples for existing Atlas config/database/template overrides, including removed flags and environment variables.
 - [ ] Document free-tier 429 behavior, Retry-After, retry/run budgets, partial exits, process cancellation, model-output validation, and what is cached.
 - [ ] State minimum llm-stream version and cross-repository release order; test examples against built binaries.
-- [ ] Update README, docs/ATLAS_SETUP.md, docs/GREPRAG_SETUP.md, bundled harness instructions, root guidance, and stale .claude/context/atlas.md references.
+- [ ] Update README, docs/ATLAS_SETUP.md, bundled harness instructions, root guidance, and stale .claude/context/atlas.md references.
 - [ ] Attach measured results and remaining limitations; confirm the initiative acceptance criteria and all prerequisite issues are complete.
 
 Prerequisites: ATLAS-19, ATLAS-20, ATLAS-21.
