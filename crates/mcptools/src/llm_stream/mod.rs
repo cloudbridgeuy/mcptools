@@ -697,6 +697,45 @@ mod stub_tests {
     }
 
     #[tokio::test]
+    async fn exit_zero_with_empty_stdout_is_protocol() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let binary = write_stub(dir.path(), "empty", "1", "exit 0\n");
+        let error = serial_run(
+            LlmStreamRequest::new("say OK"),
+            paths_for(&binary, dir.path()),
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, ContractError::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn nonzero_exit_after_partial_stdout_does_not_commit_answer() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let binary = write_stub(
+            dir.path(),
+            "partial",
+            "1",
+            "printf 'partial answer text\\n'\necho '{\"contract_version\":1,\"category\":\"provider_failed\",\"message\":\"late fail\"}'\nexit 1\n",
+        );
+        let result = serial_run(
+            LlmStreamRequest::new("say OK"),
+            paths_for(&binary, dir.path()),
+            Duration::from_secs(10),
+        )
+        .await;
+        match result {
+            Ok(answer) => {
+                assert_ne!(answer, "partial answer text");
+                panic!("expected Protocol or ProviderFailed, got Ok({answer:?})");
+            }
+            Err(ContractError::Protocol(_)) | Err(ContractError::ProviderFailed(_)) => {}
+            Err(other) => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn nonzero_exit_without_envelope_is_protocol_with_exit_code() {
         let dir = tempfile::TempDir::new().unwrap();
         let binary = write_stub(dir.path(), "crasher", "1", "echo boom >&2\nexit 7\n");
