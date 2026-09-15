@@ -156,7 +156,9 @@ pub struct IssueUpdateArgs {
     pub title: Option<String>,
     #[schemars(description = "New description")]
     pub description: Option<String>,
-    #[schemars(description = "Workflow state name or UUID (names need team)")]
+    #[schemars(
+        description = "Workflow state name or UUID (names resolve from the issue identifier team, or team)"
+    )]
     pub state: Option<String>,
     #[schemars(description = "Team id, key, or name for state lookup")]
     pub team: Option<String>,

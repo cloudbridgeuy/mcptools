@@ -162,6 +162,15 @@ fn is_key(value: &str) -> bool {
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
 }
 
+pub fn team_key_from_identifier(input: &str) -> Option<&str> {
+    let trimmed = input.trim();
+    let (key, number) = trimmed.rsplit_once('-')?;
+    if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    is_key(key).then_some(key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +309,18 @@ mod tests {
         }
         let missing = match_state(&StateSelector::Name("nope".to_string()), &items);
         assert!(matches!(missing, StateResolution::NotFound(_)));
+    }
+
+    #[test]
+    fn team_key_from_identifier_parses_key_number() {
+        assert_eq!(team_key_from_identifier("GUZ-22"), Some("GUZ"));
+        assert_eq!(team_key_from_identifier("  ENG-1  "), Some("ENG"));
+        assert_eq!(
+            team_key_from_identifier("e3b567ba-bcd1-42d8-8ae8-129fd11c97ab"),
+            None
+        );
+        assert_eq!(team_key_from_identifier("i1"), None);
+        assert_eq!(team_key_from_identifier("GUZ-"), None);
+        assert_eq!(team_key_from_identifier("guz-22"), None);
     }
 }

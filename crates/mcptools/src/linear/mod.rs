@@ -288,9 +288,15 @@ pub struct IssueUpdateOptions {
     pub title: Option<String>,
     #[arg(long, help = "New description")]
     pub description: Option<String>,
-    #[arg(long, help = "Workflow state name or UUID (names need --team)")]
+    #[arg(
+        long,
+        help = "Workflow state name or UUID (names resolve from the issue identifier team, or --team)"
+    )]
     pub state: Option<String>,
-    #[arg(long, help = "Team id, key, or name for state lookup")]
+    #[arg(
+        long,
+        help = "Team id, key, or name for state lookup (optional override; defaults from issue identifier)"
+    )]
     pub team: Option<String>,
     #[arg(long, help = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,

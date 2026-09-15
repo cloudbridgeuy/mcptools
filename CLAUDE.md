@@ -135,6 +135,7 @@ mcptools atlassian confluence search "text ~ 'deployment'"
 ```bash
 mcptools linear auth status
 mcptools linear issue get GUZ-79
+mcptools linear issue update GUZ-22 --state Done
 mcptools linear issue list --team GUZ --state "In Progress"
 mcptools linear issue list --assignee me --json
 mcptools linear teams list

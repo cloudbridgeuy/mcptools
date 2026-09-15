@@ -35,6 +35,10 @@ mcptools linear issue list --all
 
 # Output as JSON
 mcptools linear issue list --json
+
+# Update fields. State names use the identifier team; --team overrides
+mcptools linear issue update GUZ-22 --state Done
+mcptools linear issue update GUZ-22 --state Done --team GUZ
 ```
 
 Selector rules:
@@ -44,6 +48,7 @@ Selector rules:
 - `--assignee` accepts a user UUID or `me` (current viewer). Find UUIDs with `linear users list --query NAME`.
 - `--state` and `--label` match by name. `--cycle` accepts a cycle number or id.
 - `--query` matches a title substring. `--updated-after` needs RFC3339 and is rejected before any request when malformed.
+- Issue update `--state` names resolve from the issue identifier team (`GUZ-22` → `GUZ`). `--team` overrides. UUID issue ids still need `--team` or a state UUID.
 
 ### Discovery
 
@@ -81,7 +86,7 @@ linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 
 # Writes
 linear_issue_create (needs team, title)
-linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent)
+linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent; state names resolve from the issue identifier team, or team)
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```

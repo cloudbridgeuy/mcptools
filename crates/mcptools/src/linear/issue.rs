@@ -2,8 +2,8 @@ use crate::linear::client::execute;
 use crate::prelude::*;
 use mcptools_core::linear::{
     is_uuid, issue_create_input, issue_filter_value, issue_update_input, match_state,
-    parse_state_selector, transform_issue_create, transform_issue_update, IssueListFilter,
-    IssueMini, StateResolution,
+    parse_state_selector, team_key_from_identifier, transform_issue_create, transform_issue_update,
+    IssueListFilter, IssueMini, StateResolution,
 };
 
 pub const ISSUE_QUERY: &str =
@@ -224,20 +224,11 @@ pub async fn issue_update_data(
             ));
         }
     }
-    if let Some(value) = state.map(str::trim).filter(|text| !text.is_empty()) {
-        if !is_uuid(value)
-            && team
-                .map(str::trim)
-                .filter(|text| !text.is_empty())
-                .is_none()
-        {
-            return Err(eyre!(
-                "Linear issue update --state '{}' needs --team to resolve the state name. Pass a state UUID to skip team resolution",
-                value
-            ));
-        }
-    }
-    let state_id = resolve_state_id(client, state, team, "update").await?;
+    let team_for_state = team
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .or_else(|| team_key_from_identifier(selector));
+    let state_id = resolve_state_id(client, state, team_for_state, "update").await?;
     let assignee_id = resolve_assignee_id(client, assignee, "update").await?;
     let input = issue_update_input(
         title.map(str::trim),
