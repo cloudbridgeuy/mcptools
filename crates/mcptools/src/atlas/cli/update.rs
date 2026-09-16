@@ -9,8 +9,8 @@ use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlas::{
-    affected_directories, compute_change_set, content_hash, format_dry_run_update, DirectoryEntry,
-    FileEntry,
+    affected_directories, compute_change_set, content_hash, format_dry_run_update, BaseUrl,
+    DirectoryEntry, FileEntry,
 };
 
 use super::index::{
@@ -182,8 +182,16 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
         }
     };
 
-    let file_provider = Arc::new(crate::atlas::llm::LlmStreamProvider::new(&config.file_llm));
-    let dir_provider = crate::atlas::llm::LlmStreamProvider::new(&config.directory_llm);
+    let file_provider = Arc::new(crate::atlas::llm::LlmStreamProvider::new(
+        &config.api,
+        config.file_llm.model.as_str(),
+        config.base_url.as_ref().map(BaseUrl::as_str),
+    ));
+    let dir_provider = crate::atlas::llm::LlmStreamProvider::new(
+        &config.api,
+        config.directory_llm.model.as_str(),
+        config.base_url.as_ref().map(BaseUrl::as_str),
+    );
 
     let parallel = opts.parallel.max(1);
 
@@ -222,8 +230,8 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
     let templates_dir = mcptools_core::llm_stream::resolve_paths()?
         .config_dir
         .join("templates");
-    let file_template = mcptools_core::atlas::load(&templates_dir, "atlas-file")?;
-    let dir_template = mcptools_core::atlas::load(&templates_dir, "atlas-dir")?;
+    let file_template = mcptools_core::atlas::load(&templates_dir, &config.file_llm.template)?;
+    let dir_template = mcptools_core::atlas::load(&templates_dir, &config.directory_llm.template)?;
     record_template_identity(&db, &[&file_template, &dir_template])?;
     let mut file_desc_count = 0u32;
     let mut file_fail_count = 0u32;

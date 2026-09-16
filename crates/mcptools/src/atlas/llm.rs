@@ -1,6 +1,5 @@
 use crate::llm_stream::run;
 use crate::prelude::*;
-use mcptools_core::atlas::{LlmProviderConfig, LlmProviderKind};
 use mcptools_core::llm_stream::{ContractError, LlmStreamRequest};
 
 const PROMPT_POSITIONAL: &str = "enrich";
@@ -12,11 +11,11 @@ pub struct LlmStreamProvider {
 }
 
 impl LlmStreamProvider {
-    pub fn new(config: &LlmProviderConfig) -> Self {
+    pub fn new(api: &str, model: &str, base_url: Option<&str>) -> Self {
         Self {
-            provider: provider_name(config.kind),
-            model: config.model.as_str().to_string(),
-            base_url: config.base_url.as_ref().map(|url| url.as_str().to_string()),
+            provider: api.to_string(),
+            model: model.to_string(),
+            base_url: base_url.map(str::to_string),
         }
     }
 
@@ -29,12 +28,6 @@ impl LlmStreamProvider {
             prompt,
         ))
         .await
-    }
-}
-
-fn provider_name(kind: LlmProviderKind) -> String {
-    match kind {
-        LlmProviderKind::Ollama => "ollama".to_string(),
     }
 }
 
@@ -66,7 +59,7 @@ pub fn failure_report(error: &ContractError) -> String {
                 "llm-stream is rate limited; retry after the server-advertised window".to_string()
             }
         },
-        ContractError::Connection(_) => f!("{error}; verify Ollama is reachable (ollama serve)"),
+        ContractError::Connection(_) => f!("{error}"),
         ContractError::Local(_) => f!("{error}"),
         other => f!("{other}"),
     }
@@ -75,28 +68,10 @@ pub fn failure_report(error: &ContractError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
-    fn ollama_config(model: &str) -> LlmProviderConfig {
-        let mut env = HashMap::new();
-        env.insert("ATLAS_FILE_MODEL".to_string(), model.to_string());
-        mcptools_core::atlas::parse_config(None, &env)
-            .unwrap()
-            .file_llm
-    }
-
-    fn ollama_config_with_url(model: &str, url: &str) -> LlmProviderConfig {
-        let mut env = HashMap::new();
-        env.insert("ATLAS_FILE_MODEL".to_string(), model.to_string());
-        env.insert("OLLAMA_URL".to_string(), url.to_string());
-        mcptools_core::atlas::parse_config(None, &env)
-            .unwrap()
-            .file_llm
-    }
 
     #[test]
-    fn ollama_kind_maps_to_ollama_provider_and_config_model() {
-        let provider = LlmStreamProvider::new(&ollama_config("atlas"));
+    fn default_provider_argv_uses_api_and_model() {
+        let provider = LlmStreamProvider::new("chatgpt", "gpt-5.6-luna", None);
         let req = request(
             &provider.provider,
             &provider.model,
@@ -104,17 +79,23 @@ mod tests {
             "be brief",
             "body",
         );
-        assert_eq!(req.provider, "ollama");
-        assert_eq!(req.model, "atlas");
+        assert_eq!(req.provider, "chatgpt");
+        assert_eq!(req.model, "gpt-5.6-luna");
         assert_eq!(req.system.as_deref(), Some("be brief"));
         assert_eq!(req.stdin.as_deref(), Some("body"));
         assert_eq!(req.reasoning_effort, "");
+        let argv = mcptools_core::llm_stream::machine_argv(&req);
+        let api_pos = argv.iter().position(|a| a == "--api").unwrap();
+        assert_eq!(argv[api_pos + 1], "chatgpt");
+        let model_pos = argv.iter().position(|a| a == "--model").unwrap();
+        assert_eq!(argv[model_pos + 1], "gpt-5.6-luna");
+        assert!(!argv.contains(&"--api-base-url".to_string()));
     }
 
     #[test]
     fn request_carries_configured_base_url() {
         let provider =
-            LlmStreamProvider::new(&ollama_config_with_url("atlas", "http://127.0.0.1:9"));
+            LlmStreamProvider::new("chatgpt", "gpt-5.6-luna", Some("http://127.0.0.1:9"));
         let req = request(
             &provider.provider,
             &provider.model,
@@ -131,7 +112,11 @@ mod tests {
     #[test]
     fn argv_omits_reasoning_effort_and_keeps_system() {
         let argv = mcptools_core::llm_stream::machine_argv(&request(
-            "ollama", "atlas", None, "be brief", "body",
+            "chatgpt",
+            "gpt-5.6-luna",
+            None,
+            "be brief",
+            "body",
         ));
         assert!(!argv.contains(&"--reasoning-effort".to_string()));
         assert!(argv.contains(&"--system".to_string()));
@@ -139,10 +124,10 @@ mod tests {
     }
 
     #[test]
-    fn connection_failure_names_ollama_reachability() {
+    fn connection_failure_passes_display_through() {
         let report = failure_report(&ContractError::Connection("refused".to_string()));
         assert!(report.contains("llm-stream connection failed"), "{report}");
-        assert!(report.contains("Ollama"), "{report}");
+        assert!(!report.contains("Ollama"), "{report}");
     }
 
     #[test]

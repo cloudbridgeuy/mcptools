@@ -10,9 +10,11 @@ fn collect_atlas_env_vars() -> HashMap<String, String> {
         "ATLAS_DB_PATH",
         "ATLAS_PRIMER_PATH",
         "ATLAS_MAX_FILE_TOKENS",
-        "OLLAMA_URL",
         "ATLAS_FILE_MODEL",
         "ATLAS_DIR_MODEL",
+        "ATLAS_API",
+        "ATLAS_BASE_URL",
+        "OLLAMA_URL",
     ]
     .into_iter()
     .filter_map(|key| std::env::var(key).ok().map(|val| (key.to_string(), val)))

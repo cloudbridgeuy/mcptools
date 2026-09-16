@@ -38,6 +38,8 @@ fn run_fixture(root: &Path) -> Vec<serde_json::Value> {
         .env_remove("ATLAS_MAX_FILE_TOKENS")
         .env_remove("ATLAS_FILE_MODEL")
         .env_remove("ATLAS_DIR_MODEL")
+        .env_remove("ATLAS_API")
+        .env_remove("ATLAS_BASE_URL")
         .env_remove("OLLAMA_URL")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

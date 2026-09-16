@@ -12,7 +12,7 @@ pub mod types;
 pub use changes::{affected_directories, compute_change_set, ChangeSet};
 pub use config::{
     build_ignore_matcher, parse_config, AtlasConfig, BaseUrl, ConfigError, DbPath, IgnoreMatcher,
-    LlmProviderConfig, LlmProviderKind, ModelName, PrimerPath,
+    LlmRoleConfig, ModelName, PrimerPath,
 };
 pub use hash::content_hash;
 pub use parse::{parse_description, parse_stdin_line, FileDescription, ParseDescriptionError};

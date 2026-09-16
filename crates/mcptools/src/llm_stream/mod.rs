@@ -302,7 +302,6 @@ mod tests {
     fn atlas_base_url(env: &HashMap<String, String>) -> String {
         mcptools_core::atlas::parse_config(None, env)
             .unwrap()
-            .file_llm
             .base_url
             .map(|url| url.as_str().to_string())
             .unwrap_or_else(|| "http://localhost:11434".to_string())
