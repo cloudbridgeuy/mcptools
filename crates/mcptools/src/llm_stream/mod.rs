@@ -291,19 +291,14 @@ mod tests {
     }
 
     fn atlas_model(env: &HashMap<String, String>) -> String {
-        mcptools_core::atlas::parse_config(None, env)
-            .unwrap()
-            .file_llm
-            .model
-            .as_str()
-            .to_string()
+        env.get("ATLAS_FILE_MODEL")
+            .cloned()
+            .unwrap_or_else(|| "atlas".to_string())
     }
 
     fn atlas_base_url(env: &HashMap<String, String>) -> String {
-        mcptools_core::atlas::parse_config(None, env)
-            .unwrap()
-            .base_url
-            .map(|url| url.as_str().to_string())
+        env.get("OLLAMA_URL")
+            .cloned()
             .unwrap_or_else(|| "http://localhost:11434".to_string())
     }
 
