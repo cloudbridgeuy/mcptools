@@ -442,34 +442,19 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
 async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
-    let (found, activity) = issue::issue_get_data(&client, &options.id).await?;
-    let mut comments = Vec::new();
-    let mut cursor = None;
-    loop {
-        let page = comments::comments_list_data(&client, &options.id, 50, cursor).await?;
-        let has_next = page.page_info.has_next;
-        cursor = page.page_info.end_cursor;
-        comments.extend(page.nodes);
-        if !has_next {
-            break;
-        }
-    }
+    let output = issue::issue_get_output(&client, &options.id).await?;
     if options.json {
-        let mut output = mcptools_core::linear::IssueGetOutput::from(found);
-        output.activity = activity;
-        let mut value = serde_json::to_value(&output)?;
-        value["comments"] = serde_json::to_value(&comments)?;
-        println!("{}", serde_json::to_string_pretty(&value)?);
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        println!("ID: {}", found.id);
-        println!("Identifier: {}", found.identifier);
-        println!("Title: {}", found.title);
-        println!("State: {}", found.state);
-        println!("URL: {}", found.url);
-        println!("Parent: {}", found.parent.as_deref().unwrap_or(""));
-        println!("BlockedBy: {}", found.blocked_by.join(", "));
+        println!("ID: {}", output.id);
+        println!("Identifier: {}", output.identifier);
+        println!("Title: {}", output.title);
+        println!("State: {}", output.state);
+        println!("URL: {}", output.url);
+        println!("Parent: {}", output.parent.as_deref().unwrap_or(""));
+        println!("BlockedBy: {}", output.blocked_by.join(", "));
         println!("Description:");
-        match found
+        match output
             .description
             .as_deref()
             .filter(|d| !d.trim().is_empty())
@@ -478,8 +463,8 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
             None => println!("(none)"),
         }
         println!();
-        println!("Comments ({}):", comments.len());
-        for comment in &comments {
+        println!("Comments ({}):", output.comments.len());
+        for comment in &output.comments {
             println!();
             println!(
                 "--- {} ({})",
@@ -489,8 +474,8 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
             println!("{}", comment.body);
         }
         println!();
-        println!("Activity ({}):", activity.len());
-        for item in &activity {
+        println!("Activity ({}):", output.activity.len());
+        for item in &output.activity {
             println!();
             println!(
                 "--- {} ({})",

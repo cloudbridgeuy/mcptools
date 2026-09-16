@@ -3,7 +3,7 @@ use crate::prelude::*;
 use mcptools_core::linear::{
     is_uuid, issue_create_input, issue_filter_value, issue_update_input, match_state,
     parse_state_selector, team_key_from_identifier, transform_issue_create, transform_issue_update,
-    Activity, IssueListFilter, IssueMini, StateResolution,
+    Activity, IssueGetOutput, IssueListFilter, IssueMini, StateResolution,
 };
 
 pub const ISSUE_QUERY: &str =
@@ -37,6 +37,33 @@ pub async fn issue_get_data(
         other => eyre!("{}", other),
     })?;
     Ok((snapshot, activity))
+}
+
+pub async fn issue_get_output(client: &reqwest::Client, id: &str) -> Result<IssueGetOutput> {
+    let (snapshot, activity) = issue_get_data(client, id).await?;
+    let mut comments = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = super::comments::comments_list_data(client, id, 50, cursor).await?;
+        let has_next = page.page_info.has_next;
+        cursor = page.page_info.end_cursor;
+        comments.extend(page.nodes);
+        if !has_next {
+            break;
+        }
+    }
+    Ok(IssueGetOutput {
+        id: snapshot.id,
+        identifier: snapshot.identifier,
+        title: snapshot.title,
+        url: snapshot.url,
+        state: snapshot.state,
+        description: snapshot.description,
+        parent: snapshot.parent,
+        blocked_by: snapshot.blocked_by,
+        comments,
+        activity,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

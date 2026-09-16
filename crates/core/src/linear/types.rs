@@ -91,23 +91,9 @@ pub struct IssueGetOutput {
     #[serde(default)]
     pub blocked_by: Vec<String>,
     #[serde(default)]
+    pub comments: Vec<Comment>,
+    #[serde(default)]
     pub activity: Vec<Activity>,
-}
-
-impl From<IssueMini> for IssueGetOutput {
-    fn from(issue: IssueMini) -> Self {
-        Self {
-            id: issue.id,
-            identifier: issue.identifier,
-            title: issue.title,
-            url: issue.url,
-            state: issue.state,
-            description: issue.description,
-            parent: issue.parent,
-            blocked_by: issue.blocked_by,
-            activity: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
