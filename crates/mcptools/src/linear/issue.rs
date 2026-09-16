@@ -125,6 +125,7 @@ pub async fn issue_create_data(
     description: Option<&str>,
     state: Option<&str>,
     assignee: Option<&str>,
+    project: Option<&str>,
 ) -> Result<IssueMini> {
     if team.trim().is_empty() {
         return Err(eyre!("Linear issue create --team must not be empty"));
@@ -136,6 +137,7 @@ pub async fn issue_create_data(
         ("--description", description),
         ("--state", state),
         ("--assignee", assignee),
+        ("--project", project),
     ] {
         if value.is_some_and(|text| text.trim().is_empty()) {
             return Err(eyre!("Linear issue create {} must not be empty", flag));
@@ -152,6 +154,15 @@ pub async fn issue_create_data(
     let team_id = super::discover::teams_get_data(client, team.trim())
         .await?
         .id;
+    let project_id = match project.map(str::trim).filter(|text| !text.is_empty()) {
+        None => None,
+        Some(selector) if is_uuid(selector) => Some(selector.to_string()),
+        Some(selector) => Some(
+            super::discover::projects_get_data(client, selector, team.trim())
+                .await?
+                .id,
+        ),
+    };
     let state_id = resolve_state_id(client, state, Some(team.trim()), "create").await?;
     let assignee_id = resolve_assignee_id(client, assignee, "create").await?;
     let input = issue_create_input(
@@ -160,6 +171,7 @@ pub async fn issue_create_data(
         description.map(str::trim),
         state_id.as_deref(),
         assignee_id.as_deref(),
+        project_id.as_deref(),
     );
     let data = execute(
         client,
@@ -419,7 +431,7 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_create_data(&client, "GUZ", "   ", None, None, None)
+        let err = issue_create_data(&client, "GUZ", "   ", None, None, None, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("--title"));

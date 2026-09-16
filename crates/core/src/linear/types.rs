@@ -783,6 +783,7 @@ pub fn issue_create_input(
     description: Option<&str>,
     state_id: Option<&str>,
     assignee_id: Option<&str>,
+    project_id: Option<&str>,
 ) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     out.insert(
@@ -808,6 +809,12 @@ pub fn issue_create_input(
     if let Some(value) = assignee_id.and_then(non_blank) {
         out.insert(
             "assigneeId".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = project_id.and_then(non_blank) {
+        out.insert(
+            "projectId".to_string(),
             serde_json::Value::String(value.to_string()),
         );
     }
@@ -1881,16 +1888,25 @@ mod tests {
 
     #[test]
     fn issue_create_input_maps_ids_and_skips_blanks() {
-        let value = issue_create_input("t1", " Title ", Some("desc"), Some("s1"), Some("u1"));
+        let value = issue_create_input(
+            "t1",
+            " Title ",
+            Some("desc"),
+            Some("s1"),
+            Some("u1"),
+            Some("p1"),
+        );
         assert_eq!(value.get("teamId"), Some(&serde_json::json!("t1")));
         assert_eq!(value.get("title"), Some(&serde_json::json!("Title")));
         assert_eq!(value.get("description"), Some(&serde_json::json!("desc")));
         assert_eq!(value.get("stateId"), Some(&serde_json::json!("s1")));
         assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
-        let minimal = issue_create_input("t1", "T", Some("   "), None, Some(""));
+        assert_eq!(value.get("projectId"), Some(&serde_json::json!("p1")));
+        let minimal = issue_create_input("t1", "T", Some("   "), None, Some(""), Some("  "));
         assert!(minimal.get("description").is_none());
         assert!(minimal.get("stateId").is_none());
         assert!(minimal.get("assigneeId").is_none());
+        assert!(minimal.get("projectId").is_none());
     }
 
     #[test]

@@ -276,6 +276,8 @@ pub struct IssueCreateOptions {
     pub state: Option<String>,
     #[arg(long, help = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,
+    #[arg(long, help = "Project id or name (names resolve against --team)")]
+    pub project: Option<String>,
     #[arg(long, help = "Output as JSON")]
     pub json: bool,
 }
@@ -437,53 +439,53 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
     }
 }
 
-fn truncate_description(text: &str) -> String {
-    let flat: String = text
-        .chars()
-        .map(|c| match c {
-            '\n' | '\r' => ' ',
-            _ => c,
-        })
-        .collect();
-    match flat.chars().count() <= 120 {
-        true => flat,
-        false => flat.chars().take(119).collect::<String>() + "…",
-    }
-}
-
 async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
     let found = issue::issue_get_data(&client, &options.id).await?;
+    let mut comments = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = comments::comments_list_data(&client, &options.id, 50, cursor).await?;
+        let has_next = page.page_info.has_next;
+        cursor = page.page_info.end_cursor;
+        comments.extend(page.nodes);
+        if !has_next {
+            break;
+        }
+    }
     if options.json {
-        println!("{}", serde_json::to_string_pretty(&found)?);
+        let mut value = serde_json::to_value(&found)?;
+        value["comments"] = serde_json::to_value(&comments)?;
+        println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
-        let mut table = new_table();
-        table.add_row(prettytable::row![
-            "ID",
-            "Identifier",
-            "Title",
-            "URL",
-            "State",
-            "Parent",
-            "BlockedBy",
-            "Description"
-        ]);
-        table.add_row(prettytable::row![
-            found.id,
-            found.identifier,
-            found.title,
-            found.url,
-            found.state,
-            found.parent.as_deref().unwrap_or(""),
-            found.blocked_by.join(", "),
-            found
-                .description
-                .as_deref()
-                .map(truncate_description)
-                .unwrap_or_default()
-        ]);
-        table.printstd();
+        println!("ID: {}", found.id);
+        println!("Identifier: {}", found.identifier);
+        println!("Title: {}", found.title);
+        println!("State: {}", found.state);
+        println!("URL: {}", found.url);
+        println!("Parent: {}", found.parent.as_deref().unwrap_or(""));
+        println!("BlockedBy: {}", found.blocked_by.join(", "));
+        println!("Description:");
+        match found
+            .description
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())
+        {
+            Some(text) => println!("{}", text),
+            None => println!("(none)"),
+        }
+        println!();
+        println!("Comments ({}):", comments.len());
+        for comment in &comments {
+            println!();
+            println!(
+                "--- {} ({})",
+                comment.author.as_deref().unwrap_or("unknown"),
+                comment.created_at
+            );
+            println!("{}", comment.body);
+        }
     }
     Ok(())
 }
@@ -566,6 +568,7 @@ async fn issue_create_handler(options: IssueCreateOptions) -> Result<()> {
         options.description.as_deref(),
         options.state.as_deref(),
         options.assignee.as_deref(),
+        options.project.as_deref(),
     )
     .await?;
     if options.json {
@@ -1127,30 +1130,4 @@ async fn cycles_list_handler(options: TeamScopedListOptions) -> Result<()> {
         );
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn truncate_description_flattens_and_limits_to_120_chars() {
-        assert_eq!(truncate_description("short"), "short");
-        assert_eq!(truncate_description("a\nb\r\nc"), "a b  c");
-        let out = truncate_description(&"x".repeat(121));
-        assert_eq!(out.chars().count(), 120);
-        assert!(out.ends_with('…'));
-        let out = truncate_description(&("é".repeat(120) + "x"));
-        assert_eq!(out.chars().count(), 120);
-        assert!(out.ends_with('…'));
-        assert_eq!(truncate_description(&"y".repeat(120)).chars().count(), 120);
-        let absent: Option<String> = None;
-        assert_eq!(
-            absent
-                .as_deref()
-                .map(truncate_description)
-                .unwrap_or_default(),
-            ""
-        );
-    }
 }

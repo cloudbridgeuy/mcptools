@@ -144,6 +144,8 @@ pub struct IssueCreateArgs {
     pub state: Option<String>,
     #[schemars(description = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,
+    #[schemars(description = "Project id or name (names resolve against team)")]
+    pub project: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
