@@ -12,6 +12,10 @@ _Avoid_: ticket ID, issue UUID
 Linear team's short uppercase code. It is the prefix of an **Issue identifier**.
 _Avoid_: team name, team id
 
+**Activity**:
+Time-ordered issue events from Linear history, always starting with created.
+_Avoid_: history, timeline, audit log
+
 ## Relationships
 
 - An **Issue identifier** contains exactly one **Team key**
@@ -24,6 +28,20 @@ _Avoid_: team name, team id
 ## Behavior
 
 Linear command reference: [Linear](.claude/context/linear.md).
+
+### Requirement: Issue get payload
+`linear issue get` and `linear_issue_get` return the same payload: snapshot fields, comments, and **Activity**. **Activity** always includes a created row. Comments stay on `comments`.
+
+#### Scenario: Human get
+- **WHEN** an issue is fetched without `--json`
+- **THEN** stdout prints snapshot fields, then `Comments (N):`, then `Activity (N):`
+- **AND** **Activity** includes a created row
+- **AND** a missing comment author or **Activity** actor prints as `unknown`
+
+#### Scenario: JSON and MCP match
+- **WHEN** an issue is fetched with `--json` or via `linear_issue_get`
+- **THEN** the object has `comments` and `activity` arrays at the top level
+- **AND** CLI `--json` and MCP structuredContent serialize the same type
 
 ### Requirement: Issue-update state team
 Issue update resolves a workflow state name against the **Team key** in the **Issue identifier**. An explicit team argument overrides that key. A state UUID skips team resolution.

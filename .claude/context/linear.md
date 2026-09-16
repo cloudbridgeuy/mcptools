@@ -68,7 +68,9 @@ mcptools linear cycles list --team GUZ
 ## Output
 
 - Tables show compact rows plus a `hasMore/endCursor` line. Truncation is never hidden.
-- `issue get` and `issue list` tables include `Parent` (parent issue identifier, empty when none) and `BlockedBy` (comma-separated identifiers of issues blocking this one) columns; `--json` carries the same data as `parent` and `blocked_by` fields.
+- `issue get` and `issue list` include `Parent` (parent issue identifier, empty when none) and `BlockedBy` (comma-separated identifiers of issues blocking this one). `--json` carries the same data as `parent` and `blocked_by` fields.
+- `issue get` prints snapshot fields, then `Comments (N):`, then `Activity (N):`. A missing comment author or activity actor prints as `unknown`. Activity always starts with a created row. History after created is capped at 50 events.
+- CLI `issue get --json` and MCP `linear_issue_get` serialize the same object, with top-level `comments` and `activity` arrays.
 - `--json` returns `{"nodes": [...], "pageInfo": {...}}`.
 - `--all` follows cursors and caps results at 50 items.
 
