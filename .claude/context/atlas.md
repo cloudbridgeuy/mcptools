@@ -12,11 +12,11 @@ Atlas scans a repository, extracts symbols using tree-sitter, and stores them in
 ## V2 Scope (Implemented)
 
 - **Project primer**: `atlas init` creates a mental model document via editor + LLM refinement, then runs the initial index
-- **LLM file descriptions**: `atlas index` generates one-line descriptions for indexed files using a local Ollama model
-- **LLM directory descriptions**: Directory summaries generated from child descriptions (uses Ollama provider)
-- **Single bottom-up pass**: Directories are processed deepest-first; for each directory, files are described first (Ollama), then the directory itself (Ollama), so parents always see their children's descriptions
-- **Config file**: `.mcptools/config.toml` for per-project settings (db path, primer path, models, token limits)
-- **Environment variables**: Override config via `ATLAS_*` and `OLLAMA_URL` env vars
+- **LLM file descriptions**: `atlas index` generates one-line descriptions for indexed files via llm-stream runner settings (`api`, model, optional `base_url`, `atlas-file` template)
+- **LLM directory descriptions**: Directory summaries generated from child descriptions via llm-stream (`atlas-dir` template)
+- **Single bottom-up pass**: Directories are processed deepest-first; for each directory, files are described first, then the directory itself, so parents always see their children's descriptions
+- **Config file**: `.mcptools/config.toml` for per-project settings (db path, primer path, `api`, `base_url`, `[file_llm]` / `[directory_llm]`, token limits)
+- **Environment variables**: Override config via `ATLAS_*` env vars
 
 ## CLI Commands
 
@@ -50,7 +50,7 @@ The `index` and `update` commands display ETA and elapsed time during LLM descri
 ### `atlas init` Workflow
 
 1. Opens `$VISUAL` / `$EDITOR` with a primer template (questions about the project)
-2. Sends user answers to a local LLM for refinement
+2. Sends user answers to llm-stream for refinement
 3. Opens editor again with the refined draft for final edits
 4. Saves to `.mcptools/atlas/primer.md` (configurable)
 5. Adds `index.db` to `.gitignore` if not already present
@@ -60,10 +60,10 @@ The `index` and `update` commands display ETA and elapsed time during LLM descri
 
 After the tree-sitter scan, `atlas index` performs a single bottom-up pass over all directories (deepest first). For each directory:
 
-1. **File descriptions**: Describes the files in that directory using the Ollama model (`ATLAS_FILE_MODEL`). Runs with `--parallel N` workers for concurrency.
-2. **Directory description**: Describes the directory itself using the Ollama provider (`ATLAS_DIR_MODEL`, default `atlas`), which has access to all children's descriptions (both files and subdirectories).
+1. **File descriptions**: Describes the files in that directory via llm-stream (`ATLAS_FILE_MODEL`, default `gpt-5.6-luna`, template `atlas-file`). Runs with `--parallel N` workers for concurrency.
+2. **Directory description**: Describes the directory itself via llm-stream (`ATLAS_DIR_MODEL`, default `gpt-5.6-luna`, template `atlas-dir`), which has access to all children's descriptions (both files and subdirectories).
 
-Because directories are processed deepest-first, parent directories always see their children's descriptions. The Ollama provider requires a running Ollama server (`ollama serve`) and the model to be available.
+Because directories are processed deepest-first, parent directories always see their children's descriptions. Generate uses llm-stream runner settings: shared `api` (default `chatgpt`), optional `base_url`, and per-role model/template.
 
 Descriptions are expected in `SHORT:` / `LONG:` form. When a model ignores that format, the response is still accepted: the first line (truncated to 80 characters) becomes the short description and the remaining text becomes the long one. Only an empty response is an error.
 
@@ -108,10 +108,17 @@ Only the listed files are indexed: the existing index is neither cleared nor has
 db_path = ".mcptools/atlas/index.db"
 primer_path = ".mcptools/atlas/primer.md"
 max_file_tokens = 10000
-ollama_url = "http://localhost:11434"
-file_model = "atlas"
-dir_model = "atlas"
+api = "chatgpt"
+base_url = ""
 skip_patterns = ["*.test.ts", "*.md", "*.json", "*.yml"]
+
+[file_llm]
+model = "gpt-5.6-luna"
+template = "atlas-file"
+
+[directory_llm]
+model = "gpt-5.6-luna"
+template = "atlas-dir"
 ```
 
 All fields are optional and fall back to defaults. Environment variables override config file values.
@@ -135,13 +142,14 @@ Common patterns:
 | `ATLAS_DB_PATH` | `.mcptools/atlas/index.db` | Database location |
 | `ATLAS_PRIMER_PATH` | `.mcptools/atlas/primer.md` | Primer file location |
 | `ATLAS_MAX_FILE_TOKENS` | `10000` | Max tokens per file for LLM |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
-| `ATLAS_FILE_MODEL` | `atlas` | Model for file descriptions |
-| `ATLAS_DIR_MODEL` | `atlas` | Model for directory descriptions |
+| `ATLAS_API` | `chatgpt` | llm-stream API |
+| `ATLAS_BASE_URL` | unset | Optional llm-stream base URL |
+| `ATLAS_FILE_MODEL` | `gpt-5.6-luna` | Model for file descriptions |
+| `ATLAS_DIR_MODEL` | `gpt-5.6-luna` | Model for directory descriptions |
 
-### LLM Setup
+### LLM runner settings
 
-See [Atlas Setup](../../docs/ATLAS_SETUP.md) for Ollama model download and Modelfile creation.
+Generate uses llm-stream. Shared settings: `api` (default `chatgpt`) and optional `base_url` (unset). `[file_llm]` and `[directory_llm]` set `model` (default `gpt-5.6-luna`) and `template` (`atlas-file` / `atlas-dir`). Override with `ATLAS_API`, `ATLAS_BASE_URL`, `ATLAS_FILE_MODEL`, `ATLAS_DIR_MODEL`.
 
 ## Supported Symbol Types by Language
 
@@ -169,7 +177,7 @@ See [Atlas Setup](../../docs/ATLAS_SETUP.md) for Ollama model download and Model
 | File | Purpose |
 |------|---------|
 | `types.rs` | `SymbolKind`, `Visibility`, `ContentHash`, `Language`, `IndexTier`, `Symbol`, `FileEntry`, `TreeEntry`, `PeekView` |
-| `config.rs` | `AtlasConfig`, `PrimerPath`, `DbPath`, `ModelName`, `BaseUrl`, `LlmProviderKind` — config parsing from TOML + env var overlay, defaults |
+| `config.rs` | `AtlasConfig`, `PrimerPath`, `DbPath`, `ModelName`, `BaseUrl`, `LlmRoleConfig` — config parsing from TOML + env var overlay, defaults |
 | `hash.rs` | `content_hash(bytes) -> ContentHash` (SHA-256) |
 | `symbols.rs` | `extract_symbols(tree, source, language, path) -> Vec<Symbol>` |
 | `tree_view.rs` | `format_tree(entries, json)`, `format_peek(peek, json)`, `format_status(status, json)`, `IndexStatus` |

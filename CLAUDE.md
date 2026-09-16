@@ -55,9 +55,10 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | `ATLAS_DB_PATH` | `.mcptools/atlas/index.db` | Database location |
 | `ATLAS_PRIMER_PATH` | `.mcptools/atlas/primer.md` | Primer file location |
 | `ATLAS_MAX_FILE_TOKENS` | `10000` | Max tokens per file for LLM |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
-| `ATLAS_FILE_MODEL` | `atlas` | Model for file descriptions |
-| `ATLAS_DIR_MODEL` | `atlas` | Model for directory descriptions |
+| `ATLAS_API` | `chatgpt` | llm-stream API |
+| `ATLAS_BASE_URL` | unset | Optional llm-stream base URL |
+| `ATLAS_FILE_MODEL` | `gpt-5.6-luna` | Model for file descriptions |
+| `ATLAS_DIR_MODEL` | `gpt-5.6-luna` | Model for directory descriptions |
 
 ## Detailed Documentation
 
