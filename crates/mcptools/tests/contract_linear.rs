@@ -41,6 +41,7 @@ fn recorded_issue_get() -> serde_json::Value {
         "state": "In Progress",
         "parent": serde_json::Value::Null,
         "blocked_by": [],
+        "activity": [],
     })
 }
 

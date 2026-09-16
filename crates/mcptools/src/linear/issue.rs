@@ -3,11 +3,11 @@ use crate::prelude::*;
 use mcptools_core::linear::{
     is_uuid, issue_create_input, issue_filter_value, issue_update_input, match_state,
     parse_state_selector, team_key_from_identifier, transform_issue_create, transform_issue_update,
-    IssueListFilter, IssueMini, StateResolution,
+    Activity, IssueListFilter, IssueMini, StateResolution,
 };
 
 pub const ISSUE_QUERY: &str =
-    "query ($id: String!) { issue(id: $id) { id identifier title description url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } }";
+    "query ($id: String!) { issue(id: $id) { id identifier title description url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } createdAt creator { name displayName } history(first: 50) { nodes { createdAt actor { name displayName } botActor { name } fromState { name } toState { name } fromTitle toTitle updatedDescription addedLabels { name } removedLabels { name } fromParent { identifier } toParent { identifier } fromAssignee { name displayName } toAssignee { name displayName } fromCycle { number name } toCycle { number name } fromProject { name } toProject { name } attachment { title } relationChanges { identifier type } } pageInfo { hasNextPage } } } }";
 
 pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } pageInfo { hasNextPage endCursor } } }";
 
@@ -18,18 +18,25 @@ pub const ISSUE_UPDATE_MUTATION: &str = "mutation IssueUpdate($id: String!, $inp
 pub async fn issue_get_data(
     client: &reqwest::Client,
     id_or_identifier: &str,
-) -> Result<mcptools_core::linear::IssueMini> {
+) -> Result<(IssueMini, Vec<Activity>)> {
     let selector = id_or_identifier.trim();
     if selector.is_empty() {
         return Err(eyre!("Linear issue id must not be empty"));
     }
     let data = execute(client, ISSUE_QUERY, serde_json::json!({"id": selector})).await?;
-    mcptools_core::linear::transform_issue(data).map_err(|e| match e {
+    let snapshot = mcptools_core::linear::transform_issue(data.clone()).map_err(|e| match e {
         mcptools_core::linear::LinearError::MissingIssue => {
             eyre!("Linear issue not found: {}", selector)
         }
         other => eyre!("{}", other),
-    })
+    })?;
+    let activity = mcptools_core::linear::transform_activity(data).map_err(|e| match e {
+        mcptools_core::linear::LinearError::MissingIssue => {
+            eyre!("Linear issue not found: {}", selector)
+        }
+        other => eyre!("{}", other),
+    })?;
+    Ok((snapshot, activity))
 }
 
 #[allow(clippy::too_many_arguments)]

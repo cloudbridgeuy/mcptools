@@ -69,10 +69,12 @@ pub async fn handle_linear_issue_get(
         eprintln!("Calling linear_issue_get: id={}", args.id);
     }
     let client = linear_client()?;
-    let found = crate::linear::issue::issue_get_data(&client, &args.id)
+    let (found, activity) = crate::linear::issue::issue_get_data(&client, &args.id)
         .await
         .map_err(exec)?;
-    super::to_dual_result(mcptools_core::linear::IssueGetOutput::from(found))
+    let mut output = mcptools_core::linear::IssueGetOutput::from(found);
+    output.activity = activity;
+    super::to_dual_result(output)
 }
 
 pub async fn handle_linear_issue_list(

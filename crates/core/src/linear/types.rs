@@ -71,6 +71,13 @@ pub struct IssueMini {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Activity {
+    pub actor: Option<String>,
+    pub timestamp: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueGetOutput {
     pub id: String,
     pub identifier: String,
@@ -83,6 +90,8 @@ pub struct IssueGetOutput {
     pub parent: Option<String>,
     #[serde(default)]
     pub blocked_by: Vec<String>,
+    #[serde(default)]
+    pub activity: Vec<Activity>,
 }
 
 impl From<IssueMini> for IssueGetOutput {
@@ -96,6 +105,7 @@ impl From<IssueMini> for IssueGetOutput {
             description: issue.description,
             parent: issue.parent,
             blocked_by: issue.blocked_by,
+            activity: Vec::new(),
         }
     }
 }
@@ -393,6 +403,136 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
             })
         }
     }
+}
+
+pub fn transform_activity(data: serde_json::Value) -> Result<Vec<Activity>, LinearError> {
+    match data.get("issue") {
+        None | Some(serde_json::Value::Null) => Err(LinearError::MissingIssue),
+        Some(issue) => {
+            let raw: RawActivityIssue = serde_json::from_value(issue.clone())
+                .map_err(|e| LinearError::Parse(e.to_string()))?;
+            let mut rows = vec![Activity {
+                actor: named_user_label(raw.creator),
+                timestamp: raw.created_at,
+                summary: "created".to_string(),
+            }];
+            let history = raw.history.unwrap_or_default();
+            for node in history.nodes.unwrap_or_default() {
+                rows.extend(history_rows(node));
+            }
+            Ok(rows)
+        }
+    }
+}
+
+fn history_rows(node: RawHistoryNode) -> Vec<Activity> {
+    let actor = named_user_label(node.actor).or_else(|| bot_label(node.bot_actor));
+    let timestamp = node.created_at;
+    let mut summaries = Vec::new();
+    for change in node.relation_changes.unwrap_or_default() {
+        if let Some(summary) = relation_summary(&change.rel_type, &change.identifier) {
+            summaries.push(summary);
+        }
+    }
+    if let Some(summary) = pair_summary(
+        None,
+        node.from_state.map(|state| state.name),
+        node.to_state.map(|state| state.name),
+    ) {
+        summaries.push(summary);
+    }
+    if let Some(summary) = pair_summary(Some("title"), node.from_title, node.to_title) {
+        summaries.push(summary);
+    }
+    for label in node.added_labels.unwrap_or_default() {
+        summaries.push(format!("added label {}", label.name));
+    }
+    for label in node.removed_labels.unwrap_or_default() {
+        summaries.push(format!("removed label {}", label.name));
+    }
+    if node.updated_description == Some(true) {
+        summaries.push("description updated".to_string());
+    }
+    if let Some(summary) = pair_summary(
+        Some("parent"),
+        node.from_parent.map(|parent| parent.identifier),
+        node.to_parent.map(|parent| parent.identifier),
+    ) {
+        summaries.push(summary);
+    }
+    if let Some(summary) = pair_summary(
+        Some("assignee"),
+        named_user_label(node.from_assignee),
+        named_user_label(node.to_assignee),
+    ) {
+        summaries.push(summary);
+    }
+    if let Some(summary) = pair_summary(
+        Some("cycle"),
+        node.from_cycle.map(cycle_label),
+        node.to_cycle.map(cycle_label),
+    ) {
+        summaries.push(summary);
+    }
+    if let Some(summary) = pair_summary(
+        Some("project"),
+        node.from_project.map(|project| project.name),
+        node.to_project.map(|project| project.name),
+    ) {
+        summaries.push(summary);
+    }
+    if let Some(attachment) = node.attachment {
+        summaries.push(format!("attached {}", attachment.title));
+    }
+    summaries
+        .into_iter()
+        .map(|summary| Activity {
+            actor: actor.clone(),
+            timestamp: timestamp.clone(),
+            summary,
+        })
+        .collect()
+}
+
+fn relation_summary(code: &str, identifier: &str) -> Option<String> {
+    let summary = match code {
+        "ab" => format!("blocked by {identifier}"),
+        "rb" => format!("no longer blocked by {identifier}"),
+        "ax" => format!("blocks {identifier}"),
+        "rx" => format!("no longer blocks {identifier}"),
+        "ar" => format!("related to {identifier}"),
+        "rr" => format!("no longer related to {identifier}"),
+        "br" => format!("blocker {identifier} completed"),
+        "bo" => format!("blocker {identifier} reopened"),
+        "xr" => format!("completed, no longer blocks {identifier}"),
+        "xo" => format!("reopened, blocks {identifier}"),
+        _ => return None,
+    };
+    Some(summary)
+}
+
+fn pair_summary(kind: Option<&str>, from: Option<String>, to: Option<String>) -> Option<String> {
+    if from.is_none() && to.is_none() {
+        return None;
+    }
+    let from = from.unwrap_or_default();
+    let to = to.unwrap_or_default();
+    match kind {
+        Some(kind) => Some(format!("{kind} {from} → {to}")),
+        None => Some(format!("{from} → {to}")),
+    }
+}
+
+fn named_user_label(user: Option<RawNamedUser>) -> Option<String> {
+    user.and_then(|user| present_text(user.display_name).or_else(|| present_text(user.name)))
+}
+
+fn bot_label(bot: Option<RawBotActor>) -> Option<String> {
+    bot.and_then(|bot| present_text(Some(bot.name)))
+}
+
+fn cycle_label(cycle: RawCycleRef) -> String {
+    present_text(cycle.name).unwrap_or_else(|| format!("#{}", cycle.number))
 }
 
 pub fn transform_issues(data: serde_json::Value) -> Result<Paginated<IssueMini>, LinearError> {
@@ -991,6 +1131,103 @@ struct RawCommentUser {
     name: Option<String>,
     #[serde(default, rename = "displayName")]
     display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawActivityIssue {
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    #[serde(default)]
+    creator: Option<RawNamedUser>,
+    #[serde(default)]
+    history: Option<RawHistoryConnection>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawHistoryConnection {
+    #[serde(default)]
+    nodes: Option<Vec<RawHistoryNode>>,
+}
+
+#[derive(Deserialize)]
+struct RawHistoryNode {
+    #[serde(rename = "createdAt")]
+    created_at: String,
+    #[serde(default)]
+    actor: Option<RawNamedUser>,
+    #[serde(default, rename = "botActor")]
+    bot_actor: Option<RawBotActor>,
+    #[serde(default, rename = "fromState")]
+    from_state: Option<RawNamed>,
+    #[serde(default, rename = "toState")]
+    to_state: Option<RawNamed>,
+    #[serde(default, rename = "fromTitle")]
+    from_title: Option<String>,
+    #[serde(default, rename = "toTitle")]
+    to_title: Option<String>,
+    #[serde(default, rename = "updatedDescription")]
+    updated_description: Option<bool>,
+    #[serde(default, rename = "addedLabels")]
+    added_labels: Option<Vec<RawNamed>>,
+    #[serde(default, rename = "removedLabels")]
+    removed_labels: Option<Vec<RawNamed>>,
+    #[serde(default, rename = "fromParent")]
+    from_parent: Option<RawParent>,
+    #[serde(default, rename = "toParent")]
+    to_parent: Option<RawParent>,
+    #[serde(default, rename = "fromAssignee")]
+    from_assignee: Option<RawNamedUser>,
+    #[serde(default, rename = "toAssignee")]
+    to_assignee: Option<RawNamedUser>,
+    #[serde(default, rename = "fromCycle")]
+    from_cycle: Option<RawCycleRef>,
+    #[serde(default, rename = "toCycle")]
+    to_cycle: Option<RawCycleRef>,
+    #[serde(default, rename = "fromProject")]
+    from_project: Option<RawNamed>,
+    #[serde(default, rename = "toProject")]
+    to_project: Option<RawNamed>,
+    #[serde(default)]
+    attachment: Option<RawAttachment>,
+    #[serde(default, rename = "relationChanges")]
+    relation_changes: Option<Vec<RawRelationChange>>,
+}
+
+#[derive(Deserialize)]
+struct RawNamedUser {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default, rename = "displayName")]
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawBotActor {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct RawNamed {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct RawCycleRef {
+    number: u32,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RawAttachment {
+    title: String,
+}
+
+#[derive(Deserialize)]
+struct RawRelationChange {
+    identifier: String,
+    #[serde(rename = "type")]
+    rel_type: String,
 }
 
 impl From<RawComment> for Comment {
@@ -1972,5 +2209,195 @@ mod tests {
     fn transform_issue_update_rejects_missing_issue() {
         let err = transform_issue_update(serde_json::json!({})).unwrap_err();
         assert_eq!(err, LinearError::MissingIssue);
+    }
+
+    fn created_issue(history: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "issue": {
+                "createdAt": "2026-01-01T00:00:00.000Z",
+                "creator": {"name": "Ada", "displayName": "Ada Lovelace"},
+                "history": history,
+            }
+        })
+    }
+
+    fn summaries(rows: &[Activity]) -> Vec<&str> {
+        rows.iter().map(|row| row.summary.as_str()).collect()
+    }
+
+    #[test]
+    fn transform_activity_prepends_created_and_empty_history() {
+        let rows = transform_activity(created_issue(serde_json::json!({"nodes": []}))).unwrap();
+        assert_eq!(
+            rows,
+            vec![Activity {
+                actor: Some("Ada Lovelace".to_string()),
+                timestamp: "2026-01-01T00:00:00.000Z".to_string(),
+                summary: "created".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn transform_activity_missing_or_null_history_yields_created() {
+        let missing = serde_json::json!({
+            "issue": {
+                "createdAt": "t1",
+                "creator": {"name": "Ada"},
+            }
+        });
+        let null_history = serde_json::json!({
+            "issue": {
+                "createdAt": "t1",
+                "creator": {"name": "Ada"},
+                "history": null,
+            }
+        });
+        for data in [missing, null_history] {
+            let rows = transform_activity(data).unwrap();
+            assert_eq!(summaries(&rows), ["created"]);
+            assert_eq!(rows[0].actor.as_deref(), Some("Ada"));
+        }
+    }
+
+    #[test]
+    fn transform_activity_rejects_missing_issue() {
+        let err = transform_activity(serde_json::json!({})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+        let err = transform_activity(serde_json::json!({"issue": null})).unwrap_err();
+        assert_eq!(err, LinearError::MissingIssue);
+    }
+
+    #[test]
+    fn transform_activity_maps_relation_codes() {
+        let cases = [
+            ("ab", "blocked by GUZ-1"),
+            ("rb", "no longer blocked by GUZ-1"),
+            ("ax", "blocks GUZ-1"),
+            ("rx", "no longer blocks GUZ-1"),
+            ("ar", "related to GUZ-1"),
+            ("rr", "no longer related to GUZ-1"),
+            ("br", "blocker GUZ-1 completed"),
+            ("bo", "blocker GUZ-1 reopened"),
+            ("xr", "completed, no longer blocks GUZ-1"),
+            ("xo", "reopened, blocks GUZ-1"),
+        ];
+        for (code, summary) in cases {
+            let data = created_issue(serde_json::json!({"nodes": [{
+                "createdAt": "t2",
+                "actor": {"name": "Bo"},
+                "relationChanges": [{"identifier": "GUZ-1", "type": code}],
+            }]}));
+            let rows = transform_activity(data).unwrap();
+            assert_eq!(summaries(&rows), ["created", summary]);
+        }
+    }
+
+    #[test]
+    fn transform_activity_skips_unknown_relation_type() {
+        let data = created_issue(serde_json::json!({"nodes": [{
+            "createdAt": "t2",
+            "relationChanges": [{"identifier": "GUZ-1", "type": "zz"}],
+        }]}));
+        let rows = transform_activity(data).unwrap();
+        assert_eq!(summaries(&rows), ["created"]);
+    }
+
+    #[test]
+    fn transform_activity_mixed_relation_changes_yield_two_rows() {
+        let data = created_issue(serde_json::json!({"nodes": [{
+            "createdAt": "t2",
+            "actor": {"displayName": "Bo"},
+            "relationChanges": [
+                {"identifier": "GUZ-2", "type": "rr"},
+                {"identifier": "GUZ-3", "type": "ar"},
+            ],
+        }]}));
+        let rows = transform_activity(data).unwrap();
+        assert_eq!(
+            summaries(&rows),
+            ["created", "no longer related to GUZ-2", "related to GUZ-3",]
+        );
+        assert_eq!(rows[1].actor.as_deref(), Some("Bo"));
+        assert_eq!(rows[1].timestamp, "t2");
+        assert_eq!(rows[2].actor.as_deref(), Some("Bo"));
+    }
+
+    #[test]
+    fn transform_activity_maps_each_field_kind() {
+        let data = created_issue(serde_json::json!({"nodes": [
+            {
+                "createdAt": "t-state",
+                "fromState": {"name": "Todo"},
+                "toState": {"name": "Done"},
+            },
+            {
+                "createdAt": "t-title",
+                "fromTitle": "Old",
+                "toTitle": "New",
+            },
+            {
+                "createdAt": "t-labels",
+                "addedLabels": [{"name": "bug"}, {"name": "p1"}],
+                "removedLabels": [{"name": "wip"}],
+            },
+            {
+                "createdAt": "t-desc",
+                "updatedDescription": true,
+            },
+            {
+                "createdAt": "t-parent-set",
+                "toParent": {"identifier": "GUZ-9"},
+            },
+            {
+                "createdAt": "t-parent-clear",
+                "fromParent": {"identifier": "GUZ-9"},
+            },
+            {
+                "createdAt": "t-assignee",
+                "fromAssignee": {"name": "Ada"},
+                "toAssignee": {"name": "Bo", "displayName": "Bo Bit"},
+            },
+            {
+                "createdAt": "t-cycle-name",
+                "fromCycle": {"number": 1, "name": "Sprint 1"},
+                "toCycle": {"number": 2, "name": "Sprint 2"},
+            },
+            {
+                "createdAt": "t-cycle-number",
+                "toCycle": {"number": 4},
+            },
+            {
+                "createdAt": "t-project",
+                "fromProject": {"name": "Alpha"},
+                "toProject": {"name": "Beta"},
+            },
+            {
+                "createdAt": "t-attach",
+                "attachment": {"title": "spec.pdf"},
+                "botActor": {"name": "Linear"},
+            },
+        ]}));
+        let rows = transform_activity(data).unwrap();
+        assert_eq!(
+            summaries(&rows),
+            [
+                "created",
+                "Todo → Done",
+                "title Old → New",
+                "added label bug",
+                "added label p1",
+                "removed label wip",
+                "description updated",
+                "parent  → GUZ-9",
+                "parent GUZ-9 → ",
+                "assignee Ada → Bo Bit",
+                "cycle Sprint 1 → Sprint 2",
+                "cycle  → #4",
+                "project Alpha → Beta",
+                "attached spec.pdf",
+            ]
+        );
+        assert_eq!(rows.last().unwrap().actor.as_deref(), Some("Linear"));
     }
 }

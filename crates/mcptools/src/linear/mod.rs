@@ -442,7 +442,7 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
 async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
-    let found = issue::issue_get_data(&client, &options.id).await?;
+    let (found, activity) = issue::issue_get_data(&client, &options.id).await?;
     let mut comments = Vec::new();
     let mut cursor = None;
     loop {
@@ -455,7 +455,9 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
         }
     }
     if options.json {
-        let mut value = serde_json::to_value(&found)?;
+        let mut output = mcptools_core::linear::IssueGetOutput::from(found);
+        output.activity = activity;
+        let mut value = serde_json::to_value(&output)?;
         value["comments"] = serde_json::to_value(&comments)?;
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
@@ -485,6 +487,17 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
                 comment.created_at
             );
             println!("{}", comment.body);
+        }
+        println!();
+        println!("Activity ({}):", activity.len());
+        for item in &activity {
+            println!();
+            println!(
+                "--- {} ({})",
+                item.actor.as_deref().unwrap_or("unknown"),
+                item.timestamp
+            );
+            println!("{}", item.summary);
         }
     }
     Ok(())
