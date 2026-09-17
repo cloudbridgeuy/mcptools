@@ -37,39 +37,20 @@ pub enum CommentBodySource {
 }
 
 pub const BODY_CONFLICT_MSG: &str =
-    "comment body sources conflict: pass only one of --body, --body-file, or stdin (--json)";
-pub const BODY_MISSING_MSG: &str = "comment body needs exactly one source: pass --body TEXT, --body-file PATH, or pipe stdin (--json)";
+    "comment body sources conflict: pass only one of --body or --body-file";
+pub const BODY_MISSING_MSG: &str = "comment body needs exactly one source: pass --body TEXT or --body-file PATH (--body-file - reads stdin)";
 
 pub fn pick_comment_body_source(
     body: Option<&str>,
     body_file: Option<&std::path::Path>,
-    json: bool,
-    stdin_text: Option<&str>,
 ) -> Result<CommentBodySource> {
-    if body.is_some() && body_file.is_some() {
-        return Err(eyre!(BODY_CONFLICT_MSG));
+    match (body, body_file) {
+        (Some(_), Some(_)) => Err(eyre!(BODY_CONFLICT_MSG)),
+        (None, None) => Err(eyre!(BODY_MISSING_MSG)),
+        (Some(text), None) => Ok(CommentBodySource::Direct(text.to_string())),
+        (None, Some(path)) if path.as_os_str() == "-" => Ok(CommentBodySource::Stdin),
+        (None, Some(path)) => Ok(CommentBodySource::File(path.to_path_buf())),
     }
-    let has_stdin = match stdin_text {
-        Some(text) => json || !text.trim().is_empty(),
-        None => false,
-    };
-    let count = [body.is_some(), body_file.is_some(), has_stdin]
-        .into_iter()
-        .filter(|present| *present)
-        .count();
-    if count == 0 {
-        return Err(eyre!(BODY_MISSING_MSG));
-    }
-    if count > 1 {
-        return Err(eyre!(BODY_CONFLICT_MSG));
-    }
-    if let Some(text) = body {
-        return Ok(CommentBodySource::Direct(text.to_string()));
-    }
-    if let Some(path) = body_file {
-        return Ok(CommentBodySource::File(path.to_path_buf()));
-    }
-    Ok(CommentBodySource::Stdin)
 }
 
 pub fn normalize_comment_body(raw: &str) -> Result<String> {
@@ -160,15 +141,13 @@ mod tests {
 
     #[test]
     fn picks_direct_body_source() {
-        let source = pick_comment_body_source(Some("note"), None, false, None).unwrap();
+        let source = pick_comment_body_source(Some("note"), None).unwrap();
         assert_eq!(source, CommentBodySource::Direct("note".to_string()));
     }
 
     #[test]
     fn picks_file_body_source() {
-        let source =
-            pick_comment_body_source(None, Some(std::path::Path::new("note.md")), false, None)
-                .unwrap();
+        let source = pick_comment_body_source(None, Some(std::path::Path::new("note.md"))).unwrap();
         assert_eq!(
             source,
             CommentBodySource::File(std::path::PathBuf::from("note.md"))
@@ -176,47 +155,42 @@ mod tests {
     }
 
     #[test]
-    fn picks_stdin_body_source() {
+    fn picks_body_file_dash_as_stdin() {
+        let source = pick_comment_body_source(None, Some(std::path::Path::new("-"))).unwrap();
+        assert_eq!(source, CommentBodySource::Stdin);
+    }
+
+    #[test]
+    fn picks_body_file_dot_slash_dash_as_file() {
+        let source = pick_comment_body_source(None, Some(std::path::Path::new("./-"))).unwrap();
         assert_eq!(
-            pick_comment_body_source(None, None, false, Some("piped")).unwrap(),
-            CommentBodySource::Stdin
-        );
-        assert_eq!(
-            pick_comment_body_source(None, None, true, Some("")).unwrap(),
-            CommentBodySource::Stdin
+            source,
+            CommentBodySource::File(std::path::PathBuf::from("./-"))
         );
     }
 
     #[test]
-    fn ignores_empty_piped_stdin() {
-        let source = pick_comment_body_source(Some("note"), None, false, Some("")).unwrap();
-        assert_eq!(source, CommentBodySource::Direct("note".to_string()));
-        let err = pick_comment_body_source(None, None, false, Some("   ")).unwrap_err();
-        assert!(err.to_string().contains("exactly one"));
-        let err = pick_comment_body_source(None, None, true, None).unwrap_err();
-        assert!(err.to_string().contains("exactly one"));
+    fn picks_body_dash_as_direct() {
+        let source = pick_comment_body_source(Some("-"), None).unwrap();
+        assert_eq!(source, CommentBodySource::Direct("-".to_string()));
     }
 
     #[test]
-    fn rejects_zero_and_multiple_body_sources() {
-        let err = pick_comment_body_source(None, None, false, None).unwrap_err();
-        assert!(err.to_string().contains("exactly one"));
-        let err = pick_comment_body_source(
-            Some("x"),
-            Some(std::path::Path::new("f")),
-            false,
-            Some("piped"),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("conflict"));
-        let err = pick_comment_body_source(Some("x"), None, false, Some("piped")).unwrap_err();
-        assert!(err.to_string().contains("conflict"));
-        let err =
-            pick_comment_body_source(None, Some(std::path::Path::new("f")), false, Some("piped"))
-                .unwrap_err();
-        assert!(err.to_string().contains("conflict"));
-        let err = pick_comment_body_source(Some("x"), None, true, Some("")).unwrap_err();
-        assert!(err.to_string().contains("conflict"));
+    fn rejects_body_plus_body_file_dash() {
+        let err = pick_comment_body_source(Some("x"), Some(std::path::Path::new("-"))).unwrap_err();
+        assert_eq!(err.to_string(), BODY_CONFLICT_MSG);
+    }
+
+    #[test]
+    fn rejects_neither_body_flag() {
+        let err = pick_comment_body_source(None, None).unwrap_err();
+        assert_eq!(err.to_string(), BODY_MISSING_MSG);
+    }
+
+    #[test]
+    fn rejects_body_and_body_file() {
+        let err = pick_comment_body_source(Some("x"), Some(std::path::Path::new("f"))).unwrap_err();
+        assert_eq!(err.to_string(), BODY_CONFLICT_MSG);
     }
 
     #[test]

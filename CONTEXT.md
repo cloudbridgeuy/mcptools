@@ -57,3 +57,15 @@ Issue update resolves a workflow state name against the **Team key** in the **Is
 #### Scenario: Issue UUID with state name
 - **WHEN** an issue is updated by UUID with a state name and no team argument
 - **THEN** the update fails and asks for a team argument or a state UUID
+
+### Requirement: Comment create body source
+`linear issue comments create` takes exactly one of `--body TEXT` or `--body-file PATH`. `--body-file -` reads stdin to EOF. `--json` prints JSON and does not select stdin. `--body -` is the body text `-`.
+
+#### Scenario: Body file with open stdin
+- **WHEN** comments create runs with `--body-file` a real path and stdin is a non-TTY stream that does not EOF
+- **THEN** the process does not wait on stdin
+- **AND** the comment body is the file contents
+
+#### Scenario: Stdin sentinel
+- **WHEN** `--body-file -`
+- **THEN** the process reads stdin to EOF for the body

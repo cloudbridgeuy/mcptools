@@ -97,8 +97,7 @@ pub struct CommentsCreateOptions {
     /// Read comment body from file
     #[arg(long)]
     pub body_file: Option<std::path::PathBuf>,
-    /// Read comment body from stdin and output as JSON
-    #[arg(long)]
+    #[arg(long, help = "Output as JSON")]
     pub json: bool,
 }
 
@@ -818,46 +817,31 @@ async fn relations_remove_handler(options: RelationsRemoveOptions) -> Result<()>
 }
 
 async fn comments_create_handler(options: CommentsCreateOptions) -> Result<()> {
-    use std::io::IsTerminal;
-    if options.body.is_some() && options.body_file.is_some() {
-        return Err(eyre!("{}", comments::BODY_CONFLICT_MSG));
-    }
-    let stdin_piped = !std::io::stdin().is_terminal();
-    if options.json && !stdin_piped {
-        return Err(eyre!("{}", comments::BODY_MISSING_MSG));
-    }
-    let stdin_text = match options.json || stdin_piped {
-        true => {
-            use std::io::Read;
-            let mut text = String::new();
-            std::io::stdin()
-                .read_to_string(&mut text)
-                .map_err(|e| eyre!("Failed to read comment body from stdin: {}", e))?;
-            Some(text)
-        }
-        false => None,
-    };
-    let source = comments::pick_comment_body_source(
-        options.body.as_deref(),
-        options.body_file.as_deref(),
-        options.json,
-        stdin_text.as_deref(),
-    )?;
-    let from_stdin = source == comments::CommentBodySource::Stdin;
-    let raw = match source {
-        comments::CommentBodySource::Direct(text) => text,
-        comments::CommentBodySource::File(path) => std::fs::read_to_string(&path).map_err(|e| {
+    let source =
+        comments::pick_comment_body_source(options.body.as_deref(), options.body_file.as_deref())?;
+    let raw = match &source {
+        comments::CommentBodySource::Direct(text) => text.clone(),
+        comments::CommentBodySource::File(path) => std::fs::read_to_string(path).map_err(|e| {
             eyre!(
                 "Failed to read comment body file '{}': {}",
                 path.display(),
                 e
             )
         })?,
-        comments::CommentBodySource::Stdin => stdin_text.unwrap_or_default(),
+        comments::CommentBodySource::Stdin => {
+            use std::io::Read;
+            let mut text = String::new();
+            std::io::stdin()
+                .read_to_string(&mut text)
+                .map_err(|e| eyre!("Failed to read comment body from stdin: {}", e))?;
+            text
+        }
     };
-    let body = match from_stdin {
-        true => comments::stdin_body_text(&raw)?,
-        false => comments::normalize_comment_body(&raw)?,
+    let body = match source {
+        comments::CommentBodySource::Stdin => comments::stdin_body_text(&raw)?,
+        comments::CommentBodySource::Direct(_) | comments::CommentBodySource::File(_) => {
+            comments::normalize_comment_body(&raw)?
+        }
     };
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
