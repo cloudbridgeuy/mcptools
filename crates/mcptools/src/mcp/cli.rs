@@ -15,6 +15,12 @@ pub enum Commands {
     /// Start MCP server with SSE transport (HTTP)
     #[clap(name = "sse")]
     Sse(SseOptions),
+
+    #[command(
+        name = "catalog",
+        about = "Print the compact tool catalog: domain, name, summary"
+    )]
+    Catalog,
 }
 
 #[derive(Debug, clap::Args)]

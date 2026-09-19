@@ -36,7 +36,6 @@ pub struct JsonRpcError {
     pub data: Option<serde_json::Value>,
 }
 
-// MCP Protocol types
 #[derive(Debug, Serialize)]
 pub struct Tool {
     pub name: String,
@@ -45,12 +44,21 @@ pub struct Tool {
     pub input_schema: serde_json::Value,
     #[serde(rename = "outputSchema")]
     pub output_schema: serde_json::Value,
+    #[serde(skip)]
+    pub summary: &'static str,
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
     match app.command {
         cli::Commands::Stdio => stdio::run_stdio(global).await,
         cli::Commands::Sse(options) => sse::run_sse(options, global).await,
+        cli::Commands::Catalog => {
+            print!(
+                "{}",
+                mcptools_core::catalog::render_catalog(&tools::tool_catalog())
+            );
+            Ok(())
+        }
     }
 }
 

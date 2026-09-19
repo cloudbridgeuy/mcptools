@@ -193,6 +193,7 @@ mcptools md fetch https://docs.example.com --selector "main"
 ```bash
 mcptools mcp stdio   # For local agents (Claude Desktop)
 mcptools mcp sse     # For web clients
+mcptools mcp catalog # Print the compact tool catalog (domain, name, summary)
 ```
 
 ## Setup Guides

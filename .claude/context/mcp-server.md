@@ -20,6 +20,8 @@ mcptools mcp sse --port 3000 --host 127.0.0.1
 
 For web-based clients using Server-Sent Events over HTTP.
 
+mcptools mcp catalog # Print the compact tool catalog (domain, name, summary)
+
 ## Claude Desktop Configuration
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
