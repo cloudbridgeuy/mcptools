@@ -701,3 +701,64 @@ mod dual_tests {
         assert!(value.get("isError").is_none());
     }
 }
+
+#[cfg(test)]
+mod catalog_tests {
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn catalog_names_equal_registered_names() {
+        let catalog = super::tool_catalog();
+        let registered = super::registered_tools();
+        assert_eq!(catalog.len(), registered.len());
+        let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
+        let registry_names: BTreeSet<String> =
+            registered.into_iter().map(|tool| tool.name).collect();
+        assert_eq!(catalog_names, registry_names);
+    }
+
+    #[test]
+    fn summaries_fit_the_cap() {
+        for entry in super::tool_catalog() {
+            assert!(!entry.summary.is_empty(), "{}", entry.name);
+            assert!(
+                entry.summary.chars().count() <= mcptools_core::catalog::SUMMARY_MAX_CHARS,
+                "{}",
+                entry.name
+            );
+        }
+    }
+
+    #[test]
+    fn domains_equal_the_known_prefixes() {
+        let catalog = super::tool_catalog();
+        let domains: BTreeSet<&str> = catalog.iter().map(|entry| entry.domain.as_str()).collect();
+        assert_eq!(
+            domains,
+            BTreeSet::from([
+                "atlas",
+                "bitbucket",
+                "confluence",
+                "hn",
+                "images",
+                "jira",
+                "linear",
+                "md",
+                "pdf",
+                "ui"
+            ])
+        );
+    }
+
+    #[test]
+    fn tools_list_json_omits_summary() {
+        let list = super::handle_tools_list().unwrap();
+        for tool in list["tools"].as_array().unwrap() {
+            assert!(tool.get("summary").is_none());
+            assert!(tool.get("name").is_some());
+            assert!(tool.get("description").is_some());
+            assert!(tool.get("inputSchema").is_some());
+            assert!(tool.get("outputSchema").is_some());
+        }
+    }
+}
