@@ -1,0 +1,43 @@
+task	expected	kind
+close GUZ-22	linear_issue_update,jira_update	in_scope
+reopen PROJ-123	jira_update,linear_issue_update	in_scope
+mark ABC-789 done	jira_update,linear_issue_update	in_scope
+who's assigned to XYZ-456	jira_get,linear_issue_get	in_scope
+add a note to DEV-101	jira_comment_add,linear_comment_create	in_scope
+what are people discussing about rust on the news site	hn_list_items	in_scope
+grab that third diagram from the report	pdf_image	in_scope
+sketch out the project directory structure	atlas_tree_view	in_scope
+convert this website to markdown format	md_fetch	in_scope
+which pull requests are waiting for review in bitbucket	bitbucket_pr_list	in_scope
+show the UI overlays from the dev screen	ui_annotations_list	in_scope
+find wiki pages mentioning deployment	confluence_search	in_scope
+who commented and what did they say	jira_comment_list	in_scope
+manufacture a picture of a starry night	images_generate	in_scope
+enhance this image with better color balance	images_edit	in_scope
+what's the sprint calendar	jira_sprint_list	in_scope
+what's blocking this card	linear_relation_list	in_scope
+show me the page structure from this URL	md_toc	in_scope
+get the list of teams	linear_team_list	in_scope
+what issue categories are available	linear_state_list	in_scope
+read hacker news stories	hn_read_item	in_scope
+list sections in the PDF	pdf_toc	in_scope
+fetch webpage content	md_fetch	in_scope
+search jira for open bugs	jira_search	in_scope
+file a new jira ticket	jira_create	in_scope
+change the ticket status to done	jira_update	in_scope
+save this jql query for later	jira_query_save	in_scope
+create a pull request in bitbucket	bitbucket_pr_create	in_scope
+verify the atlas index health	atlas_status	in_scope
+find linear users by name	linear_user_list	in_scope
+bake a chocolate cake	NONE	unrelated
+what is the weather in Montevideo	NONE	unrelated
+teach me how to play the violin	NONE	unrelated
+how do I cook risotto	NONE	unrelated
+tell me about the history of rome	NONE	unrelated
+recommend a good chinese restaurant	NONE	unrelated
+close the window blinds	NONE	adversarial
+list my spotify playlists	NONE	adversarial
+update my macOS version	NONE	adversarial
+read my email inbox	NONE	adversarial
+create a docker container	NONE	adversarial
+search flights to madrid	NONE	adversarial

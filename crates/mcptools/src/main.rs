@@ -7,6 +7,7 @@ mod agent;
 mod atlas;
 mod atlassian;
 mod error;
+mod find_tools;
 mod hn;
 mod images;
 mod linear;
@@ -50,6 +51,9 @@ pub enum SubCommands {
     /// Atlassian (Jira, Confluence) operations
     Atlassian(Box<crate::atlassian::App>),
 
+    #[command(about = "Find the best-fitting tools for a task")]
+    FindTools(crate::find_tools::App),
+
     /// HackerNews (news.ycombinator.com) operations
     HN(crate::hn::App),
 
@@ -82,6 +86,7 @@ async fn main() -> Result<()> {
         SubCommands::Agent(sub_app) => crate::agent::run(sub_app, app.global).await,
         SubCommands::Atlas(sub_app) => crate::atlas::run(sub_app, app.global).await,
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(*sub_app, app.global).await,
+        SubCommands::FindTools(sub_app) => crate::find_tools::run(sub_app, app.global).await,
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
         SubCommands::Images(sub_app) => crate::images::run(sub_app, app.global).await,
         SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,

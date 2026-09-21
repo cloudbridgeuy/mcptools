@@ -1,6 +1,7 @@
 mod annotations;
 mod atlas;
 mod atlassian;
+mod find_tools;
 mod hn;
 mod images;
 mod linear;
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 // Re-export types needed by tool handlers
 pub use super::{JsonRpcError, Tool};
+pub use find_tools::find_tools;
 
 // MCP Protocol types for tools
 #[derive(Debug, Serialize)]

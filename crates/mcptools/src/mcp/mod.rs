@@ -5,6 +5,7 @@ mod stdio;
 mod tools;
 
 pub use cli::App;
+pub use tools::find_tools;
 
 use crate::prelude::*;
 use serde::{Deserialize, Serialize};
