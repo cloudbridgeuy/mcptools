@@ -10,6 +10,7 @@ mod error;
 mod find_tools;
 mod hn;
 mod images;
+mod jev;
 mod linear;
 mod llm_stream;
 mod mcp;
