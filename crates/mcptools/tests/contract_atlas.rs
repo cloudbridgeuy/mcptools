@@ -41,6 +41,7 @@ fn run_fixture(root: &Path) -> Vec<serde_json::Value> {
         .env_remove("ATLAS_API")
         .env_remove("ATLAS_BASE_URL")
         .env_remove("OLLAMA_URL")
+        .env_remove("MCPTOOLS_DISCOVERY")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()

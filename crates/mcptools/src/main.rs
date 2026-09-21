@@ -39,6 +39,14 @@ pub struct Global {
     /// Whether to display additional information.
     #[clap(long, env = "MCPTOOLS_VERBOSE", global = true, default_value = "false")]
     pub verbose: bool,
+
+    #[clap(
+        long,
+        env = "MCPTOOLS_DISCOVERY",
+        global = true,
+        default_value = "false"
+    )]
+    pub discovery: bool,
 }
 
 #[derive(Debug, clap::Parser)]

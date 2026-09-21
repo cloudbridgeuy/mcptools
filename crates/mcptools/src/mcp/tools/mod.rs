@@ -632,7 +632,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<find_tools::FoundTools>(),
             name: "find_tools".to_string(),
-            description: "Ranks the tool catalog against a task and returns real input schemas, and never calls another tool.".to_string(),
+            description: "Ranks the tool catalog against a task and returns real input schemas, and never calls another tool. Every tool it returns is callable by name through tools/call, even when tools/list does not list it.".to_string(),
             input_schema: schema::input_schema_for::<find_tools::FindToolsArgs>(),
             summary: "Find the best-fitting tools for a task",
             kind: ToolKind::Read,
@@ -640,8 +640,19 @@ pub fn registered_tools() -> Vec<Tool> {
     ]
 }
 
-pub fn handle_tools_list() -> Result<serde_json::Value, JsonRpcError> {
-    let tools = registered_tools();
+pub fn listed_tools(tools: Vec<Tool>, discovery: bool) -> Vec<Tool> {
+    if discovery {
+        tools
+            .into_iter()
+            .filter(|tool| tool.name == "find_tools")
+            .collect()
+    } else {
+        tools
+    }
+}
+
+pub fn handle_tools_list(discovery: bool) -> Result<serde_json::Value, JsonRpcError> {
+    let tools = listed_tools(registered_tools(), discovery);
     let kinds: Vec<ToolKind> = tools.iter().map(|tool| tool.kind).collect();
     let mut list = serde_json::to_value(ToolsList { tools }).map_err(|e| JsonRpcError {
         code: -32603,
@@ -861,7 +872,7 @@ mod catalog_tests {
 
     #[test]
     fn tools_list_json_omits_summary() {
-        let list = super::handle_tools_list().unwrap();
+        let list = super::handle_tools_list(false).unwrap();
         for tool in list["tools"].as_array().unwrap() {
             assert!(tool.get("summary").is_none());
             assert!(tool.get("name").is_some());
@@ -873,7 +884,7 @@ mod catalog_tests {
 
     #[test]
     fn mcp_tools_list_includes_find_tools() {
-        let list = super::handle_tools_list().unwrap();
+        let list = super::handle_tools_list(false).unwrap();
         let tools = list["tools"].as_array().unwrap();
         assert!(tools
             .iter()
@@ -882,6 +893,24 @@ mod catalog_tests {
     #[test]
     fn registry_holds_sixty_two_tools() {
         assert_eq!(super::registered_tools().len(), 62);
+    }
+
+    #[test]
+    fn listed_tools_discovery_keeps_only_find_tools() {
+        let tools = super::listed_tools(super::registered_tools(), true);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "find_tools");
+    }
+
+    #[test]
+    fn listed_tools_full_mode_is_unchanged() {
+        let full = super::listed_tools(super::registered_tools(), false);
+        let registered = super::registered_tools();
+        assert_eq!(full.len(), registered.len());
+        assert_eq!(
+            full.iter().map(|t| &t.name).collect::<Vec<_>>(),
+            registered.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -930,7 +959,7 @@ mod catalog_tests {
             "ui_annotations_clear",
         ];
         let spend = ["images_generate", "images_edit", "images_vary"];
-        let list = super::handle_tools_list().unwrap();
+        let list = super::handle_tools_list(false).unwrap();
         let tools = list["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 62);
         let entry = |name: &str| {
@@ -1049,7 +1078,7 @@ mod catalog_tests {
 
     #[test]
     fn pilot_entries_carry_kind_annotations() {
-        let list = super::handle_tools_list().unwrap();
+        let list = super::handle_tools_list(false).unwrap();
         let tools = list["tools"].as_array().unwrap();
         let entry = |name: &str| {
             tools

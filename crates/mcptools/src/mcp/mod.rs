@@ -91,7 +91,7 @@ pub async fn handle_request(request_str: &str, global: &crate::Global) -> JsonRp
 
     let result = match request.method.as_str() {
         "initialize" => tools::handle_initialize(),
-        "tools/list" => tools::handle_tools_list(),
+        "tools/list" => tools::handle_tools_list(global.discovery),
         "tools/call" => tools::handle_tools_call(request.params, global).await,
         "resources/list" => resources::handle_resources_list(),
         "resources/read" => resources::handle_resources_read(request.params),

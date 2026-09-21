@@ -238,7 +238,10 @@ mod find_tools_tests {
     async fn mcp_call_matches_shell_result() {
         let task = "close GUZ-22";
         let k = 5;
-        let global = crate::Global { verbose: false };
+        let global = crate::Global {
+            verbose: false,
+            discovery: false,
+        };
         let mcp_result = super::super::handle_tools_call(
             Some(serde_json::json!({"name":"find_tools","arguments":{"task":task,"k":k}})),
             &global,

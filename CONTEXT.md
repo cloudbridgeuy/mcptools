@@ -16,6 +16,10 @@ _Avoid_: team name, team id
 Time-ordered issue events from Linear history, always starting with created.
 _Avoid_: history, timeline, audit log
 
+**Discovery mode**:
+MCP server mode in which `tools/list` returns only `find_tools`.
+_Avoid_: finder mode, list gating
+
 ## Relationships
 
 - An **Issue identifier** contains exactly one **Team key**
@@ -28,6 +32,26 @@ _Avoid_: history, timeline, audit log
 ## Behavior
 
 Linear command reference: [Linear](.claude/context/linear.md).
+MCP server reference: [MCP Server](.claude/context/mcp-server.md).
+
+### Requirement: Discovery mode tool list
+The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **Discovery mode** on stdio and SSE. `tools/call` dispatches every registered tool by name in both modes.
+
+#### Scenario: Flag or env enables the mode
+- **WHEN** the server starts with `--discovery`, or with `MCPTOOLS_DISCOVERY=true` and no flag
+- **THEN** `tools/list` returns exactly one tool, `find_tools`
+
+#### Scenario: Default list
+- **WHEN** the server starts with neither the flag nor the env var
+- **THEN** `tools/list` returns every registered tool
+
+#### Scenario: Unlisted tool call
+- **WHEN** a client in **Discovery mode** sends `tools/call` with the name of a tool that `tools/list` did not return
+- **THEN** the server dispatches that tool and returns its result
+
+#### Scenario: Invalid env value
+- **WHEN** `MCPTOOLS_DISCOVERY` holds a value other than `true` or `false`, including an empty value
+- **THEN** the process exits with a parse error that names the two valid values
 
 ### Requirement: Issue get payload
 `linear issue get` and `linear_issue_get` return the same payload: snapshot fields, comments, and **Activity**. **Activity** always includes a created row. Comments stay on `comments`.

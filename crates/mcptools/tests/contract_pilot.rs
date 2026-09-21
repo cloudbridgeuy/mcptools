@@ -9,6 +9,7 @@ fn binary() -> PathBuf {
 fn tools_list() -> serde_json::Value {
     let mut child = Command::new(binary())
         .args(["mcp", "stdio"])
+        .env_remove("MCPTOOLS_DISCOVERY")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()

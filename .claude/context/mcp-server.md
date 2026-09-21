@@ -154,6 +154,19 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `AI_GATEWAY_API_KEY` | - | Conventional key var when `JEV_PROVIDER=vercel` |
 | `TYPESAFE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=typesafe` |
 
+## Discovery mode
+
+Enable with the `--discovery` flag or the `MCPTOOLS_DISCOVERY` environment
+variable, accepted values `true` or `false` only. In this mode `tools/list`
+returns exactly one tool, `find_tools`; `tools/call` still dispatches every
+real tool by name. Without this mode, hosts load all 62 schemas and Jev
+saves no context.
+
+Known limitation, planned and undesigned: hosts that declare only listed
+tools to the model, such as Claude Code, cannot yet call the tool
+`find_tools` returns, because it is absent from `tools/list`. A future
+`execute` command is planned to close this gap.
+
 ## Testing with curl
 
 ```bash

@@ -205,6 +205,7 @@ mcptools md fetch https://docs.example.com --selector "main"
 
 ```bash
 mcptools mcp stdio   # For local agents (Claude Desktop)
+mcptools mcp stdio --discovery  # tools/list returns only find_tools (env: MCPTOOLS_DISCOVERY=true)
 mcptools mcp sse     # For web clients
 mcptools mcp catalog # Print the compact tool catalog (domain, name, summary)
 ```
