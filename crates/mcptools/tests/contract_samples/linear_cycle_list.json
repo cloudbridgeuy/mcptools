@@ -2,12 +2,12 @@
   "nodes": [
     {
       "id": "c1",
-      "name": null,
+      "name": "Cycle 3",
       "number": 3
     }
   ],
   "pageInfo": {
-    "endCursor": null,
+    "endCursor": "curs",
     "hasNextPage": false
   }
 }

@@ -1,7 +1,7 @@
 {
   "nodes": [
     {
-      "author": null,
+      "author": "bob",
       "body": "Nice",
       "created_at": "2026-01-01T00:00:00Z",
       "id": "c1",
@@ -9,7 +9,7 @@
     }
   ],
   "pageInfo": {
-    "endCursor": null,
+    "endCursor": "curs",
     "hasNextPage": false
   }
 }

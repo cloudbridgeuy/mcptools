@@ -350,6 +350,103 @@ fn is_loose(s: &serde_json::Value) -> bool {
     }
 }
 
+fn unreached(schema: &serde_json::Value, sample: &serde_json::Value) -> Vec<String> {
+    let mut paths = vec![];
+    unreached_collect(schema, schema, sample, "", &mut HashSet::new(), &mut paths);
+    paths
+}
+
+fn unreached_collect(
+    node: &serde_json::Value,
+    root: &serde_json::Value,
+    value: &serde_json::Value,
+    path: &str,
+    visited: &mut HashSet<String>,
+    paths: &mut Vec<String>,
+) {
+    let ref_str = node
+        .get("$ref")
+        .and_then(|x| x.as_str())
+        .map(str::to_string);
+    if let Some(r) = &ref_str {
+        if visited.contains(r) {
+            return;
+        }
+        visited.insert(r.clone());
+        let res = resolve_ref(root, r);
+        unreached_collect(res, root, value, path, visited, paths);
+        visited.remove(r);
+        return;
+    }
+    if let Some(aos) = node.get("anyOf").and_then(|a| a.as_array()) {
+        if value.is_null() {
+            return;
+        }
+        for ao in aos {
+            let b = resolve_schema(ao, root);
+            if !is_nullish(b) {
+                unreached_collect(b, root, value, path, visited, paths);
+                break;
+            }
+        }
+        return;
+    }
+    if let Some(obj) = node.as_object() {
+        if let Some(props) = obj.get("properties").and_then(|p| p.as_object()) {
+            let empty = serde_json::Map::new();
+            let map = value.as_object().unwrap_or(&empty);
+            for (k, ps) in props {
+                let child = if path.is_empty() {
+                    format!("/properties/{}", k)
+                } else {
+                    format!("{}/properties/{}", path, k)
+                };
+                if let Some(v) = map.get(k) {
+                    if v.is_null() {
+                        paths.push(child);
+                    } else {
+                        unreached_collect(ps, root, v, &child, visited, paths);
+                    }
+                } else {
+                    paths.push(child);
+                }
+            }
+        }
+        if let Some(it) = obj.get("items") {
+            let child = if path.is_empty() {
+                "/items".to_string()
+            } else {
+                format!("{}/items", path)
+            };
+            if let Some(arr) = value.as_array() {
+                if arr.is_empty() {
+                    paths.push(child);
+                } else {
+                    unreached_collect(it, root, &arr[0], &child, visited, paths);
+                }
+            } else {
+                paths.push(child);
+            }
+        }
+        if let Some(pis) = obj.get("prefixItems").and_then(|p| p.as_array()) {
+            let empty: Vec<serde_json::Value> = vec![];
+            let arr = value.as_array().unwrap_or(&empty);
+            for (i, pi) in pis.iter().enumerate() {
+                let child = if path.is_empty() {
+                    format!("/prefixItems/{}", i)
+                } else {
+                    format!("{}/prefixItems/{}", path, i)
+                };
+                if i < arr.len() && !arr[i].is_null() {
+                    unreached_collect(pi, root, &arr[i], &child, visited, paths);
+                } else {
+                    paths.push(child);
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn samples_roundtrip_through_output_types() {
     for tool in super::registered_tools() {
@@ -392,4 +489,19 @@ fn output_schemas_have_no_any_nodes() {
         }
     }
     assert!(bad.is_empty(), "loose nodes: {bad:?}");
+}
+
+#[test]
+fn samples_cover_their_schemas() {
+    let mut bad = vec![];
+    for tool in super::registered_tools() {
+        let name = &tool.name;
+        let s = sample(name);
+        let schema = &tool.output_schema;
+        let unre = unreached(schema, &s);
+        if !unre.is_empty() {
+            bad.push((name.to_string(), unre));
+        }
+    }
+    assert!(bad.is_empty(), "unreached paths: {bad:?}");
 }

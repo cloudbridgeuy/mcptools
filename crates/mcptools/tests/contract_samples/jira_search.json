@@ -1,12 +1,13 @@
 {
   "issues": [
     {
-      "assignee": null,
-      "description": null,
+      "assignee": "Bob",
+      "description": "A bug",
       "key": "PROJ-1",
       "status": "To Do",
       "summary": "Sample bug"
     }
   ],
+  "next_page_token": "tok123",
   "total": 1
 }

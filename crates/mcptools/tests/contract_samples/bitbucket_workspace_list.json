@@ -1,6 +1,6 @@
 {
-  "next_page": null,
-  "total_count": null,
+  "next_page": "https://api.bitbucket.org/2.0/workspaces?page=2",
+  "total_count": 2,
   "workspaces": [
     {
       "name": "WS",

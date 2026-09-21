@@ -8,6 +8,6 @@
       "name": "main"
     }
   ],
-  "next_page": null,
-  "total_count": null
+  "next_page": "https://api.bitbucket.org/2.0/repositories/ws/repo/refs/branches?page=2",
+  "total_count": 1
 }

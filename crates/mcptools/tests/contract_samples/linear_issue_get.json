@@ -1,10 +1,27 @@
 {
-  "activity": [],
-  "blocked_by": [],
-  "comments": [],
+  "activity": [
+    {
+      "actor": "bob",
+      "timestamp": "2024-01-01T12:00:00Z",
+      "summary": "created"
+    }
+  ],
+  "blocked_by": [
+    "other-id"
+  ],
+  "comments": [
+    {
+      "id": "c1",
+      "body": "hi",
+      "url": "https://linear.app/acme/issue/GUZ-79/comment/c1",
+      "author": "bob",
+      "created_at": "2024-01-01T12:00:00Z"
+    }
+  ],
+  "description": "Wire the thing.",
   "id": "9d1a2b3c-0000-4000-8000-000000000001",
   "identifier": "GUZ-79",
-  "parent": null,
+  "parent": "parent-id",
   "state": "In Progress",
   "title": "Wire the thing",
   "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing"

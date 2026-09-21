@@ -1,6 +1,15 @@
 {
-  "assignee": null,
-  "attachments": [],
+  "assignee": "Bob",
+  "attachments": [
+    {
+      "id": "10000",
+      "filename": "screenshot.png",
+      "mime_type": "image/png",
+      "size_bytes": 45678,
+      "size_human": "45.7 kB",
+      "created": "2024-01-01T12:00:00Z"
+    }
+  ],
   "comments": [
     {
       "ticket_key": "PROJ-1",
@@ -13,16 +22,16 @@
   "components": [
     "api"
   ],
-  "created": null,
-  "description": null,
-  "due_date": null,
-  "issue_type": null,
+  "created": "2024-01-01T11:00:00Z",
+  "description": "Detailed bug report here.",
+  "due_date": "2024-02-01",
+  "issue_type": "Bug",
   "key": "PROJ-1",
   "labels": [
     "bug"
   ],
-  "priority": null,
+  "priority": "High",
   "status": "To Do",
   "summary": "Sample bug",
-  "updated": null
+  "updated": "2024-01-02T10:00:00Z"
 }

@@ -9,5 +9,7 @@
       "char_limit": 5
     }
   ],
-  "fetch_time_ms": 12
+  "elements_found": 1,
+  "fetch_time_ms": 12,
+  "selector_used": "h1"
 }

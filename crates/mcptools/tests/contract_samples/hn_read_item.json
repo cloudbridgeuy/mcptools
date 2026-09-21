@@ -21,7 +21,7 @@
     "total_pages": 1,
     "total_comments": 1,
     "limit": 10,
-    "next_page_command": null,
-    "prev_page_command": null
+    "next_page_command": "hn_read_item --id 8863 --page 2",
+    "prev_page_command": "hn_read_item --id 8863 --page 1"
   }
 }

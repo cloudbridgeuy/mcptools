@@ -9,23 +9,23 @@
       "content": "nit",
       "created_on": "2026-01-02T00:00:00Z",
       "id": 7,
-      "inline_line": null,
-      "inline_path": null,
-      "is_inline": false
+      "inline_line": 42,
+      "inline_path": "src/main.rs",
+      "is_inline": true
     }
   ],
   "created_on": "2026-01-01T00:00:00Z",
-  "description": null,
+  "description": "Some PR description",
   "destination_branch": "main",
-  "destination_commit": null,
+  "destination_commit": "def4567890",
   "destination_repo": "ws/repo",
-  "diff_content": null,
+  "diff_content": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n- old\n+ new",
   "diffstat": {
     "files": [
       {
         "lines_added": 3,
         "lines_removed": 1,
-        "old_path": null,
+        "old_path": "old/a.rs",
         "path": "a.rs",
         "status": "modified"
       }
@@ -40,7 +40,7 @@
     "rev"
   ],
   "source_branch": "feat",
-  "source_commit": null,
+  "source_commit": "abc1234567",
   "source_repo": "ws/repo",
   "state": "OPEN",
   "title": "Fix",

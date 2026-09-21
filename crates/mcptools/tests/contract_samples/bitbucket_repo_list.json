@@ -1,13 +1,13 @@
 {
-  "next_page": null,
+  "next_page": "https://api.bitbucket.org/2.0/repositories/ws?page=2",
   "repositories": [
     {
       "full_name": "ws/repo",
-      "https_url": null,
+      "https_url": "https://bitbucket.org/ws/repo.git",
       "name": "Repo",
       "slug": "repo",
-      "ssh_url": null
+      "ssh_url": "git@bitbucket.org:ws/repo.git"
     }
   ],
-  "total_count": null
+  "total_count": 5
 }

@@ -1,11 +1,11 @@
 {
   "pages": [
     {
-      "content": null,
+      "content": "The content",
       "id": "123",
       "page_type": "page",
       "title": "Runbook",
-      "url": null
+      "url": "https://example.atlassian.net/wiki/spaces/xx/pages/123"
     }
   ],
   "total": 1

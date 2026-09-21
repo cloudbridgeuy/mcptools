@@ -1,13 +1,13 @@
 {
   "nodes": [
     {
-      "email": null,
+      "email": "dev@example.com",
       "id": "u1",
       "name": "Dev"
     }
   ],
   "pageInfo": {
-    "endCursor": null,
+    "endCursor": "curs",
     "hasNextPage": false
   }
 }

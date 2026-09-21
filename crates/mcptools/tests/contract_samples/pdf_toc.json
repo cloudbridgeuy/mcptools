@@ -14,15 +14,29 @@
     ]
   },
   "metadata": {
-    "author": null,
-    "creator": null,
+    "author": "Alice",
+    "creator": "pdfgen",
     "page_count": 3,
-    "title": null
+    "title": "Doc Title"
   },
   "sections": [
     {
       "char_count": 5,
-      "children": [],
+      "children": [
+        {
+          "char_count": 2,
+          "children": [],
+          "content_preview": "sub",
+          "id": "s-1-0-1",
+          "image_count": 0,
+          "level": 2,
+          "page_range": [
+            1,
+            1
+          ],
+          "title": "Sub"
+        }
+      ],
       "content_preview": "Hello",
       "id": "s-1-0",
       "image_count": 0,

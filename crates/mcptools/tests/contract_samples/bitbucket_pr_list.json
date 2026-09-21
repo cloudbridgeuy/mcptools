@@ -1,5 +1,5 @@
 {
-  "next_page": null,
+  "next_page": "https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests?page=2",
   "pull_requests": [
     {
       "author": "dev",
@@ -10,5 +10,5 @@
       "title": "Fix"
     }
   ],
-  "total_count": null
+  "total_count": 3
 }

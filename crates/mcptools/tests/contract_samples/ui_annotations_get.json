@@ -22,8 +22,8 @@
   "element_path": "div.grid > div.entry",
   "id": "abc-123",
   "is_fixed": false,
-  "resolution_summary": null,
-  "screenshot": null,
+  "resolution_summary": "Fixed the font size.",
+  "screenshot": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
   "tag_name": "div",
   "text_content": "Hello",
   "timestamp": "2026-03-03T17:40:15Z"
