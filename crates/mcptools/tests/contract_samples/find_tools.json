@@ -1,5 +1,6 @@
 {
   "backend": "local",
+  "fallback": "http_status",
   "none": 0.4758709275361789,
   "tools": [
     {
