@@ -11,7 +11,9 @@ pub struct App {
 }
 
 pub async fn run(app: App, _global: crate::Global) -> Result<()> {
-    let result = crate::mcp::find_tools(&app.task, app.k).map_err(|e| eyre!(e.to_string()))?;
+    let result = crate::mcp::find_tools(&app.task, app.k)
+        .await
+        .map_err(|e| eyre!(e.to_string()))?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }

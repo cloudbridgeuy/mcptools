@@ -879,7 +879,6 @@ mod catalog_tests {
             .iter()
             .any(|t| t.get("name") == Some(&serde_json::json!("find_tools"))));
     }
-
     #[test]
     fn registry_holds_sixty_two_tools() {
         assert_eq!(super::registered_tools().len(), 62);
@@ -1075,5 +1074,11 @@ mod catalog_tests {
             assert!(annotations.get("idempotentHint").is_none());
             assert!(annotations.get("openWorldHint").is_none());
         }
+    }
+
+    #[test]
+    fn catalog_never_contains_a_tool_named_none() {
+        let catalog = super::tool_catalog();
+        assert!(!catalog.iter().any(|e| e.name == "none"));
     }
 }
