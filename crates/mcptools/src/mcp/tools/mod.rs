@@ -1193,4 +1193,74 @@ mod declaration_tests {
         let err = super::declarations(&["nope_tool".to_string()]).unwrap_err();
         assert!(err.to_string().contains("nope_tool"));
     }
+
+    fn pascal_case(name: &str) -> String {
+        name.split('_')
+            .map(|piece| {
+                let mut chars = piece.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            })
+            .collect()
+    }
+
+    fn ref_targets(schema: &serde_json::Value, out: &mut Vec<String>) {
+        match schema {
+            serde_json::Value::Object(map) => {
+                if let Some(name) = map
+                    .get("$ref")
+                    .and_then(|link| link.as_str())
+                    .and_then(|link| link.strip_prefix("#/$defs/"))
+                {
+                    out.push(name.to_string());
+                }
+                for value in map.values() {
+                    ref_targets(value, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    ref_targets(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn sweep_covers_every_registered_tool() {
+        let tools = super::registered_tools();
+        let mut unknown_tools = std::collections::BTreeSet::new();
+        for tool in &tools {
+            let text = super::declaration(tool);
+            let mut targets = vec![];
+            ref_targets(&tool.input_schema, &mut targets);
+            ref_targets(&tool.output_schema, &mut targets);
+            let prefix = pascal_case(&tool.name);
+            for target in targets {
+                let named = format!("{prefix}{target}");
+                assert!(
+                    text.contains(&format!("interface {named} "))
+                        || text.contains(&format!("type {named} =")),
+                    "{}: missing definition for {target}",
+                    tool.name
+                );
+            }
+            assert!(!text.contains("$ref"), "{}: raw $ref leaked", tool.name);
+            assert!(
+                !text.contains("#/$defs"),
+                "{}: raw #/$defs leaked",
+                tool.name
+            );
+            if text.contains("unknown") {
+                unknown_tools.insert(tool.name.clone());
+            }
+        }
+        assert_eq!(
+            unknown_tools,
+            std::collections::BTreeSet::from(["find_tools".to_string()])
+        );
+    }
 }

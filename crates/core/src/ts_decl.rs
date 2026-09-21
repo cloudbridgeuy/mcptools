@@ -255,6 +255,23 @@ fn ts_type_at(schema: &Value, prefix: &str, level: usize) -> String {
         }
         return variants.iter().map(compact).collect::<Vec<_>>().join(" | ");
     }
+    if let Some(members) = obj.get("anyOf").and_then(Value::as_array) {
+        if members.is_empty() {
+            return "unknown".to_string();
+        }
+        return members
+            .iter()
+            .map(|member| ts_type_at(member, prefix, level))
+            .collect::<Vec<_>>()
+            .join(" | ");
+    }
+    if let Some(items) = obj.get("prefixItems").and_then(Value::as_array) {
+        let parts = items
+            .iter()
+            .map(|item| ts_type_at(item, prefix, level))
+            .collect::<Vec<_>>();
+        return format!("[{}]", parts.join(", "));
+    }
     match obj.get("type") {
         Some(Value::String(name)) => match name.as_str() {
             "string" => "string".to_string(),
@@ -378,9 +395,54 @@ mod tests {
     }
 
     #[test]
-    fn unknown_fallback() {
+    fn anyof_becomes_union() {
+        assert_eq!(
+            ty(json!({"anyOf": [{"$ref": "#/$defs/Usage"}, {"type": "null"}]})),
+            "PfxUsage | null"
+        );
+        assert_eq!(
+            ty(json!({"anyOf": [{"type": "string"}, {"type": "integer"}]})),
+            "string | number"
+        );
+    }
+
+    #[test]
+    fn prefix_items_become_tuple() {
+        assert_eq!(
+            ty(json!({"type": "array", "prefixItems": [{"type": "integer"}, {"type": "integer"}]})),
+            "[number, number]"
+        );
+    }
+
+    #[test]
+    fn boolean_schema_stays_unknown() {
         assert_eq!(ty(json!(true)), "unknown");
-        assert_eq!(ty(json!({"anyOf": [{"type": "string"}]})), "unknown");
+        assert_eq!(ty(json!(false)), "unknown");
+    }
+
+    #[test]
+    fn self_referential_def_renders() {
+        let text = tool_declaration(
+            "demo_tool",
+            "Does things.",
+            &json!({"type": "object", "properties": {}}),
+            &json!({
+                "type": "object",
+                "properties": {"sections": {"type": "array", "items": {"$ref": "#/$defs/Section"}}},
+                "required": ["sections"],
+                "$defs": {"Section": {
+                    "type": "object",
+                    "properties": {"children": {"type": "array", "items": {"$ref": "#/$defs/Section"}}},
+                    "required": ["children"]
+                }}
+            }),
+        );
+        assert!(text.contains("interface DemoToolSection {"));
+        assert!(text.contains("children: DemoToolSection[];"));
+    }
+
+    #[test]
+    fn unknown_fallback() {
         assert_eq!(ty(json!({"type": "object"})), "unknown");
         assert_eq!(ty(json!({"$ref": "#/other/X"})), "unknown");
         assert_eq!(ty(json!({})), "unknown");
