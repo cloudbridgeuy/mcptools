@@ -233,6 +233,123 @@ fn is_nullish(s: &serde_json::Value) -> bool {
     }
 }
 
+fn loose_nodes(schema: &serde_json::Value) -> Vec<String> {
+    let mut paths = vec![];
+    loose_collect(schema, schema, "", &mut HashSet::new(), &mut paths);
+    paths
+}
+
+fn loose_collect(
+    node: &serde_json::Value,
+    root: &serde_json::Value,
+    path: &str,
+    visited: &mut HashSet<String>,
+    paths: &mut Vec<String>,
+) {
+    let ref_str = node
+        .get("$ref")
+        .and_then(|x| x.as_str())
+        .map(str::to_string);
+    if let Some(r) = &ref_str {
+        if visited.contains(r) {
+            return;
+        }
+        visited.insert(r.clone());
+        let res = resolve_ref(root, r);
+        if is_loose(res) {
+            let p = if path.is_empty() {
+                "/".to_string()
+            } else {
+                path.to_string()
+            };
+            paths.push(p);
+        }
+        visited.remove(r);
+        return;
+    }
+    if is_loose(node) {
+        let p = if path.is_empty() {
+            "/".to_string()
+        } else {
+            path.to_string()
+        };
+        paths.push(p);
+    }
+    if let Some(obj) = node.as_object() {
+        if let Some(props) = obj.get("properties").and_then(|p| p.as_object()) {
+            for (k, v) in props {
+                let child = if path.is_empty() {
+                    format!("/properties/{}", k)
+                } else {
+                    format!("{}/properties/{}", path, k)
+                };
+                loose_collect(v, root, &child, visited, paths);
+            }
+        }
+        if let Some(items) = obj.get("items") {
+            let child = if path.is_empty() {
+                "/items".to_string()
+            } else {
+                format!("{}/items", path)
+            };
+            loose_collect(items, root, &child, visited, paths);
+        }
+        if let Some(pis) = obj.get("prefixItems").and_then(|p| p.as_array()) {
+            for (i, pi) in pis.iter().enumerate() {
+                let child = if path.is_empty() {
+                    format!("/prefixItems/{}", i)
+                } else {
+                    format!("{}/prefixItems/{}", path, i)
+                };
+                loose_collect(pi, root, &child, visited, paths);
+            }
+        }
+        if let Some(aos) = obj.get("anyOf").and_then(|a| a.as_array()) {
+            for (i, ao) in aos.iter().enumerate() {
+                let child = if path.is_empty() {
+                    format!("/anyOf/{}", i)
+                } else {
+                    format!("{}/anyOf/{}", path, i)
+                };
+                loose_collect(ao, root, &child, visited, paths);
+            }
+        }
+        if let Some(defs) = obj
+            .get("$defs")
+            .or_else(|| obj.get("definitions"))
+            .and_then(|d| d.as_object())
+        {
+            for (k, dv) in defs {
+                let child = format!("/$defs/{}", k);
+                let dref = format!("#/$defs/{}", k);
+                if visited.contains(&dref) {
+                    continue;
+                }
+                visited.insert(dref.clone());
+                loose_collect(dv, root, &child, visited, paths);
+                visited.remove(&dref);
+            }
+        }
+    }
+}
+
+fn is_loose(s: &serde_json::Value) -> bool {
+    if s.as_bool() == Some(true) {
+        return true;
+    }
+    if let Some(o) = s.as_object() {
+        if o.is_empty() {
+            return true;
+        }
+        !o.contains_key("type")
+            && !o.contains_key("$ref")
+            && !o.contains_key("anyOf")
+            && !o.contains_key("enum")
+    } else {
+        false
+    }
+}
+
 #[test]
 fn samples_roundtrip_through_output_types() {
     for tool in super::registered_tools() {
@@ -261,4 +378,18 @@ fn sparse_outputs_validate() {
         }
         assert!(errs.is_empty(), "sparse failed for {name}: {errs:?}");
     }
+}
+
+#[test]
+fn output_schemas_have_no_any_nodes() {
+    let mut bad = vec![];
+    for tool in super::registered_tools() {
+        let name = &tool.name;
+        let schema = &tool.output_schema;
+        let loose = loose_nodes(schema);
+        if !loose.is_empty() {
+            bad.push((name.to_string(), loose));
+        }
+    }
+    assert!(bad.is_empty(), "loose nodes: {bad:?}");
 }

@@ -1,7 +1,15 @@
 {
   "assignee": null,
   "attachments": [],
-  "comments": [],
+  "comments": [
+    {
+      "ticket_key": "PROJ-1",
+      "comment_id": "10001",
+      "author": "Alice",
+      "body": "hello world",
+      "created_at": "2024-01-01T12:00:00Z"
+    }
+  ],
   "components": [
     "api"
   ],

@@ -7,7 +7,7 @@ pub struct FoundTool {
     pub domain: String,
     pub score: f64,
     #[serde(rename = "inputSchema")]
-    pub input_schema: serde_json::Value,
+    pub input_schema: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -42,7 +42,7 @@ pub fn find_tools(
                     name: r.name,
                     domain: r.domain,
                     score: r.score,
-                    input_schema: t.input_schema.clone(),
+                    input_schema: t.input_schema.as_object().cloned().unwrap_or_default(),
                 })
         })
         .collect();
@@ -107,7 +107,8 @@ mod find_tools_tests {
         let registered = super::super::registered_tools();
         for found in &result.tools {
             let reg = registered.iter().find(|t| t.name == found.name).unwrap();
-            assert_eq!(found.input_schema, reg.input_schema);
+            let reg_schema = reg.input_schema.as_object().cloned().unwrap_or_default();
+            assert_eq!(found.input_schema, reg_schema);
         }
     }
 

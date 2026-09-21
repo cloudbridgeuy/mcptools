@@ -126,7 +126,7 @@ pub struct JiraExtendedIssueResponse {
     pub fields: JiraExtendedFields,
 }
 
-#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct JiraComment {
     #[serde(rename = "id")]
     pub comment_id: String,
@@ -151,7 +151,7 @@ pub struct TicketOutput {
     pub due_date: Option<String>,
     pub labels: Vec<String>,
     pub components: Vec<String>,
-    pub comments: Vec<JiraComment>,
+    pub comments: Vec<CommentOutput>,
     pub attachments: Vec<AttachmentOutput>,
 }
 
@@ -213,19 +213,15 @@ pub fn extract_description(value: Option<serde_json::Value>) -> Option<String> {
     })
 }
 
-/// Render ADF (Atlassian Document Format) to readable text
-///
-/// ADF is a JSON-based document format used by Atlassian products.
-/// This function walks the ADF tree and extracts human-readable text.
-///
-/// # Arguments
-/// * `value` - The ADF document as JSON
-///
-/// # Returns
-/// * `Option<String>` - Rendered text, or None if empty
 pub fn render_adf(value: &serde_json::Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        return Some(trimmed.to_string());
+    }
     let mut output = String::new();
-
     if let Some(content) = value.get("content").and_then(|c| c.as_array()) {
         for node in content {
             if let Some(rendered) = render_adf_node(node, 0) {
@@ -236,7 +232,6 @@ pub fn render_adf(value: &serde_json::Value) -> Option<String> {
             }
         }
     }
-
     if output.is_empty() {
         None
     } else {
@@ -244,7 +239,6 @@ pub fn render_adf(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// Render a single ADF node recursively
 fn render_adf_node(node: &serde_json::Value, depth: usize) -> Option<String> {
     let node_type = node.get("type")?.as_str()?;
     let indent = "  ".repeat(depth);
@@ -326,8 +320,18 @@ fn render_adf_node(node: &serde_json::Value, depth: usize) -> Option<String> {
             .and_then(|t| t.as_str())
             .map(|text| text.to_string()),
         "hardBreak" => Some("\n".to_string()),
+        "mention" => node
+            .get("attrs")
+            .and_then(|a| a.get("text"))
+            .and_then(|t| t.as_str())
+            .map(|t| {
+                if t.starts_with('@') {
+                    t.to_string()
+                } else {
+                    format!("@{}", t)
+                }
+            }),
         _ => {
-            // For unknown node types, try to extract text content
             if let Some(content) = node.get("content").and_then(|c| c.as_array()) {
                 let mut text = String::new();
                 for child in content {
@@ -400,8 +404,13 @@ pub fn transform_ticket_response(
     comments: Vec<JiraComment>,
     attachments: Vec<AttachmentOutput>,
 ) -> TicketOutput {
+    let key = issue.key;
+    let mapped_comments: Vec<CommentOutput> = comments
+        .into_iter()
+        .map(|c| transform_comment_response(&key, c))
+        .collect();
     TicketOutput {
-        key: issue.key,
+        key,
         summary: issue.fields.summary,
         description: extract_description(issue.fields.description),
         status: issue.fields.status.name,
@@ -427,7 +436,7 @@ pub fn transform_ticket_response(
             .into_iter()
             .map(|c| c.name)
             .collect(),
-        comments,
+        comments: mapped_comments,
         attachments,
     }
 }

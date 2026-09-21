@@ -213,47 +213,15 @@ fn display_ticket(ticket: &TicketOutput) {
     if !ticket.comments.is_empty() {
         std::println!("\n{}", "Comments:".bold().cyan());
         for (index, comment) in ticket.comments.iter().enumerate() {
-            let content = match &comment.body {
-                serde_json::Value::Object(map) => {
-                    let mut full_text = String::new();
-
-                    if let Some(content_arr) = map.get("content").and_then(|c| c.as_array()) {
-                        for content_item in content_arr {
-                            if let Some(paragraph_content) =
-                                content_item.get("content").and_then(|c| c.as_array())
-                            {
-                                for text_item in paragraph_content {
-                                    if let Some(text) =
-                                        text_item.get("text").and_then(|t| t.as_str())
-                                    {
-                                        full_text.push_str(text);
-                                        full_text.push(' ');
-                                    }
-
-                                    if let Some(mention_text) = text_item
-                                        .get("attrs")
-                                        .and_then(|attrs| attrs.get("text"))
-                                        .and_then(|t| t.as_str())
-                                    {
-                                        full_text.push_str(&format!("@{mention_text} "));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    full_text.trim().to_string()
-                }
-                serde_json::Value::String(s) => s.to_string(),
-                _ => "(Unable to parse comment)".to_string(),
-            };
-
+            let content = comment
+                .body
+                .clone()
+                .unwrap_or_else(|| "(Unable to parse comment)".to_string());
             let index_str = format!("{}.", index + 1).green().to_string();
             let timestamp_str = format!("[{}]", comment.created_at).blue().to_string();
             let author_str = comment
                 .author
-                .as_ref()
-                .and_then(|a| a.display_name.clone())
+                .clone()
                 .unwrap_or_else(|| "Unknown".to_string())
                 .magenta()
                 .to_string();
