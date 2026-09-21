@@ -37,6 +37,13 @@ pub struct JsonRpcError {
     pub data: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolKind {
+    Read,
+    Write,
+    Spend,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Tool {
     pub name: String,
@@ -47,6 +54,8 @@ pub struct Tool {
     pub output_schema: serde_json::Value,
     #[serde(skip)]
     pub summary: &'static str,
+    #[serde(skip)]
+    pub kind: ToolKind,
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
