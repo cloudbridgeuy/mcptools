@@ -206,7 +206,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Description (markdown), and Sprint assignment. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraUpdateArgs>(),
             summary: "Update a Jira ticket: status (close, reopen), priority, assignee, sprint",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::CommentOutput>(),
@@ -214,7 +214,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Post a comment on a Jira ticket. Supports markdown in the comment body (bold, italic, headings, lists, code blocks, links) which is automatically converted to Atlassian Document Format. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraCommentAddArgs>(),
             summary: "Add a comment to a Jira ticket",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::CommentListOutput>(),
@@ -230,7 +230,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Update an existing comment on a Jira ticket. Supports markdown in the comment body. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraCommentUpdateArgs>(),
             summary: "Edit a comment on a Jira ticket",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::CommentDeleteOutput>(),
@@ -238,7 +238,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Delete a comment from a Jira ticket by comment ID. Use jira_comment_list first to get comment IDs. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraCommentDeleteArgs>(),
             summary: "Delete a comment from a Jira ticket",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::SprintListOutput>(),
@@ -270,7 +270,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Upload one or more files as attachments to a Jira ticket. Accepts an array of local file paths. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraAttachmentUploadArgs>(),
             summary: "Upload files as attachments to a Jira ticket",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::QueryListOutput>(),
@@ -286,7 +286,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Save a Jira JQL query with a name for later reuse. Queries are stored in ~/.config/mcptools/queries/ as .jql files.".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraQuerySaveArgs>(),
             summary: "Save a named Jira JQL query",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::QueryStatusOutput>(),
@@ -294,7 +294,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Delete a saved Jira query by name. Removes the query from ~/.config/mcptools/queries/".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraQueryDeleteArgs>(),
             summary: "Delete a saved Jira JQL query",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::QueryLoadOutput>(),
@@ -326,7 +326,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Create a new pull request in a Bitbucket repository. Requires repo, title, and source branch. Optionally specify destination branch (defaults to repo's main branch), description, and whether to close the source branch after merge. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
             input_schema: schema::input_schema_for::<atlassian::BitbucketPRCreateArgs>(),
             summary: "Create a pull request in a Bitbucket repository",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::WorkspaceListOutput>(),
@@ -374,7 +374,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Mark a UI annotation as resolved with a summary of the changes made.".to_string(),
             input_schema: schema::input_schema_for::<annotations::AnnotationsResolveArgs>(),
             summary: "Mark a UI annotation as resolved with a change summary",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<annotations::AnnotationClearOutput>(),
@@ -382,7 +382,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Clear all UI annotations from the dev server.".to_string(),
             input_schema: schema::input_schema_for::<annotations::AnnotationsClearArgs>(),
             summary: "Delete all UI annotations",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<::pdf::DocumentTree>(),
@@ -446,7 +446,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Edit ChatGPT Images 2.5 images with a prompt plus 1-16 reference images and optional mask via POST /v1/images/edits. Preserves subject/composition outside the edit. Saves files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
             input_schema: schema::input_schema_for::<images::ImagesEditArgs>(),
             summary: "Edit an image with a prompt, reference images, and an optional mask",
-            kind: ToolKind::Read,
+            kind: ToolKind::Spend,
         },
         Tool {
             output_schema: schema::output_schema_for::<crate::images::SavedOutput>(),
@@ -454,7 +454,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Create variations of ChatGPT Images 2.5 images anchored to 1-16 reference images. Same as images_edit with a default variation prompt when prompt is omitted. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
             input_schema: schema::input_schema_for::<images::ImagesVaryArgs>(),
             summary: "Create variations of reference images",
-            kind: ToolKind::Read,
+            kind: ToolKind::Spend,
         },
         Tool {
             output_schema: schema::output_schema_for::<atlas::AtlasTextOutput>(),
@@ -592,7 +592,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Create a Linear issue in a team. Returns id, identifier, title, URL, state, parent. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueCreateArgs>(),
             summary: "Create a Linear issue in a team",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueMini>(),
@@ -600,7 +600,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Update a Linear issue by id or identifier. Needs at least one of title, description, state, assignee, parent, clearParent. Returns the updated issue. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueUpdateArgs>(),
             summary: "Update a Linear issue: state (close, reopen), title, assignee, parent",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::Comment>(),
@@ -608,7 +608,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Create a comment on a Linear issue. Returns id, body, URL, author, createdAt. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::CommentCreateArgs>(),
             summary: "Add a comment to a Linear issue",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::RelationAddOutput>(),
@@ -616,7 +616,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Add a relation between two Linear issues. Type is 'blocks' or 'related'. Returns status created or already_exists plus the relation. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::RelationAddArgs>(),
             summary: "Add a blocks or related relation between two Linear issues",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::RelationRemoveOutput>(),
@@ -624,7 +624,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Remove a relation between two Linear issues matched by source, related, type triple. Returns the deleted relation id. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::RelationRemoveArgs>(),
             summary: "Remove a relation between two Linear issues",
-            kind: ToolKind::Read,
+            kind: ToolKind::Write,
         },
         Tool {
             output_schema: schema::output_schema_for::<find_tools::FoundTools>(),
@@ -905,6 +905,50 @@ mod catalog_tests {
                 destructive: true,
             }
         );
+    }
+
+    #[test]
+    fn full_table_matches_oracle_annotations() {
+        let write = [
+            "jira_create",
+            "jira_update",
+            "jira_comment_add",
+            "jira_comment_update",
+            "jira_comment_delete",
+            "jira_attachment_upload",
+            "jira_query_save",
+            "jira_query_delete",
+            "bitbucket_pr_create",
+            "linear_issue_create",
+            "linear_issue_update",
+            "linear_comment_create",
+            "linear_relation_add",
+            "linear_relation_remove",
+            "ui_annotations_resolve",
+            "ui_annotations_clear",
+        ];
+        let spend = ["images_generate", "images_edit", "images_vary"];
+        let list = super::handle_tools_list().unwrap();
+        let tools = list["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 62);
+        let entry = |name: &str| {
+            tools
+                .iter()
+                .find(|t| t.get("name") == Some(&serde_json::json!(name)))
+                .unwrap_or_else(|| panic!("missing tool {name}"))
+        };
+        let mutable = serde_json::json!({"readOnlyHint": false, "destructiveHint": true});
+        let readonly = serde_json::json!({"readOnlyHint": true, "destructiveHint": false});
+        for name in write.into_iter().chain(spend) {
+            assert_eq!(entry(name)["annotations"], mutable, "{name}");
+        }
+        let mutable_names: std::collections::BTreeSet<&str> =
+            write.into_iter().chain(spend).collect();
+        let read_count = tools
+            .iter()
+            .filter(|t| t["annotations"] == readonly)
+            .count();
+        assert_eq!(read_count, 62 - mutable_names.len());
     }
 
     #[test]
