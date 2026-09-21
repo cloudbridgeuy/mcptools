@@ -544,6 +544,13 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::RelationRemoveArgs>(),
             summary: "Remove a relation between two Linear issues",
         },
+        Tool {
+            output_schema: schema::output_schema_for::<find_tools::FoundTools>(),
+            name: "find_tools".to_string(),
+            description: "Ranks the tool catalog against a task and returns real input schemas, and never calls another tool.".to_string(),
+            input_schema: schema::input_schema_for::<find_tools::FindToolsArgs>(),
+            summary: "Find the best-fitting tools for a task",
+        },
     ]
 }
 
@@ -563,6 +570,7 @@ pub fn tool_catalog() -> Vec<mcptools_core::catalog::CatalogEntry> {
     mcptools_core::catalog::build_catalog(
         registered_tools()
             .iter()
+            .filter(|tool| tool.name != "find_tools")
             .map(|tool| (tool.name.as_str(), tool.summary)),
     )
 }
@@ -672,6 +680,7 @@ pub async fn handle_tools_call(
         "linear_relation_remove" => {
             linear::handle_linear_relation_remove(params.arguments, global).await
         }
+        "find_tools" => find_tools::handle_find_tools(params.arguments, global).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),
@@ -709,13 +718,16 @@ mod catalog_tests {
     use std::collections::BTreeSet;
 
     #[test]
-    fn catalog_names_equal_registered_names() {
+    fn catalog_names_equal_registered_names_minus_find_tools() {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
-        assert_eq!(catalog.len(), registered.len());
+        assert_eq!(catalog.len() + 1, registered.len());
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
-        let registry_names: BTreeSet<String> =
-            registered.into_iter().map(|tool| tool.name).collect();
+        let registry_names: BTreeSet<String> = registered
+            .into_iter()
+            .map(|tool| tool.name)
+            .filter(|n| n != "find_tools")
+            .collect();
         assert_eq!(catalog_names, registry_names);
     }
 
@@ -762,5 +774,14 @@ mod catalog_tests {
             assert!(tool.get("inputSchema").is_some());
             assert!(tool.get("outputSchema").is_some());
         }
+    }
+
+    #[test]
+    fn mcp_tools_list_includes_find_tools() {
+        let list = super::handle_tools_list().unwrap();
+        let tools = list["tools"].as_array().unwrap();
+        assert!(tools
+            .iter()
+            .any(|t| t.get("name") == Some(&serde_json::json!("find_tools"))));
     }
 }

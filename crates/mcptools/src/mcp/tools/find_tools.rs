@@ -1,3 +1,5 @@
+use super::JsonRpcError;
+
 #[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 pub struct FoundTool {
     pub name: String,
@@ -11,6 +13,14 @@ pub struct FoundTool {
 pub struct FoundTools {
     pub none: f64,
     pub tools: Vec<FoundTool>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct FindToolsArgs {
+    #[schemars(description = "Natural-language description of the task")]
+    pub task: String,
+    #[schemars(description = "Maximum number of tools to return (default 5)")]
+    pub k: Option<usize>,
 }
 
 pub fn find_tools(
@@ -39,6 +49,28 @@ pub fn find_tools(
         none: ranking.none,
         tools,
     })
+}
+
+pub async fn handle_find_tools(
+    arguments: Option<serde_json::Value>,
+    _global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: FindToolsArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
+        .map_err(|e| JsonRpcError {
+            code: -32602,
+            message: format!("Invalid arguments: {e}"),
+            data: None,
+        })?;
+    let result = find_tools(
+        &args.task,
+        args.k.unwrap_or(mcptools_core::find_tools::DEFAULT_K),
+    )
+    .map_err(|e| JsonRpcError {
+        code: -32602,
+        message: e.to_string(),
+        data: None,
+    })?;
+    super::to_dual_result(result)
 }
 
 #[cfg(test)]
@@ -117,5 +149,20 @@ mod find_tools_tests {
                 close_none
             );
         }
+    }
+
+    #[tokio::test]
+    async fn mcp_call_matches_shell_result() {
+        let task = "close GUZ-22";
+        let k = 5;
+        let global = crate::Global { verbose: false };
+        let mcp_result = super::super::handle_tools_call(
+            Some(serde_json::json!({"name":"find_tools","arguments":{"task":task,"k":k}})),
+            &global,
+        )
+        .await
+        .unwrap();
+        let shell_value = serde_json::to_value(find_tools(task, k).unwrap()).unwrap();
+        assert_eq!(mcp_result["structuredContent"], shell_value);
     }
 }

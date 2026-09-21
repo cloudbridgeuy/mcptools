@@ -168,7 +168,7 @@ fn mcp_contract_all() {
         .and_then(|v| v.get("tools"))
         .and_then(|v| v.as_array())
         .unwrap();
-    assert_eq!(tools.len(), 61, "unexpected tools/list length");
+    assert_eq!(tools.len(), 62, "unexpected tools/list length");
     let mut passed = 0;
     for tool in tools {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();

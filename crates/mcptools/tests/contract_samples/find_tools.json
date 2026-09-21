@@ -1,0 +1,197 @@
+{
+  "none": 0.4758709275361789,
+  "tools": [
+    {
+      "name": "linear_issue_update",
+      "domain": "linear",
+      "score": 0.5241290724638211,
+      "inputSchema": {
+        "properties": {
+          "assignee": {
+            "description": "Assignee user UUID or 'me'",
+            "type": "string"
+          },
+          "clearParent": {
+            "default": null,
+            "description": "Clear the parent issue (cannot combine with parent)",
+            "type": "boolean"
+          },
+          "description": {
+            "description": "New description",
+            "type": "string"
+          },
+          "id": {
+            "description": "Issue id or identifier (e.g. GUZ-85)",
+            "type": "string"
+          },
+          "parent": {
+            "description": "Parent issue id or identifier",
+            "type": "string"
+          },
+          "state": {
+            "description": "Workflow state name or UUID (names resolve from the issue identifier team, or team)",
+            "type": "string"
+          },
+          "team": {
+            "description": "Team id, key, or name for state lookup",
+            "type": "string"
+          },
+          "title": {
+            "description": "New title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "jira_update",
+      "domain": "jira",
+      "score": 0.3535401287604917,
+      "inputSchema": {
+        "properties": {
+          "assignee": {
+            "type": "string"
+          },
+          "boardId": {
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "issueType": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "sprint": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "ticketKey": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticketKey"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "linear_issue_get",
+      "domain": "linear",
+      "score": 0.29291974247901664,
+      "inputSchema": {
+        "properties": {
+          "id": {
+            "description": "Issue id or identifier (e.g. GUZ-85)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "linear_issue_list",
+      "domain": "linear",
+      "score": 0.29291974247901664,
+      "inputSchema": {
+        "properties": {
+          "all": {
+            "description": "Fetch all pages (up to 50 items)",
+            "type": "boolean"
+          },
+          "assignee": {
+            "description": "Assignee user UUID or 'me'",
+            "type": "string"
+          },
+          "cursor": {
+            "description": "Page cursor for pagination",
+            "type": "string"
+          },
+          "cycle": {
+            "description": "Cycle number or id",
+            "type": "string"
+          },
+          "label": {
+            "description": "Label name",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Max items per page (default: 25)",
+            "type": "integer"
+          },
+          "project": {
+            "description": "Project id or name (names need team)",
+            "type": "string"
+          },
+          "query": {
+            "description": "Title substring to search",
+            "type": "string"
+          },
+          "state": {
+            "description": "Workflow state name (e.g. Todo)",
+            "type": "string"
+          },
+          "team": {
+            "description": "Team id, key, or name",
+            "type": "string"
+          },
+          "updatedAfter": {
+            "description": "Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "linear_issue_create",
+      "domain": "linear",
+      "score": 0.29291974247901664,
+      "inputSchema": {
+        "properties": {
+          "assignee": {
+            "description": "Assignee user UUID or 'me'",
+            "type": "string"
+          },
+          "description": {
+            "description": "Issue description",
+            "type": "string"
+          },
+          "project": {
+            "description": "Project id or name (names resolve against team)",
+            "type": "string"
+          },
+          "state": {
+            "description": "Workflow state name or UUID",
+            "type": "string"
+          },
+          "team": {
+            "description": "Team id, key, or name",
+            "type": "string"
+          },
+          "title": {
+            "description": "Issue title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "team",
+          "title"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}
