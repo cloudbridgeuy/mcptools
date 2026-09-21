@@ -1,18 +1,22 @@
 {
-  "story_type": "top",
   "items": [
     {
+      "author": null,
+      "comments": null,
       "id": 8863,
+      "score": 100,
+      "time": null,
       "title": "Sample story",
-      "score": 100
+      "url": null
     }
   ],
   "pagination": {
     "current_page": 1,
-    "total_pages": 1,
-    "total_items": 1,
     "limit": 10,
     "next_page_command": null,
-    "prev_page_command": null
-  }
+    "prev_page_command": null,
+    "total_items": 1,
+    "total_pages": 1
+  },
+  "story_type": "top"
 }

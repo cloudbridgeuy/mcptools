@@ -1,11 +1,13 @@
 {
   "branches": [
     {
-      "name": "main",
+      "author": "dev",
+      "commit_date": "2026-01-01T00:00:00Z",
       "commit_hash": "abc",
       "commit_message": "init",
-      "commit_date": "2026-01-01T00:00:00Z",
-      "author": "dev"
+      "name": "main"
     }
-  ]
+  ],
+  "next_page": null,
+  "total_count": null
 }

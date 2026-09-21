@@ -1,37 +1,40 @@
 {
-  "title": "Doc",
-  "metadata": {
-    "page_count": 3
-  },
-  "sections": [
-    {
-      "id": "s-1-0",
-      "level": 1,
-      "title": "Intro",
-      "children": [],
-      "content_preview": "Hello",
-      "char_count": 5,
-      "image_count": 0,
-      "page_range": [
-        1,
-        1
-      ]
-    }
-  ],
   "index": {
     "entries": [
       {
+        "char_count": 5,
         "id": "s-1-0",
+        "image_count": 0,
         "level": 1,
-        "title": "Intro",
         "path": [
           "Intro"
         ],
-        "char_count": 5,
-        "image_count": 0
+        "title": "Intro"
       }
     ]
   },
+  "metadata": {
+    "author": null,
+    "creator": null,
+    "page_count": 3,
+    "title": null
+  },
+  "sections": [
+    {
+      "char_count": 5,
+      "children": [],
+      "content_preview": "Hello",
+      "id": "s-1-0",
+      "image_count": 0,
+      "level": 1,
+      "page_range": [
+        1,
+        1
+      ],
+      "title": "Intro"
+    }
+  ],
+  "title": "Doc",
   "total_chars": 5,
   "total_images": 0
 }

@@ -1,11 +1,12 @@
 {
-  "ticket_key": "PROJ-1",
   "fields_updated": [
     {
+      "error": null,
       "field": "summary",
       "success": true,
       "value": "New"
     }
   ],
-  "partial_failure": false
+  "partial_failure": false,
+  "ticket_key": "PROJ-1"
 }

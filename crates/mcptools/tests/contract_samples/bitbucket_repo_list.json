@@ -1,9 +1,13 @@
 {
+  "next_page": null,
   "repositories": [
     {
-      "slug": "repo",
+      "full_name": "ws/repo",
+      "https_url": null,
       "name": "Repo",
-      "full_name": "ws/repo"
+      "slug": "repo",
+      "ssh_url": null
     }
-  ]
+  ],
+  "total_count": null
 }

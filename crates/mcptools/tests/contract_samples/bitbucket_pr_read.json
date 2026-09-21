@@ -1,41 +1,48 @@
 {
-  "id": 1,
-  "title": "Fix",
-  "state": "OPEN",
-  "author": "dev",
-  "source_branch": "feat",
-  "destination_branch": "main",
-  "source_repo": "ws/repo",
-  "destination_repo": "ws/repo",
-  "created_on": "2026-01-01T00:00:00Z",
-  "updated_on": "2026-01-02T00:00:00Z",
-  "reviewers": [
-    "rev"
-  ],
   "approvals": [
     "rev"
   ],
-  "html_link": "https://bitbucket.org/ws/repo/pull-requests/1",
-  "diffstat": {
-    "files": [
-      {
-        "path": "a.rs",
-        "status": "modified",
-        "lines_added": 3,
-        "lines_removed": 1
-      }
-    ],
-    "total_files": 1,
-    "total_insertions": 3,
-    "total_deletions": 1
-  },
+  "author": "dev",
   "comments": [
     {
-      "id": 7,
       "author": "rev",
       "content": "nit",
       "created_on": "2026-01-02T00:00:00Z",
+      "id": 7,
+      "inline_line": null,
+      "inline_path": null,
       "is_inline": false
     }
-  ]
+  ],
+  "created_on": "2026-01-01T00:00:00Z",
+  "description": null,
+  "destination_branch": "main",
+  "destination_commit": null,
+  "destination_repo": "ws/repo",
+  "diff_content": null,
+  "diffstat": {
+    "files": [
+      {
+        "lines_added": 3,
+        "lines_removed": 1,
+        "old_path": null,
+        "path": "a.rs",
+        "status": "modified"
+      }
+    ],
+    "total_deletions": 1,
+    "total_files": 1,
+    "total_insertions": 3
+  },
+  "html_link": "https://bitbucket.org/ws/repo/pull-requests/1",
+  "id": 1,
+  "reviewers": [
+    "rev"
+  ],
+  "source_branch": "feat",
+  "source_commit": null,
+  "source_repo": "ws/repo",
+  "state": "OPEN",
+  "title": "Fix",
+  "updated_on": "2026-01-02T00:00:00Z"
 }

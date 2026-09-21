@@ -1,14 +1,15 @@
 {
   "nodes": [
     {
+      "direction": "out",
       "id": "r1",
-      "rel_type": "blocks",
       "issue": "GUZ-79",
-      "related_issue": "GUZ-80",
-      "direction": "out"
+      "rel_type": "blocks",
+      "related_issue": "GUZ-80"
     }
   ],
   "pageInfo": {
+    "endCursor": null,
     "hasNextPage": false
   }
 }

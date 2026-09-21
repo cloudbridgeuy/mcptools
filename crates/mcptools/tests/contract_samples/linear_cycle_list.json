@@ -2,10 +2,12 @@
   "nodes": [
     {
       "id": "c1",
+      "name": null,
       "number": 3
     }
   ],
   "pageInfo": {
+    "endCursor": null,
     "hasNextPage": false
   }
 }

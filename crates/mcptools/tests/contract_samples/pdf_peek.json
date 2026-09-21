@@ -1,6 +1,7 @@
 {
-  "title": "Doc",
-  "snippet": "Hello",
+  "id": null,
   "position": "Beginning",
+  "snippet": "Hello",
+  "title": "Doc",
   "total_chars": 100
 }

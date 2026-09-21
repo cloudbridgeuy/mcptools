@@ -1,8 +1,10 @@
 {
+  "next_page": null,
+  "total_count": null,
   "workspaces": [
     {
-      "slug": "ws",
-      "name": "WS"
+      "name": "WS",
+      "slug": "ws"
     }
   ]
 }

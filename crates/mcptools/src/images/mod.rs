@@ -6,9 +6,9 @@ use mcptools_core::images::{
     DEFAULT_BASE_URL, DEFAULT_MODEL, MAX_INPUT_IMAGES, VARY_PROMPT,
 };
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct SavedOutput {
     pub files: Vec<String>,
     pub model: String,

@@ -1,11 +1,14 @@
 {
+  "has_more": false,
   "sprints": [
     {
+      "complete_date": null,
+      "end_date": null,
       "id": 1,
       "name": "Sprint 1",
+      "start_date": null,
       "state": "active"
     }
   ],
-  "total": 1,
-  "has_more": false
+  "total": 1
 }

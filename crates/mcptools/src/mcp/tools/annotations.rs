@@ -26,13 +26,13 @@ pub struct AnnotationsClearArgs {
     pub url: Option<String>,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct AnnotationResolveOutput {
     pub id: String,
     pub resolved: bool,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct AnnotationClearOutput {
     pub cleared: u64,
 }

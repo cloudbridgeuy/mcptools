@@ -1,37 +1,41 @@
 {
   "annotations": [
     {
+      "bounding_box": {
+        "height": 50.0,
+        "left": 20.0,
+        "top": 10.0,
+        "width": 100.0
+      },
+      "comment": "Fix the font",
+      "component_name": "Entry",
+      "computed_styles": {
+        "background_color": "rgb(255, 255, 255)",
+        "color": "rgb(0, 0, 0)",
+        "display": "flex",
+        "font_family": "Inter",
+        "font_size": "16px",
+        "height": "40px",
+        "margin": "0px",
+        "padding": "8px",
+        "position": "relative",
+        "width": "200px"
+      },
+      "element_path": "div.grid > div.entry",
       "id": "abc-123",
-      "timestamp": "2026-03-03T17:40:15Z",
+      "is_fixed": false,
+      "resolution_summary": null,
+      "screenshot": null,
       "tag_name": "div",
       "text_content": "Hello",
-      "element_path": "div.grid > div.entry",
-      "comment": "Fix the font",
-      "is_fixed": false,
-      "component_name": "Entry",
-      "bounding_box": {
-        "top": 10.0,
-        "left": 20.0,
-        "width": 100.0,
-        "height": 50.0
-      },
-      "computed_styles": {
-        "color": "rgb(0, 0, 0)",
-        "background_color": "rgb(255, 255, 255)",
-        "font_size": "16px",
-        "font_family": "Inter",
-        "padding": "8px",
-        "margin": "0px",
-        "width": "200px",
-        "height": "40px",
-        "display": "flex",
-        "position": "relative"
-      }
+      "timestamp": "2026-03-03T17:40:15Z"
     }
   ],
   "summary": {
-    "total": 1,
+    "acknowledged": 0,
+    "dismissed": 0,
     "pending": 1,
-    "resolved": 0
+    "resolved": 0,
+    "total": 1
   }
 }

@@ -6,6 +6,7 @@
     }
   ],
   "pageInfo": {
+    "endCursor": null,
     "hasNextPage": false
   }
 }

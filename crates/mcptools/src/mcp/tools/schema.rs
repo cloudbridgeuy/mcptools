@@ -1,21 +1,21 @@
 pub fn input_schema_for<T: schemars::JsonSchema>() -> serde_json::Value {
-    schema_value::<T>()
+    schema_value::<T>(true)
 }
 
 pub fn output_schema_for<T: schemars::JsonSchema>() -> serde_json::Value {
-    schema_value::<T>()
+    schema_value::<T>(false)
 }
 
-fn schema_value<T: schemars::JsonSchema>() -> serde_json::Value {
+fn schema_value<T: schemars::JsonSchema>(normalize: bool) -> serde_json::Value {
     let schema = schemars::schema_for!(T);
     let mut value = serde_json::to_value(&schema).unwrap_or(serde_json::json!({
         "type": "object",
     }));
-    strip_envelope(&mut value);
+    strip_envelope(&mut value, normalize);
     value
 }
 
-fn strip_envelope(value: &mut serde_json::Value) {
+fn strip_envelope(value: &mut serde_json::Value, normalize: bool) {
     let Some(root) = value.as_object_mut() else {
         return;
     };
@@ -24,8 +24,10 @@ fn strip_envelope(value: &mut serde_json::Value) {
     let Some(props) = root.get_mut("properties").and_then(|v| v.as_object_mut()) else {
         return;
     };
-    for (_, prop) in props.iter_mut() {
-        normalize_prop(prop);
+    if normalize {
+        for (_, prop) in props.iter_mut() {
+            normalize_prop(prop);
+        }
     }
 }
 

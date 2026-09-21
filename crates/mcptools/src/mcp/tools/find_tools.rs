@@ -1,6 +1,7 @@
 use super::JsonRpcError;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct FoundTool {
     pub name: String,
     pub domain: String,
@@ -9,7 +10,7 @@ pub struct FoundTool {
     pub input_schema: serde_json::Value,
 }
 
-#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct FoundTools {
     pub none: f64,
     pub tools: Vec<FoundTool>,

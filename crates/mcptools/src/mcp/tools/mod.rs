@@ -9,6 +9,9 @@ mod md;
 mod pdf;
 pub mod schema;
 
+#[cfg(test)]
+mod conformance_tests;
+
 use serde::{Deserialize, Serialize};
 
 // Re-export types needed by tool handlers

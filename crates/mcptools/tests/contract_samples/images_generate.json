@@ -3,7 +3,8 @@
     "/tmp/img-1.png"
   ],
   "model": "gpt-image-1",
-  "size": "1024x1024",
+  "output_format": "png",
   "quality": "high",
-  "output_format": "png"
+  "size": "1024x1024",
+  "usage": null
 }

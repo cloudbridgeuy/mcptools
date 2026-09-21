@@ -1,9 +1,11 @@
 {
   "pages": [
     {
+      "content": null,
       "id": "123",
+      "page_type": "page",
       "title": "Runbook",
-      "page_type": "page"
+      "url": null
     }
   ],
   "total": 1

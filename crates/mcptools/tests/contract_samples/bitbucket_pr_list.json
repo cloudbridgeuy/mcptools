@@ -1,12 +1,14 @@
 {
+  "next_page": null,
   "pull_requests": [
     {
-      "id": 1,
-      "title": "Fix",
       "author": "dev",
-      "state": "OPEN",
+      "destination_branch": "main",
+      "id": 1,
       "source_branch": "feat",
-      "destination_branch": "main"
+      "state": "OPEN",
+      "title": "Fix"
     }
-  ]
+  ],
+  "total_count": null
 }
