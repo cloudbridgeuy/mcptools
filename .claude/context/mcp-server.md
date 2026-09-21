@@ -21,6 +21,7 @@ mcptools mcp sse --port 3000 --host 127.0.0.1
 For web-based clients using Server-Sent Events over HTTP.
 
 mcptools mcp catalog # Print the compact tool catalog (domain, name, summary)
+mcptools mcp declarations [NAME...] # Print TypeScript declarations for named tools (all tools without names)
 
 ## Claude Desktop Configuration
 
