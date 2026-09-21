@@ -133,6 +133,27 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `ui_annotations_resolve` | Mark annotation as resolved |
 | `ui_annotations_clear` | Clear all annotations |
 
+### Find tools
+
+| Tool | Description |
+|------|-------------|
+| `find_tools` | Ranks registered tools for a task description. Returns `none` score, `tools` list, `backend` ("local" or "jev"), and optional `fallback` ("unreachable" | "http_status" | "invalid_response" | "invalid_config"). |
+
+`find_tools` is advisory: it never dispatches a tool, and a Jev outage never blocks the caller.
+
+**Jev environment variables**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JEV_PROVIDER` | unset | `opencode`, `openrouter`, `vercel` or `typesafe` to enable Jev classifier |
+| `JEV_ENDPOINT` | provider preset | Override endpoint URL |
+| `JEV_MODEL` | provider preset | Override model name |
+| `JEV_API_KEY` | (none) | API key; falls back to the provider's conventional key var |
+| `OPENCODE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=opencode` |
+| `OPENROUTER_API_KEY` | - | Conventional key var when `JEV_PROVIDER=openrouter` |
+| `AI_GATEWAY_API_KEY` | - | Conventional key var when `JEV_PROVIDER=vercel` |
+| `TYPESAFE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=typesafe` |
+
 ## Testing with curl
 
 ```bash

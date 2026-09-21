@@ -60,6 +60,19 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | `ATLAS_FILE_MODEL` | `gpt-5.6-luna` | Model for file descriptions |
 | `ATLAS_DIR_MODEL` | `gpt-5.6-luna` | Model for directory descriptions |
 
+**Jev**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JEV_PROVIDER` | unset | `opencode`, `openrouter`, `vercel` or `typesafe` to enable Jev classifier |
+| `JEV_ENDPOINT` | provider preset | Override endpoint URL |
+| `JEV_MODEL` | provider preset | Override model name |
+| `JEV_API_KEY` | (none) | API key; falls back to the provider's conventional key var |
+| `OPENCODE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=opencode` |
+| `OPENROUTER_API_KEY` | - | Conventional key var when `JEV_PROVIDER=openrouter` |
+| `AI_GATEWAY_API_KEY` | - | Conventional key var when `JEV_PROVIDER=vercel` |
+| `TYPESAFE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=typesafe` |
+
 ## Detailed Documentation
 
 For detailed usage of each feature, see the context files:

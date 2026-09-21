@@ -83,6 +83,21 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 | `OPENAI_API_KEY` | Key for `--api openai` |
 | `OPENAI_BASE_URL` | Base URL for `--api openai` (default: `https://api.openai.com/v1`) |
 
+## Jev Variables
+
+| Variable | Description |
+|----------|-------------|
+| `JEV_PROVIDER` | `opencode`, `openrouter`, `vercel` or `typesafe` to enable Jev (unset selects local) |
+| `JEV_ENDPOINT` | Override gateway endpoint (defaults from provider) |
+| `JEV_MODEL` | Override model (defaults from provider) |
+| `JEV_API_KEY` | API key (falls back to the provider's conventional variable) |
+| `OPENCODE_API_KEY` | Key used by `opencode` preset |
+| `OPENROUTER_API_KEY` | Key used by `openrouter` preset |
+| `AI_GATEWAY_API_KEY` | Key used by `vercel` preset |
+| `TYPESAFE_API_KEY` | Key used by `typesafe` preset |
+
+On `jev-1.13-free` the full 61-tool catalog plus `none` returns in under 1.2 s per call. `none` separates in-scope from out-of-scope tasks except for one near-miss. The 0.05-floor selection rule matches the live probabilities for every query the spike ran. This covers the `opencode` preset only; other presets are unverified beyond gateway documentation.
+
 ## Usage Examples
 
 ### Scripting
