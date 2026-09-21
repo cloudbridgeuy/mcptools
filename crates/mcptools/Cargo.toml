@@ -50,5 +50,8 @@ ignore = { workspace = true }
 terminal_size = { workspace = true }
 tempfile = "3.8"
 
+[dev-dependencies]
+jsonschema = { workspace = true }
+
 [package.metadata.cargo-machete]
 ignored = []
