@@ -29,127 +29,6 @@ fn tools_list() -> serde_json::Value {
     serde_json::from_str(&line).unwrap()
 }
 
-fn deref<'a>(schema: &'a serde_json::Value, root: &'a serde_json::Value) -> &'a serde_json::Value {
-    match schema.get("$ref").and_then(|v| v.as_str()) {
-        Some(r) => {
-            let mut current = root;
-            for segment in r
-                .trim_start_matches('#')
-                .split('/')
-                .filter(|s| !s.is_empty())
-            {
-                current = &current[segment];
-            }
-            current
-        }
-        None => schema,
-    }
-}
-
-fn matches_type(value: &serde_json::Value, name: &str) -> bool {
-    match name {
-        "string" => value.is_string(),
-        "integer" => value.is_i64() || value.is_u64(),
-        "number" => value.is_number(),
-        "boolean" => value.is_boolean(),
-        "array" => value.is_array(),
-        "object" => value.is_object(),
-        "null" => value.is_null(),
-        _ => true,
-    }
-}
-
-fn check(
-    value: &serde_json::Value,
-    schema: &serde_json::Value,
-    root: &serde_json::Value,
-    path: &str,
-    errors: &mut Vec<String>,
-) {
-    if schema.is_boolean() {
-        return;
-    }
-    let schema = deref(schema, root);
-    if let Some(branches) = schema.get("anyOf").and_then(|v| v.as_array()) {
-        let mut probe = Vec::new();
-        for branch in branches {
-            let mut trial = Vec::new();
-            check(value, branch, root, path, &mut trial);
-            if trial.is_empty() {
-                return;
-            }
-            probe.extend(trial);
-        }
-        errors.push(format!("{path}: no anyOf branch matched"));
-        errors.extend(probe);
-        return;
-    }
-    match schema.get("type") {
-        Some(serde_json::Value::String(name)) => {
-            if !matches_type(value, name) {
-                errors.push(format!("{path}: expected {name}, got {value}"));
-                return;
-            }
-        }
-        Some(serde_json::Value::Array(names)) => {
-            let ok = names
-                .iter()
-                .filter_map(|n| n.as_str())
-                .any(|n| matches_type(value, n));
-            if !ok {
-                errors.push(format!("{path}: expected {names:?}, got {value}"));
-                return;
-            }
-        }
-        _ => {}
-    }
-    if let Some(allowed) = schema.get("enum").and_then(|v| v.as_array()) {
-        if !allowed.contains(value) {
-            errors.push(format!("{path}: {value} not in {allowed:?}"));
-        }
-    }
-    if !value.is_object() && !value.is_array() {
-        return;
-    }
-    if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
-        let object = value.as_object().unwrap();
-        for key in required.iter().filter_map(|k| k.as_str()) {
-            if !object.contains_key(key) {
-                errors.push(format!("{path}: missing required field {key}"));
-            }
-        }
-    }
-    if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
-        if let Some(object) = value.as_object() {
-            for (key, subschema) in properties {
-                if let Some(field) = object.get(key) {
-                    check(field, subschema, root, &format!("{path}.{key}"), errors);
-                }
-            }
-        }
-    }
-    if let Some(items) = schema.get("items") {
-        if let Some(array) = value.as_array() {
-            for (index, item) in array.iter().enumerate() {
-                check(item, items, root, &format!("{path}[{index}]"), errors);
-            }
-        }
-    }
-    if let Some(prefix) = schema.get("prefixItems").and_then(|v| v.as_array()) {
-        if let Some(array) = value.as_array() {
-            for (subschema, item) in prefix.iter().zip(array.iter()) {
-                check(item, subschema, root, path, errors);
-            }
-        }
-    }
-}
-
-fn validate(value: &serde_json::Value, schema: &serde_json::Value) -> Vec<String> {
-    let mut errors = Vec::new();
-    check(value, schema, schema, "$", &mut errors);
-    errors
-}
-
 fn sample(name: &str) -> serde_json::Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -189,7 +68,15 @@ fn mcp_contract_all() {
             "bad inputSchema type in {name}"
         );
         let recorded = sample(name);
-        let errors = validate(&recorded, output);
+        let validator = jsonschema::draft202012::new(output)
+            .unwrap_or_else(|e| panic!("invalid outputSchema for {name}: {e}"));
+        let mut errors = Vec::new();
+        for error in validator.iter_errors(&recorded) {
+            let path = error.instance_path().as_str();
+            let path = if path.is_empty() { "/" } else { path };
+            let msg = error.to_string();
+            errors.push(format!("{name}: {path}: {msg}"));
+        }
         assert!(
             errors.is_empty(),
             "sample failed schema in {name}: {errors:?}"
