@@ -99,6 +99,18 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 
 On `jev-1.13-free` the full 61-tool catalog plus `none` returns in under 1.2 s per call. `none` separates in-scope from out-of-scope tasks except for one near-miss. The 0.05-floor selection rule matches the live probabilities for every query the spike ran. This covers the `opencode` preset only; other presets are unverified beyond gateway documentation.
 
+Live run against the `opencode` preset, one row per query (`JEV_PROVIDER=opencode`, `-k 5`, timed per call):
+
+| task | backend | fallback | none | tools | latency |
+|------|---------|----------|------|-------|---------|
+| `mark the ticket done` | `jev` | — | 0.01 | `jira_update`, `linear_issue_update` | 1.2 s |
+| `table of contents of this pdf` | `jev` | — | 0.0 | `pdf_toc` | 1.4 s |
+| `table of contents of this web page` | `jev` | — | 0.0 | `md_toc` | 1.2 s |
+| `update the jira comment I just listed` | `jev` | — | 0.0 | `jira_comment_update` | 1.2 s |
+| `jira_comment_update` | `jev` | — | 0.0 | `jira_comment_update` | 1.9 s |
+| `pdf_toc` | `jev` | — | 0.0 | `pdf_toc` | 1.1 s |
+| `book a flight to Paris` | `jev` | — | 1.0 | — | 1.1 s |
+
 ## Usage Examples
 
 ### Scripting

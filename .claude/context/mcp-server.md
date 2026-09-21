@@ -155,6 +155,15 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `AI_GATEWAY_API_KEY` | - | Conventional key var when `JEV_PROVIDER=vercel` |
 | `TYPESAFE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=typesafe` |
 
+## Agent loop
+
+1. Call `find_tools` with a task that names the system (e.g. "mark the Jira ticket done", not "mark it done").
+2. Read the returned `inputSchema` on the tool(s) of interest.
+3. Call the tool by name through `tools/call`.
+4. For a same-domain follow-up (e.g. `jira_comment_list` then `jira_comment_update`), call the follow-up tool directly; do not call `find_tools` again.
+5. `find_tools` is advisory: it never dispatches a tool, and Jev is consulted only inside `find_tools` itself, never in front of or around any other tool call.
+6. In discovery mode the loop needs a host that can call a tool absent from `tools/list` — see the Known limitation in [Discovery mode](#discovery-mode) below; this section restates none of that text.
+
 ## Discovery mode
 
 Enable with the `--discovery` flag or the `MCPTOOLS_DISCOVERY` environment
