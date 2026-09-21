@@ -17,11 +17,22 @@ pub enum Backend {
     Local,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackReason {
+    Unreachable,
+    HttpStatus,
+    InvalidResponse,
+    InvalidConfig,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct FoundTools {
     pub none: f64,
     pub tools: Vec<FoundTool>,
     pub backend: Backend,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<FallbackReason>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -32,7 +43,11 @@ pub struct FindToolsArgs {
     pub k: Option<usize>,
 }
 
-fn attach_schemas(ranking: mcptools_core::find_tools::Ranking, backend: Backend) -> FoundTools {
+fn attach_schemas(
+    ranking: mcptools_core::find_tools::Ranking,
+    backend: Backend,
+    fallback: Option<FallbackReason>,
+) -> FoundTools {
     let registered = super::registered_tools();
     let tools: Vec<FoundTool> = ranking
         .tools
@@ -53,6 +68,7 @@ fn attach_schemas(ranking: mcptools_core::find_tools::Ranking, backend: Backend)
         none: ranking.none,
         tools,
         backend,
+        fallback,
     }
 }
 
@@ -63,20 +79,41 @@ pub async fn find_tools_with(
 ) -> Result<FoundTools, mcptools_core::find_tools::FindToolsError> {
     let catalog = super::tool_catalog();
     let local = mcptools_core::find_tools::rank_tools(task, &catalog, k)?;
-    let cfg = match config {
-        Ok(Some(c)) => c,
-        _ => return Ok(attach_schemas(local, Backend::Local)),
-    };
-    let body = mcptools_core::jev::build_request(task, &catalog, &cfg.model);
-    match crate::jev::classify(&cfg, &body).await {
-        Ok(text) => match mcptools_core::jev::parse_ranking(&text, &catalog) {
-            Ok(r) => {
-                let sel = mcptools_core::jev::select(r, k);
-                Ok(attach_schemas(sel, Backend::Jev))
+    match config {
+        Ok(Some(cfg)) => {
+            let body = mcptools_core::jev::build_request(task, &catalog, &cfg.model);
+            match crate::jev::classify(&cfg, &body).await {
+                Ok(text) => match mcptools_core::jev::parse_ranking(&text, &catalog) {
+                    Ok(r) => {
+                        let sel = mcptools_core::jev::select(r, k);
+                        Ok(attach_schemas(sel, Backend::Jev, None))
+                    }
+                    Err(mcptools_core::jev::ClassifyError::MalformedBody)
+                    | Err(mcptools_core::jev::ClassifyError::MissingAnswer) => Ok(attach_schemas(
+                        local,
+                        Backend::Local,
+                        Some(FallbackReason::InvalidResponse),
+                    )),
+                },
+                Err(crate::jev::JevError::Unreachable) => Ok(attach_schemas(
+                    local,
+                    Backend::Local,
+                    Some(FallbackReason::Unreachable),
+                )),
+                Err(crate::jev::JevError::HttpStatus) => Ok(attach_schemas(
+                    local,
+                    Backend::Local,
+                    Some(FallbackReason::HttpStatus),
+                )),
             }
-            Err(_) => Ok(attach_schemas(local, Backend::Local)),
-        },
-        Err(_) => Ok(attach_schemas(local, Backend::Local)),
+        }
+        Ok(None) => Ok(attach_schemas(local, Backend::Local, None)),
+        Err(mcptools_core::jev::ConfigError::UnknownProvider)
+        | Err(mcptools_core::jev::ConfigError::MissingKey) => Ok(attach_schemas(
+            local,
+            Backend::Local,
+            Some(FallbackReason::InvalidConfig),
+        )),
     }
 }
 
@@ -333,7 +370,120 @@ mod find_tools_tests {
             .await
             .unwrap();
         assert_eq!(jev_res.backend, Backend::Local);
+        assert_eq!(jev_res.fallback, Some(FallbackReason::HttpStatus));
         let local_res = find_tools_with(Ok(None), "close GUZ-22", 5).await.unwrap();
         assert_eq!(jev_res.tools, local_res.tools);
+        assert_eq!(local_res.fallback, None);
+    }
+
+    #[tokio::test]
+    async fn fallback_on_garbage_body_is_invalid_response() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let url = spawn_stub(vec![Stub::ok("not json")], hits).await;
+        let cfg = mcptools_core::jev::GatewayConfig {
+            endpoint: url,
+            model: "test".into(),
+            api_key: mcptools_core::jev::Secret::new("k"),
+        };
+        let res = find_tools_with(Ok(Some(cfg)), "close GUZ-22", 5)
+            .await
+            .unwrap();
+        assert_eq!(res.backend, Backend::Local);
+        assert_eq!(res.fallback, Some(FallbackReason::InvalidResponse));
+    }
+
+    #[tokio::test]
+    async fn fallback_on_closed_port_is_unreachable() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let url = format!("http://{}", addr);
+        let cfg = mcptools_core::jev::GatewayConfig {
+            endpoint: url,
+            model: "test".into(),
+            api_key: mcptools_core::jev::Secret::new("k"),
+        };
+        let res = find_tools_with(Ok(Some(cfg)), "close GUZ-22", 5)
+            .await
+            .unwrap();
+        assert_eq!(res.backend, Backend::Local);
+        assert_eq!(res.fallback, Some(FallbackReason::Unreachable));
+    }
+
+    #[tokio::test]
+    async fn fallback_on_401_is_http_status() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let url = spawn_stub(
+            vec![Stub {
+                status: 401,
+                headers: vec![],
+                body: "",
+                delay_ms: 0,
+            }],
+            hits,
+        )
+        .await;
+        let cfg = mcptools_core::jev::GatewayConfig {
+            endpoint: url,
+            model: "test".into(),
+            api_key: mcptools_core::jev::Secret::new("k"),
+        };
+        let res = find_tools_with(Ok(Some(cfg)), "close GUZ-22", 5)
+            .await
+            .unwrap();
+        assert_eq!(res.backend, Backend::Local);
+        assert_eq!(res.fallback, Some(FallbackReason::HttpStatus));
+    }
+
+    #[tokio::test]
+    async fn fallback_on_unknown_provider_is_invalid_config() {
+        let err = mcptools_core::jev::gateway_config(|k| {
+            (k == "JEV_PROVIDER").then(|| "bogus".to_string())
+        });
+        let res = find_tools_with(err, "close GUZ-22", 5).await.unwrap();
+        assert_eq!(res.backend, Backend::Local);
+        assert_eq!(res.fallback, Some(FallbackReason::InvalidConfig));
+    }
+
+    #[tokio::test]
+    async fn fallback_on_missing_key_is_invalid_config() {
+        let err = mcptools_core::jev::gateway_config(|k| {
+            (k == "JEV_PROVIDER").then(|| "opencode".to_string())
+        });
+        let res = find_tools_with(err, "close GUZ-22", 5).await.unwrap();
+        assert_eq!(res.backend, Backend::Local);
+        assert_eq!(res.fallback, Some(FallbackReason::InvalidConfig));
+    }
+
+    #[tokio::test]
+    async fn secret_never_leaks() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let url = spawn_stub(
+            vec![Stub {
+                status: 401,
+                headers: vec![],
+                body: "",
+                delay_ms: 0,
+            }],
+            hits,
+        )
+        .await;
+        let sentinel = "sentinel-key-zz99";
+        let cfg = mcptools_core::jev::GatewayConfig {
+            endpoint: url,
+            model: "test".into(),
+            api_key: mcptools_core::jev::Secret::new(sentinel),
+        };
+        assert!(!format!("{:?}", cfg).contains(sentinel));
+        let res = find_tools_with(Ok(Some(cfg)), "close GUZ-22", 5)
+            .await
+            .unwrap();
+        let json = serde_json::to_string(&res).unwrap();
+        assert!(!json.contains(sentinel));
+        assert!(!format!("{:?}", mcptools_core::jev::ConfigError::MissingKey).contains(sentinel));
+        assert!(!format!("{:?}", crate::jev::JevError::HttpStatus).contains(sentinel));
+        assert!(
+            !format!("{:?}", mcptools_core::jev::ClassifyError::MalformedBody).contains(sentinel)
+        );
     }
 }
