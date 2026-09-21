@@ -681,6 +681,30 @@ pub fn tool_catalog() -> Vec<mcptools_core::catalog::CatalogEntry> {
     )
 }
 
+pub fn declaration(tool: &Tool) -> String {
+    mcptools_core::ts_decl::tool_declaration(
+        &tool.name,
+        &tool.description,
+        &tool.input_schema,
+        &tool.output_schema,
+    )
+}
+
+pub fn declarations(names: &[String]) -> crate::prelude::Result<String> {
+    let tools = registered_tools();
+    if names.is_empty() {
+        return Ok(tools.iter().map(declaration).collect::<Vec<_>>().join("\n"));
+    }
+    let mut blocks = Vec::with_capacity(names.len());
+    for name in names {
+        match tools.iter().find(|tool| &tool.name == name) {
+            Some(tool) => blocks.push(declaration(tool)),
+            None => return Err(crate::prelude::eyre!("unknown tool: {name}")),
+        }
+    }
+    Ok(blocks.join("\n"))
+}
+
 pub async fn handle_tools_call(
     params: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1109,5 +1133,64 @@ mod catalog_tests {
     fn catalog_never_contains_a_tool_named_none() {
         let catalog = super::tool_catalog();
         assert!(!catalog.iter().any(|e| e.name == "none"));
+    }
+}
+
+#[cfg(test)]
+mod declaration_tests {
+    use super::*;
+
+    fn named(name: &str) -> Tool {
+        super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == name)
+            .unwrap()
+    }
+
+    #[test]
+    fn jira_search_declaration() {
+        let tool = named("jira_search");
+        let head = "interface JiraSearchInput {\n  limit?: number;\n  nextPageToken?: string;\n  query?: string;\n  queryName?: string;\n}\n\ninterface JiraSearchIssueOutput {\n  assignee?: string | null;\n  description?: string | null;\n  key: string;\n  status: string;\n  summary: string;\n}\n\ninterface JiraSearchOutput {\n  issues: JiraSearchIssueOutput[];\n  next_page_token?: string | null;\n  total: number;\n}\n\n";
+        let want =
+            format!("{head}/** {} */\ndeclare function jira_search(input: JiraSearchInput): Promise<JiraSearchOutput>;\n", tool.description);
+        assert_eq!(super::declaration(&tool), want);
+    }
+
+    #[test]
+    fn pdf_read_declaration() {
+        let tool = named("pdf_read");
+        let head = "interface PdfReadInput {\n  path: string;\n  sectionId?: string;\n}\n\ntype PdfReadImageFormat = \"Jpeg\" | \"Png\" | \"Jpeg2000\" | \"Gif\" | \"Tiff\" | \"Bmp\" | \"WebP\" | \"Unknown\";\n\ntype PdfReadImageId = string;\n\ninterface PdfReadImageRef {\n  format: PdfReadImageFormat;\n  id: PdfReadImageId;\n}\n\ntype PdfReadSectionId = string;\n\ninterface PdfReadOutput {\n  id: PdfReadSectionId;\n  images: PdfReadImageRef[];\n  text: string;\n  title: string;\n}\n\n";
+        let want =
+            format!("{head}/** {} */\ndeclare function pdf_read(input: PdfReadInput): Promise<PdfReadOutput>;\n", tool.description);
+        assert_eq!(super::declaration(&tool), want);
+    }
+
+    #[test]
+    fn linear_issue_list_declaration() {
+        let tool = named("linear_issue_list");
+        let head = "interface LinearIssueListInput {\n  /** Fetch all pages (up to 50 items) */\n  all?: boolean;\n  /** Assignee user UUID or 'me' */\n  assignee?: string;\n  /** Page cursor for pagination */\n  cursor?: string;\n  /** Cycle number or id */\n  cycle?: string;\n  /** Label name */\n  label?: string;\n  /** Max items per page @default 25 */\n  limit?: number;\n  /** Project id or name (names need team) */\n  project?: string;\n  /** Title substring to search */\n  query?: string;\n  /** Workflow state name (e.g. Todo) */\n  state?: string;\n  /** Team id, key, or name */\n  team?: string;\n  /** Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z) */\n  updatedAfter?: string;\n}\n\ninterface LinearIssueListIssueMini {\n  blocked_by?: string[];\n  description?: string | null;\n  id: string;\n  identifier: string;\n  parent?: string | null;\n  state: string;\n  title: string;\n  url: string;\n}\n\ninterface LinearIssueListPageInfo {\n  endCursor?: string | null;\n  hasNextPage: boolean;\n}\n\ninterface LinearIssueListOutput {\n  nodes: LinearIssueListIssueMini[];\n  pageInfo: LinearIssueListPageInfo;\n}\n\n";
+        let want =
+            format!("{head}/** {} */\ndeclare function linear_issue_list(input: LinearIssueListInput): Promise<LinearIssueListOutput>;\n", tool.description);
+        assert_eq!(super::declaration(&tool), want);
+    }
+
+    #[test]
+    fn declarations_keep_given_order_and_reject_unknown() {
+        let names = vec!["pdf_read".to_string(), "jira_search".to_string()];
+        let text = super::declarations(&names).unwrap();
+        assert!(
+            text.find("declare function pdf_read").unwrap()
+                < text.find("declare function jira_search").unwrap()
+        );
+        assert!(text.ends_with(";\n") && !text.ends_with("\n\n"));
+
+        let all = super::declarations(&[]).unwrap();
+        assert_eq!(
+            all.matches("declare function ").count(),
+            super::registered_tools().len()
+        );
+
+        let err = super::declarations(&["nope_tool".to_string()]).unwrap_err();
+        assert!(err.to_string().contains("nope_tool"));
     }
 }

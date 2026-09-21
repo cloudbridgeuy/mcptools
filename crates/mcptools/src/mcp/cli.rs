@@ -21,6 +21,12 @@ pub enum Commands {
         about = "Print the compact tool catalog: domain, name, summary"
     )]
     Catalog,
+
+    #[command(
+        name = "declarations",
+        about = "Print TypeScript declarations for tools"
+    )]
+    Declarations { names: Vec<String> },
 }
 
 #[derive(Debug, clap::Args)]

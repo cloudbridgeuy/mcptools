@@ -69,6 +69,10 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
             );
             Ok(())
         }
+        cli::Commands::Declarations { names } => {
+            print!("{}", tools::declarations(&names)?);
+            Ok(())
+        }
     }
 }
 
