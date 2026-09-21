@@ -952,6 +952,100 @@ mod catalog_tests {
     }
 
     #[test]
+    fn registered_names_match_oracle_sets() {
+        let write: std::collections::BTreeSet<&str> = [
+            "jira_create",
+            "jira_update",
+            "jira_comment_add",
+            "jira_comment_update",
+            "jira_comment_delete",
+            "jira_attachment_upload",
+            "jira_query_save",
+            "jira_query_delete",
+            "bitbucket_pr_create",
+            "linear_issue_create",
+            "linear_issue_update",
+            "linear_comment_create",
+            "linear_relation_add",
+            "linear_relation_remove",
+            "ui_annotations_resolve",
+            "ui_annotations_clear",
+        ]
+        .into_iter()
+        .collect();
+        let spend: std::collections::BTreeSet<&str> =
+            ["images_generate", "images_edit", "images_vary"]
+                .into_iter()
+                .collect();
+        let read: std::collections::BTreeSet<&str> = [
+            "jira_search",
+            "confluence_search",
+            "hn_read_item",
+            "hn_list_items",
+            "md_fetch",
+            "md_toc",
+            "jira_get",
+            "jira_comment_list",
+            "jira_sprint_list",
+            "jira_attachment_list",
+            "jira_attachment_download",
+            "jira_query_list",
+            "jira_query_load",
+            "bitbucket_pr_list",
+            "bitbucket_pr_read",
+            "bitbucket_workspace_list",
+            "bitbucket_repo_list",
+            "bitbucket_repo_branches",
+            "ui_annotations_list",
+            "ui_annotations_get",
+            "pdf_toc",
+            "pdf_read",
+            "pdf_peek",
+            "pdf_images",
+            "pdf_image",
+            "pdf_info",
+            "atlas_tree_view",
+            "atlas_peek",
+            "atlas_status",
+            "linear_auth_status",
+            "linear_issue_get",
+            "linear_issue_list",
+            "linear_comment_list",
+            "linear_relation_list",
+            "linear_team_list",
+            "linear_team_get",
+            "linear_project_list",
+            "linear_project_get",
+            "linear_user_list",
+            "linear_state_list",
+            "linear_label_list",
+            "linear_cycle_list",
+            "find_tools",
+        ]
+        .into_iter()
+        .collect();
+        let union: std::collections::BTreeSet<&str> =
+            write.union(&spend).chain(read.iter()).copied().collect();
+        assert_eq!(union.len(), 62);
+        let mut actual_write = BTreeSet::new();
+        let mut actual_spend = BTreeSet::new();
+        let mut actual_read = BTreeSet::new();
+        for tool in super::registered_tools() {
+            match tool.kind {
+                super::ToolKind::Write => actual_write.insert(tool.name),
+                super::ToolKind::Spend => actual_spend.insert(tool.name),
+                super::ToolKind::Read => actual_read.insert(tool.name),
+            };
+        }
+        let names = |set: std::collections::BTreeSet<&str>| {
+            set.into_iter().map(str::to_string).collect::<BTreeSet<_>>()
+        };
+        assert_eq!(actual_write, names(write));
+        assert_eq!(actual_spend, names(spend));
+        assert_eq!(actual_read, names(read));
+    }
+
+    #[test]
     fn pilot_entries_carry_kind_annotations() {
         let list = super::handle_tools_list().unwrap();
         let tools = list["tools"].as_array().unwrap();
