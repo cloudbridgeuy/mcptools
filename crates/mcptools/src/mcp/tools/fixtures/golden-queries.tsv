@@ -41,3 +41,10 @@ update my macOS version	NONE	adversarial
 read my email inbox	NONE	adversarial
 create a docker container	NONE	adversarial
 search flights to madrid	NONE	adversarial
+mark the ticket done	linear_issue_update,jira_update	required
+table of contents of this pdf	pdf_toc	required
+table of contents of this web page	md_toc	required
+update the jira comment I just listed	jira_comment_update	required
+jira_comment_update	jira_comment_update	required
+pdf_toc	pdf_toc	required
+book a flight to Paris	NONE	required

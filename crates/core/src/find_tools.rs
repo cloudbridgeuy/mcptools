@@ -27,11 +27,20 @@ fn stem(token: &str) -> String {
     }
 }
 
+fn synonym(stem: &str) -> &str {
+    match stem {
+        "mark" => "update",
+        "done" | "resolv" | "resolve" | "finish" => "close",
+        "ticket" => "issue",
+        _ => stem,
+    }
+}
+
 fn tokenize(text: &str) -> Vec<String> {
     let lower = text.to_lowercase().replace('_', " ");
     get_token_re()
         .find_iter(&lower)
-        .map(|m| stem(m.as_str()))
+        .map(|m| synonym(&stem(m.as_str())).to_string())
         .collect()
 }
 
@@ -155,6 +164,16 @@ pub fn rank_tools(
 mod tests {
     use super::*;
     use crate::catalog::build_catalog;
+
+    #[test]
+    fn tokenize_maps_synonyms() {
+        assert_eq!(
+            tokenize("mark the ticket done"),
+            vec!["update", "the", "issue", "close"]
+        );
+        assert_eq!(tokenize("resolved"), vec!["close"]);
+        assert_eq!(tokenize("resolve"), vec!["close"]);
+    }
 
     #[test]
     fn rank_tools_orders_by_score_descending() {

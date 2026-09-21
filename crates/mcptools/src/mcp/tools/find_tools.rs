@@ -212,6 +212,35 @@ mod find_tools_tests {
     }
 
     #[tokio::test]
+    async fn required_rows_each_pass() {
+        let rows = parse_golden();
+        let required: Vec<_> = rows.iter().filter(|(_, _, k)| k == "required").collect();
+        let mut none_scores = vec![];
+        let mut failing = vec![];
+        for (task, expected, _) in &required {
+            let res = find_tools(task, 5).await.unwrap();
+            let names: Vec<_> = res.tools.iter().map(|t| t.name.as_str()).collect();
+            if let Some(exps) = expected {
+                let top1_ok = names.first().is_some_and(|t| exps.iter().any(|e| e == t));
+                let all_in = exps.iter().all(|e| names.contains(&e.as_str()));
+                none_scores.push(res.none);
+                if !(top1_ok && all_in) {
+                    failing.push(task.clone());
+                }
+            }
+        }
+        for (task, expected, _) in &required {
+            if expected.is_none() {
+                let res = find_tools(task, 5).await.unwrap();
+                if !none_scores.iter().all(|&n| n < res.none) {
+                    failing.push(task.clone());
+                }
+            }
+        }
+        assert!(failing.is_empty(), "required rows failed: {failing:?}");
+    }
+
+    #[tokio::test]
     async fn close_guz_22_ranks_linear_issue_update_in_top_5() {
         let res = find_tools("close GUZ-22", 5).await.unwrap();
         assert!(res.tools.iter().any(|t| t.name == "linear_issue_update"));
