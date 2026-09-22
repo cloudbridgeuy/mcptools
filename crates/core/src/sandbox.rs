@@ -82,6 +82,13 @@ impl From<OutputLimit> for SandboxError {
     }
 }
 
+pub fn tool_result(envelope: serde_json::Value) -> serde_json::Value {
+    envelope
+        .get("structuredContent")
+        .cloned()
+        .unwrap_or(envelope)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +117,22 @@ mod tests {
             result: serde_json::json!(""),
         };
         assert_eq!(over_cap.check_size(4), Err(OutputLimit(4)));
+    }
+
+    #[test]
+    fn tool_result_prefers_structured_content() {
+        let envelope = serde_json::json!({
+            "content": [{"type": "text", "text": "{}"}],
+            "structuredContent": {"tools": []},
+        });
+        assert_eq!(tool_result(envelope), serde_json::json!({"tools": []}));
+    }
+
+    #[test]
+    fn tool_result_falls_back_to_envelope() {
+        let envelope = serde_json::json!({
+            "content": [{"type": "text", "text": "{}"}],
+        });
+        assert_eq!(tool_result(envelope.clone()), envelope);
     }
 }
