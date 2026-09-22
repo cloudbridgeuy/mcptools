@@ -138,7 +138,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 
 | Tool | Description |
 |------|-------------|
-| `find_tools` | Ranks registered tools for a task description. Returns `none` score, `tools` list, `backend` ("local" or "jev"), and optional `fallback` ("unreachable" | "http_status" | "invalid_response" | "invalid_config"). |
+| `find_tools` | Ranks registered tools for a task description. Returns `none` score, `tools` list with a TypeScript `declaration` per tool, `backend` ("local" or "jev"), optional `fallback` ("unreachable" | "http_status" | "invalid_response" | "invalid_config"), and `usage`. |
 
 `find_tools` is advisory: it never dispatches a tool, and a Jev outage never blocks the caller.
 
@@ -158,7 +158,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 ## Agent loop
 
 1. Call `find_tools` with a task that names the system (e.g. "mark the Jira ticket done", not "mark it done").
-2. Read the returned `inputSchema` on the tool(s) of interest.
+2. Read the returned `declaration` on the tool(s) of interest.
 3. Call the tool by name through `tools/call`.
 4. For a same-domain follow-up (e.g. `jira_comment_list` then `jira_comment_update`), call the follow-up tool directly; do not call `find_tools` again.
 5. `find_tools` is advisory: it never dispatches a tool, and Jev is consulted only inside `find_tools` itself, never in front of or around any other tool call.
@@ -174,8 +174,9 @@ saves no context.
 
 Known limitation, planned and undesigned: hosts that declare only listed
 tools to the model, such as Claude Code, cannot yet call the tool
-`find_tools` returns, because it is absent from `tools/list`. A future
-`execute` command is planned to close this gap.
+`find_tools` returns, because it is absent from `tools/list`. The returned
+declarations name the tools/call arguments and results of every tool they
+carry. A future `execute` command is planned to close this gap.
 
 ## Testing with curl
 

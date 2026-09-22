@@ -211,7 +211,7 @@ mcptools mcp catalog # Print the compact tool catalog (domain, name, summary)
 mcptools mcp declarations [NAME...] # Print TypeScript declarations for named tools (all tools without names)
 ```
 
-Find `find_tools` with a task that names the system, read the schema, call the tool by name, and call same-domain follow-ups directly without another `find_tools` call. See [.claude/context/mcp-server.md#agent-loop](.claude/context/mcp-server.md#agent-loop) for the full loop and the discovery-mode limitation.
+Find `find_tools` with a task that names the system, read the declaration, call the tool by name, and call same-domain follow-ups directly without another `find_tools` call. See [.claude/context/mcp-server.md#agent-loop](.claude/context/mcp-server.md#agent-loop) for the full loop and the discovery-mode limitation.
 
 ## Setup Guides
 
