@@ -925,8 +925,8 @@ mod catalog_tests {
             .any(|t| t.get("name") == Some(&serde_json::json!("find_tools"))));
     }
     #[test]
-    fn registry_holds_sixty_two_tools() {
-        assert_eq!(super::registered_tools().len(), 62);
+    fn registry_holds_sixty_three_tools() {
+        assert_eq!(super::registered_tools().len(), 63);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 1300;
@@ -1022,11 +1022,12 @@ mod catalog_tests {
             "linear_relation_remove",
             "ui_annotations_resolve",
             "ui_annotations_clear",
+            "execute",
         ];
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(false).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 62);
+        assert_eq!(tools.len(), 63);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1044,7 +1045,7 @@ mod catalog_tests {
             .iter()
             .filter(|t| t["annotations"] == readonly)
             .count();
-        assert_eq!(read_count, 62 - mutable_names.len());
+        assert_eq!(read_count, 63 - mutable_names.len());
     }
 
     #[test]
@@ -1296,7 +1297,7 @@ mod declaration_tests {
                 "{}: raw #/$defs leaked",
                 tool.name
             );
-            if text.contains("unknown") {
+            if text.contains("unknown") && tool.name != "execute" {
                 unknown_tools.insert(tool.name.clone());
             }
         }

@@ -1,0 +1,10 @@
+{
+  "logs": [
+    "started"
+  ],
+  "result": 42,
+  "error": {
+    "message": "boom",
+    "name": "Error"
+  }
+}
