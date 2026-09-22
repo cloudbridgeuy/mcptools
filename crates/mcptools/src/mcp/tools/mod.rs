@@ -1,6 +1,7 @@
 mod annotations;
 mod atlas;
 mod atlassian;
+mod execute;
 mod find_tools;
 mod hn;
 mod images;
@@ -637,6 +638,14 @@ pub fn registered_tools() -> Vec<Tool> {
             summary: "Find the best-fitting tools for a task",
             kind: ToolKind::Read,
         },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::sandbox::ExecuteOutput>(),
+            name: "execute".to_string(),
+            description: execute::DESCRIPTION.to_string(),
+            input_schema: schema::input_schema_for::<execute::ExecuteArgs>(),
+            summary: "Run JavaScript that calls the tools find_tools returns",
+            kind: ToolKind::Write,
+        },
     ]
 }
 
@@ -676,7 +685,7 @@ pub fn tool_catalog() -> Vec<mcptools_core::catalog::CatalogEntry> {
     mcptools_core::catalog::build_catalog(
         registered_tools()
             .iter()
-            .filter(|tool| tool.name != "find_tools")
+            .filter(|tool| tool.name != "find_tools" && tool.name != "execute")
             .map(|tool| (tool.name.as_str(), tool.summary)),
     )
 }
@@ -811,6 +820,7 @@ pub async fn handle_tools_call(
             linear::handle_linear_relation_remove(params.arguments, global).await
         }
         "find_tools" => find_tools::handle_find_tools(params.arguments, global).await,
+        "execute" => execute::handle_execute(params.arguments, global).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),
@@ -848,15 +858,15 @@ mod catalog_tests {
     use std::collections::BTreeSet;
 
     #[test]
-    fn catalog_names_equal_registered_names_minus_find_tools() {
+    fn catalog_names_equal_registered_names_minus_find_tools_and_execute() {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
-        assert_eq!(catalog.len() + 1, registered.len());
+        assert_eq!(catalog.len() + 2, registered.len());
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
             .map(|tool| tool.name)
-            .filter(|n| n != "find_tools")
+            .filter(|n| n != "find_tools" && n != "execute")
             .collect();
         assert_eq!(catalog_names, registry_names);
     }
@@ -980,6 +990,20 @@ mod catalog_tests {
     }
 
     #[test]
+    fn execute_entry_is_destructive() {
+        let list = super::handle_tools_list(false).unwrap();
+        let tools = list["tools"].as_array().unwrap();
+        let entry = tools
+            .iter()
+            .find(|tool| tool.get("name") == Some(&serde_json::json!("execute")))
+            .expect("execute missing from tools/list");
+        assert_eq!(
+            entry["annotations"]["destructiveHint"],
+            serde_json::json!(true)
+        );
+    }
+
+    #[test]
     fn full_table_matches_oracle_annotations() {
         let write = [
             "jira_create",
@@ -1042,6 +1066,7 @@ mod catalog_tests {
             "linear_relation_remove",
             "ui_annotations_resolve",
             "ui_annotations_clear",
+            "execute",
         ]
         .into_iter()
         .collect();
@@ -1098,7 +1123,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 62);
+        assert_eq!(union.len(), 63);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();
