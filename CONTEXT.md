@@ -93,3 +93,38 @@ Issue update resolves a workflow state name against the **Team key** in the **Is
 #### Scenario: Stdin sentinel
 - **WHEN** `--body-file -`
 - **THEN** the process reads stdin to EOF for the body
+
+### Requirement: Execute tool
+The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`, and `error` in `structuredContent`. Limits come from the `--execute-timeout-secs`, `--execute-output-kb`, and `--execute-memory-mb` server flags. Gating is by tool kind: read tools bind by default, `allowWrites` adds write tools, `allowSpend` adds spend tools, and `execute` never binds as a global inside its own sandbox.
+
+#### Scenario: Success payload
+- **WHEN** the script finishes without throwing
+- **THEN** `structuredContent` holds `logs`, the final value as `result`, and `error: null`
+- **AND** the envelope has no `isError`
+
+#### Scenario: Script throws
+- **WHEN** the script throws a JavaScript error
+- **THEN** `error.name` is the error's own name and `error.message` is its message
+- **AND** `result` is `null`, `logs` keeps the lines printed before the throw, and the envelope has `isError: true`
+
+#### Scenario: Timeout
+- **WHEN** the run exceeds `--execute-timeout-secs`
+- **THEN** `error.name` is `TimeoutError`
+- **AND** `logs` keeps the lines printed before the deadline
+
+#### Scenario: Output cap
+- **WHEN** the logs and result exceed `--execute-output-kb`
+- **THEN** `error.name` is `OutputLimitError`
+- **AND** `logs` holds the lines that fit under the cap
+
+#### Scenario: Memory exhaustion
+- **WHEN** the script exhausts `--execute-memory-mb`
+- **THEN** `error.name` is `InternalError`
+
+#### Scenario: Kind gating
+- **WHEN** `execute` runs with neither `allowWrites` nor `allowSpend`
+- **THEN** only read tools bind as globals in the sandbox
+
+#### Scenario: Missing code
+- **WHEN** `tools/call` invokes `execute` without `code`
+- **THEN** the server returns a JSON-RPC error with code `-32602`

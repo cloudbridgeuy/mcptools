@@ -155,6 +155,47 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `AI_GATEWAY_API_KEY` | - | Conventional key var when `JEV_PROVIDER=vercel` |
 | `TYPESAFE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=typesafe` |
 
+### Execute
+
+| Tool | Description |
+|------|-------------|
+| `execute` | Run JavaScript in a sandbox that binds the tools `find_tools` returns |
+
+Inputs:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `code` | string | (required) | JavaScript to run; the final expression or top-level `return` value becomes `result` |
+| `allowWrites` | boolean | `false` | Also bind tools of kind Write |
+| `allowSpend` | boolean | `false` | Also bind tools of kind Spend |
+
+Result shape, the `structuredContent` object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `logs` | string[] | Lines captured from `console.log` up to the failure point |
+| `result` | any | Final expression or top-level return value; `null` when `error` is set |
+| `error` | object \| null | `null` on success; otherwise `{message, name}` |
+
+The envelope carries `isError: true` exactly when `error` is non-null. On
+failure `result` is `null` and `logs` still holds the lines printed before the
+failure.
+
+Error names:
+
+- `TimeoutError` — the run exceeded `--execute-timeout-secs`
+- `OutputLimitError` — the logs and result exceeded `--execute-output-kb`
+- JavaScript error names pass through unchanged (`TypeError`, `Error`, and so
+  on); memory exhaustion surfaces as `InternalError`
+
+Flag gating is by tool kind only: read tools bind by default, `allowWrites`
+adds write tools, `allowSpend` adds spend tools, and `execute` never binds as
+a global inside its own sandbox. A missing global rejects with QuickJS's
+`ReferenceError`.
+
+Limits come from the server flags `--execute-timeout-secs` (default 30),
+`--execute-memory-mb` (default 64), and `--execute-output-kb` (default 256).
+
 ## Agent loop
 
 1. Call `find_tools` with a task that names the system (e.g. "mark the Jira ticket done", not "mark it done").
@@ -169,7 +210,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 Enable with the `--discovery` flag or the `MCPTOOLS_DISCOVERY` environment
 variable, accepted values `true` or `false` only. In this mode `tools/list`
 returns exactly one tool, `find_tools`; `tools/call` still dispatches every
-real tool by name. Without this mode, hosts load all 62 schemas and Jev
+real tool by name. Without this mode, hosts load all 63 schemas and Jev
 saves no context.
 
 Known limitation, planned and undesigned: hosts that declare only listed
