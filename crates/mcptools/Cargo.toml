@@ -37,6 +37,7 @@ base64 = { workspace = true }
 urlencoding = { workspace = true }
 indicatif = { workspace = true }
 rand = { workspace = true }
+rquickjs = { workspace = true }
 
 rusqlite = { workspace = true }
 tree-sitter = { workspace = true }

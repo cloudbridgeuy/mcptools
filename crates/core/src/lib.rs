@@ -87,5 +87,6 @@ pub mod llm_stream;
 pub mod md;
 pub mod pagination;
 pub mod queries;
+pub mod sandbox;
 pub mod ts_decl;
 pub mod upgrade;

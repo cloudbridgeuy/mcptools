@@ -17,6 +17,7 @@ mod mcp;
 mod md;
 mod pdf;
 mod prelude;
+mod sandbox;
 mod upgrade;
 
 #[derive(Debug, clap::Parser)]
