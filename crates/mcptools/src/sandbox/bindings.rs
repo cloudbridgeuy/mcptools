@@ -7,6 +7,7 @@ use rquickjs::{Ctx, Exception, Function, Value};
 pub fn bound_names(tools: &[Tool], allowed: &[ToolKind]) -> Vec<String> {
     tools
         .iter()
+        .filter(|tool| tool.name != "execute")
         .filter(|tool| allowed.contains(&tool.kind))
         .map(|tool| tool.name.clone())
         .collect()
@@ -140,35 +141,32 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn excluded_tool_is_undefined() {
-        let output = run(
+        let run = run(
             "return [typeof jira_create, typeof jira_search]",
             Limits::default(),
             read_bindings(),
         )
-        .await
-        .unwrap();
-        assert_eq!(output.result, json!(["undefined", "function"]));
+        .await;
+        assert_eq!(run.outcome.unwrap(), json!(["undefined", "function"]));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn success_returns_structured_content() {
         clear_offline_env();
-        let output = run(
+        let first = run(
             "const r = await find_tools({ task: 'search jira issues' }); return Array.isArray(r.tools)",
             Limits::default(),
             read_bindings(),
         )
-        .await
-        .unwrap();
-        assert_eq!(output.result, json!(true));
-        let output = run(
+        .await;
+        assert_eq!(first.outcome.unwrap(), json!(true));
+        let second = run(
             "return 'content' in (await find_tools({ task: 'x' }))",
             Limits::default(),
             read_bindings(),
         )
-        .await
-        .unwrap();
-        assert_eq!(output.result, json!(false));
+        .await;
+        assert_eq!(second.outcome.unwrap(), json!(false));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -179,20 +177,19 @@ mod tests {
             names: bound_names(&registered_tools(), &[ToolKind::Read]),
             global: global.clone(),
         };
-        let output = run(
+        let run = run(
             "try { await jira_search({ jql: 'x' }); return null } catch (e) { return [e.code, e.message, e instanceof Error, e.name] }",
             Limits::default(),
             bindings,
         )
-        .await
-        .unwrap();
+        .await;
+        let result = run.outcome.unwrap();
         let err = handle_tools_call(
             Some(json!({"name": "jira_search", "arguments": {"jql": "x"}})),
             &global,
         )
         .await
         .unwrap_err();
-        let result = &output.result;
         assert_eq!(result[0].as_i64(), Some(err.code as i64));
         assert_eq!(result[1].as_str(), Some(err.message.as_str()));
         assert_eq!(result[2], json!(true));
@@ -201,26 +198,24 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn missing_arguments_reject_with_invalid_params() {
-        let output = run(
+        let run = run(
             "try { await pdf_info(); return null } catch (e) { return e.code }",
             Limits::default(),
             read_bindings(),
         )
-        .await
-        .unwrap();
-        assert_eq!(output.result, json!(-32602));
+        .await;
+        assert_eq!(run.outcome.unwrap(), json!(-32602));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn concurrent_calls_resolve() {
         clear_offline_env();
-        let output = run(
+        let run = run(
             "const r = await Promise.all([find_tools({task:'a'}), find_tools({task:'b'})]); return r.length",
             Limits::default(),
             read_bindings(),
         )
-        .await
-        .unwrap();
-        assert_eq!(output.result, json!(2));
+        .await;
+        assert_eq!(run.outcome.unwrap(), json!(2));
     }
 }

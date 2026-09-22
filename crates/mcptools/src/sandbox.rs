@@ -1,4 +1,4 @@
-use mcptools_core::sandbox::{Limits, LogBuffer, Output, SandboxError};
+use mcptools_core::sandbox::{check_size, Limits, LogBuffer, Run, SandboxError};
 use rquickjs::context::EvalOptions;
 use rquickjs::function::Func;
 use rquickjs::{AsyncContext, AsyncRuntime, Coerced, Ctx, Exception, FromJs, Promise, Value};
@@ -30,63 +30,72 @@ function __fmt(args) {
 }
 "#;
 
-pub async fn run(code: &str, limits: Limits, bindings: Bindings) -> Result<Output, SandboxError> {
+pub async fn run(code: &str, limits: Limits, bindings: Bindings) -> Run {
     let code = code.to_string();
     let outcome = tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(run_inner(code, limits, bindings))
     })
     .await;
     match outcome {
-        Ok(result) => result,
-        Err(err) => Err(message_error(err.to_string())),
+        Ok(run) => run,
+        Err(err) => Run {
+            logs: Vec::new(),
+            outcome: Err(message_error(err.to_string())),
+        },
     }
 }
 
-async fn run_inner(
-    code: String,
-    limits: Limits,
-    bindings: Bindings,
-) -> Result<Output, SandboxError> {
+async fn run_inner(code: String, limits: Limits, bindings: Bindings) -> Run {
     let logs = Rc::new(RefCell::new(LogBuffer::new(limits.output_bytes)));
     let stop: Rc<Cell<Option<StopReason>>> = Rc::new(Cell::new(None));
-    let result = {
-        let runtime = AsyncRuntime::new().map_err(js_error)?;
-        runtime.set_memory_limit(limits.memory_bytes).await;
-        let deadline = Instant::now() + limits.timeout;
-        let handler_stop = stop.clone();
-        runtime
-            .set_interrupt_handler(Some(Box::new(move || {
-                if handler_stop.get().is_some() {
-                    return true;
+    let outcome: Result<serde_json::Value, SandboxError> = {
+        match AsyncRuntime::new().map_err(js_error) {
+            Err(err) => Err(err),
+            Ok(runtime) => {
+                runtime.set_memory_limit(limits.memory_bytes).await;
+                let deadline = Instant::now() + limits.timeout;
+                let handler_stop = stop.clone();
+                runtime
+                    .set_interrupt_handler(Some(Box::new(move || {
+                        if handler_stop.get().is_some() {
+                            return true;
+                        }
+                        if Instant::now() >= deadline {
+                            handler_stop.set(Some(StopReason::Timeout));
+                            return true;
+                        }
+                        false
+                    })))
+                    .await;
+                let drive = eval(&runtime, &logs, &stop, code, bindings);
+                let timed = tokio::time::timeout(limits.timeout, drive).await;
+                if let Some(reason) = stop.get() {
+                    Err(reason.to_error(&limits))
+                } else {
+                    match timed {
+                        Ok(Ok(value)) => Ok(value),
+                        Ok(Err(err)) => Err(err),
+                        Err(_) => Err(SandboxError::Timeout(limits.timeout)),
+                    }
                 }
-                if Instant::now() >= deadline {
-                    handler_stop.set(Some(StopReason::Timeout));
-                    return true;
-                }
-                false
-            })))
-            .await;
-        let drive = eval(&runtime, &logs, &stop, code, bindings);
-        let outcome = tokio::time::timeout(limits.timeout, drive).await;
-        if let Some(reason) = stop.get() {
-            return Err(reason.to_error(&limits));
-        }
-        match outcome {
-            Ok(Ok(value)) => value,
-            Ok(Err(err)) => return Err(err),
-            Err(_) => return Err(SandboxError::Timeout(limits.timeout)),
+            }
         }
     };
     let lines = Rc::try_unwrap(logs)
         .expect("context released")
         .into_inner()
         .into_lines();
-    let output = Output {
-        logs: lines,
-        result,
+    let outcome = match outcome {
+        Ok(result) => match check_size(&lines, &result, limits.output_bytes) {
+            Ok(()) => Ok(result),
+            Err(limit) => Err(limit.into()),
+        },
+        Err(err) => Err(err),
     };
-    output.check_size(limits.output_bytes)?;
-    Ok(output)
+    Run {
+        logs: lines,
+        outcome,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -251,49 +260,64 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plain_expression_yields_its_value() {
-        let output = run("1 + 1", Limits::default(), empty_bindings())
-            .await
-            .unwrap();
-        assert_eq!(output.result, serde_json::json!(2));
-        assert!(output.logs.is_empty());
+        let run = run("1 + 1", Limits::default(), empty_bindings()).await;
+        let outcome = run.outcome.unwrap();
+        assert_eq!(outcome, serde_json::json!(2));
+        assert!(run.logs.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn console_logs_are_captured() {
-        let output = run("console.log('a'); 'b'", Limits::default(), empty_bindings())
-            .await
-            .unwrap();
-        assert_eq!(output.logs, vec!["a".to_string()]);
-        assert_eq!(output.result, serde_json::json!("b"));
+        let run = run("console.log('a'); 'b'", Limits::default(), empty_bindings()).await;
+        let outcome = run.outcome.unwrap();
+        assert_eq!(run.logs, vec!["a".to_string()]);
+        assert_eq!(outcome, serde_json::json!("b"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn top_level_await_resolves() {
-        let output = run(
+        let run = run(
             "await Promise.resolve(3)",
             Limits::default(),
             empty_bindings(),
         )
-        .await
-        .unwrap();
-        assert_eq!(output.result, serde_json::json!(3));
+        .await;
+        assert_eq!(run.outcome.unwrap(), serde_json::json!(3));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn thrown_type_error_is_mapped() {
-        let error = run(
+        let run = run(
             "throw new TypeError('x')",
             Limits::default(),
             empty_bindings(),
         )
-        .await
-        .unwrap_err();
+        .await;
+        let error = run.outcome.unwrap_err();
         assert_eq!(
             error,
             SandboxError::Js {
                 name: "TypeError".to_string(),
                 message: "x".to_string(),
             }
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn thrown_error_keeps_prior_logs() {
+        let run = run(
+            "console.log('a'); throw new Error('b')",
+            Limits::default(),
+            empty_bindings(),
+        )
+        .await;
+        assert_eq!(run.logs, vec!["a".to_string()]);
+        assert_eq!(
+            run.outcome,
+            Err(SandboxError::Js {
+                name: "Error".to_string(),
+                message: "b".to_string(),
+            })
         );
     }
 
@@ -308,6 +332,7 @@ mod tests {
         ] {
             let error = run(code, Limits::default(), empty_bindings())
                 .await
+                .outcome
                 .unwrap_err();
             assert!(
                 matches!(error, SandboxError::Js { .. }),
@@ -318,14 +343,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn fresh_runtime_per_call() {
-        let first = run("globalThis.x = 1", Limits::default(), empty_bindings())
-            .await
-            .unwrap();
-        assert_eq!(first.result, serde_json::json!(1));
-        let second = run("typeof x", Limits::default(), empty_bindings())
-            .await
-            .unwrap();
-        assert_eq!(second.result, serde_json::json!("undefined"));
+        let first = run("globalThis.x = 1", Limits::default(), empty_bindings()).await;
+        assert_eq!(first.outcome.unwrap(), serde_json::json!(1));
+        let second = run("typeof x", Limits::default(), empty_bindings()).await;
+        assert_eq!(second.outcome.unwrap(), serde_json::json!("undefined"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -334,6 +355,7 @@ mod tests {
         let limits = small_limits(Duration::from_millis(100));
         let error = run("while(true){}", limits, empty_bindings())
             .await
+            .outcome
             .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
         assert!(started.elapsed() < Duration::from_secs(1));
@@ -348,6 +370,7 @@ mod tests {
             empty_bindings(),
         )
         .await
+        .outcome
         .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
     }
@@ -361,6 +384,7 @@ mod tests {
             empty_bindings(),
         )
         .await
+        .outcome
         .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
     }
@@ -370,6 +394,7 @@ mod tests {
         let limits = small_limits(Duration::from_millis(100));
         let error = run("await new Promise(()=>{})", limits, empty_bindings())
             .await
+            .outcome
             .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
     }
@@ -383,6 +408,7 @@ mod tests {
             empty_bindings(),
         )
         .await
+        .outcome
         .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
     }
@@ -391,7 +417,10 @@ mod tests {
     async fn log_flood_hits_output_limit_despite_try_catch() {
         let limits = small_limits(Duration::from_millis(100));
         let code = "try { for(;;) console.log('x'.repeat(1000)) } catch(e) {} 'x'";
-        let error = run(code, limits, empty_bindings()).await.unwrap_err();
+        let error = run(code, limits, empty_bindings())
+            .await
+            .outcome
+            .unwrap_err();
         assert_eq!(error, SandboxError::OutputLimit(4096));
     }
 
@@ -400,6 +429,7 @@ mod tests {
         let limits = small_limits(Duration::from_millis(100));
         let error = run("'x'.repeat(5000)", limits, empty_bindings())
             .await
+            .outcome
             .unwrap_err();
         assert_eq!(error, SandboxError::OutputLimit(4096));
     }
@@ -407,34 +437,36 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn log_at_cap_with_empty_result_succeeds() {
         let limits = small_limits(Duration::from_millis(100));
-        let output = run(
+        let run = run(
             "console.log('x'.repeat(4094)); ''",
             limits,
             empty_bindings(),
         )
-        .await
-        .unwrap();
-        assert_eq!(output.logs, vec!["x".repeat(4094)]);
-        assert_eq!(output.result, serde_json::json!(""));
+        .await;
+        let outcome = run.outcome.unwrap();
+        assert_eq!(run.logs, vec!["x".repeat(4094)]);
+        assert_eq!(outcome, serde_json::json!(""));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn memory_exhaustion_is_recoverable() {
         let limits = small_limits(Duration::from_millis(100));
         let code = "const a=[]; while(true) a.push('x'.repeat(1<<20))";
-        let error = run(code, limits, empty_bindings()).await.unwrap_err();
+        let error = run(code, limits, empty_bindings())
+            .await
+            .outcome
+            .unwrap_err();
         assert!(
             matches!(&error, SandboxError::Js { name, .. } if name == "InternalError"),
             "{error:?}"
         );
-        let output = run(
+        let second = run(
             "1+1",
             small_limits(Duration::from_millis(100)),
             empty_bindings(),
         )
-        .await
-        .unwrap();
-        assert_eq!(output.result, serde_json::json!(2));
+        .await;
+        assert_eq!(second.outcome.unwrap(), serde_json::json!(2));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -452,6 +484,7 @@ mod tests {
         let limits = small_limits(Duration::from_millis(300));
         let error = run("while(true){}", limits, empty_bindings())
             .await
+            .outcome
             .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(300)));
         let count = ticks.load(Ordering::SeqCst);
