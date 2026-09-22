@@ -6,8 +6,7 @@ pub struct FoundTool {
     pub name: String,
     pub domain: String,
     pub score: f64,
-    #[serde(rename = "inputSchema")]
-    pub input_schema: serde_json::Map<String, serde_json::Value>,
+    pub declaration: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, schemars::JsonSchema)]
@@ -33,6 +32,7 @@ pub struct FoundTools {
     pub backend: Backend,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback: Option<FallbackReason>,
+    pub usage: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -60,7 +60,7 @@ fn attach_schemas(
                     name: r.name,
                     domain: r.domain,
                     score: r.score,
-                    input_schema: t.input_schema.as_object().cloned().unwrap_or_default(),
+                    declaration: super::declaration(t),
                 })
         })
         .collect();
@@ -69,6 +69,7 @@ fn attach_schemas(
         tools,
         backend,
         fallback,
+        usage: mcptools_core::find_tools::USAGE.to_string(),
     }
 }
 
@@ -183,14 +184,14 @@ mod find_tools_tests {
     }
 
     #[tokio::test]
-    async fn find_tools_attaches_real_input_schema() {
+    async fn find_tools_attaches_declaration() {
         let result = find_tools("close GUZ-22", 5).await.unwrap();
         let registered = super::super::registered_tools();
         for found in &result.tools {
             let reg = registered.iter().find(|t| t.name == found.name).unwrap();
-            let reg_schema = reg.input_schema.as_object().cloned().unwrap_or_default();
-            assert_eq!(found.input_schema, reg_schema);
+            assert_eq!(found.declaration, super::super::declaration(reg));
         }
+        assert_eq!(result.usage, mcptools_core::find_tools::USAGE);
     }
 
     #[tokio::test]

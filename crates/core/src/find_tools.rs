@@ -67,6 +67,8 @@ pub enum FindToolsError {
 
 pub const DEFAULT_K: usize = 5;
 
+pub const USAGE: &str = "Each declaration is the call signature: the input interface is the tools/call arguments object, the Promise type is the result.";
+
 pub fn rank_tools(
     task: &str,
     catalog: &[CatalogEntry],

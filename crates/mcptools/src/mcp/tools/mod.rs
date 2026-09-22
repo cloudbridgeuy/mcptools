@@ -632,7 +632,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<find_tools::FoundTools>(),
             name: "find_tools".to_string(),
-            description: "Ranks the tool catalog against a task and returns real input schemas, and never calls another tool. Every tool it returns is callable by name through tools/call, even when tools/list does not list it.".to_string(),
+            description: "Ranks the tool catalog against a task and returns a TypeScript declaration per tool, and never calls another tool. Every tool it returns is callable by name through tools/call, even when tools/list does not list it.".to_string(),
             input_schema: schema::input_schema_for::<find_tools::FindToolsArgs>(),
             summary: "Find the best-fitting tools for a task",
             kind: ToolKind::Read,
@@ -1258,9 +1258,6 @@ mod declaration_tests {
                 unknown_tools.insert(tool.name.clone());
             }
         }
-        assert_eq!(
-            unknown_tools,
-            std::collections::BTreeSet::from(["find_tools".to_string()])
-        );
+        assert_eq!(unknown_tools, std::collections::BTreeSet::new());
     }
 }

@@ -80,9 +80,9 @@ fn discovery_flag_lists_only_find_tools_then_calls_real_tool() {
     let found_tools = found["tools"].as_array().unwrap();
     assert!(!found_tools.is_empty());
     for tool in found_tools {
-        assert!(tool["inputSchema"]
-            .as_object()
-            .is_some_and(|s| !s.is_empty()));
+        assert!(tool["declaration"]
+            .as_str()
+            .is_some_and(|s| s.contains("declare function ")));
     }
     assert_eq!(found["backend"], "local");
 

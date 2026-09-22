@@ -7,193 +7,32 @@
       "name": "linear_issue_update",
       "domain": "linear",
       "score": 0.5241290724638211,
-      "inputSchema": {
-        "properties": {
-          "assignee": {
-            "description": "Assignee user UUID or 'me'",
-            "type": "string"
-          },
-          "clearParent": {
-            "default": null,
-            "description": "Clear the parent issue (cannot combine with parent)",
-            "type": "boolean"
-          },
-          "description": {
-            "description": "New description",
-            "type": "string"
-          },
-          "id": {
-            "description": "Issue id or identifier (e.g. GUZ-85)",
-            "type": "string"
-          },
-          "parent": {
-            "description": "Parent issue id or identifier",
-            "type": "string"
-          },
-          "state": {
-            "description": "Workflow state name or UUID (names resolve from the issue identifier team, or team)",
-            "type": "string"
-          },
-          "team": {
-            "description": "Team id, key, or name for state lookup",
-            "type": "string"
-          },
-          "title": {
-            "description": "New title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "type": "object"
-      }
+      "declaration": "interface LinearIssueUpdateInput {\n  /** Assignee user UUID or 'me' */\n  assignee?: string;\n  /** Clear the parent issue (cannot combine with parent) @default null */\n  clearParent?: boolean;\n  /** New description */\n  description?: string;\n  /** Issue id or identifier (e.g. GUZ-85) */\n  id: string;\n  /** Parent issue id or identifier */\n  parent?: string;\n  /** Workflow state name or UUID (names resolve from the issue identifier team, or team) */\n  state?: string;\n  /** Team id, key, or name for state lookup */\n  team?: string;\n  /** New title */\n  title?: string;\n}\n\ninterface LinearIssueUpdateOutput {\n  blocked_by?: string[];\n  description?: string | null;\n  id: string;\n  identifier: string;\n  parent?: string | null;\n  state: string;\n  title: string;\n  url: string;\n}\n\n/** Update a Linear issue by id or identifier. Needs at least one of title, description, state, assignee, parent, clearParent. Returns the updated issue. Requires LINEAR_API_KEY environment variable. */\ndeclare function linear_issue_update(input: LinearIssueUpdateInput): Promise<LinearIssueUpdateOutput>;\n"
     },
     {
       "name": "jira_update",
       "domain": "jira",
       "score": 0.3535401287604917,
-      "inputSchema": {
-        "properties": {
-          "assignee": {
-            "type": "string"
-          },
-          "boardId": {
-            "type": "integer"
-          },
-          "description": {
-            "type": "string"
-          },
-          "issueType": {
-            "type": "string"
-          },
-          "priority": {
-            "type": "string"
-          },
-          "sprint": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "ticketKey": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "ticketKey"
-        ],
-        "type": "object"
-      }
+      "declaration": "interface JiraUpdateInput {\n  assignee?: string;\n  boardId?: number;\n  description?: string;\n  issueType?: string;\n  priority?: string;\n  sprint?: string;\n  status?: string;\n  ticketKey: string;\n}\n\ninterface JiraUpdateFieldUpdateResult {\n  error?: string | null;\n  field: string;\n  success: boolean;\n  value?: string | null;\n}\n\ninterface JiraUpdateOutput {\n  fields_updated: JiraUpdateFieldUpdateResult[];\n  partial_failure: boolean;\n  ticket_key: string;\n}\n\n/** Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Description (markdown), and Sprint assignment. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback). */\ndeclare function jira_update(input: JiraUpdateInput): Promise<JiraUpdateOutput>;\n"
     },
     {
       "name": "linear_issue_get",
       "domain": "linear",
       "score": 0.29291974247901664,
-      "inputSchema": {
-        "properties": {
-          "id": {
-            "description": "Issue id or identifier (e.g. GUZ-85)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "type": "object"
-      }
+      "declaration": "interface LinearIssueGetInput {\n  /** Issue id or identifier (e.g. GUZ-85) */\n  id: string;\n}\n\ninterface LinearIssueGetActivity {\n  actor?: string | null;\n  summary: string;\n  timestamp: string;\n}\n\ninterface LinearIssueGetComment {\n  author?: string | null;\n  body: string;\n  created_at: string;\n  id: string;\n  url: string;\n}\n\ninterface LinearIssueGetOutput {\n  activity?: LinearIssueGetActivity[];\n  blocked_by?: string[];\n  comments?: LinearIssueGetComment[];\n  description?: string | null;\n  id: string;\n  identifier: string;\n  parent?: string | null;\n  state: string;\n  title: string;\n  url: string;\n}\n\n/** Get one Linear issue by id or identifier (e.g. GUZ-85). Returns id, identifier, title, URL, state, parent, and blocked-by relations. Requires LINEAR_API_KEY environment variable. */\ndeclare function linear_issue_get(input: LinearIssueGetInput): Promise<LinearIssueGetOutput>;\n"
     },
     {
       "name": "linear_issue_list",
       "domain": "linear",
       "score": 0.29291974247901664,
-      "inputSchema": {
-        "properties": {
-          "all": {
-            "description": "Fetch all pages (up to 50 items)",
-            "type": "boolean"
-          },
-          "assignee": {
-            "description": "Assignee user UUID or 'me'",
-            "type": "string"
-          },
-          "cursor": {
-            "description": "Page cursor for pagination",
-            "type": "string"
-          },
-          "cycle": {
-            "description": "Cycle number or id",
-            "type": "string"
-          },
-          "label": {
-            "description": "Label name",
-            "type": "string"
-          },
-          "limit": {
-            "description": "Max items per page (default: 25)",
-            "type": "integer"
-          },
-          "project": {
-            "description": "Project id or name (names need team)",
-            "type": "string"
-          },
-          "query": {
-            "description": "Title substring to search",
-            "type": "string"
-          },
-          "state": {
-            "description": "Workflow state name (e.g. Todo)",
-            "type": "string"
-          },
-          "team": {
-            "description": "Team id, key, or name",
-            "type": "string"
-          },
-          "updatedAfter": {
-            "description": "Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)",
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
+      "declaration": "interface LinearIssueListInput {\n  /** Fetch all pages (up to 50 items) */\n  all?: boolean;\n  /** Assignee user UUID or 'me' */\n  assignee?: string;\n  /** Page cursor for pagination */\n  cursor?: string;\n  /** Cycle number or id */\n  cycle?: string;\n  /** Label name */\n  label?: string;\n  /** Max items per page @default 25 */\n  limit?: number;\n  /** Project id or name (names need team) */\n  project?: string;\n  /** Title substring to search */\n  query?: string;\n  /** Workflow state name (e.g. Todo) */\n  state?: string;\n  /** Team id, key, or name */\n  team?: string;\n  /** Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z) */\n  updatedAfter?: string;\n}\n\ninterface LinearIssueListIssueMini {\n  blocked_by?: string[];\n  description?: string | null;\n  id: string;\n  identifier: string;\n  parent?: string | null;\n  state: string;\n  title: string;\n  url: string;\n}\n\ninterface LinearIssueListPageInfo {\n  endCursor?: string | null;\n  hasNextPage: boolean;\n}\n\ninterface LinearIssueListOutput {\n  nodes: LinearIssueListIssueMini[];\n  pageInfo: LinearIssueListPageInfo;\n}\n\n/** List Linear issues with filters. Returns nodes with id, identifier, title, state, parent, blocked-by plus pageInfo. Requires LINEAR_API_KEY environment variable. */\ndeclare function linear_issue_list(input: LinearIssueListInput): Promise<LinearIssueListOutput>;\n"
     },
     {
       "name": "linear_issue_create",
       "domain": "linear",
       "score": 0.29291974247901664,
-      "inputSchema": {
-        "properties": {
-          "assignee": {
-            "description": "Assignee user UUID or 'me'",
-            "type": "string"
-          },
-          "description": {
-            "description": "Issue description",
-            "type": "string"
-          },
-          "project": {
-            "description": "Project id or name (names resolve against team)",
-            "type": "string"
-          },
-          "state": {
-            "description": "Workflow state name or UUID",
-            "type": "string"
-          },
-          "team": {
-            "description": "Team id, key, or name",
-            "type": "string"
-          },
-          "title": {
-            "description": "Issue title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "team",
-          "title"
-        ],
-        "type": "object"
-      }
+      "declaration": "interface LinearIssueCreateInput {\n  /** Assignee user UUID or 'me' */\n  assignee?: string;\n  /** Issue description */\n  description?: string;\n  /** Project id or name (names resolve against team) */\n  project?: string;\n  /** Workflow state name or UUID */\n  state?: string;\n  /** Team id, key, or name */\n  team: string;\n  /** Issue title */\n  title: string;\n}\n\ninterface LinearIssueCreateOutput {\n  blocked_by?: string[];\n  description?: string | null;\n  id: string;\n  identifier: string;\n  parent?: string | null;\n  state: string;\n  title: string;\n  url: string;\n}\n\n/** Create a Linear issue in a team. Returns id, identifier, title, URL, state, parent. Requires LINEAR_API_KEY environment variable. */\ndeclare function linear_issue_create(input: LinearIssueCreateInput): Promise<LinearIssueCreateOutput>;\n"
     }
-  ]
+  ],
+  "usage": "Each declaration is the call signature: the input interface is the tools/call arguments object, the Promise type is the result."
 }
