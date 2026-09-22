@@ -919,6 +919,23 @@ mod catalog_tests {
         assert_eq!(super::registered_tools().len(), 62);
     }
 
+    const FIND_TOOLS_BUDGET_CHARS: usize = 1300;
+
+    #[test]
+    fn find_tools_definition_fits_budget() {
+        let list = super::handle_tools_list(true).unwrap();
+        let tools = list["tools"].as_array().unwrap();
+        let entry = tools
+            .iter()
+            .find(|tool| tool.get("name") == Some(&serde_json::json!("find_tools")))
+            .expect("find_tools missing from discovery tools/list");
+        let length = serde_json::to_string(entry).unwrap().len();
+        assert!(
+            length <= FIND_TOOLS_BUDGET_CHARS,
+            "find_tools tools/list entry is {length} chars, budget is {FIND_TOOLS_BUDGET_CHARS}"
+        );
+    }
+
     #[test]
     fn listed_tools_discovery_keeps_only_find_tools() {
         let tools = super::listed_tools(super::registered_tools(), true);
