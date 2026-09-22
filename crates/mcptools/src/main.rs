@@ -2,6 +2,8 @@
 
 use crate::prelude::*;
 use clap::Parser;
+use mcptools_core::sandbox::Limits;
+use std::time::Duration;
 
 mod agent;
 mod atlas;
@@ -35,7 +37,7 @@ pub struct App {
     global: Global,
 }
 
-#[derive(Debug, Clone, clap::Args)]
+#[derive(Debug, Clone, clap::Parser)]
 pub struct Global {
     /// Whether to display additional information.
     #[clap(long, env = "MCPTOOLS_VERBOSE", global = true, default_value = "false")]
@@ -48,6 +50,46 @@ pub struct Global {
         default_value = "false"
     )]
     pub discovery: bool,
+
+    #[clap(
+        long,
+        env = "MCPTOOLS_EXECUTE_TIMEOUT_SECS",
+        global = true,
+        default_value_t = 30,
+        value_name = "SECS",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub execute_timeout_secs: u64,
+
+    #[clap(
+        long,
+        env = "MCPTOOLS_EXECUTE_MEMORY_MB",
+        global = true,
+        default_value_t = 64,
+        value_name = "MB",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub execute_memory_mb: u64,
+
+    #[clap(
+        long,
+        env = "MCPTOOLS_EXECUTE_OUTPUT_KB",
+        global = true,
+        default_value_t = 256,
+        value_name = "KB",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub execute_output_kb: u64,
+}
+
+impl Global {
+    pub fn sandbox_limits(&self) -> Limits {
+        Limits {
+            timeout: Duration::from_secs(self.execute_timeout_secs),
+            memory_bytes: (self.execute_memory_mb * 1024 * 1024) as usize,
+            output_bytes: (self.execute_output_kb * 1024) as usize,
+        }
+    }
 }
 
 #[derive(Debug, clap::Parser)]
@@ -106,4 +148,44 @@ async fn main() -> Result<()> {
         SubCommands::Upgrade(sub_app) => crate::upgrade::run(sub_app, app.global).await,
     }
     .map_err(|err: color_eyre::eyre::Report| eyre!(err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sandbox_limits_from_flags() {
+        let global = Global::try_parse_from([
+            "mcptools",
+            "--execute-timeout-secs",
+            "5",
+            "--execute-memory-mb",
+            "2",
+            "--execute-output-kb",
+            "3",
+        ])
+        .unwrap();
+
+        let limits = global.sandbox_limits();
+        assert_eq!(limits.timeout, Duration::from_secs(5));
+        assert_eq!(limits.memory_bytes, 2 * 1024 * 1024);
+        assert_eq!(limits.output_bytes, 3 * 1024);
+    }
+
+    #[test]
+    fn sandbox_limits_without_flags_are_default() {
+        let limits = Global::try_parse_from(["mcptools"])
+            .unwrap()
+            .sandbox_limits();
+        let default = Limits::default();
+        assert_eq!(limits.timeout, default.timeout);
+        assert_eq!(limits.memory_bytes, default.memory_bytes);
+        assert_eq!(limits.output_bytes, default.output_bytes);
+    }
+
+    #[test]
+    fn zero_execute_memory_is_rejected() {
+        assert!(Global::try_parse_from(["mcptools", "--execute-memory-mb", "0"]).is_err());
+    }
 }

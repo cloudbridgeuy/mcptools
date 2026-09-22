@@ -271,6 +271,9 @@ mod find_tools_tests {
         let global = crate::Global {
             verbose: false,
             discovery: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
         };
         let mcp_result = super::super::handle_tools_call(
             Some(serde_json::json!({"name":"find_tools","arguments":{"task":task,"k":k}})),
