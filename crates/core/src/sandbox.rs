@@ -54,14 +54,14 @@ pub struct Run {
     pub outcome: Result<serde_json::Value, SandboxError>,
 }
 
-#[derive(Debug, PartialEq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecuteOutput {
     pub logs: Vec<String>,
     pub result: serde_json::Value,
     pub error: Option<ExecuteError>,
 }
 
-#[derive(Debug, PartialEq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecuteError {
     pub message: String,
     pub name: String,
