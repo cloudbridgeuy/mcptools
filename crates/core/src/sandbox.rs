@@ -49,21 +49,22 @@ impl LogBuffer {
 #[derive(Debug, PartialEq)]
 pub struct OutputLimit(pub usize);
 
-#[derive(Debug)]
-pub struct Output {
+pub struct Run {
     pub logs: Vec<String>,
-    pub result: serde_json::Value,
+    pub outcome: Result<serde_json::Value, SandboxError>,
 }
 
-impl Output {
-    pub fn check_size(&self, cap: usize) -> Result<(), OutputLimit> {
-        let log_bytes: usize = self.logs.iter().map(String::len).sum();
-        if log_bytes + self.result.to_string().len() > cap {
-            Err(OutputLimit(cap))
-        } else {
-            Ok(())
-        }
-    }
+#[derive(Debug, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct ExecuteOutput {
+    pub logs: Vec<String>,
+    pub result: serde_json::Value,
+    pub error: Option<ExecuteError>,
+}
+
+#[derive(Debug, PartialEq, serde::Serialize, schemars::JsonSchema)]
+pub struct ExecuteError {
+    pub message: String,
+    pub name: String,
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -79,6 +80,51 @@ pub enum SandboxError {
 impl From<OutputLimit> for SandboxError {
     fn from(OutputLimit(cap): OutputLimit) -> Self {
         Self::OutputLimit(cap)
+    }
+}
+
+pub fn check_size(
+    logs: &[String],
+    result: &serde_json::Value,
+    cap: usize,
+) -> Result<(), OutputLimit> {
+    let log_bytes: usize = logs.iter().map(String::len).sum();
+    if log_bytes + result.to_string().len() > cap {
+        Err(OutputLimit(cap))
+    } else {
+        Ok(())
+    }
+}
+
+pub fn execute_output(run: Run) -> ExecuteOutput {
+    let Run { logs, outcome } = run;
+    match outcome {
+        Ok(result) => ExecuteOutput {
+            logs,
+            result,
+            error: None,
+        },
+        Err(err) => {
+            let error = match &err {
+                SandboxError::Timeout(_) => ExecuteError {
+                    name: "TimeoutError".to_string(),
+                    message: err.to_string(),
+                },
+                SandboxError::OutputLimit(_) => ExecuteError {
+                    name: "OutputLimitError".to_string(),
+                    message: err.to_string(),
+                },
+                SandboxError::Js { name, message } => ExecuteError {
+                    name: name.clone(),
+                    message: message.clone(),
+                },
+            };
+            ExecuteOutput {
+                logs,
+                result: serde_json::Value::Null,
+                error: Some(error),
+            }
+        }
     }
 }
 
@@ -107,16 +153,93 @@ mod tests {
 
     #[test]
     fn check_size_boundary() {
-        let at_cap = Output {
-            logs: vec!["xx".to_string()],
-            result: serde_json::json!(""),
-        };
-        assert_eq!(at_cap.check_size(4), Ok(()));
-        let over_cap = Output {
-            logs: vec!["xxx".to_string()],
-            result: serde_json::json!(""),
-        };
-        assert_eq!(over_cap.check_size(4), Err(OutputLimit(4)));
+        let at_logs = vec!["xx".to_string()];
+        assert_eq!(check_size(&at_logs, &serde_json::json!(""), 4), Ok(()));
+        let over_logs = vec!["xxx".to_string()];
+        assert_eq!(
+            check_size(&over_logs, &serde_json::json!(""), 4),
+            Err(OutputLimit(4))
+        );
+    }
+
+    #[test]
+    fn execute_output_ok_passes_logs_through() {
+        let output = execute_output(Run {
+            logs: vec!["a".to_string()],
+            outcome: Ok(serde_json::json!(2)),
+        });
+        assert_eq!(
+            output,
+            ExecuteOutput {
+                logs: vec!["a".to_string()],
+                result: serde_json::json!(2),
+                error: None,
+            }
+        );
+    }
+
+    #[test]
+    fn execute_output_timeout_names_timeout_error() {
+        let err = SandboxError::Timeout(Duration::from_secs(1));
+        let message = err.to_string();
+        let output = execute_output(Run {
+            logs: vec!["a".to_string()],
+            outcome: Err(err),
+        });
+        assert_eq!(
+            output,
+            ExecuteOutput {
+                logs: vec!["a".to_string()],
+                result: serde_json::Value::Null,
+                error: Some(ExecuteError {
+                    name: "TimeoutError".to_string(),
+                    message,
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn execute_output_limit_names_output_limit_error() {
+        let err = SandboxError::OutputLimit(4);
+        let message = err.to_string();
+        let output = execute_output(Run {
+            logs: vec!["a".to_string()],
+            outcome: Err(err),
+        });
+        assert_eq!(
+            output,
+            ExecuteOutput {
+                logs: vec!["a".to_string()],
+                result: serde_json::Value::Null,
+                error: Some(ExecuteError {
+                    name: "OutputLimitError".to_string(),
+                    message,
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn execute_output_js_passes_name_and_message_through() {
+        let output = execute_output(Run {
+            logs: vec!["a".to_string()],
+            outcome: Err(SandboxError::Js {
+                name: "TypeError".to_string(),
+                message: "x".to_string(),
+            }),
+        });
+        assert_eq!(
+            output,
+            ExecuteOutput {
+                logs: vec!["a".to_string()],
+                result: serde_json::Value::Null,
+                error: Some(ExecuteError {
+                    name: "TypeError".to_string(),
+                    message: "x".to_string(),
+                }),
+            }
+        );
     }
 
     #[test]
