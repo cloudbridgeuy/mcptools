@@ -196,6 +196,17 @@ fn coerced_string<'js>(ctx: &Ctx<'js>, value: &Value<'js>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    fn small_limits(timeout: Duration) -> Limits {
+        Limits {
+            timeout,
+            memory_bytes: 1024 * 1024,
+            output_bytes: 4096,
+        }
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plain_expression_yields_its_value() {
@@ -258,5 +269,108 @@ mod tests {
         assert_eq!(first.result, serde_json::json!(1));
         let second = run("typeof x", Limits::default()).await.unwrap();
         assert_eq!(second.result, serde_json::json!("undefined"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tight_loop_stops_at_the_deadline() {
+        let started = Instant::now();
+        let limits = small_limits(Duration::from_millis(100));
+        let error = run("while(true){}", limits).await.unwrap_err();
+        assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn try_catch_cannot_swallow_the_deadline() {
+        let limits = small_limits(Duration::from_millis(100));
+        let error = run("try { while(true){} } catch(e) {} 'x'", limits)
+            .await
+            .unwrap_err();
+        assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn yielding_loop_stops_at_the_deadline() {
+        let limits = small_limits(Duration::from_millis(100));
+        let error = run("while(true){ await Promise.resolve() }", limits)
+            .await
+            .unwrap_err();
+        assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn never_resolving_promise_stops_at_the_deadline() {
+        let limits = small_limits(Duration::from_millis(100));
+        let error = run("await new Promise(()=>{})", limits).await.unwrap_err();
+        assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn catastrophic_backtracking_stops_at_the_deadline() {
+        let limits = small_limits(Duration::from_millis(100));
+        let error = run("/(a+)+$/.test('a'.repeat(40)+'!')", limits)
+            .await
+            .unwrap_err();
+        assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn log_flood_hits_output_limit_despite_try_catch() {
+        let limits = small_limits(Duration::from_millis(100));
+        let code = "try { for(;;) console.log('x'.repeat(1000)) } catch(e) {} 'x'";
+        let error = run(code, limits).await.unwrap_err();
+        assert_eq!(error, SandboxError::OutputLimit(4096));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oversized_result_hits_output_limit() {
+        let limits = small_limits(Duration::from_millis(100));
+        let error = run("'x'.repeat(5000)", limits).await.unwrap_err();
+        assert_eq!(error, SandboxError::OutputLimit(4096));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn log_at_cap_with_empty_result_succeeds() {
+        let limits = small_limits(Duration::from_millis(100));
+        let output = run("console.log('x'.repeat(4094)); ''", limits)
+            .await
+            .unwrap();
+        assert_eq!(output.logs, vec!["x".repeat(4094)]);
+        assert_eq!(output.result, serde_json::json!(""));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn memory_exhaustion_is_recoverable() {
+        let limits = small_limits(Duration::from_millis(100));
+        let code = "const a=[]; while(true) a.push('x'.repeat(1<<20))";
+        let error = run(code, limits).await.unwrap_err();
+        assert!(
+            matches!(&error, SandboxError::Js { name, .. } if name == "InternalError"),
+            "{error:?}"
+        );
+        let output = run("1+1", small_limits(Duration::from_millis(100)))
+            .await
+            .unwrap();
+        assert_eq!(output.result, serde_json::json!(2));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn busy_loop_does_not_stop_the_ticker() {
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticker = {
+            let ticks = ticks.clone();
+            tokio::spawn(async move {
+                for _ in 0..20 {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    ticks.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        };
+        let limits = small_limits(Duration::from_millis(300));
+        let error = run("while(true){}", limits).await.unwrap_err();
+        assert_eq!(error, SandboxError::Timeout(Duration::from_millis(300)));
+        let count = ticks.load(Ordering::SeqCst);
+        assert!(count >= 15, "ticks = {count}");
+        ticker.await.unwrap();
     }
 }

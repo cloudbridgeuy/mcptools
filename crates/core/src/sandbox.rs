@@ -97,4 +97,18 @@ mod tests {
         let mut buffer = LogBuffer::new(4);
         assert_eq!(buffer.push("abcde".to_string()), Err(OutputLimit(4)));
     }
+
+    #[test]
+    fn check_size_boundary() {
+        let at_cap = Output {
+            logs: vec!["xx".to_string()],
+            result: serde_json::json!(""),
+        };
+        assert_eq!(at_cap.check_size(4), Ok(()));
+        let over_cap = Output {
+            logs: vec!["xxx".to_string()],
+            result: serde_json::json!(""),
+        };
+        assert_eq!(over_cap.check_size(4), Err(OutputLimit(4)));
+    }
 }
