@@ -55,6 +55,17 @@ pub struct Output {
     pub result: serde_json::Value,
 }
 
+impl Output {
+    pub fn check_size(&self, cap: usize) -> Result<(), OutputLimit> {
+        let log_bytes: usize = self.logs.iter().map(String::len).sum();
+        if log_bytes + self.result.to_string().len() > cap {
+            Err(OutputLimit(cap))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum SandboxError {
     #[error("execution timed out after {0:?}")]
@@ -63,6 +74,12 @@ pub enum SandboxError {
     OutputLimit(usize),
     #[error("{name}: {message}")]
     Js { name: String, message: String },
+}
+
+impl From<OutputLimit> for SandboxError {
+    fn from(OutputLimit(cap): OutputLimit) -> Self {
+        Self::OutputLimit(cap)
+    }
 }
 
 #[cfg(test)]

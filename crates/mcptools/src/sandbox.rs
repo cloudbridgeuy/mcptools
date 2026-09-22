@@ -1,9 +1,10 @@
 use mcptools_core::sandbox::{Limits, LogBuffer, Output, SandboxError};
 use rquickjs::context::EvalOptions;
 use rquickjs::function::Func;
-use rquickjs::{AsyncContext, AsyncRuntime, Coerced, Ctx, FromJs, Promise, Value};
-use std::cell::RefCell;
+use rquickjs::{AsyncContext, AsyncRuntime, Coerced, Ctx, Exception, FromJs, Promise, Value};
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Instant;
 
 pub const PRELUDE: &str = r#"
 globalThis.console = {
@@ -36,32 +37,80 @@ pub async fn run(code: &str, limits: Limits) -> Result<Output, SandboxError> {
 
 async fn run_inner(code: String, limits: Limits) -> Result<Output, SandboxError> {
     let logs = Rc::new(RefCell::new(LogBuffer::new(limits.output_bytes)));
+    let stop: Rc<Cell<Option<StopReason>>> = Rc::new(Cell::new(None));
     let result = {
         let runtime = AsyncRuntime::new().map_err(js_error)?;
         runtime.set_memory_limit(limits.memory_bytes).await;
-        eval(&runtime, &logs, code).await?
+        let deadline = Instant::now() + limits.timeout;
+        let handler_stop = stop.clone();
+        runtime
+            .set_interrupt_handler(Some(Box::new(move || {
+                if handler_stop.get().is_some() {
+                    return true;
+                }
+                if Instant::now() >= deadline {
+                    handler_stop.set(Some(StopReason::Timeout));
+                    return true;
+                }
+                false
+            })))
+            .await;
+        let drive = eval(&runtime, &logs, &stop, code);
+        let outcome = tokio::time::timeout(limits.timeout, drive).await;
+        if let Some(reason) = stop.get() {
+            return Err(reason.to_error(&limits));
+        }
+        match outcome {
+            Ok(Ok(value)) => value,
+            Ok(Err(err)) => return Err(err),
+            Err(_) => return Err(SandboxError::Timeout(limits.timeout)),
+        }
     };
     let lines = Rc::try_unwrap(logs)
         .expect("context released")
         .into_inner()
         .into_lines();
-    Ok(Output {
+    let output = Output {
         logs: lines,
         result,
-    })
+    };
+    output.check_size(limits.output_bytes)?;
+    Ok(output)
+}
+
+#[derive(Clone, Copy)]
+enum StopReason {
+    Timeout,
+    OutputLimit,
+}
+
+impl StopReason {
+    fn to_error(self, limits: &Limits) -> SandboxError {
+        match self {
+            Self::Timeout => SandboxError::Timeout(limits.timeout),
+            Self::OutputLimit => SandboxError::OutputLimit(limits.output_bytes),
+        }
+    }
 }
 
 async fn eval(
     runtime: &AsyncRuntime,
     logs: &Rc<RefCell<LogBuffer>>,
+    stop: &Rc<Cell<Option<StopReason>>>,
     code: String,
 ) -> Result<serde_json::Value, SandboxError> {
     let context = AsyncContext::full(runtime).await.map_err(js_error)?;
     let buffer = logs.clone();
+    let stop = stop.clone();
     context
-        .with(move |ctx| {
-            let log = Func::from(move |line: String| {
-                let _ = buffer.borrow_mut().push(line);
+        .with(move |ctx| -> Result<(), SandboxError> {
+            let log = Func::from(move |ctx: Ctx, line: String| -> rquickjs::Result<()> {
+                let pushed = buffer.borrow_mut().push(line);
+                if pushed.is_err() {
+                    stop.set(Some(StopReason::OutputLimit));
+                    return Err(Exception::throw_range(&ctx, "output limit exceeded"));
+                }
+                Ok(())
             });
             ctx.globals()
                 .set("__log", log)
