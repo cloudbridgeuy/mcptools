@@ -2,7 +2,7 @@ mod cli;
 mod resources;
 mod sse;
 mod stdio;
-mod tools;
+pub(crate) mod tools;
 
 pub use cli::App;
 pub use tools::find_tools;

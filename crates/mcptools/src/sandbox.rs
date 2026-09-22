@@ -6,6 +6,13 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
 
+pub mod bindings;
+
+pub struct Bindings {
+    pub names: Vec<String>,
+    pub global: crate::Global,
+}
+
 pub const PRELUDE: &str = r#"
 globalThis.console = {
     log: (...args) => __log(__fmt(args)),
@@ -23,10 +30,10 @@ function __fmt(args) {
 }
 "#;
 
-pub async fn run(code: &str, limits: Limits) -> Result<Output, SandboxError> {
+pub async fn run(code: &str, limits: Limits, bindings: Bindings) -> Result<Output, SandboxError> {
     let code = code.to_string();
     let outcome = tokio::task::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(run_inner(code, limits))
+        tokio::runtime::Handle::current().block_on(run_inner(code, limits, bindings))
     })
     .await;
     match outcome {
@@ -35,7 +42,11 @@ pub async fn run(code: &str, limits: Limits) -> Result<Output, SandboxError> {
     }
 }
 
-async fn run_inner(code: String, limits: Limits) -> Result<Output, SandboxError> {
+async fn run_inner(
+    code: String,
+    limits: Limits,
+    bindings: Bindings,
+) -> Result<Output, SandboxError> {
     let logs = Rc::new(RefCell::new(LogBuffer::new(limits.output_bytes)));
     let stop: Rc<Cell<Option<StopReason>>> = Rc::new(Cell::new(None));
     let result = {
@@ -55,7 +66,7 @@ async fn run_inner(code: String, limits: Limits) -> Result<Output, SandboxError>
                 false
             })))
             .await;
-        let drive = eval(&runtime, &logs, &stop, code);
+        let drive = eval(&runtime, &logs, &stop, code, bindings);
         let outcome = tokio::time::timeout(limits.timeout, drive).await;
         if let Some(reason) = stop.get() {
             return Err(reason.to_error(&limits));
@@ -98,6 +109,7 @@ async fn eval(
     logs: &Rc<RefCell<LogBuffer>>,
     stop: &Rc<Cell<Option<StopReason>>>,
     code: String,
+    bindings: Bindings,
 ) -> Result<serde_json::Value, SandboxError> {
     let context = AsyncContext::full(runtime).await.map_err(js_error)?;
     let buffer = logs.clone();
@@ -117,16 +129,21 @@ async fn eval(
                 .map_err(|err| eval_error(&ctx, err))?;
             ctx.eval::<(), _>(PRELUDE)
                 .map_err(|err| eval_error(&ctx, err))?;
+            bindings::install(&ctx, &bindings).map_err(|err| eval_error(&ctx, err))?;
             Ok(())
         })
         .await?;
     context
         .async_with(async move |ctx| {
-            let mut options = EvalOptions::default();
-            options.promise = true;
-            let promise: Promise = ctx
-                .eval_with_options(code, options)
-                .map_err(|err| eval_error(&ctx, err))?;
+            let promise: Promise = match eval_script(&ctx, &code) {
+                Ok(promise) => promise,
+                Err(SandboxError::Js { name, message })
+                    if name == "SyntaxError" && message == "return not in a function" =>
+                {
+                    eval_script(&ctx, &format!("(async () => {{ {code} }})()"))?
+                }
+                Err(err) => return Err(err),
+            };
             let wrapper: Value = promise
                 .into_future()
                 .await
@@ -154,6 +171,13 @@ async fn eval(
             }
         })
         .await
+}
+
+fn eval_script<'js>(ctx: &Ctx<'js>, code: &str) -> Result<Promise<'js>, SandboxError> {
+    let mut options = EvalOptions::default();
+    options.promise = true;
+    ctx.eval_with_options(code.as_bytes(), options)
+        .map_err(|err| eval_error(ctx, err))
 }
 
 fn message_error(message: String) -> SandboxError {
@@ -208,16 +232,35 @@ mod tests {
         }
     }
 
+    fn default_global() -> crate::Global {
+        use clap::Parser;
+        #[derive(clap::Parser)]
+        struct Args {
+            #[command(flatten)]
+            global: crate::Global,
+        }
+        Args::parse_from(["mcptools"]).global
+    }
+
+    fn empty_bindings() -> Bindings {
+        Bindings {
+            names: Vec::new(),
+            global: default_global(),
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn plain_expression_yields_its_value() {
-        let output = run("1 + 1", Limits::default()).await.unwrap();
+        let output = run("1 + 1", Limits::default(), empty_bindings())
+            .await
+            .unwrap();
         assert_eq!(output.result, serde_json::json!(2));
         assert!(output.logs.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn console_logs_are_captured() {
-        let output = run("console.log('a'); 'b'", Limits::default())
+        let output = run("console.log('a'); 'b'", Limits::default(), empty_bindings())
             .await
             .unwrap();
         assert_eq!(output.logs, vec!["a".to_string()]);
@@ -226,17 +269,25 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn top_level_await_resolves() {
-        let output = run("await Promise.resolve(3)", Limits::default())
-            .await
-            .unwrap();
+        let output = run(
+            "await Promise.resolve(3)",
+            Limits::default(),
+            empty_bindings(),
+        )
+        .await
+        .unwrap();
         assert_eq!(output.result, serde_json::json!(3));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn thrown_type_error_is_mapped() {
-        let error = run("throw new TypeError('x')", Limits::default())
-            .await
-            .unwrap_err();
+        let error = run(
+            "throw new TypeError('x')",
+            Limits::default(),
+            empty_bindings(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             error,
             SandboxError::Js {
@@ -255,7 +306,9 @@ mod tests {
             "import('fs')",
             "import('std')",
         ] {
-            let error = run(code, Limits::default()).await.unwrap_err();
+            let error = run(code, Limits::default(), empty_bindings())
+                .await
+                .unwrap_err();
             assert!(
                 matches!(error, SandboxError::Js { .. }),
                 "{code} => {error:?}"
@@ -265,9 +318,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn fresh_runtime_per_call() {
-        let first = run("globalThis.x = 1", Limits::default()).await.unwrap();
+        let first = run("globalThis.x = 1", Limits::default(), empty_bindings())
+            .await
+            .unwrap();
         assert_eq!(first.result, serde_json::json!(1));
-        let second = run("typeof x", Limits::default()).await.unwrap();
+        let second = run("typeof x", Limits::default(), empty_bindings())
+            .await
+            .unwrap();
         assert_eq!(second.result, serde_json::json!("undefined"));
     }
 
@@ -275,7 +332,9 @@ mod tests {
     async fn tight_loop_stops_at_the_deadline() {
         let started = Instant::now();
         let limits = small_limits(Duration::from_millis(100));
-        let error = run("while(true){}", limits).await.unwrap_err();
+        let error = run("while(true){}", limits, empty_bindings())
+            .await
+            .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
         assert!(started.elapsed() < Duration::from_secs(1));
     }
@@ -283,34 +342,48 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn try_catch_cannot_swallow_the_deadline() {
         let limits = small_limits(Duration::from_millis(100));
-        let error = run("try { while(true){} } catch(e) {} 'x'", limits)
-            .await
-            .unwrap_err();
+        let error = run(
+            "try { while(true){} } catch(e) {} 'x'",
+            limits,
+            empty_bindings(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn yielding_loop_stops_at_the_deadline() {
         let limits = small_limits(Duration::from_millis(100));
-        let error = run("while(true){ await Promise.resolve() }", limits)
-            .await
-            .unwrap_err();
+        let error = run(
+            "while(true){ await Promise.resolve() }",
+            limits,
+            empty_bindings(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn never_resolving_promise_stops_at_the_deadline() {
         let limits = small_limits(Duration::from_millis(100));
-        let error = run("await new Promise(()=>{})", limits).await.unwrap_err();
+        let error = run("await new Promise(()=>{})", limits, empty_bindings())
+            .await
+            .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn catastrophic_backtracking_stops_at_the_deadline() {
         let limits = small_limits(Duration::from_millis(100));
-        let error = run("/(a+)+$/.test('a'.repeat(40)+'!')", limits)
-            .await
-            .unwrap_err();
+        let error = run(
+            "/(a+)+$/.test('a'.repeat(40)+'!')",
+            limits,
+            empty_bindings(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(100)));
     }
 
@@ -318,23 +391,29 @@ mod tests {
     async fn log_flood_hits_output_limit_despite_try_catch() {
         let limits = small_limits(Duration::from_millis(100));
         let code = "try { for(;;) console.log('x'.repeat(1000)) } catch(e) {} 'x'";
-        let error = run(code, limits).await.unwrap_err();
+        let error = run(code, limits, empty_bindings()).await.unwrap_err();
         assert_eq!(error, SandboxError::OutputLimit(4096));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn oversized_result_hits_output_limit() {
         let limits = small_limits(Duration::from_millis(100));
-        let error = run("'x'.repeat(5000)", limits).await.unwrap_err();
+        let error = run("'x'.repeat(5000)", limits, empty_bindings())
+            .await
+            .unwrap_err();
         assert_eq!(error, SandboxError::OutputLimit(4096));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn log_at_cap_with_empty_result_succeeds() {
         let limits = small_limits(Duration::from_millis(100));
-        let output = run("console.log('x'.repeat(4094)); ''", limits)
-            .await
-            .unwrap();
+        let output = run(
+            "console.log('x'.repeat(4094)); ''",
+            limits,
+            empty_bindings(),
+        )
+        .await
+        .unwrap();
         assert_eq!(output.logs, vec!["x".repeat(4094)]);
         assert_eq!(output.result, serde_json::json!(""));
     }
@@ -343,14 +422,18 @@ mod tests {
     async fn memory_exhaustion_is_recoverable() {
         let limits = small_limits(Duration::from_millis(100));
         let code = "const a=[]; while(true) a.push('x'.repeat(1<<20))";
-        let error = run(code, limits).await.unwrap_err();
+        let error = run(code, limits, empty_bindings()).await.unwrap_err();
         assert!(
             matches!(&error, SandboxError::Js { name, .. } if name == "InternalError"),
             "{error:?}"
         );
-        let output = run("1+1", small_limits(Duration::from_millis(100)))
-            .await
-            .unwrap();
+        let output = run(
+            "1+1",
+            small_limits(Duration::from_millis(100)),
+            empty_bindings(),
+        )
+        .await
+        .unwrap();
         assert_eq!(output.result, serde_json::json!(2));
     }
 
@@ -367,7 +450,9 @@ mod tests {
             })
         };
         let limits = small_limits(Duration::from_millis(300));
-        let error = run("while(true){}", limits).await.unwrap_err();
+        let error = run("while(true){}", limits, empty_bindings())
+            .await
+            .unwrap_err();
         assert_eq!(error, SandboxError::Timeout(Duration::from_millis(300)));
         let count = ticks.load(Ordering::SeqCst);
         assert!(count >= 15, "ticks = {count}");
