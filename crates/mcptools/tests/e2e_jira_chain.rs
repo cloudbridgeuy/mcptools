@@ -76,3 +76,34 @@ async fn jira_chain_updates_every_search_result() {
         .count();
     assert_eq!(puts, 3);
 }
+
+#[tokio::test]
+async fn jira_chain_no_writes_rejects_before_any_put() {
+    let stub = start_jira_stub().await;
+    let stub_uri = stub.uri();
+    let mut server = common::spawn_server(&[
+        ("JIRA_BASE_URL", stub_uri.as_str()),
+        ("JIRA_EMAIL", "test@example.com"),
+        ("JIRA_API_TOKEN", "test-token"),
+    ])
+    .expect("spawn mcptools mcp stdio");
+    let result = server
+        .tools_call("execute", serde_json::json!({"code": CHAIN_SCRIPT}))
+        .await;
+    assert_eq!(result["isError"], serde_json::json!(true));
+    let error = result["structuredContent"]["error"]["message"]
+        .as_str()
+        .expect("error message");
+    assert!(
+        error.contains("pass allowWrites: true to execute"),
+        "error message: {error}"
+    );
+    let requests = stub.received_requests().await.expect("request log");
+    let puts = requests
+        .iter()
+        .filter(|request| {
+            request.method.as_str() == "PUT" && request.url.path().starts_with("/rest/api/3/issue/")
+        })
+        .count();
+    assert_eq!(puts, 0);
+}
