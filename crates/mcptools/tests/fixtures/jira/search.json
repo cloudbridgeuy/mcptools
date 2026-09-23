@@ -1,0 +1,30 @@
+{
+  "issues": [
+    {
+      "key": "ISS-1",
+      "fields": {
+        "summary": "First tracked issue",
+        "status": { "name": "To Do" },
+        "assignee": { "displayName": "Ada Lovelace" }
+      }
+    },
+    {
+      "key": "ISS-2",
+      "fields": {
+        "summary": "Second tracked issue",
+        "status": { "name": "In Progress" },
+        "assignee": { "displayName": "Grace Hopper" }
+      }
+    },
+    {
+      "key": "ISS-3",
+      "fields": {
+        "summary": "Third tracked issue",
+        "status": { "name": "Done" },
+        "assignee": null
+      }
+    }
+  ],
+  "total": 3,
+  "isLast": true
+}

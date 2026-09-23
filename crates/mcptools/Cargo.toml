@@ -53,6 +53,7 @@ tempfile = "3.8"
 
 [dev-dependencies]
 jsonschema = { workspace = true }
+wiremock = "0.6"
 
 [package.metadata.cargo-machete]
 ignored = []

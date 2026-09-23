@@ -1,0 +1,14 @@
+{
+  "maxResults": 50,
+  "startAt": 0,
+  "isLast": true,
+  "values": [
+    {
+      "id": 7,
+      "name": "Current Sprint",
+      "state": "active",
+      "startDate": "2026-09-01T09:00:00.000Z",
+      "endDate": "2026-09-24T09:00:00.000Z"
+    }
+  ]
+}
