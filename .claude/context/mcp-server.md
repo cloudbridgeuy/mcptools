@@ -190,8 +190,10 @@ Error names:
 
 Flag gating is by tool kind only: read tools bind by default, `allowWrites`
 adds write tools, `allowSpend` adds spend tools, and `execute` never binds as
-a global inside its own sandbox. A missing global rejects with QuickJS's
-`ReferenceError`.
+a global inside its own sandbox. A missing gated tool rejects with a
+`ReferenceError` whose message names the tool, its kind, and the flag to pass
+(e.g. `jira_update is a write tool; pass allowWrites: true to execute`); any
+other missing global keeps QuickJS's plain `<name> is not defined` message.
 
 Limits come from the server flags `--execute-timeout-secs` (default 30),
 `--execute-memory-mb` (default 64), and `--execute-output-kb` (default 256).

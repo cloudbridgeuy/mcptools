@@ -1,4 +1,4 @@
-use super::{registered_tools, to_dual_result, JsonRpcError, ToolKind};
+use super::{registered_tools, to_dual_result, JsonRpcError, Tool, ToolKind};
 use crate::sandbox;
 use mcptools_core::sandbox::execute_output;
 
@@ -33,7 +33,8 @@ pub async fn handle_execute(
     if args.allow_spend {
         kinds.push(ToolKind::Spend);
     }
-    let names = sandbox::bindings::bound_names(&registered_tools(), &kinds);
+    let tools = registered_tools();
+    let names = sandbox::bindings::bound_names(&tools, &kinds);
     let run = sandbox::run(
         &args.code,
         global.sandbox_limits(),
@@ -43,13 +44,42 @@ pub async fn handle_execute(
         },
     )
     .await;
-    let output = execute_output(run);
+    let mut output = execute_output(run);
+    if let Some(error) = output
+        .error
+        .as_mut()
+        .filter(|error| error.name == "ReferenceError")
+    {
+        if let Some(message) = gated_reference_message(&error.message, &tools, &kinds) {
+            error.message = message;
+        }
+    }
     let failed = output.error.is_some();
     let mut envelope = to_dual_result(&output)?;
     if failed {
         envelope["isError"] = serde_json::json!(true);
     }
     Ok(envelope)
+}
+
+fn gated_reference_message(message: &str, tools: &[Tool], allowed: &[ToolKind]) -> Option<String> {
+    let name = message.strip_suffix(" is not defined")?;
+    if name == "execute" {
+        return None;
+    }
+    let kind = tools.iter().find(|tool| tool.name == name)?.kind;
+    if allowed.contains(&kind) {
+        return None;
+    }
+    match kind {
+        ToolKind::Write => Some(format!(
+            "{name} is a write tool; pass allowWrites: true to execute"
+        )),
+        ToolKind::Spend => Some(format!(
+            "{name} is a spend tool; pass allowSpend: true to execute"
+        )),
+        ToolKind::Read => None,
+    }
 }
 
 #[cfg(test)]
@@ -265,5 +295,105 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, -32602);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn write_tool_names_allow_writes_flag() {
+        clear_offline_env();
+        let global = global_with(&[]);
+        let executed = call(
+            "execute",
+            json!({"code": "console.log('a'); jira_update({})"}),
+            &global,
+        )
+        .await
+        .unwrap();
+        assert_eq!(executed["structuredContent"]["logs"], json!(["a"]));
+        assert_eq!(
+            executed["structuredContent"]["error"],
+            json!({
+                "message": "jira_update is a write tool; pass allowWrites: true to execute",
+                "name": "ReferenceError"
+            })
+        );
+        assert_eq!(executed["structuredContent"]["result"], json!(null));
+        assert_eq!(executed["isError"], json!(true));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn spend_tool_names_allow_spend_flag() {
+        clear_offline_env();
+        let global = global_with(&[]);
+        let executed = call("execute", json!({"code": "images_generate({})"}), &global)
+            .await
+            .unwrap();
+        assert_eq!(
+            executed["structuredContent"]["error"],
+            json!({
+                "message": "images_generate is a spend tool; pass allowSpend: true to execute",
+                "name": "ReferenceError"
+            })
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn allow_writes_does_not_cover_spend() {
+        clear_offline_env();
+        let global = global_with(&[]);
+        let executed = call(
+            "execute",
+            json!({"code": "images_generate({})", "allowWrites": true}),
+            &global,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            executed["structuredContent"]["error"]["message"],
+            json!("images_generate is a spend tool; pass allowSpend: true to execute")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_reference_stays_plain() {
+        clear_offline_env();
+        let global = global_with(&[]);
+        let executed = call("execute", json!({"code": "execute({})"}), &global)
+            .await
+            .unwrap();
+        assert_eq!(
+            executed["structuredContent"]["error"]["message"],
+            json!("execute is not defined")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unknown_global_stays_plain() {
+        clear_offline_env();
+        let global = global_with(&[]);
+        let executed = call("execute", json!({"code": "no_such_tool_175({})"}), &global)
+            .await
+            .unwrap();
+        assert_eq!(
+            executed["structuredContent"]["error"]["message"],
+            json!("no_such_tool_175 is not defined")
+        );
+    }
+
+    #[test]
+    fn gated_reference_message_none_branches() {
+        let tools = registered_tools();
+        let writes = [ToolKind::Read, ToolKind::Write];
+        assert_eq!(
+            gated_reference_message("jira_update is not defined", &tools, &writes),
+            None
+        );
+        assert_eq!(
+            gated_reference_message("jira_update could not run", &tools, &writes),
+            None
+        );
+        assert_eq!(
+            gated_reference_message("execute is not defined", &tools, &writes),
+            None
+        );
     }
 }

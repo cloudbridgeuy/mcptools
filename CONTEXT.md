@@ -95,7 +95,7 @@ Issue update resolves a workflow state name against the **Team key** in the **Is
 - **THEN** the process reads stdin to EOF for the body
 
 ### Requirement: Execute tool
-The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`, and `error` in `structuredContent`. Limits come from the `--execute-timeout-secs`, `--execute-output-kb`, and `--execute-memory-mb` server flags. Gating is by tool kind: read tools bind by default, `allowWrites` adds write tools, `allowSpend` adds spend tools, and `execute` never binds as a global inside its own sandbox.
+The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`, and `error` in `structuredContent`. Limits come from the `--execute-timeout-secs`, `--execute-output-kb`, and `--execute-memory-mb` server flags. Gating is by tool kind: read tools bind by default, `allowWrites` adds write tools, `allowSpend` adds spend tools, and `execute` never binds as a global inside its own sandbox. A missing gated tool keeps `error.name` at `ReferenceError` and reports a message naming the tool, its kind, and the flag to pass; any other missing global keeps the plain `is not defined` message.
 
 #### Scenario: Success payload
 - **WHEN** the script finishes without throwing
@@ -124,6 +124,11 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 #### Scenario: Kind gating
 - **WHEN** `execute` runs with neither `allowWrites` nor `allowSpend`
 - **THEN** only read tools bind as globals in the sandbox
+
+#### Scenario: Gated tool message
+- **WHEN** the script references a write or spend tool that did not bind
+- **THEN** `error.name` is `ReferenceError` and `error.message` names the tool, its kind, and the flag to pass
+- **AND** a missing global that is not a gated tool keeps the plain `is not defined` message
 
 #### Scenario: Missing code
 - **WHEN** `tools/call` invokes `execute` without `code`
