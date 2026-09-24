@@ -1,5 +1,8 @@
 mod common;
 
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
 fn fixture_path(dir: &std::path::Path) -> String {
     let fixture = dir.join("chain.pdf");
     std::fs::copy(
@@ -75,4 +78,44 @@ async fn pdf_read_unknown_field_path_errors() {
         response["error"]["message"],
         serde_json::json!("Unknown field path: \"bogus\"")
     );
+}
+
+fn fixture(body: &str) -> ResponseTemplate {
+    let json: serde_json::Value = serde_json::from_str(body).expect("fixture parses as JSON");
+    ResponseTemplate::new(200).set_body_json(json)
+}
+
+#[tokio::test]
+async fn fields_projection_jira_search_issues() {
+    let stub = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/search/jql"))
+        .respond_with(fixture(include_str!("fixtures/jira/search.json")))
+        .mount(&stub)
+        .await;
+    let stub_uri = stub.uri();
+    let mut server = common::spawn_server(&[
+        ("JIRA_BASE_URL", stub_uri.as_str()),
+        ("JIRA_EMAIL", "test@example.com"),
+        ("JIRA_API_TOKEN", "test-token"),
+    ])
+    .expect("spawn mcptools mcp stdio");
+
+    let result = server
+        .tools_call(
+            "jira_search",
+            serde_json::json!({"query": "project = ISS", "fields": ["issues.key", "total"]}),
+        )
+        .await;
+
+    let structured = &result["structuredContent"];
+    assert_eq!(
+        structured["issues"],
+        serde_json::json!([{"key": "ISS-1"}, {"key": "ISS-2"}, {"key": "ISS-3"}])
+    );
+    assert_eq!(structured["total"], serde_json::json!(3));
+    assert!(structured.get("next_page_token").is_none());
+    let text = result["content"][0]["text"].as_str().expect("text body");
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("text parses as JSON");
+    assert_eq!(parsed, result["structuredContent"]);
 }

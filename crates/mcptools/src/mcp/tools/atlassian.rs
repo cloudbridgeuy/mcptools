@@ -6,6 +6,7 @@ use super::JsonRpcError;
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JiraSearchArgs {
+    fields: Option<Vec<String>>,
     query: Option<String>,
     #[serde(rename = "queryName")]
     query_name: Option<String>,
@@ -190,6 +191,7 @@ pub async fn handle_jira_search(
             message: format!("Invalid arguments: {e}"),
             data: None,
         })?;
+    let fields = args.fields;
 
     let resolved_query = if let Some(query_name) = args.query_name {
         let home = env::var("HOME")
@@ -245,7 +247,7 @@ pub async fn handle_jira_search(
         data: None,
     })?;
 
-    super::to_dual_result(search_data)
+    super::to_dual_result_projected(search_data, fields.as_deref())
 }
 
 pub async fn handle_confluence_search(

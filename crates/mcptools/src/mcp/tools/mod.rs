@@ -162,9 +162,9 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 pub fn registered_tools() -> Vec<Tool> {
     vec![
         Tool {
-            output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::SearchOutput>(),
+            output_schema: schema::projected_output_schema_for::<mcptools_core::atlassian::jira::SearchOutput>(),
             name: "jira_search".to_string(),
-            description: "Search Jira issues using JQL (Jira Query Language) or a saved query. Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            description: "Search Jira issues using JQL (Jira Query Language) or a saved query. Returns a list of issues matching the query with details like key, summary, status, and assignee. Supports token-based pagination using nextPageToken. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback). Optional fields (array of dotted paths, e.g. [\"issues.key\",\"total\"]) returns only the named fields; omit it for the full output. Keep nextPageToken if you page further.".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraSearchArgs>(),
             summary: "Search Jira issues with JQL or a saved query",
             kind: ToolKind::Read,
@@ -524,9 +524,11 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Read,
         },
         Tool {
-            output_schema: schema::output_schema_for::<mcptools_core::linear::IssueListOutput>(),
+            output_schema: schema::projected_output_schema_for::<
+                mcptools_core::linear::IssueListOutput,
+            >(),
             name: "linear_issue_list".to_string(),
-            description: "List Linear issues with filters. Returns nodes with id, identifier, title, state, parent, blocked-by plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            description: "List Linear issues with filters. Returns nodes with id, identifier, title, state, parent, blocked-by plus pageInfo. Requires LINEAR_API_KEY environment variable. Optional fields (array of dotted paths, e.g. [\"nodes.identifier\",\"nodes.title\",\"pageInfo\"]) returns only the named fields; omit it for the full output. Keep pageInfo if you page further.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueListArgs>(),
             summary: "List Linear issues by team, state, assignee, project, label, or cycle",
             kind: ToolKind::Read,
@@ -1283,7 +1285,7 @@ mod declaration_tests {
     #[test]
     fn jira_search_declaration() {
         let tool = named("jira_search");
-        let head = "interface JiraSearchInput {\n  limit?: number;\n  nextPageToken?: string;\n  query?: string;\n  queryName?: string;\n}\n\ninterface JiraSearchIssueOutput {\n  assignee?: string | null;\n  description?: string | null;\n  key: string;\n  status: string;\n  summary: string;\n}\n\ninterface JiraSearchOutput {\n  issues: JiraSearchIssueOutput[];\n  next_page_token?: string | null;\n  total: number;\n}\n\n";
+        let head = "interface JiraSearchInput {\n  fields?: string[];\n  limit?: number;\n  nextPageToken?: string;\n  query?: string;\n  queryName?: string;\n}\n\ninterface JiraSearchIssueOutput {\n  assignee?: string | null;\n  description?: string | null;\n  key?: string;\n  status?: string;\n  summary?: string;\n}\n\ninterface JiraSearchOutput {\n  issues?: JiraSearchIssueOutput[];\n  next_page_token?: string | null;\n  total?: number;\n}\n\n";
         let want =
             format!("{head}/** {} */\ndeclare function jira_search(input: JiraSearchInput): Promise<JiraSearchOutput>;\n", tool.description);
         assert_eq!(super::declaration(&tool), want);
@@ -1301,7 +1303,7 @@ mod declaration_tests {
     #[test]
     fn linear_issue_list_declaration() {
         let tool = named("linear_issue_list");
-        let head = "interface LinearIssueListInput {\n  /** Fetch all pages (up to 50 items) */\n  all?: boolean;\n  /** Assignee user UUID or 'me' */\n  assignee?: string;\n  /** Page cursor for pagination */\n  cursor?: string;\n  /** Cycle number or id */\n  cycle?: string;\n  /** Label name */\n  label?: string;\n  /** Max items per page @default 25 */\n  limit?: number;\n  /** Project id or name (names need team) */\n  project?: string;\n  /** Title substring to search */\n  query?: string;\n  /** Workflow state name (e.g. Todo) */\n  state?: string;\n  /** Team id, key, or name */\n  team?: string;\n  /** Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z) */\n  updatedAfter?: string;\n}\n\ninterface LinearIssueListIssueMini {\n  blocked_by?: string[];\n  description?: string | null;\n  id: string;\n  identifier: string;\n  parent?: string | null;\n  state: string;\n  title: string;\n  url: string;\n}\n\ninterface LinearIssueListPageInfo {\n  endCursor?: string | null;\n  hasNextPage: boolean;\n}\n\ninterface LinearIssueListOutput {\n  nodes: LinearIssueListIssueMini[];\n  pageInfo: LinearIssueListPageInfo;\n}\n\n";
+        let head = "interface LinearIssueListInput {\n  /** Fetch all pages (up to 50 items) */\n  all?: boolean;\n  /** Assignee user UUID or 'me' */\n  assignee?: string;\n  /** Page cursor for pagination */\n  cursor?: string;\n  /** Cycle number or id */\n  cycle?: string;\n  fields?: string[];\n  /** Label name */\n  label?: string;\n  /** Max items per page @default 25 */\n  limit?: number;\n  /** Project id or name (names need team) */\n  project?: string;\n  /** Title substring to search */\n  query?: string;\n  /** Workflow state name (e.g. Todo) */\n  state?: string;\n  /** Team id, key, or name */\n  team?: string;\n  /** Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z) */\n  updatedAfter?: string;\n}\n\ninterface LinearIssueListIssueMini {\n  blocked_by?: string[];\n  description?: string | null;\n  id?: string;\n  identifier?: string;\n  parent?: string | null;\n  state?: string;\n  title?: string;\n  url?: string;\n}\n\ninterface LinearIssueListPageInfo {\n  endCursor?: string | null;\n  hasNextPage?: boolean;\n}\n\ninterface LinearIssueListOutput {\n  nodes?: LinearIssueListIssueMini[];\n  pageInfo?: LinearIssueListPageInfo;\n}\n\n";
         let want =
             format!("{head}/** {} */\ndeclare function linear_issue_list(input: LinearIssueListInput): Promise<LinearIssueListOutput>;\n", tool.description);
         assert_eq!(super::declaration(&tool), want);

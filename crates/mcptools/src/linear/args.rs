@@ -14,6 +14,7 @@ pub struct IssueGetArgs {
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase")]
 pub struct IssueListArgs {
+    pub fields: Option<Vec<String>>,
     #[schemars(description = "Team id, key, or name")]
     pub team: Option<String>,
     #[schemars(description = "Project id or name (names need team)")]

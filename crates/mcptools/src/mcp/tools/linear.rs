@@ -80,6 +80,7 @@ pub async fn handle_linear_issue_list(
     global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: crate::linear::args::IssueListArgs = parse_args(arguments)?;
+    let fields = args.fields;
     if global.verbose {
         eprintln!(
             "Calling linear_issue_list: team={:?}, project={:?}, limit={:?}",
@@ -120,7 +121,10 @@ pub async fn handle_linear_issue_list(
         cursor = page_info.end_cursor.clone();
     }
     nodes.truncate(50);
-    super::to_dual_result(IssueListOutput::from(Paginated { nodes, page_info }))
+    super::to_dual_result_projected(
+        IssueListOutput::from(Paginated { nodes, page_info }),
+        fields.as_deref(),
+    )
 }
 
 pub async fn handle_linear_comment_list(

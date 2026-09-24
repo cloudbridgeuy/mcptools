@@ -195,6 +195,7 @@ mod tests {
                 "assignee",
                 "cursor",
                 "cycle",
+                "fields",
                 "label",
                 "limit",
                 "project",

@@ -521,3 +521,70 @@ fn samples_cover_their_schemas() {
     }
     assert!(bad.is_empty(), "unreached paths: {bad:?}");
 }
+
+fn paths(list: &[&str]) -> Vec<String> {
+    list.iter().map(|p| p.to_string()).collect()
+}
+
+fn text_matches_structured(result: &serde_json::Value) {
+    let text = result["content"][0]["text"].as_str().expect("text body");
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("text parses as JSON");
+    assert_eq!(parsed, result["structuredContent"]);
+}
+
+fn object_keys(value: &serde_json::Value) -> Vec<&str> {
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .expect("object value")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort();
+    keys
+}
+
+#[test]
+fn fields_projection_linear_issue_list() {
+    let projected = super::to_dual_result_projected(
+        sample("linear_issue_list"),
+        Some(&paths(&["nodes.identifier", "nodes.title", "pageInfo"])),
+    )
+    .expect("known paths project");
+    let structured = &projected["structuredContent"];
+    let nodes = structured["nodes"].as_array().expect("nodes array");
+    assert!(!nodes.is_empty());
+    for node in nodes {
+        assert_eq!(object_keys(node), ["identifier", "title"]);
+    }
+    assert!(structured.get("pageInfo").is_some());
+    text_matches_structured(&projected);
+
+    let err =
+        super::to_dual_result_projected(sample("linear_issue_list"), Some(&paths(&["nodes.nope"])))
+            .expect_err("unknown path fails");
+    assert_eq!(err.code, -32602);
+    assert_eq!(err.message, "Unknown field path: \"nodes.nope\"");
+}
+
+#[test]
+fn fields_projection_jira_search() {
+    let projected = super::to_dual_result_projected(
+        sample("jira_search"),
+        Some(&paths(&["issues.key", "total"])),
+    )
+    .expect("known paths project");
+    let structured = &projected["structuredContent"];
+    let issues = structured["issues"].as_array().expect("issues array");
+    assert!(!issues.is_empty());
+    assert_eq!(object_keys(&issues[0]), ["key"]);
+    assert_eq!(issues[0]["key"], serde_json::json!("PROJ-1"));
+    assert_eq!(structured["total"], serde_json::json!(1));
+    assert!(structured.get("next_page_token").is_none());
+    text_matches_structured(&projected);
+
+    let err =
+        super::to_dual_result_projected(sample("jira_search"), Some(&paths(&["issues.nope"])))
+            .expect_err("unknown path fails");
+    assert_eq!(err.code, -32602);
+    assert_eq!(err.message, "Unknown field path: \"issues.nope\"");
+}
