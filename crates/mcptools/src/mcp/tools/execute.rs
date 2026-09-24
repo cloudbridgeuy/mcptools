@@ -121,14 +121,14 @@ mod tests {
         handle_tools_call(
             Some(json!({"name": name, "arguments": arguments})),
             global,
-            serve_flags(),
+            serve_flags(false),
         )
         .await
     }
 
-    fn serve_flags() -> crate::mcp::ServeFlags {
+    fn serve_flags(discovery: bool) -> crate::mcp::ServeFlags {
         crate::mcp::ServeFlags {
-            discovery: false,
+            discovery,
             code_mode: false,
         }
     }
@@ -150,7 +150,7 @@ mod tests {
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
         assert!(names.contains(&"jira_search"));
-        assert!(!listed_tools(registered_tools(), true)
+        assert!(!listed_tools(registered_tools(), serve_flags(true))
             .iter()
             .any(|tool| tool.name == "jira_search"));
         let executed = call(
@@ -164,7 +164,7 @@ mod tests {
         let err = handle_tools_call(
             Some(json!({"name": "jira_search", "arguments": {"jql": "x"}})),
             &global,
-            serve_flags(),
+            serve_flags(false),
         )
         .await
         .unwrap_err();
@@ -309,7 +309,7 @@ mod tests {
         let err = handle_tools_call(
             Some(json!({"name": "execute", "arguments": {}})),
             &global,
-            serve_flags(),
+            serve_flags(false),
         )
         .await
         .unwrap_err();

@@ -649,8 +649,13 @@ pub fn registered_tools() -> Vec<Tool> {
     ]
 }
 
-pub fn listed_tools(tools: Vec<Tool>, discovery: bool) -> Vec<Tool> {
-    if discovery {
+pub fn listed_tools(tools: Vec<Tool>, flags: ServeFlags) -> Vec<Tool> {
+    if flags.code_mode {
+        tools
+            .into_iter()
+            .filter(|tool| tool.name == "find_tools" || tool.name == "execute")
+            .collect()
+    } else if flags.discovery {
         tools
             .into_iter()
             .filter(|tool| tool.name == "find_tools")
@@ -661,7 +666,7 @@ pub fn listed_tools(tools: Vec<Tool>, discovery: bool) -> Vec<Tool> {
 }
 
 pub fn handle_tools_list(flags: ServeFlags) -> Result<serde_json::Value, JsonRpcError> {
-    let tools = listed_tools(registered_tools(), flags.discovery);
+    let tools = listed_tools(registered_tools(), flags);
     let kinds: Vec<ToolKind> = tools.iter().map(|tool| tool.kind).collect();
     let mut list = serde_json::to_value(ToolsList { tools }).map_err(|e| JsonRpcError {
         code: -32603,
@@ -939,6 +944,32 @@ mod catalog_tests {
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 1300;
+    const JOINT_BUDGET_TOKENS: usize = 1000;
+
+    #[test]
+    fn joint_definition_fits_budget() {
+        let list = super::handle_tools_list(ServeFlags {
+            discovery: false,
+            code_mode: true,
+        })
+        .unwrap();
+        let tools = list["tools"].as_array().unwrap();
+        let mut total = 0;
+        for name in ["find_tools", "execute"] {
+            let entry = tools
+                .iter()
+                .find(|tool| tool.get("name") == Some(&serde_json::json!(name)))
+                .unwrap_or_else(|| panic!("{name} missing from code mode tools/list"));
+            total += mcptools_core::atlas::prompts::estimate_tokens(
+                &serde_json::to_string(entry).unwrap(),
+            );
+        }
+        println!("joint tokens = {total} (budget {JOINT_BUDGET_TOKENS})");
+        assert!(
+            total <= JOINT_BUDGET_TOKENS,
+            "joint tokens = {total} (budget {JOINT_BUDGET_TOKENS})"
+        );
+    }
 
     #[test]
     fn find_tools_definition_fits_budget() {
@@ -957,19 +988,48 @@ mod catalog_tests {
 
     #[test]
     fn listed_tools_discovery_keeps_only_find_tools() {
-        let tools = super::listed_tools(super::registered_tools(), true);
+        let tools = super::listed_tools(super::registered_tools(), serve_flags(true));
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "find_tools");
     }
 
     #[test]
     fn listed_tools_full_mode_is_unchanged() {
-        let full = super::listed_tools(super::registered_tools(), false);
+        let full = super::listed_tools(super::registered_tools(), serve_flags(false));
         let registered = super::registered_tools();
         assert_eq!(full.len(), registered.len());
         assert_eq!(
             full.iter().map(|t| &t.name).collect::<Vec<_>>(),
             registered.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn gate_truth_table_for_flag_combinations() {
+        let names = |flags: ServeFlags| -> Vec<String> {
+            let list = super::handle_tools_list(flags).unwrap();
+            list["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(names(serve_flags(false)).len(), 63);
+        assert_eq!(names(serve_flags(true)), ["find_tools"]);
+        assert_eq!(
+            names(ServeFlags {
+                discovery: false,
+                code_mode: true
+            }),
+            ["find_tools", "execute"]
+        );
+        assert_eq!(
+            names(ServeFlags {
+                discovery: true,
+                code_mode: true
+            }),
+            ["find_tools", "execute"]
         );
     }
 
