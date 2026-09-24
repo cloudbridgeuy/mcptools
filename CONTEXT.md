@@ -187,3 +187,29 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 #### Scenario: Deterministic output
 - **WHEN** chart runs twice on the same issue set
 - **THEN** both runs write byte-identical HTML
+
+### Requirement: Tool output field projection
+`pdf_read`, `md_fetch`, `bitbucket_pr_read`, `jira_search`, and `linear_issue_list` accept an optional `fields` argument: an array of dotted paths. When present and non-empty, the tool returns only the named fields. Projection runs after the handler builds its output and after all existing output shaping (lineLimit truncation, pagination assembly), before serialization. `content[0].text` and `structuredContent` carry the same projected value. Each tool's `outputSchema` keeps the full output shape with every field optional, and each tool description documents `fields`.
+
+#### Scenario: Named fields only
+- **WHEN** `tools/call` invokes `pdf_read` with `fields: ["id", "title"]`
+- **THEN** `structuredContent` contains exactly the keys `id` and `title`
+- **AND** `content[0].text` parses back to the same value as `structuredContent`
+
+#### Scenario: Array outputs project per element
+- **WHEN** `tools/call` invokes `linear_issue_list` with `fields: ["nodes.identifier", "nodes.title", "pageInfo"]`
+- **THEN** every element of `nodes` contains exactly `identifier` and `title`, and `pageInfo` is still present
+
+#### Scenario: Absent or empty fields
+- **WHEN** `tools/call` invokes any of the five tools without `fields`, or with `fields: []`
+- **THEN** the full output returns unchanged, byte-identical to the pre-`fields` behavior
+
+#### Scenario: Unknown field path
+- **WHEN** `tools/call` invokes any of the five tools with a `fields` path that resolves to no field in the actual output, e.g. `["bogus"]`
+- **THEN** the server returns a JSON-RPC error with code `-32602` and message `Unknown field path: "bogus"`
+
+#### Scenario: Catalog advertises the parameter
+- **WHEN** `tools/list` returns any of the five tools
+- **THEN** the input schema shows `fields` as an optional array of strings
+- **AND** the description documents `fields`
+- **AND** the output schema contains no `required` key anywhere
