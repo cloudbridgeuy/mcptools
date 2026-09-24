@@ -11,6 +11,7 @@ pub struct PdfTocArgs {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct PdfReadArgs {
+    pub fields: Option<Vec<String>>,
     pub path: String,
     #[serde(rename = "sectionId")]
     pub section_id: Option<String>,
@@ -104,6 +105,7 @@ pub async fn handle_pdf_read(
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: PdfReadArgs = parse_args(arguments)?;
+    let fields = args.fields;
 
     let content = run_blocking(move || {
         let bytes = std::fs::read(&args.path).map_err(|e| format!("Failed to read file: {e}"))?;
@@ -112,7 +114,7 @@ pub async fn handle_pdf_read(
     })
     .await?;
 
-    super::to_dual_result(content)
+    super::to_dual_result_projected(content, fields.as_deref())
 }
 
 pub async fn handle_pdf_peek(

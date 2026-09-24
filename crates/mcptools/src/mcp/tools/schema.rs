@@ -6,6 +6,46 @@ pub fn output_schema_for<T: schemars::JsonSchema>() -> serde_json::Value {
     schema_value::<T>(false)
 }
 
+pub fn projected_output_schema_for<T: schemars::JsonSchema>() -> serde_json::Value {
+    let mut value = output_schema_for::<T>();
+    strip_required(&mut value);
+    value
+}
+
+fn strip_required(value: &mut serde_json::Value) {
+    let Some(map) = value.as_object_mut() else {
+        if let Some(items) = value.as_array_mut() {
+            for item in items {
+                strip_required(item);
+            }
+        }
+        return;
+    };
+    map.remove("required");
+    if let Some(props) = map.get_mut("properties").and_then(|v| v.as_object_mut()) {
+        for child in props.values_mut() {
+            strip_required(child);
+        }
+    }
+    if let Some(items) = map.get_mut("items") {
+        strip_required(items);
+    }
+    for key in ["anyOf", "oneOf", "allOf", "prefixItems"] {
+        if let Some(variants) = map.get_mut(key).and_then(|v| v.as_array_mut()) {
+            for variant in variants {
+                strip_required(variant);
+            }
+        }
+    }
+    for key in ["$defs", "definitions"] {
+        if let Some(defs) = map.get_mut(key).and_then(|v| v.as_object_mut()) {
+            for child in defs.values_mut() {
+                strip_required(child);
+            }
+        }
+    }
+}
+
 fn schema_value<T: schemars::JsonSchema>(normalize: bool) -> serde_json::Value {
     let schema = schemars::schema_for!(T);
     let mut value = serde_json::to_value(&schema).unwrap_or(serde_json::json!({

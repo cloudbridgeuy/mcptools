@@ -118,6 +118,27 @@ pub fn to_dual_result(value: impl Serialize) -> Result<serde_json::Value, JsonRp
     })
 }
 
+pub fn to_dual_result_projected(
+    value: impl Serialize,
+    fields: Option<&[String]>,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let Some(fields) = fields.filter(|fields| !fields.is_empty()) else {
+        return to_dual_result(value);
+    };
+    let structured = serde_json::to_value(&value).map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Serialization error: {e}"),
+        data: None,
+    })?;
+    let projected =
+        mcptools_core::projection::project(structured, fields).map_err(|e| JsonRpcError {
+            code: -32602,
+            message: format!("Unknown field path: \"{}\"", e.path),
+            data: None,
+        })?;
+    to_dual_result(projected)
+}
+
 pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
     let result = InitializeResult {
         protocol_version: "2025-06-18".to_string(),
@@ -397,9 +418,9 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Read,
         },
         Tool {
-            output_schema: schema::output_schema_for::<::pdf::SectionContent>(),
+            output_schema: schema::projected_output_schema_for::<::pdf::SectionContent>(),
             name: "pdf_read".to_string(),
-            description: "Read a section of a PDF document as Markdown, or the entire document if no section specified. Returns the section title, rendered Markdown text, and image references.".to_string(),
+            description: "Read a section of a PDF document as Markdown, or the entire document if no section specified. Returns the section title, rendered Markdown text, and image references. Optional fields (array of dotted paths, e.g. [\"title\",\"text\"]) returns only the named fields; omit it for the full output.".to_string(),
             input_schema: schema::input_schema_for::<pdf::PdfReadArgs>(),
             summary: "Read a PDF section, or the whole PDF, as Markdown",
             kind: ToolKind::Read,
@@ -1271,7 +1292,7 @@ mod declaration_tests {
     #[test]
     fn pdf_read_declaration() {
         let tool = named("pdf_read");
-        let head = "interface PdfReadInput {\n  path: string;\n  sectionId?: string;\n}\n\ntype PdfReadImageFormat = \"Jpeg\" | \"Png\" | \"Jpeg2000\" | \"Gif\" | \"Tiff\" | \"Bmp\" | \"WebP\" | \"Unknown\";\n\ntype PdfReadImageId = string;\n\ninterface PdfReadImageRef {\n  format: PdfReadImageFormat;\n  id: PdfReadImageId;\n}\n\ntype PdfReadSectionId = string;\n\ninterface PdfReadOutput {\n  id: PdfReadSectionId;\n  images: PdfReadImageRef[];\n  text: string;\n  title: string;\n}\n\n";
+        let head = "interface PdfReadInput {\n  fields?: string[];\n  path: string;\n  sectionId?: string;\n}\n\ntype PdfReadImageFormat = \"Jpeg\" | \"Png\" | \"Jpeg2000\" | \"Gif\" | \"Tiff\" | \"Bmp\" | \"WebP\" | \"Unknown\";\n\ntype PdfReadImageId = string;\n\ninterface PdfReadImageRef {\n  format?: PdfReadImageFormat;\n  id?: PdfReadImageId;\n}\n\ntype PdfReadSectionId = string;\n\ninterface PdfReadOutput {\n  id?: PdfReadSectionId;\n  images?: PdfReadImageRef[];\n  text?: string;\n  title?: string;\n}\n\n";
         let want =
             format!("{head}/** {} */\ndeclare function pdf_read(input: PdfReadInput): Promise<PdfReadOutput>;\n", tool.description);
         assert_eq!(super::declaration(&tool), want);
