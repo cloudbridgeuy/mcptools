@@ -1312,6 +1312,24 @@ mod declaration_tests {
     }
 
     #[test]
+    fn md_fetch_declaration() {
+        let tool = named("md_fetch");
+        let head = "interface MdFetchInput {\n  /** @default null */\n  fields?: string[];\n  /** @default null */\n  index?: number;\n  /** @default null */\n  limit?: number;\n  /** @default null */\n  offset?: number;\n  /** @default null */\n  page?: number;\n  /** @default null */\n  raw_html?: boolean;\n  /** @default null */\n  selector?: string;\n  /** @default null */\n  strategy?: string;\n  /** @default null */\n  timeout?: number;\n  url: string;\n}\n\ninterface MdFetchMdPaginationInfo {\n  current_page?: number;\n  has_more?: boolean;\n  limit?: number;\n  total_characters?: number;\n  total_pages?: number;\n}\n\ninterface MdFetchOutput {\n  content?: string;\n  elements_found?: number | null;\n  fetch_time_ms?: number;\n  html_length?: number;\n  pagination?: MdFetchMdPaginationInfo;\n  selector_used?: string | null;\n  strategy_applied?: string | null;\n  title?: string | null;\n  url?: string;\n}\n\n";
+        let want =
+            format!("{head}/** {} */\ndeclare function md_fetch(input: MdFetchInput): Promise<MdFetchOutput>;\n", tool.description);
+        assert_eq!(super::declaration(&tool), want);
+    }
+
+    #[test]
+    fn bitbucket_pr_read_declaration() {
+        let tool = named("bitbucket_pr_read");
+        let head = "interface BitbucketPrReadInput {\n  diffLimit?: number;\n  fields?: string[];\n  limit?: number;\n  lineLimit?: number;\n  noDiff?: boolean;\n  prNumber: number;\n  repo: string;\n}\n\ninterface BitbucketPrReadCommentOutput {\n  author?: string;\n  content?: string;\n  created_on?: string;\n  id?: number;\n  inline_line?: number | null;\n  inline_path?: string | null;\n  is_inline?: boolean;\n}\n\ninterface BitbucketPrReadDiffstatOutput {\n  files?: BitbucketPrReadFileStatOutput[];\n  total_deletions?: number;\n  total_files?: number;\n  total_insertions?: number;\n}\n\ninterface BitbucketPrReadFileStatOutput {\n  lines_added?: number;\n  lines_removed?: number;\n  old_path?: string | null;\n  path?: string;\n  status?: string;\n}\n\ninterface BitbucketPrReadOutput {\n  approvals?: string[];\n  author?: string;\n  comments?: BitbucketPrReadCommentOutput[];\n  created_on?: string;\n  description?: string | null;\n  destination_branch?: string;\n  destination_commit?: string | null;\n  destination_repo?: string;\n  diff_content?: string | null;\n  diffstat?: BitbucketPrReadDiffstatOutput;\n  html_link?: string;\n  id?: number;\n  reviewers?: string[];\n  source_branch?: string;\n  source_commit?: string | null;\n  source_repo?: string;\n  state?: string;\n  title?: string;\n  updated_on?: string;\n}\n\n";
+        let want =
+            format!("{head}/** {} */\ndeclare function bitbucket_pr_read(input: BitbucketPrReadInput): Promise<BitbucketPrReadOutput>;\n", tool.description);
+        assert_eq!(super::declaration(&tool), want);
+    }
+
+    #[test]
     fn declarations_keep_given_order_and_reject_unknown() {
         let names = vec!["pdf_read".to_string(), "jira_search".to_string()];
         let text = super::declarations(&names).unwrap();
