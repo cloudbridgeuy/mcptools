@@ -4,6 +4,8 @@ use serde::Deserialize;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct MdFetchArgs {
+    #[serde(default)]
+    pub fields: Option<Vec<String>>,
     pub url: String,
     #[serde(default)]
     pub timeout: Option<u64>,
@@ -75,6 +77,7 @@ pub async fn handle_md_fetch(
     if matches!(strategy, crate::md::SelectionStrategy::N) && args.index.is_none() {
         return Err(invalid_strategy_index());
     }
+    let fields = args.fields;
 
     let fetch_data = tokio::task::spawn_blocking(move || {
         crate::md::fetch_and_convert_data(crate::md::FetchConfig {
@@ -102,7 +105,7 @@ pub async fn handle_md_fetch(
         data: None,
     })?;
 
-    super::to_dual_result(fetch_data)
+    super::to_dual_result_projected(fetch_data, fields.as_deref())
 }
 
 pub async fn handle_md_toc(

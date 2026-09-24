@@ -588,3 +588,86 @@ fn fields_projection_jira_search() {
     assert_eq!(err.code, -32602);
     assert_eq!(err.message, "Unknown field path: \"issues.nope\"");
 }
+
+#[test]
+fn fields_projection_md_fetch() {
+    let projected =
+        super::to_dual_result_projected(sample("md_fetch"), Some(&paths(&["title", "content"])))
+            .expect("known paths project");
+    let structured = &projected["structuredContent"];
+    assert_eq!(object_keys(structured), ["content", "title"]);
+    assert!(structured.get("url").is_none());
+    assert!(structured.get("html_length").is_none());
+    assert!(structured.get("fetch_time_ms").is_none());
+    assert!(structured.get("pagination").is_none());
+    text_matches_structured(&projected);
+}
+
+#[test]
+fn fields_projection_bitbucket_pr_read() {
+    let projected = super::to_dual_result_projected(
+        sample("bitbucket_pr_read"),
+        Some(&paths(&["id", "title", "state", "diff_content"])),
+    )
+    .expect("known paths project");
+    let structured = &projected["structuredContent"];
+    assert_eq!(
+        object_keys(structured),
+        ["diff_content", "id", "state", "title"]
+    );
+    assert!(structured.get("comments").is_none());
+    assert!(structured.get("diffstat").is_none());
+    text_matches_structured(&projected);
+}
+
+fn contains_required_key(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .any(|(k, v)| k == "required" || contains_required_key(v)),
+        serde_json::Value::Array(items) => items.iter().any(contains_required_key),
+        _ => false,
+    }
+}
+
+#[test]
+fn fields_projection_covers_five_registered_tools() {
+    let tools = super::registered_tools();
+    for name in PROJECTED_TOOLS {
+        let tool = tools
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("missing tool {name}"));
+        let fields = tool
+            .input_schema
+            .get("properties")
+            .and_then(|p| p.get("fields"))
+            .unwrap_or_else(|| panic!("{name}: missing fields property"));
+        assert_eq!(fields.get("type").and_then(|t| t.as_str()), Some("array"));
+        assert_eq!(
+            fields
+                .get("items")
+                .and_then(|i| i.get("type"))
+                .and_then(|t| t.as_str()),
+            Some("string")
+        );
+        let required = tool
+            .input_schema
+            .get("required")
+            .and_then(|r| r.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !required.iter().any(|r| r.as_str() == Some("fields")),
+            "{name}: fields is required"
+        );
+        assert!(
+            tool.description.contains("fields"),
+            "{name}: description lacks fields"
+        );
+        assert!(
+            !contains_required_key(&tool.output_schema),
+            "{name}: output schema keeps required"
+        );
+    }
+}

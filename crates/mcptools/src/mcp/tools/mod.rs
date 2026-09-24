@@ -194,9 +194,9 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Read,
         },
         Tool {
-            output_schema: schema::output_schema_for::<mcptools_core::md::FetchOutput>(),
+            output_schema: schema::projected_output_schema_for::<mcptools_core::md::FetchOutput>(),
             name: "md_fetch".to_string(),
-            description: "Fetch a web page using headless Chrome, wait for all XHR requests to complete (network idle), and convert the HTML to Markdown. Supports CSS selector filtering to extract specific page elements. Returns the page title, markdown content, selector metadata, and fetch statistics.".to_string(),
+            description: "Fetch a web page using headless Chrome, wait for all XHR requests to complete (network idle), and convert the HTML to Markdown. Supports CSS selector filtering to extract specific page elements. Returns the page title, markdown content, selector metadata, and fetch statistics. Optional fields (array of dotted paths, e.g. [\"title\",\"content\"]) returns only the named fields; omit it for the full output. Keep the pagination fields if you page further.".to_string(),
             input_schema: schema::input_schema_for::<md::MdFetchArgs>(),
             summary: "Fetch a web page as Markdown",
             kind: ToolKind::Read,
@@ -338,9 +338,11 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Read,
         },
         Tool {
-            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PROutput>(),
+            output_schema: schema::projected_output_schema_for::<
+                mcptools_core::atlassian::bitbucket::PROutput,
+            >(),
             name: "bitbucket_pr_read".to_string(),
-            description: "Read details of a specific Bitbucket pull request including diff, diffstat, and comments. Use lineLimit to control diff output size (default: 500 lines, use -1 for unlimited). Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            description: "Read details of a specific Bitbucket pull request including diff, diffstat, and comments. Use lineLimit to control diff output size (default: 500 lines, use -1 for unlimited). Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables. Optional fields (array of dotted paths, e.g. [\"id\",\"title\",\"diff_content\"]) returns only the named fields; omit it for the full output.".to_string(),
             input_schema: schema::input_schema_for::<atlassian::BitbucketPRReadArgs>(),
             summary: "Read one Bitbucket pull request with diff and comments",
             kind: ToolKind::Read,

@@ -81,6 +81,7 @@ pub(crate) struct BitbucketPRListArgs {
 }
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct BitbucketPRReadArgs {
+    fields: Option<Vec<String>>,
     repo: String,
     #[serde(rename = "prNumber")]
     pr_number: u64,
@@ -710,6 +711,8 @@ pub async fn handle_bitbucket_pr_read(
             }
         })?;
 
+    let fields = args.fields;
+
     if global.verbose {
         eprintln!(
             "Calling bitbucket_pr_read: repo={}, prNumber={}, limit={:?}, diffLimit={:?}, lineLimit={:?}, noDiff={:?}",
@@ -757,7 +760,7 @@ pub async fn handle_bitbucket_pr_read(
         }
     }
 
-    super::to_dual_result(pr_data)
+    super::to_dual_result_projected(pr_data, fields.as_deref())
 }
 
 pub async fn handle_bitbucket_pr_create(
