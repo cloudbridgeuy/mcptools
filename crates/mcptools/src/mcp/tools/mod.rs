@@ -16,7 +16,7 @@ mod conformance_tests;
 use serde::{Deserialize, Serialize};
 
 // Re-export types needed by tool handlers
-pub use super::{JsonRpcError, Tool, ToolKind};
+pub use super::{JsonRpcError, ServeFlags, Tool, ToolKind};
 pub use find_tools::find_tools;
 
 // MCP Protocol types for tools
@@ -660,8 +660,8 @@ pub fn listed_tools(tools: Vec<Tool>, discovery: bool) -> Vec<Tool> {
     }
 }
 
-pub fn handle_tools_list(discovery: bool) -> Result<serde_json::Value, JsonRpcError> {
-    let tools = listed_tools(registered_tools(), discovery);
+pub fn handle_tools_list(flags: ServeFlags) -> Result<serde_json::Value, JsonRpcError> {
+    let tools = listed_tools(registered_tools(), flags.discovery);
     let kinds: Vec<ToolKind> = tools.iter().map(|tool| tool.kind).collect();
     let mut list = serde_json::to_value(ToolsList { tools }).map_err(|e| JsonRpcError {
         code: -32603,
@@ -717,6 +717,7 @@ pub fn declarations(names: &[String]) -> crate::prelude::Result<String> {
 pub async fn handle_tools_call(
     params: Option<serde_json::Value>,
     global: &crate::Global,
+    flags: ServeFlags,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let params: CallToolParams = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
@@ -819,8 +820,8 @@ pub async fn handle_tools_call(
         "linear_relation_remove" => {
             linear::handle_linear_relation_remove(params.arguments, global).await
         }
-        "find_tools" => find_tools::handle_find_tools(params.arguments, global).await,
-        "execute" => execute::handle_execute(params.arguments, global).await,
+        "find_tools" => find_tools::handle_find_tools(params.arguments, global, flags).await,
+        "execute" => execute::handle_execute(params.arguments, global, flags).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),
@@ -855,7 +856,15 @@ mod dual_tests {
 
 #[cfg(test)]
 mod catalog_tests {
+    use super::ServeFlags;
     use std::collections::BTreeSet;
+
+    fn serve_flags(discovery: bool) -> ServeFlags {
+        ServeFlags {
+            discovery,
+            code_mode: false,
+        }
+    }
 
     #[test]
     fn catalog_names_equal_registered_names_minus_find_tools_and_execute() {
@@ -906,7 +915,7 @@ mod catalog_tests {
 
     #[test]
     fn tools_list_json_omits_summary() {
-        let list = super::handle_tools_list(false).unwrap();
+        let list = super::handle_tools_list(serve_flags(false)).unwrap();
         for tool in list["tools"].as_array().unwrap() {
             assert!(tool.get("summary").is_none());
             assert!(tool.get("name").is_some());
@@ -918,7 +927,7 @@ mod catalog_tests {
 
     #[test]
     fn mcp_tools_list_includes_find_tools() {
-        let list = super::handle_tools_list(false).unwrap();
+        let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
         assert!(tools
             .iter()
@@ -933,7 +942,7 @@ mod catalog_tests {
 
     #[test]
     fn find_tools_definition_fits_budget() {
-        let list = super::handle_tools_list(true).unwrap();
+        let list = super::handle_tools_list(serve_flags(true)).unwrap();
         let tools = list["tools"].as_array().unwrap();
         let entry = tools
             .iter()
@@ -991,7 +1000,7 @@ mod catalog_tests {
 
     #[test]
     fn execute_entry_is_destructive() {
-        let list = super::handle_tools_list(false).unwrap();
+        let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
         let entry = tools
             .iter()
@@ -1025,7 +1034,7 @@ mod catalog_tests {
             "execute",
         ];
         let spend = ["images_generate", "images_edit", "images_vary"];
-        let list = super::handle_tools_list(false).unwrap();
+        let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 63);
         let entry = |name: &str| {
@@ -1145,7 +1154,7 @@ mod catalog_tests {
 
     #[test]
     fn pilot_entries_carry_kind_annotations() {
-        let list = super::handle_tools_list(false).unwrap();
+        let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
         let entry = |name: &str| {
             tools

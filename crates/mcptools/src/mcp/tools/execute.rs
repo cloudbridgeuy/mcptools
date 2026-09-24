@@ -19,6 +19,7 @@ pub struct ExecuteArgs {
 pub async fn handle_execute(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
+    flags: super::ServeFlags,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: ExecuteArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
@@ -41,6 +42,7 @@ pub async fn handle_execute(
         sandbox::Bindings {
             names,
             global: global.clone(),
+            flags,
         },
     )
     .await;
@@ -116,7 +118,19 @@ mod tests {
         arguments: serde_json::Value,
         global: &crate::Global,
     ) -> Result<serde_json::Value, JsonRpcError> {
-        handle_tools_call(Some(json!({"name": name, "arguments": arguments})), global).await
+        handle_tools_call(
+            Some(json!({"name": name, "arguments": arguments})),
+            global,
+            serve_flags(),
+        )
+        .await
+    }
+
+    fn serve_flags() -> crate::mcp::ServeFlags {
+        crate::mcp::ServeFlags {
+            discovery: false,
+            code_mode: false,
+        }
     }
 
     const KIND_PROBE: &str =
@@ -150,6 +164,7 @@ mod tests {
         let err = handle_tools_call(
             Some(json!({"name": "jira_search", "arguments": {"jql": "x"}})),
             &global,
+            serve_flags(),
         )
         .await
         .unwrap_err();
@@ -291,9 +306,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn missing_code_is_invalid_params() {
         let global = global_with(&[]);
-        let err = handle_tools_call(Some(json!({"name": "execute", "arguments": {}})), &global)
-            .await
-            .unwrap_err();
+        let err = handle_tools_call(
+            Some(json!({"name": "execute", "arguments": {}})),
+            &global,
+            serve_flags(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code, -32602);
     }
 

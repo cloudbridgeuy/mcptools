@@ -46,14 +46,6 @@ pub struct Global {
 
     #[clap(
         long,
-        env = "MCPTOOLS_DISCOVERY",
-        global = true,
-        default_value = "false"
-    )]
-    pub discovery: bool,
-
-    #[clap(
-        long,
         env = "MCPTOOLS_EXECUTE_TIMEOUT_SECS",
         global = true,
         default_value_t = 30,

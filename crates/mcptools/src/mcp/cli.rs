@@ -1,7 +1,31 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::Args)]
+pub struct ServeFlags {
+    #[clap(
+        long,
+        env = "MCPTOOLS_DISCOVERY",
+        global = true,
+        default_value = "false",
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub discovery: bool,
+
+    #[clap(
+        long,
+        env = "MCPTOOLS_CODE_MODE",
+        global = true,
+        default_value = "false",
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub code_mode: bool,
+}
+
 #[derive(Debug, clap::Parser)]
 #[command(name = "mcp")]
 #[command(about = "Model Context Protocol server")]
 pub struct App {
+    #[clap(flatten)]
+    pub flags: ServeFlags,
+
     #[command(subcommand)]
     pub command: Commands,
 }

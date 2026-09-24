@@ -17,12 +17,13 @@ pub fn install<'js>(ctx: &Ctx<'js>, bindings: &Bindings) -> rquickjs::Result<()>
     for name in &bindings.names {
         let bound = name.clone();
         let global = bindings.global.clone();
+        let flags = bindings.flags;
         let function = Function::new(
             ctx.clone(),
             Async(move |ctx: Ctx<'js>, input: Opt<Value<'js>>| {
                 let name = bound.clone();
                 let global = global.clone();
-                async move { call(ctx, name, global, input.0).await }
+                async move { call(ctx, name, global, flags, input.0).await }
             }),
         )?;
         ctx.globals().set(name, function)?;
@@ -34,12 +35,14 @@ async fn call<'js>(
     ctx: Ctx<'js>,
     name: String,
     global: crate::Global,
+    flags: crate::mcp::ServeFlags,
     input: Option<Value<'js>>,
 ) -> rquickjs::Result<Value<'js>> {
     let arguments = arguments(&ctx, input)?;
     match handle_tools_call(
         Some(serde_json::json!({ "name": name, "arguments": arguments })),
         &global,
+        flags,
     )
     .await
     {
@@ -103,10 +106,18 @@ mod tests {
         Args::parse_from(["mcptools"]).global
     }
 
+    fn test_flags() -> crate::mcp::ServeFlags {
+        crate::mcp::ServeFlags {
+            discovery: false,
+            code_mode: false,
+        }
+    }
+
     fn read_bindings() -> Bindings {
         Bindings {
             names: bound_names(&registered_tools(), &[ToolKind::Read]),
             global: test_global(),
+            flags: test_flags(),
         }
     }
 
@@ -176,6 +187,7 @@ mod tests {
         let bindings = Bindings {
             names: bound_names(&registered_tools(), &[ToolKind::Read]),
             global: global.clone(),
+            flags: test_flags(),
         };
         let run = run(
             "try { await jira_search({ jql: 'x' }); return null } catch (e) { return [e.code, e.message, e instanceof Error, e.name] }",
@@ -187,6 +199,7 @@ mod tests {
         let err = handle_tools_call(
             Some(json!({"name": "jira_search", "arguments": {"jql": "x"}})),
             &global,
+            test_flags(),
         )
         .await
         .unwrap_err();

@@ -11,6 +11,7 @@ pub mod bindings;
 pub struct Bindings {
     pub names: Vec<String>,
     pub global: crate::Global,
+    pub flags: crate::mcp::ServeFlags,
 }
 
 pub const PRELUDE: &str = r#"
@@ -255,6 +256,10 @@ mod tests {
         Bindings {
             names: Vec::new(),
             global: default_global(),
+            flags: crate::mcp::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
         }
     }
 

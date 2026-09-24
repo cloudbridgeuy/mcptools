@@ -1,7 +1,7 @@
 use crate::prelude::{eprintln, *};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-pub async fn run_stdio(global: crate::Global) -> Result<()> {
+pub async fn run_stdio(global: crate::Global, flags: crate::mcp::ServeFlags) -> Result<()> {
     if global.verbose {
         eprintln!("Starting MCP server with stdio transport...");
         eprintln!();
@@ -29,7 +29,7 @@ pub async fn run_stdio(global: crate::Global) -> Result<()> {
             eprintln!("Received: {trimmed}");
         }
 
-        let response = super::handle_request(trimmed, &global).await;
+        let response = super::handle_request(trimmed, &global, flags).await;
         let response_json = serde_json::to_string(&response)?;
 
         if global.verbose {

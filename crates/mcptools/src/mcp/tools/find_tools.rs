@@ -133,6 +133,7 @@ pub async fn find_tools(
 pub async fn handle_find_tools(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
+    flags: super::ServeFlags,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: FindToolsArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| JsonRpcError {
@@ -270,14 +271,18 @@ mod find_tools_tests {
         let k = 5;
         let global = crate::Global {
             verbose: false,
-            discovery: false,
             execute_timeout_secs: 30,
             execute_memory_mb: 64,
             execute_output_kb: 256,
         };
+        let flags = super::super::ServeFlags {
+            discovery: false,
+            code_mode: false,
+        };
         let mcp_result = super::super::handle_tools_call(
             Some(serde_json::json!({"name":"find_tools","arguments":{"task":task,"k":k}})),
             &global,
+            flags,
         )
         .await
         .unwrap();

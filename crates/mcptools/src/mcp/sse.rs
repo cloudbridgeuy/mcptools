@@ -10,7 +10,11 @@ use std::convert::Infallible;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
-pub async fn run_sse(options: super::cli::SseOptions, global: crate::Global) -> Result<()> {
+pub async fn run_sse(
+    options: super::cli::SseOptions,
+    global: crate::Global,
+    flags: super::cli::ServeFlags,
+) -> Result<()> {
     if global.verbose {
         eprintln!(
             "Starting MCP server with SSE transport on {}:{}...",
@@ -31,7 +35,7 @@ pub async fn run_sse(options: super::cli::SseOptions, global: crate::Global) -> 
         .route("/sse", get(sse_handler))
         .route("/message", post(message_handler))
         .layer(cors)
-        .with_state(shared_global);
+        .with_state((shared_global, flags));
 
     if global.verbose {
         eprintln!("MCP server listening on http://{}", addr);
@@ -51,17 +55,17 @@ pub async fn run_sse(options: super::cli::SseOptions, global: crate::Global) -> 
 }
 
 async fn sse_handler(
-    State(_global): State<Arc<crate::Global>>,
+    State((_global, _flags)): State<(Arc<crate::Global>, super::cli::ServeFlags)>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let stream = stream::once(async { Ok(Event::default().data("MCP SSE endpoint ready")) });
     Sse::new(stream)
 }
 
 async fn message_handler(
-    State(global): State<Arc<crate::Global>>,
+    State((global, flags)): State<(Arc<crate::Global>, super::cli::ServeFlags)>,
     Json(request): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
     let request_str = serde_json::to_string(&request).unwrap_or_default();
-    let response = super::handle_request(&request_str, &global).await;
+    let response = super::handle_request(&request_str, &global, flags).await;
     Json(serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
 }

@@ -4,7 +4,7 @@ mod sse;
 mod stdio;
 pub(crate) mod tools;
 
-pub use cli::App;
+pub use cli::{App, ServeFlags};
 pub use tools::find_tools;
 
 use crate::prelude::*;
@@ -59,9 +59,10 @@ pub struct Tool {
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
+    let flags = app.flags;
     match app.command {
-        cli::Commands::Stdio => stdio::run_stdio(global).await,
-        cli::Commands::Sse(options) => sse::run_sse(options, global).await,
+        cli::Commands::Stdio => stdio::run_stdio(global, flags).await,
+        cli::Commands::Sse(options) => sse::run_sse(options, global, flags).await,
         cli::Commands::Catalog => {
             print!(
                 "{}",
@@ -76,7 +77,11 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
     }
 }
 
-pub async fn handle_request(request_str: &str, global: &crate::Global) -> JsonRpcResponse {
+pub async fn handle_request(
+    request_str: &str,
+    global: &crate::Global,
+    flags: ServeFlags,
+) -> JsonRpcResponse {
     let request: JsonRpcRequest = match serde_json::from_str(request_str) {
         Ok(req) => req,
         Err(e) => {
@@ -95,8 +100,8 @@ pub async fn handle_request(request_str: &str, global: &crate::Global) -> JsonRp
 
     let result = match request.method.as_str() {
         "initialize" => tools::handle_initialize(),
-        "tools/list" => tools::handle_tools_list(global.discovery),
-        "tools/call" => tools::handle_tools_call(request.params, global).await,
+        "tools/list" => tools::handle_tools_list(flags),
+        "tools/call" => tools::handle_tools_call(request.params, global, flags).await,
         "resources/list" => resources::handle_resources_list(),
         "resources/read" => resources::handle_resources_read(request.params),
         method => Err(JsonRpcError {
