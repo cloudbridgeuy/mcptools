@@ -1,5 +1,6 @@
 pub mod args;
 pub mod auth;
+pub mod chart;
 pub mod client;
 pub mod comments;
 pub mod config;
@@ -7,7 +8,7 @@ pub mod discover;
 pub mod issue;
 pub mod relations;
 
-use crate::prelude::{println, *};
+use crate::prelude::{eprintln, println, *};
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "linear")]
@@ -43,6 +44,8 @@ pub enum Commands {
     /// Cycle operations
     #[command(subcommand)]
     Cycles(CyclesCommands),
+    #[command(about = "Render an HTML Mermaid chart of issues, sub-issues, and blockers")]
+    Chart(ChartOptions),
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -391,6 +394,23 @@ pub struct TeamScopedListOptions {
     pub json: bool,
 }
 
+#[derive(Debug, clap::Args, Clone)]
+pub struct ChartOptions {
+    #[arg(
+        required = true,
+        help = "Issue identifiers (e.g. GUZ-185 GUZ-186 GUZ-188)"
+    )]
+    pub issues: Vec<String>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Output HTML path (default: <temp dir>/mcptools-linear-chart.html)"
+    )]
+    pub out: Option<std::path::PathBuf>,
+    #[arg(long, help = "Do not open the chart in the default browser")]
+    pub no_open: bool,
+}
+
 pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
     if main_global.verbose {
         println!("Running Linear command...");
@@ -435,7 +455,38 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
         Commands::Cycles(cmd) => match cmd {
             CyclesCommands::List(options) => cycles_list_handler(options).await,
         },
+        Commands::Chart(options) => chart_handler(options).await,
     }
+}
+
+async fn chart_handler(options: ChartOptions) -> Result<()> {
+    let seeds = chart::validate_issue_ids(&options.issues)?;
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let closure = chart::chart_data(&client, &seeds).await?;
+    if closure.cap_hit {
+        eprintln!(
+            "warning: linear chart capped at {} issues; expansion stopped early",
+            chart::ISSUE_CAP
+        );
+    }
+    for (issue, blocker) in &closure.missing_blockers {
+        eprintln!(
+            "warning: {} is blocked by {}, which is outside the fetched set; rendering {} as fog",
+            issue, blocker, issue
+        );
+    }
+    let stats = mcptools_core::linear::chart_stats(&closure.nodes);
+    let mermaid = mcptools_core::linear::build_mermaid(&closure.nodes);
+    let stats_line = mcptools_core::linear::stats_line(&stats);
+    let html = chart::render_html(&seeds[0], &mermaid);
+    let out = options.out.unwrap_or_else(chart::default_out_path);
+    std::fs::write(&out, html)
+        .map_err(|e| eyre!("Failed to write chart HTML to '{}': {}", out.display(), e))?;
+    println!("{}", out.display());
+    println!("{}", stats_line);
+    crate::open::maybe_open(&[out.to_string_lossy().into_owned()], !options.no_open);
+    Ok(())
 }
 
 async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {

@@ -155,6 +155,7 @@ mcptools linear issue list --assignee me --json
 mcptools linear teams list
 mcptools linear projects list --team GUZ
 mcptools linear users list --query "Ada"
+mcptools linear chart GUZ-185 GUZ-186 GUZ-188
 ```
 
 ### Bitbucket

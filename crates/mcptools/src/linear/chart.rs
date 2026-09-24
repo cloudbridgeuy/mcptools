@@ -1,0 +1,306 @@
+use crate::linear::client::execute;
+use crate::prelude::*;
+use mcptools_core::linear::ChartNode;
+use std::collections::{BTreeMap, HashSet, VecDeque};
+
+pub const ISSUE_CAP: usize = 300;
+
+const CHART_ISSUE_QUERY: &str = "query ($id: String!, $after: String) { issue(id: $id) { id identifier title url state { name type } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } children(first: 50, after: $after) { nodes { identifier } pageInfo { hasNextPage endCursor } } } }";
+
+#[derive(Debug)]
+pub struct ChartClosure {
+    pub nodes: Vec<ChartNode>,
+    pub cap_hit: bool,
+    pub missing_blockers: Vec<(String, String)>,
+}
+
+pub fn validate_issue_ids(seeds: &[String]) -> Result<Vec<String>> {
+    if seeds.is_empty() {
+        return Err(eyre!("Linear chart needs at least one issue id"));
+    }
+    let mut validated = Vec::with_capacity(seeds.len());
+    for seed in seeds {
+        let trimmed = seed.trim();
+        if trimmed.is_empty() {
+            return Err(eyre!("Linear chart issue id must not be empty"));
+        }
+        validated.push(trimmed.to_string());
+    }
+    Ok(validated)
+}
+
+pub async fn chart_data(client: &reqwest::Client, seeds: &[String]) -> Result<ChartClosure> {
+    let seeds = validate_issue_ids(seeds)?;
+    let mut fetched: BTreeMap<String, FetchedIssue> = BTreeMap::new();
+    let mut queue: VecDeque<String> = seeds.iter().cloned().collect();
+    let mut seen: HashSet<String> = seeds.iter().cloned().collect();
+    let mut cap_hit = false;
+    while let Some(selector) = queue.pop_front() {
+        if fetched.contains_key(&selector) {
+            continue;
+        }
+        if fetched.len() >= ISSUE_CAP {
+            cap_hit = true;
+            break;
+        }
+        let issue = fetch_issue(client, &selector).await?;
+        for id in issue.children.iter().chain(issue.blocked_by.iter()) {
+            if seen.insert(id.clone()) {
+                queue.push_back(id.clone());
+            }
+        }
+        fetched.insert(issue.identifier.clone(), issue);
+    }
+    let mut missing_blockers = Vec::new();
+    for issue in fetched.values() {
+        for blocker in &issue.blocked_by {
+            if !fetched.contains_key(blocker) {
+                missing_blockers.push((issue.identifier.clone(), blocker.clone()));
+            }
+        }
+    }
+    let nodes = fetched
+        .values()
+        .map(|issue| ChartNode {
+            identifier: issue.identifier.clone(),
+            title: issue.title.clone(),
+            state_type: issue.state_type.clone(),
+            parent: issue.parent.clone(),
+            blocked_by: issue.blocked_by.clone(),
+        })
+        .collect();
+    Ok(ChartClosure {
+        nodes,
+        cap_hit,
+        missing_blockers,
+    })
+}
+
+pub fn default_out_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("mcptools-linear-chart.html")
+}
+
+pub fn render_html(title: &str, chart: &str) -> String {
+    let heading = escape_html(&format!("{title} — Linear chart"));
+    let chart = escape_html(chart);
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{heading}</title>
+<style>
+html, body {{
+  margin: 0;
+  width: 100%;
+  min-height: 100dvh;
+  overflow: auto;
+  background-color: #0a0e1a;
+  background-image: radial-gradient(#ffffff1c 1px, transparent 1px);
+  background-size: 26px 26px;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}}
+pre.mermaid {{
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}}
+svg {{
+  max-width: none;
+  height: auto;
+  display: block;
+}}
+</style>
+</head>
+<body>
+<pre class="mermaid">
+{chart}
+</pre>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+mermaid.initialize({{
+  startOnLoad: true,
+  theme: 'base',
+  themeVariables: {{
+    darkMode: true,
+    background: '#0a0e1a',
+    textColor: '#e2e8f0',
+    titleColor: '#e2e8f0',
+    primaryTextColor: '#e2e8f0',
+    lineColor: '#94a3b8',
+    clusterBkg: 'rgba(18,20,29,0.85)',
+    clusterBorder: '#94a3b8',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize: '14px'
+  }},
+  flowchart: {{ htmlLabels: true, useMaxWidth: false, curve: 'basis' }}
+}});
+</script>
+</body>
+</html>
+"#
+    )
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+struct FetchedIssue {
+    identifier: String,
+    title: String,
+    url: String,
+    state_type: String,
+    parent: Option<String>,
+    blocked_by: Vec<String>,
+    children: Vec<String>,
+}
+
+async fn fetch_issue(client: &reqwest::Client, selector: &str) -> Result<FetchedIssue> {
+    let mut root: Option<RawIssue> = None;
+    let mut children: Vec<String> = Vec::new();
+    let mut after: Option<String> = None;
+    let mut last_cursor: Option<String> = None;
+    loop {
+        let data = execute(
+            client,
+            CHART_ISSUE_QUERY,
+            serde_json::json!({"id": selector, "after": after}),
+        )
+        .await?;
+        let issue = parse_issue(data, selector)?;
+        let page = issue.children.as_ref().map(|kids| kids.page_info.clone());
+        children.extend(
+            issue
+                .children
+                .iter()
+                .flat_map(|kids| kids.nodes.iter().map(|node| node.identifier.clone())),
+        );
+        if root.is_none() {
+            root = Some(issue);
+        }
+        let (has_next, cursor) = match page {
+            Some(info) => (info.has_next, info.end_cursor),
+            None => (false, None),
+        };
+        if !has_next {
+            break;
+        }
+        let cursor = match cursor {
+            Some(cursor) if last_cursor.as_deref() != Some(cursor.as_str()) => cursor,
+            _ => break,
+        };
+        last_cursor = Some(cursor.clone());
+        after = Some(cursor);
+    }
+    let issue = root.ok_or_else(|| eyre!("Linear issue not found: {}", selector))?;
+    Ok(FetchedIssue {
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+        state_type: issue.state.state_type,
+        parent: issue.parent.map(|parent| parent.identifier),
+        blocked_by: issue
+            .inverse_relations
+            .unwrap_or_default()
+            .nodes
+            .into_iter()
+            .filter(|node| node.rel_type == "blocks")
+            .filter_map(|node| node.issue.map(|issue| issue.identifier))
+            .collect(),
+        children,
+    })
+}
+
+fn parse_issue(data: serde_json::Value, selector: &str) -> Result<RawIssue> {
+    #[derive(serde::Deserialize)]
+    struct Root {
+        issue: Option<RawIssue>,
+    }
+    let root: Root = serde_json::from_value(data)
+        .map_err(|e| eyre!("Failed to parse Linear issue {}: {}", selector, e))?;
+    root.issue
+        .ok_or_else(|| eyre!("Linear issue not found: {}", selector))
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct RawIssue {
+    identifier: String,
+    title: String,
+    url: String,
+    state: RawState,
+    parent: Option<RawParent>,
+    #[serde(rename = "inverseRelations")]
+    inverse_relations: Option<RawRelations>,
+    children: Option<RawChildren>,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct RawState {
+    #[serde(rename = "type")]
+    state_type: String,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct RawParent {
+    identifier: String,
+}
+
+#[derive(Clone, Default, serde::Deserialize)]
+struct RawRelations {
+    #[serde(default)]
+    nodes: Vec<RawRelationNode>,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct RawRelationNode {
+    #[serde(rename = "type")]
+    rel_type: String,
+    issue: Option<RawIdentifier>,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct RawIdentifier {
+    identifier: String,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct RawChildren {
+    #[serde(default)]
+    nodes: Vec<RawIdentifier>,
+    #[serde(rename = "pageInfo")]
+    page_info: RawPageInfo,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct RawPageInfo {
+    #[serde(rename = "hasNextPage")]
+    has_next: bool,
+    #[serde(rename = "endCursor")]
+    end_cursor: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::linear::config::LinearConfig;
+
+    #[tokio::test]
+    async fn rejects_empty_issue_ids_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        for seed in ["", "   "] {
+            let err = chart_data(&client, &[seed.to_string()]).await.unwrap_err();
+            assert!(err.to_string().contains("must not be empty"));
+        }
+        let err = chart_data(&client, &[]).await.unwrap_err();
+        assert!(err.to_string().contains("at least one issue id"));
+    }
+}

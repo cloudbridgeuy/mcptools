@@ -50,6 +50,17 @@ Selector rules:
 - `--query` matches a title substring. `--updated-after` needs RFC3339 and is rejected before any request when malformed.
 - Issue update `--state` names resolve from the issue identifier team (`GUZ-22` → `GUZ`). `--team` overrides. UUID issue ids still need `--team` or a state UUID.
 
+### Chart
+
+```bash
+# Render an HTML Mermaid chart of issues, sub-issues, and blockers, then open it
+mcptools linear chart GUZ-185 GUZ-186 GUZ-188
+mcptools linear chart GUZ-185 --out /tmp/linear-chart.html
+mcptools linear chart GUZ-185 --no-open
+```
+
+`chart` walks the transitive closure of children and `blocked_by` blockers (cap 300 issues, warning on the cap), drops canceled issues, and classifies the rest as complete, in progress, frontier (ready to start), or fog (prerequisite incomplete). Output defaults to `<temp dir>/mcptools-linear-chart.html`. Empty issue ids reject before any request.
+
 ### Discovery
 
 ```bash

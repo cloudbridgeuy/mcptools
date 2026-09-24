@@ -133,3 +133,34 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 #### Scenario: Missing code
 - **WHEN** `tools/call` invokes `execute` without `code`
 - **THEN** the server returns a JSON-RPC error with code `-32602`
+
+### Requirement: Linear chart rendering
+`linear chart` takes one or more **Issue identifier**s, fetches the transitive closure of sub-issues and `blocked_by` blockers (cap 300 issues, stderr warning when the cap stops expansion), drops canceled issues, and classifies the rest as complete, in progress, frontier (no incomplete blocker), or fog (at least one incomplete blocker). It writes a full-viewport dark-themed HTML Mermaid page — one subgraph per parent issue, state legend — to `<temp dir>/mcptools-linear-chart.html` unless `--out` overrides it, prints the output path and a stats line, and opens the page in the default browser unless `--no-open`.
+
+#### Scenario: Closure and classification
+- **WHEN** chart runs on a set of **Issue identifier**s
+- **THEN** every transitive sub-issue and blocker appears as a node, grouped into one subgraph per parent issue
+- **AND** completed issues are complete, started issues are in progress, not-yet-started issues with no incomplete blocker are frontier, and issues with at least one incomplete blocker are fog
+- **AND** canceled issues are absent and do not block dependents
+
+#### Scenario: Cap stops expansion
+- **WHEN** the closure exceeds 300 issues
+- **THEN** expansion stops, stderr prints a cap warning, and the partial chart still renders
+
+#### Scenario: Blocker outside the fetched set
+- **WHEN** an issue is blocked by an issue outside the fetched set
+- **THEN** stderr warns and the blocked issue renders as fog
+
+#### Scenario: Output location and browser launch
+- **WHEN** chart runs with `--out PATH`
+- **THEN** the page is written to PATH; without `--out` it is written to `<temp dir>/mcptools-linear-chart.html`
+- **AND** the default browser opens it unless `--no-open` is set
+- **AND** stdout prints the output path, then `<N> issues: <n> complete, <n> in progress, <n> frontier, <n> fog`
+
+#### Scenario: Blank issue id
+- **WHEN** chart runs with an empty or blank issue id
+- **THEN** the command fails with an error naming the problem before any Linear request
+
+#### Scenario: Deterministic output
+- **WHEN** chart runs twice on the same issue set
+- **THEN** both runs write byte-identical HTML

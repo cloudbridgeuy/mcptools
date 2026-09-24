@@ -1,6 +1,8 @@
+pub mod chart;
 pub mod resolve;
 pub mod retry;
 pub mod types;
+pub use chart::*;
 pub use resolve::*;
 pub use retry::*;
 pub use types::*;
