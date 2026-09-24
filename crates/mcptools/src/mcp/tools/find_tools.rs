@@ -141,7 +141,7 @@ pub async fn handle_find_tools(
             message: format!("Invalid arguments: {e}"),
             data: None,
         })?;
-    let result = find_tools(
+    let mut result = find_tools(
         &args.task,
         args.k.unwrap_or(mcptools_core::find_tools::DEFAULT_K),
     )
@@ -151,6 +151,11 @@ pub async fn handle_find_tools(
         message: e.to_string(),
         data: None,
     })?;
+    result.usage = if flags.code_mode {
+        mcptools_core::find_tools::CODE_MODE_USAGE.to_string()
+    } else {
+        mcptools_core::find_tools::USAGE.to_string()
+    };
     super::to_dual_result(result)
 }
 
@@ -288,6 +293,70 @@ mod find_tools_tests {
         .unwrap();
         let shell_value = serde_json::to_value(find_tools(task, k).await.unwrap()).unwrap();
         assert_eq!(mcp_result["structuredContent"], shell_value);
+    }
+
+    fn test_flags(code_mode: bool) -> super::super::ServeFlags {
+        super::super::ServeFlags {
+            discovery: false,
+            code_mode,
+        }
+    }
+
+    fn test_global() -> crate::Global {
+        crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        }
+    }
+
+    #[tokio::test]
+    async fn usage_switches_by_code_mode() {
+        let global = test_global();
+        let args = Some(serde_json::json!({
+            "name": "find_tools",
+            "arguments": {"task": "search jira issues"}
+        }));
+        let plain = super::super::handle_tools_call(args.clone(), &global, test_flags(false))
+            .await
+            .unwrap();
+        assert_eq!(
+            plain["structuredContent"]["usage"],
+            serde_json::json!(mcptools_core::find_tools::USAGE)
+        );
+        let code = super::super::handle_tools_call(args, &global, test_flags(true))
+            .await
+            .unwrap();
+        assert_eq!(
+            code["structuredContent"]["usage"],
+            serde_json::json!(mcptools_core::find_tools::CODE_MODE_USAGE)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn nested_find_tools_usage_follows_flags_inside_execute() {
+        let global = test_global();
+        let args = Some(serde_json::json!({
+            "name": "execute",
+            "arguments": {
+                "code": "return (await find_tools({task: \"search jira issues\"})).usage"
+            }
+        }));
+        let plain = super::super::handle_tools_call(args.clone(), &global, test_flags(false))
+            .await
+            .unwrap();
+        assert_eq!(
+            plain["structuredContent"]["result"],
+            serde_json::json!(mcptools_core::find_tools::USAGE)
+        );
+        let code = super::super::handle_tools_call(args, &global, test_flags(true))
+            .await
+            .unwrap();
+        assert_eq!(
+            code["structuredContent"]["result"],
+            serde_json::json!(mcptools_core::find_tools::CODE_MODE_USAGE)
+        );
     }
 
     struct Stub {
