@@ -1,6 +1,7 @@
 pub mod auth;
 
-use crate::prelude::{eprintln, println, *};
+use crate::open::maybe_open;
+use crate::prelude::{println, *};
 use mcptools_core::images::{
     self, EditParams, GenerateParams, ImagesResponse, CHAT_MAINLINE_DEFAULT, CODEX_RESPONSES_URL,
     DEFAULT_BASE_URL, DEFAULT_MODEL, MAX_INPUT_IMAGES, VARY_PROMPT,
@@ -185,24 +186,6 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
             maybe_open(&saved.files, open);
             Ok(())
         }
-    }
-}
-
-fn opener() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    }
-}
-
-fn maybe_open(files: &[String], open: bool) {
-    if !open {
-        return;
-    }
-    match std::process::Command::new(opener()).args(files).status() {
-        Ok(_) => {}
-        Err(e) => eprintln!("warning: failed to open image: {e}"),
     }
 }
 

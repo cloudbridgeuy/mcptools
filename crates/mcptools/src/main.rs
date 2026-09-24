@@ -17,6 +17,7 @@ mod linear;
 mod llm_stream;
 mod mcp;
 mod md;
+mod open;
 mod pdf;
 mod prelude;
 mod sandbox;
