@@ -397,14 +397,23 @@ pub struct TeamScopedListOptions {
 #[derive(Debug, clap::Args, Clone)]
 pub struct ChartOptions {
     #[arg(
-        required = true,
-        help = "Issue identifiers (e.g. GUZ-185 GUZ-186 GUZ-188)"
+        help = "Issue identifiers (e.g. GUZ-185 GUZ-186 GUZ-188); needs at least one id or --project"
     )]
     pub issues: Vec<String>,
     #[arg(
         long,
+        help = "Project id or name (names need --team); seeds every issue in the project"
+    )]
+    pub project: Option<String>,
+    #[arg(
+        long,
+        help = "Team id, key, or name; required to resolve --project names"
+    )]
+    pub team: Option<String>,
+    #[arg(
+        long,
         value_name = "PATH",
-        help = "Output HTML path (default: <temp dir>/mcptools-linear-chart.html)"
+        help = "Output HTML path (default: <temp dir>/mcptools-linear-chart-<slug>.html)"
     )]
     pub out: Option<std::path::PathBuf>,
     #[arg(long, help = "Do not open the chart in the default browser")]
@@ -460,9 +469,48 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
 }
 
 async fn chart_handler(options: ChartOptions) -> Result<()> {
-    let seeds = chart::validate_issue_ids(&options.issues)?;
+    let (positional, project, team) = chart::validate_chart_args(
+        &options.issues,
+        options.project.as_deref(),
+        options.team.as_deref(),
+    )?;
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
+    let mut seeds = positional;
+    if let Some(project) = project.as_deref() {
+        let filter = issue::resolve_issue_filter(
+            &client,
+            team.as_deref(),
+            Some(project),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        let mut project_seeds = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = issue::issues_list_data(&client, &filter, 50, cursor.clone()).await?;
+            let has_next = page.page_info.has_next;
+            cursor = page.page_info.end_cursor;
+            project_seeds.extend(page.nodes.into_iter().map(|node| node.identifier));
+            if !has_next || project_seeds.len() >= chart::ISSUE_CAP {
+                break;
+            }
+        }
+        if project_seeds.is_empty() {
+            return Err(eyre!("Linear chart --project '{}' has no issues", project));
+        }
+        project_seeds.truncate(chart::ISSUE_CAP);
+        seeds.extend(project_seeds);
+    }
+    let title = match &project {
+        Some(project) => project.clone(),
+        None => seeds[0].clone(),
+    };
     let closure = chart::chart_data(&client, &seeds).await?;
     if closure.cap_hit {
         eprintln!(
@@ -479,8 +527,10 @@ async fn chart_handler(options: ChartOptions) -> Result<()> {
     let stats = mcptools_core::linear::chart_stats(&closure.nodes);
     let mermaid = mcptools_core::linear::build_mermaid(&closure.nodes);
     let stats_line = mcptools_core::linear::stats_line(&stats);
-    let html = chart::render_html(&seeds[0], &mermaid);
-    let out = options.out.unwrap_or_else(chart::default_out_path);
+    let html = chart::render_html(&title, &mermaid);
+    let out = options
+        .out
+        .unwrap_or_else(|| chart::default_out_path(&chart::slugify(&title)));
     std::fs::write(&out, html)
         .map_err(|e| eyre!("Failed to write chart HTML to '{}': {}", out.display(), e))?;
     println!("{}", out.display());

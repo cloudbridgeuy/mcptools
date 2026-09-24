@@ -48,6 +48,8 @@ const SUBGRAPH_HUES: [&str; 8] = [
     "#8b7bb8", "#2dd4bf", "#f59e0b", "#4ade80", "#60a5fa", "#f472b6", "#a78bfa", "#38bdf8",
 ];
 
+const CLUSTER_WRAP: usize = 22;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChartStats {
     pub total: usize,
@@ -193,10 +195,10 @@ pub fn build_mermaid(nodes: &[ChartNode]) -> String {
         "  classDef complete fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px\n",
     );
     out.push_str(
-        "  classDef inprogress fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a,stroke-width:4px\n",
+        "  classDef inprogress fill:#fef9c3,stroke:#ca8a04,color:#713f12,stroke-width:4px\n",
     );
     out.push_str(
-        "  classDef frontier fill:#fef3c7,stroke:#b45309,color:#78350f,stroke-width:3px\n",
+        "  classDef frontier fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:3px\n",
     );
     out.push_str("  classDef fog fill:#f1f5f9,stroke:#64748b,color:#334155,stroke-dasharray:5 5\n");
 
@@ -239,7 +241,7 @@ fn emit_scope<'a>(
                 "{}subgraph {}[\"{}\"]\n",
                 indent,
                 subgraph_id(identifier),
-                label(identifier, &node.title)
+                cluster_label(identifier, &node.title)
             ));
             let kids: Vec<&ChartNode> = children.get(identifier).cloned().unwrap_or_default();
             emit_scope(&kids, children, containers, depth + 1, out);
@@ -292,6 +294,39 @@ fn label(identifier: &str, title: &str) -> String {
     format!("{identifier}: {title}")
         .replace('"', "#quot;")
         .replace(['[', ']'], "")
+}
+
+fn cluster_label(identifier: &str, title: &str) -> String {
+    wrap_label(&label(identifier, title), CLUSTER_WRAP).join("<br/>")
+}
+
+fn wrap_label(text: &str, max: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    let mut width = 0usize;
+    for word in text.split(' ') {
+        let mut rest = word;
+        if width > 0 && width + 1 + rest.chars().count() <= max {
+            line.push(' ');
+            line.push_str(rest);
+            width += 1 + rest.chars().count();
+            continue;
+        }
+        if width > 0 {
+            lines.push(std::mem::take(&mut line));
+        }
+        while rest.chars().count() > max {
+            let cut: usize = rest.chars().take(max).map(char::len_utf8).sum();
+            lines.push(rest[..cut].to_string());
+            rest = &rest[cut..];
+        }
+        line.push_str(rest);
+        width = rest.chars().count();
+    }
+    if width > 0 || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -377,10 +412,10 @@ mod tests {
             "classDef complete fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px"
         ));
         assert!(mermaid.contains(
-            "classDef inprogress fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a,stroke-width:4px"
+            "classDef inprogress fill:#fef9c3,stroke:#ca8a04,color:#713f12,stroke-width:4px"
         ));
         assert!(mermaid.contains(
-            "classDef frontier fill:#fef3c7,stroke:#b45309,color:#78350f,stroke-width:3px"
+            "classDef frontier fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:3px"
         ));
         assert!(mermaid.contains(
             "classDef fog fill:#f1f5f9,stroke:#64748b,color:#334155,stroke-dasharray:5 5"
@@ -401,6 +436,29 @@ mod tests {
         let mut reversed = input.clone();
         reversed.reverse();
         assert_eq!(mermaid, build_mermaid(&reversed));
+    }
+
+    #[test]
+    fn cluster_titles_hard_wrap_and_node_labels_stay_flat() {
+        let long = "electable PNG and JPEG render outputs plus extras";
+        let mut epic = node("GUZ-400", "started", None, &[]);
+        epic.title = long.to_string();
+        let mut plain = node("GUZ-401", "backlog", None, &[]);
+        plain.title = long.to_string();
+        let child = node("GUZ-402", "backlog", Some("GUZ-400"), &[]);
+        let mermaid = build_mermaid(&[epic, child, plain]);
+        let subgraph = mermaid
+            .lines()
+            .find(|l| l.contains("subgraph E400"))
+            .unwrap();
+        let title = &subgraph[subgraph.find('[').unwrap() + 2..subgraph.rfind('"').unwrap()];
+        let lines: Vec<&str> = title.split("<br/>").collect();
+        assert!(lines.len() > 1);
+        for line in lines {
+            assert!(line.chars().count() <= CLUSTER_WRAP);
+        }
+        let node_line = format!("GUZ_401[\"GUZ-401: {long}\"]");
+        assert!(mermaid.contains(&node_line));
     }
 
     #[test]

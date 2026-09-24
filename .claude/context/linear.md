@@ -57,9 +57,10 @@ Selector rules:
 mcptools linear chart GUZ-185 GUZ-186 GUZ-188
 mcptools linear chart GUZ-185 --out /tmp/linear-chart.html
 mcptools linear chart GUZ-185 --no-open
+mcptools linear chart --project modelops-cycles --team GUZ
 ```
 
-`chart` walks the transitive closure of children and `blocked_by` blockers (cap 300 issues, warning on the cap), drops canceled issues, and classifies the rest as complete, in progress, frontier (ready to start), or fog (prerequisite incomplete). Output defaults to `<temp dir>/mcptools-linear-chart.html`. Empty issue ids reject before any request.
+`chart` walks the transitive closure of children and `blocked_by` blockers (cap 300 issues, warning on the cap), drops canceled issues, and classifies the rest as complete, in progress, frontier (ready to start), or fog (prerequisite incomplete). Output defaults to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html`. Empty issue ids reject before any request. `--project` seeds the chart with every issue in the project (project names need `--team`); issue ids and `--project` are mutually alternative inputs.
 
 ### Discovery
 

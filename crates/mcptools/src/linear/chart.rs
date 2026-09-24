@@ -29,6 +29,34 @@ pub fn validate_issue_ids(seeds: &[String]) -> Result<Vec<String>> {
     Ok(validated)
 }
 
+pub fn validate_chart_args(
+    issues: &[String],
+    project: Option<&str>,
+    team: Option<&str>,
+) -> Result<(Vec<String>, Option<String>, Option<String>)> {
+    let project = project.map(str::trim).filter(|text| !text.is_empty());
+    let team = team.map(str::trim).filter(|text| !text.is_empty());
+    if team.is_some() && project.is_none() {
+        return Err(eyre!(
+            "Linear chart --team needs --project; it only resolves project names"
+        ));
+    }
+    if issues.is_empty() && project.is_none() {
+        return Err(eyre!(
+            "Linear chart needs at least one issue id (e.g. GUZ-185) or --project <ID_OR_NAME>"
+        ));
+    }
+    let positional = match issues.is_empty() {
+        true => Vec::new(),
+        false => validate_issue_ids(issues)?,
+    };
+    Ok((
+        positional,
+        project.map(str::to_string),
+        team.map(str::to_string),
+    ))
+}
+
 pub async fn chart_data(client: &reqwest::Client, seeds: &[String]) -> Result<ChartClosure> {
     let seeds = validate_issue_ids(seeds)?;
     let mut fetched: BTreeMap<String, FetchedIssue> = BTreeMap::new();
@@ -76,8 +104,27 @@ pub async fn chart_data(client: &reqwest::Client, seeds: &[String]) -> Result<Ch
     })
 }
 
-pub fn default_out_path() -> std::path::PathBuf {
-    std::env::temp_dir().join("mcptools-linear-chart.html")
+pub fn slugify(input: &str) -> String {
+    let mut slug = String::with_capacity(input.len());
+    for c in input.chars() {
+        let c = match c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+            true => c,
+            false => '-',
+        };
+        if c == '-' && (slug.is_empty() || slug.ends_with('-')) {
+            continue;
+        }
+        slug.push(c);
+    }
+    let slug = slug.trim_matches('-');
+    match slug.is_empty() {
+        true => "chart".to_string(),
+        false => slug.to_string(),
+    }
+}
+
+pub fn default_out_path(slug: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("mcptools-linear-chart-{}.html", slug))
 }
 
 pub fn render_html(title: &str, chart: &str) -> String {
@@ -121,8 +168,12 @@ svg {{
 </pre>
 <script type="module">
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0/dist/mermaid-layout-elk.esm.min.mjs";
+mermaid.registerLayoutLoaders(elkLayouts);
 mermaid.initialize({{
   startOnLoad: true,
+  layout: 'elk',
+  straightenEdges: true,
   theme: 'base',
   themeVariables: {{
     darkMode: true,
@@ -136,7 +187,7 @@ mermaid.initialize({{
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
     fontSize: '14px'
   }},
-  flowchart: {{ htmlLabels: true, useMaxWidth: false, curve: 'basis' }}
+  flowchart: {{ htmlLabels: true, useMaxWidth: false, curve: 'rounded' }}
 }});
 </script>
 </body>
@@ -302,5 +353,45 @@ mod tests {
         }
         let err = chart_data(&client, &[]).await.unwrap_err();
         assert!(err.to_string().contains("at least one issue id"));
+    }
+
+    #[test]
+    fn chart_args_require_an_input_source() {
+        let err = validate_chart_args(&[], None, None).unwrap_err();
+        assert!(err.to_string().contains("issue id"));
+        assert!(err.to_string().contains("--project"));
+        let err = validate_chart_args(&[], None, Some("GUZ")).unwrap_err();
+        assert!(err.to_string().contains("--team"));
+        let err = validate_chart_args(&["   ".to_string()], None, None).unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+        let (positional, project, team) =
+            validate_chart_args(&[], Some("  proj  "), Some(" GUZ ")).unwrap();
+        assert!(positional.is_empty());
+        assert_eq!(project.as_deref(), Some("proj"));
+        assert_eq!(team.as_deref(), Some("GUZ"));
+        let (positional, project, team) =
+            validate_chart_args(&["GUZ-1".to_string()], None, None).unwrap();
+        assert_eq!(positional, vec!["GUZ-1"]);
+        assert!(project.is_none());
+        assert!(team.is_none());
+    }
+
+    #[test]
+    fn slugify_slugs_input_for_default_out_path() {
+        assert_eq!(slugify("modelops-cycles"), "modelops-cycles");
+        assert_eq!(slugify("GUZ-185"), "GUZ-185");
+        assert_eq!(slugify("My Project Name"), "My-Project-Name");
+        assert_eq!(slugify("a  /  b"), "a-b");
+        assert_eq!(slugify("foo bar--baz"), "foo-bar-baz");
+        assert_eq!(slugify("-lead- and trail-"), "lead-and-trail");
+        assert_eq!(slugify("   "), "chart");
+        assert_eq!(slugify(""), "chart");
+        assert_eq!(slugify("///"), "chart");
+        assert_eq!(
+            default_out_path(&slugify("My Project"))
+                .file_name()
+                .unwrap(),
+            "mcptools-linear-chart-My-Project.html"
+        );
     }
 }
