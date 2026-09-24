@@ -35,7 +35,7 @@ Linear command reference: [Linear](.claude/context/linear.md).
 MCP server reference: [MCP Server](.claude/context/mcp-server.md).
 
 ### Requirement: Discovery mode tool list
-The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **Discovery mode** on stdio and SSE. `tools/call` dispatches every registered tool by name in both modes.
+The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **Discovery mode** on stdio and SSE. `MCPTOOLS_DISCOVERY` also accepts `y`, `yes`, `t`, `true`, `on`, `1`, `n`, `no`, `f`, `false`, `off`, and `0`, in upper or lower case. `tools/call` dispatches every registered tool by name in every mode.
 
 #### Scenario: Flag or env enables the mode
 - **WHEN** the server starts with `--discovery`, or with `MCPTOOLS_DISCOVERY=true` and no flag
@@ -50,8 +50,31 @@ The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **D
 - **THEN** the server dispatches that tool and returns its result
 
 #### Scenario: Invalid env value
-- **WHEN** `MCPTOOLS_DISCOVERY` holds a value other than `true` or `false`, including an empty value
-- **THEN** the process exits with a parse error that names the two valid values
+- **WHEN** `MCPTOOLS_DISCOVERY` holds a value outside the accepted list, including an empty value
+- **THEN** the process exits with code 2 and an error that says `value was not a boolean`
+
+### Requirement: Code mode tool list
+The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in code mode on stdio and SSE. `MCPTOOLS_CODE_MODE` accepts the same values as `MCPTOOLS_DISCOVERY`; any other value exits with code 2. `tools/call` dispatches every registered tool by name in every mode.
+
+#### Scenario: Flag or env enables the mode
+- **WHEN** the server starts with `--code-mode`, or with `MCPTOOLS_CODE_MODE=true` and no flag
+- **THEN** `tools/list` returns exactly two tools, in order: `find_tools`, then `execute`
+
+#### Scenario: Code mode wins over discovery
+- **WHEN** the server starts with `--discovery` and `--code-mode`, or with both env vars enabled
+- **THEN** `tools/list` returns `find_tools` and `execute`, not one tool
+
+#### Scenario: Unlisted tool call
+- **WHEN** a client in code mode sends `tools/call` with the name of a tool that `tools/list` did not return
+- **THEN** the server dispatches that tool and returns its result
+
+#### Scenario: Code-mode usage text
+- **WHEN** `find_tools` runs in code mode, including a nested call inside `execute`
+- **THEN** its `usage` field is `Call each declared function as an async global inside execute.`
+
+#### Scenario: Usage text without code mode
+- **WHEN** `find_tools` runs in any other mode
+- **THEN** its `usage` field is `Each declaration is the call signature: the input interface is the tools/call arguments object, the Promise type is the result.`
 
 ### Requirement: Issue get payload
 `linear issue get` and `linear_issue_get` return the same payload: snapshot fields, comments, and **Activity**. **Activity** always includes a created row. Comments stay on `comments`.

@@ -210,16 +210,32 @@ Limits come from the server flags `--execute-timeout-secs` (default 30),
 ## Discovery mode
 
 Enable with the `--discovery` flag or the `MCPTOOLS_DISCOVERY` environment
-variable, accepted values `true` or `false` only. In this mode `tools/list`
-returns exactly one tool, `find_tools`; `tools/call` still dispatches every
-real tool by name. Without this mode, hosts load all 63 schemas and Jev
-saves no context.
+variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
+`on`, `1` enable the mode; `n`, `no`, `f`, `false`, `off`, `0` keep it off;
+any other value, including an empty one, exits with code 2 and the error
+`value was not a boolean`. In this mode `tools/list` returns exactly one tool,
+`find_tools`; `tools/call` still dispatches every real tool by name. Without
+this mode, hosts load all 63 schemas and Jev saves no context.
 
 Known limitation, planned and undesigned: hosts that declare only listed
-tools to the model, such as Claude Code, cannot yet call the tool
-`find_tools` returns, because it is absent from `tools/list`. The returned
-declarations name the tools/call arguments and results of every tool they
-carry. A future `execute` command is planned to close this gap.
+tools to the model, such as Claude Code, cannot yet call a tool directly
+when it is absent from `tools/list`. The returned declarations name the
+tools/call arguments and results of every tool they carry. Code mode closes
+this gap in practice: `tools/list` returns `execute` beside `find_tools`, and
+tools bind inside `execute` as async globals, under the flag gating
+documented in [Execute](#execute) above.
+
+## Code mode
+
+Enable with the `--code-mode` flag or the `MCPTOOLS_CODE_MODE` environment
+variable, with the same accepted values as `MCPTOOLS_DISCOVERY`. In this mode
+`tools/list` returns exactly two tools, in order: `find_tools`, then
+`execute`. Code mode wins over Discovery mode when both are enabled.
+`tools/call` still dispatches every real tool by name. The `find_tools`
+response `usage` field, also for nested `find_tools` calls inside `execute`,
+is `Call each declared function as an async global inside execute.`; other
+modes keep `Each declaration is the call signature: the input interface is
+the tools/call arguments object, the Promise type is the result.`
 
 ## Testing with curl
 

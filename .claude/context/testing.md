@@ -7,7 +7,8 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 | Variable | Description |
 |----------|-------------|
 | `MCPTOOLS_VERBOSE` | Enable verbose output (default: false) |
-| `MCPTOOLS_DISCOVERY` | List only `find_tools` via `tools/list`. Accepts `true` or `false` only (default: false) |
+| `MCPTOOLS_DISCOVERY` | List only `find_tools` via `tools/list`. Accepts `y`, `yes`, `t`, `true`, `on`, `1` (on) and `n`, `no`, `f`, `false`, `off`, `0` (off), any case; other values exit 2 (default: false) |
+| `MCPTOOLS_CODE_MODE` | List `find_tools,execute` via `tools/list`; wins over `MCPTOOLS_DISCOVERY`. Same accepted values, other values exit 2 (default: false) |
 
 ## Atlassian Variables
 
