@@ -86,6 +86,7 @@ pub mod linear;
 pub mod llm_stream;
 pub mod md;
 pub mod pagination;
+pub mod projection;
 pub mod queries;
 pub mod sandbox;
 pub mod ts_decl;
