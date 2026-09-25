@@ -252,6 +252,9 @@ pub struct IssueListOptions {
     /// Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)
     #[arg(long)]
     pub updated_after: Option<String>,
+    /// Issue order: priority or updatedAt
+    #[arg(long, value_parser = parse_issue_sort)]
+    pub sort: Option<mcptools_core::linear::IssueSort>,
     /// Max items per page
     #[arg(long, default_value = "25")]
     pub limit: u32,
@@ -264,6 +267,11 @@ pub struct IssueListOptions {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+}
+
+fn parse_issue_sort(value: &str) -> Result<mcptools_core::linear::IssueSort, String> {
+    serde_json::from_value(serde_json::Value::String(value.to_string()))
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, clap::Args, Clone)]
@@ -588,6 +596,15 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
     Ok(())
 }
 
+fn table_row<S: AsRef<str>>(values: &[S]) -> prettytable::Row {
+    prettytable::Row::new(
+        values
+            .iter()
+            .map(|value| prettytable::Cell::new(value.as_ref()))
+            .collect(),
+    )
+}
+
 async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
@@ -610,8 +627,14 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
         end_cursor: None,
     };
     loop {
-        let page =
-            issue::issues_list_data(&client, &filter, None, options.limit, cursor.clone()).await?;
+        let page = issue::issues_list_data(
+            &client,
+            &filter,
+            options.sort,
+            options.limit,
+            cursor.clone(),
+        )
+        .await?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
         if !options.all || !page_info.has_next || nodes.len() >= 50 {
@@ -628,24 +651,27 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
             )?
         );
     } else {
+        let with_priority = options.sort.is_some();
         let mut table = new_table();
-        table.add_row(prettytable::row![
-            "ID",
-            "Identifier",
-            "Title",
-            "State",
-            "Parent",
-            "BlockedBy"
-        ]);
+        let mut headers = vec!["ID", "Identifier", "Title", "State"];
+        if with_priority {
+            headers.push("Priority");
+        }
+        headers.extend(["Parent", "BlockedBy"]);
+        table.add_row(table_row(&headers));
         for issue in &nodes {
-            table.add_row(prettytable::row![
-                issue.id,
-                issue.identifier,
-                issue.title,
-                issue.state,
-                issue.parent.as_deref().unwrap_or(""),
-                issue.blocked_by.join(", ")
-            ]);
+            let mut values = vec![
+                issue.id.clone(),
+                issue.identifier.clone(),
+                issue.title.clone(),
+                issue.state.clone(),
+            ];
+            if with_priority {
+                values.push(issue.priority.clone().unwrap_or_default());
+            }
+            values.push(issue.parent.clone().unwrap_or_default());
+            values.push(issue.blocked_by.join(", "));
+            table.add_row(table_row(&values));
         }
         table.printstd();
         println!(
@@ -1214,4 +1240,37 @@ async fn cycles_list_handler(options: TeamScopedListOptions) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn list_sort(args: &[&str]) -> Result<Option<mcptools_core::linear::IssueSort>, String> {
+        let mut argv = vec!["linear", "issue", "list"];
+        argv.extend_from_slice(args);
+        match App::try_parse_from(argv) {
+            Ok(app) => match app.command {
+                Commands::Issue(IssueCommands::List(options)) => Ok(options.sort),
+                _ => Err("expected issue list command".to_string()),
+            },
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    #[test]
+    fn issue_list_sort_flag_parses_wire_names_and_rejects_others() {
+        assert_eq!(
+            list_sort(&["--sort", "priority"]).unwrap(),
+            Some(mcptools_core::linear::IssueSort::Priority)
+        );
+        assert_eq!(
+            list_sort(&["--sort", "updatedAt"]).unwrap(),
+            Some(mcptools_core::linear::IssueSort::UpdatedAt)
+        );
+        assert_eq!(list_sort(&[]).unwrap(), None);
+        let error = list_sort(&["--sort", "bogus"]).unwrap_err();
+        assert!(error.contains("priority") && error.contains("updatedAt"));
+    }
 }
