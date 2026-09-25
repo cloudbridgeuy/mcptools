@@ -1293,6 +1293,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn issue_sort_values_match_linear_sort_input() {
+        assert_eq!(
+            issue_sort_value(IssueSort::Priority),
+            serde_json::json!([
+                {"priority": {"order": "Descending", "usePrioritySortOrderTiebreaker": false}},
+                {"updatedAt": {"order": "Descending"}}
+            ])
+        );
+        assert_eq!(
+            issue_sort_value(IssueSort::UpdatedAt),
+            serde_json::json!([{"updatedAt": {"order": "Descending"}}])
+        );
+    }
+
+    #[test]
+    fn issue_sort_parses_wire_names_and_rejects_others() {
+        let sort: IssueSort = serde_json::from_str("\"priority\"").unwrap();
+        assert_eq!(sort, IssueSort::Priority);
+        let sort: IssueSort = serde_json::from_str("\"updatedAt\"").unwrap();
+        assert_eq!(sort, IssueSort::UpdatedAt);
+        let err = serde_json::from_str::<IssueSort>("\"bogus\"").unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("priority") && text.contains("updatedAt"));
+    }
+
+    #[test]
     fn check_response_returns_data_on_success() {
         let body = r#"{"data":{"viewer":{"id":"u1","name":"Ada","email":"ada@example.com"}}}"#;
         let data = check_response(200, body).unwrap();
