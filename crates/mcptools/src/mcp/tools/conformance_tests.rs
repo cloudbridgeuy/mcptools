@@ -559,6 +559,19 @@ fn fields_projection_linear_issue_list() {
     assert!(structured.get("pageInfo").is_some());
     text_matches_structured(&projected);
 
+    let priority_only = super::to_dual_result_projected(
+        sample("linear_issue_list"),
+        Some(&paths(&["nodes.priority"])),
+    )
+    .expect("known paths project");
+    let structured = &priority_only["structuredContent"];
+    let nodes = structured["nodes"].as_array().expect("nodes array");
+    assert!(!nodes.is_empty());
+    for node in nodes {
+        assert_eq!(object_keys(node), ["priority"]);
+    }
+    text_matches_structured(&priority_only);
+
     let err =
         super::to_dual_result_projected(sample("linear_issue_list"), Some(&paths(&["nodes.nope"])))
             .expect_err("unknown path fails");

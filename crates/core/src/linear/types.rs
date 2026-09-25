@@ -64,6 +64,8 @@ pub struct IssueMini {
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
     #[serde(default)]
     pub parent: Option<String>,
     #[serde(default)]
@@ -86,6 +88,8 @@ pub struct IssueGetOutput {
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<String>,
     #[serde(default)]
     pub parent: Option<String>,
     #[serde(default)]
@@ -377,6 +381,7 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
                 url: raw.url,
                 state: raw.state.name,
                 description: present_text(raw.description),
+                priority: present_text(raw.priority_label),
                 parent: raw.parent.map(|parent| parent.identifier),
                 blocked_by: raw
                     .inverse_relations
@@ -538,6 +543,7 @@ pub fn transform_issues(data: serde_json::Value) -> Result<Paginated<IssueMini>,
                         url: raw.url,
                         state: raw.state.name,
                         description: present_text(raw.description),
+                        priority: present_text(raw.priority_label),
                         parent: raw.parent.map(|parent| parent.identifier),
                         blocked_by: raw
                             .inverse_relations
@@ -1054,6 +1060,8 @@ struct RawIssue {
     state: RawState,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default, rename = "priorityLabel")]
+    priority_label: Option<String>,
     #[serde(default)]
     parent: Option<RawParent>,
     #[serde(default, rename = "inverseRelations")]
@@ -1434,6 +1442,7 @@ mod tests {
             "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing",
             "state": {"name": "In Progress"},
             "description": "Fix **auth** flow",
+            "priorityLabel": "High",
             "parent": {"identifier": "GUZ-78"},
             "inverseRelations": {"nodes": [
                 {"type": "blocks", "issue": {"identifier": "GUZ-80"}},
@@ -1450,6 +1459,7 @@ mod tests {
                 url: "https://linear.app/acme/issue/GUZ-79/wire-the-thing".to_string(),
                 state: "In Progress".to_string(),
                 description: Some("Fix **auth** flow".to_string()),
+                priority: Some("High".to_string()),
                 parent: Some("GUZ-78".to_string()),
                 blocked_by: vec!["GUZ-80".to_string()],
             }
@@ -1496,6 +1506,7 @@ mod tests {
             url: "https://linear.app/x/issue/GUZ-1/t".to_string(),
             state: "Todo".to_string(),
             description: None,
+            priority: None,
             parent: None,
             blocked_by: Vec::new(),
         };
@@ -1553,6 +1564,7 @@ mod tests {
             url: "https://linear.app/x/issue/GUZ-79/t".to_string(),
             state: "Todo".to_string(),
             description: None,
+            priority: None,
             parent: Some("GUZ-78".to_string()),
             blocked_by: vec!["GUZ-80".to_string()],
         };
