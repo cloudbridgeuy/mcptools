@@ -93,6 +93,9 @@ fn normalize_prop(prop: &mut serde_json::Value) {
     obj.remove("format");
     obj.remove("minimum");
     obj.remove("maximum");
+    if let Some(serde_json::Value::Array(values)) = obj.get_mut("enum") {
+        values.retain(|value| !value.is_null());
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +203,7 @@ mod tests {
                 "limit",
                 "project",
                 "query",
+                "sort",
                 "state",
                 "team",
                 "updatedAfter"

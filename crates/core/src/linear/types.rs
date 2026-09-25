@@ -646,6 +646,24 @@ fn present(value: &Option<String>) -> Option<&str> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(inline)]
+pub enum IssueSort {
+    Priority,
+    UpdatedAt,
+}
+
+pub fn issue_sort_value(sort: IssueSort) -> serde_json::Value {
+    match sort {
+        IssueSort::Priority => serde_json::json!([
+            {"priority": {"order": "Descending", "usePrioritySortOrderTiebreaker": false}},
+            {"updatedAt": {"order": "Descending"}}
+        ]),
+        IssueSort::UpdatedAt => serde_json::json!([{"updatedAt": {"order": "Descending"}}]),
+    }
+}
+
 pub fn transform_comments(data: serde_json::Value) -> Result<Paginated<Comment>, LinearError> {
     let issue = match data.get("issue") {
         None | Some(serde_json::Value::Null) => return Err(LinearError::MissingIssue),

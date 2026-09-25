@@ -1,15 +1,18 @@
 use crate::linear::client::execute;
 use crate::prelude::*;
 use mcptools_core::linear::{
-    is_uuid, issue_create_input, issue_filter_value, issue_update_input, match_state,
-    parse_state_selector, team_key_from_identifier, transform_issue_create, transform_issue_update,
-    Activity, IssueGetOutput, IssueListFilter, IssueMini, StateResolution,
+    is_uuid, issue_create_input, issue_filter_value, issue_sort_value, issue_update_input,
+    match_state, parse_state_selector, team_key_from_identifier, transform_issue_create,
+    transform_issue_update, Activity, IssueGetOutput, IssueListFilter, IssueMini, IssueSort,
+    StateResolution,
 };
 
 pub const ISSUE_QUERY: &str =
     "query ($id: String!) { issue(id: $id) { id identifier title description priorityLabel url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } createdAt creator { name displayName } history(first: 50) { nodes { createdAt actor { name displayName } botActor { name } fromState { name } toState { name } fromTitle toTitle updatedDescription addedLabels { name } removedLabels { name } fromParent { identifier } toParent { identifier } fromAssignee { name displayName } toAssignee { name displayName } fromCycle { number name } toCycle { number name } fromProject { name } toProject { name } attachment { title } relationChanges { identifier type } } pageInfo { hasNextPage } } } }";
 
 pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title priorityLabel url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } pageInfo { hasNextPage endCursor } } }";
+
+pub const ISSUES_SORT_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter, $sort: [IssueSortInput!]) { issues(first: $first, after: $after, filter: $filter, sort: $sort) { nodes { id identifier title priorityLabel url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } } pageInfo { hasNextPage endCursor } } }";
 
 pub const ISSUE_CREATE_MUTATION: &str = "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title priorityLabel url state { name } parent { identifier } } } }";
 
@@ -139,17 +142,23 @@ pub async fn resolve_issue_filter(
 pub async fn issues_list_data(
     client: &reqwest::Client,
     filter: &IssueListFilter,
+    sort: Option<IssueSort>,
     limit: u32,
     cursor: Option<String>,
 ) -> Result<mcptools_core::linear::Paginated<mcptools_core::linear::IssueMini>> {
     let filter_value =
         issue_filter_value(filter).map_err(|e| eyre!("Invalid Linear issue filter: {}", e))?;
-    let data = execute(
-        client,
-        ISSUES_QUERY,
-        serde_json::json!({"first": limit, "after": cursor, "filter": filter_value}),
-    )
-    .await?;
+    let (query, variables) = match sort {
+        None => (
+            ISSUES_QUERY,
+            serde_json::json!({"first": limit, "after": cursor, "filter": filter_value}),
+        ),
+        Some(value) => (
+            ISSUES_SORT_QUERY,
+            serde_json::json!({"first": limit, "after": cursor, "filter": filter_value, "sort": issue_sort_value(value)}),
+        ),
+    };
+    let data = execute(client, query, variables).await?;
     mcptools_core::linear::transform_issues(data).map_err(|e| eyre!("{}", e))
 }
 

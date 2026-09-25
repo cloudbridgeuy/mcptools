@@ -493,7 +493,7 @@ async fn chart_handler(options: ChartOptions) -> Result<()> {
         let mut project_seeds = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
-            let page = issue::issues_list_data(&client, &filter, 50, cursor.clone()).await?;
+            let page = issue::issues_list_data(&client, &filter, None, 50, cursor.clone()).await?;
             let has_next = page.page_info.has_next;
             cursor = page.page_info.end_cursor;
             project_seeds.extend(page.nodes.into_iter().map(|node| node.identifier));
@@ -610,7 +610,8 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
         end_cursor: None,
     };
     loop {
-        let page = issue::issues_list_data(&client, &filter, options.limit, cursor.clone()).await?;
+        let page =
+            issue::issues_list_data(&client, &filter, None, options.limit, cursor.clone()).await?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
         if !options.all || !page_info.has_next || nodes.len() >= 50 {

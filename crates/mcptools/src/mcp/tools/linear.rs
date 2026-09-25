@@ -110,9 +110,15 @@ pub async fn handle_linear_issue_list(
         end_cursor: None,
     };
     loop {
-        let page = crate::linear::issue::issues_list_data(&client, &filter, limit, cursor.clone())
-            .await
-            .map_err(exec)?;
+        let page = crate::linear::issue::issues_list_data(
+            &client,
+            &filter,
+            args.sort,
+            limit,
+            cursor.clone(),
+        )
+        .await
+        .map_err(exec)?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
         if !fetch_all || !page_info.has_next || nodes.len() >= 50 {
