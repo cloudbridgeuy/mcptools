@@ -41,7 +41,7 @@ fn recorded_issue_get() -> serde_json::Value {
         "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing",
         "state": "In Progress",
         "parent": serde_json::Value::Null,
-        "blocked_by": [],
+        "blocked_by": [{"identifier": "GUZ-80", "state": "Done"}],
         "comments": [],
         "activity": [],
     })
