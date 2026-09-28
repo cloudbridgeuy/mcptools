@@ -56,6 +56,13 @@ pub struct Paginated<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Blocker {
+    pub identifier: String,
+    #[serde(default)]
+    pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IssueMini {
     pub id: String,
     pub identifier: String,
@@ -69,7 +76,7 @@ pub struct IssueMini {
     #[serde(default)]
     pub parent: Option<String>,
     #[serde(default)]
-    pub blocked_by: Vec<String>,
+    pub blocked_by: Vec<Blocker>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -93,7 +100,7 @@ pub struct IssueGetOutput {
     #[serde(default)]
     pub parent: Option<String>,
     #[serde(default)]
-    pub blocked_by: Vec<String>,
+    pub blocked_by: Vec<Blocker>,
     #[serde(default)]
     pub comments: Vec<Comment>,
     #[serde(default)]
@@ -383,17 +390,36 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
                 description: present_text(raw.description),
                 priority: present_text(raw.priority_label),
                 parent: raw.parent.map(|parent| parent.identifier),
-                blocked_by: raw
-                    .inverse_relations
-                    .unwrap_or_default()
-                    .nodes
-                    .into_iter()
-                    .filter(|node| node.rel_type == "blocks")
-                    .filter_map(|node| node.issue.map(|issue| issue.identifier))
-                    .collect(),
+                blocked_by: blockers_of(raw.inverse_relations),
             })
         }
     }
+}
+
+pub fn format_blocked_by(blockers: &[Blocker]) -> String {
+    blockers
+        .iter()
+        .map(|blocker| match blocker.state.trim().is_empty() {
+            true => blocker.identifier.clone(),
+            false => format!("{} ({})", blocker.identifier, blocker.state),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn blockers_of(relations: Option<RawRelationConnection>) -> Vec<Blocker> {
+    relations
+        .unwrap_or_default()
+        .nodes
+        .into_iter()
+        .filter(|node| node.rel_type == "blocks")
+        .filter_map(|node| {
+            node.issue.map(|issue| Blocker {
+                identifier: issue.identifier,
+                state: issue.state.map(|state| state.name).unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 pub fn transform_activity(data: serde_json::Value) -> Result<Vec<Activity>, LinearError> {
@@ -545,14 +571,7 @@ pub fn transform_issues(data: serde_json::Value) -> Result<Paginated<IssueMini>,
                         description: present_text(raw.description),
                         priority: present_text(raw.priority_label),
                         parent: raw.parent.map(|parent| parent.identifier),
-                        blocked_by: raw
-                            .inverse_relations
-                            .unwrap_or_default()
-                            .nodes
-                            .into_iter()
-                            .filter(|node| node.rel_type == "blocks")
-                            .filter_map(|node| node.issue.map(|issue| issue.identifier))
-                            .collect(),
+                        blocked_by: blockers_of(raw.inverse_relations),
                     })
                     .collect(),
                 page_info: paged.page_info,
@@ -1119,6 +1138,8 @@ struct RawFullRelation {
 #[derive(Deserialize)]
 struct RawRelated {
     identifier: String,
+    #[serde(default)]
+    state: Option<RawState>,
 }
 
 #[derive(Deserialize)]
@@ -1489,7 +1510,7 @@ mod tests {
             "priorityLabel": "High",
             "parent": {"identifier": "GUZ-78"},
             "inverseRelations": {"nodes": [
-                {"type": "blocks", "issue": {"identifier": "GUZ-80"}},
+                {"type": "blocks", "issue": {"identifier": "GUZ-80", "state": {"name": "Done"}}},
                 {"type": "related", "issue": {"identifier": "GUZ-81"}},
             ]},
         }});
@@ -1505,7 +1526,10 @@ mod tests {
                 description: Some("Fix **auth** flow".to_string()),
                 priority: Some("High".to_string()),
                 parent: Some("GUZ-78".to_string()),
-                blocked_by: vec!["GUZ-80".to_string()],
+                blocked_by: vec![Blocker {
+                    identifier: "GUZ-80".to_string(),
+                    state: "Done".to_string(),
+                }],
             }
         );
     }
@@ -1610,7 +1634,10 @@ mod tests {
             description: None,
             priority: None,
             parent: Some("GUZ-78".to_string()),
-            blocked_by: vec!["GUZ-80".to_string()],
+            blocked_by: vec![Blocker {
+                identifier: "GUZ-80".to_string(),
+                state: "Done".to_string(),
+            }],
         };
         let value = serde_json::to_value(&issue).unwrap();
         assert_eq!(
@@ -1621,7 +1648,7 @@ mod tests {
         assert_eq!(value.get("parent").and_then(|v| v.as_str()), Some("GUZ-78"));
         assert_eq!(
             value.get("blocked_by"),
-            Some(&serde_json::json!(["GUZ-80"]))
+            Some(&serde_json::json!([{"identifier": "GUZ-80", "state": "Done"}]))
         );
     }
 
@@ -1637,6 +1664,22 @@ mod tests {
         let issue = transform_issue(data).unwrap();
         assert_eq!(issue.parent, None);
         assert!(issue.blocked_by.is_empty());
+    }
+
+    #[test]
+    fn format_blocked_by_renders_state_and_bare_id() {
+        let blockers = vec![
+            Blocker {
+                identifier: "GUZ-101".to_string(),
+                state: "Canceled".to_string(),
+            },
+            Blocker {
+                identifier: "GUZ-80".to_string(),
+                state: String::new(),
+            },
+        ];
+        assert_eq!(format_blocked_by(&blockers), "GUZ-101 (Canceled), GUZ-80");
+        assert_eq!(format_blocked_by(&[]), "");
     }
 
     #[test]

@@ -108,7 +108,7 @@ fn recorded_issue_list() -> serde_json::Value {
                 "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing",
                 "state": "In Progress",
                 "parent": "GUZ-78",
-                "blocked_by": ["GUZ-80"],
+                "blocked_by": [{"identifier": "GUZ-80", "state": "Done"}],
             }
         ],
         "pageInfo": {"hasNextPage": true, "endCursor": "cur1"},

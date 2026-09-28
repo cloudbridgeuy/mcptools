@@ -560,7 +560,10 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
         println!("State: {}", output.state);
         println!("URL: {}", output.url);
         println!("Parent: {}", output.parent.as_deref().unwrap_or(""));
-        println!("BlockedBy: {}", output.blocked_by.join(", "));
+        println!(
+            "BlockedBy: {}",
+            mcptools_core::linear::format_blocked_by(&output.blocked_by)
+        );
         println!("Description:");
         match output
             .description
@@ -670,7 +673,7 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
                 values.push(issue.priority.clone().unwrap_or_default());
             }
             values.push(issue.parent.clone().unwrap_or_default());
-            values.push(issue.blocked_by.join(", "));
+            values.push(mcptools_core::linear::format_blocked_by(&issue.blocked_by));
             table.add_row(table_row(&values));
         }
         table.printstd();
