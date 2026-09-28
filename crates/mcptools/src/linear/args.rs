@@ -33,13 +33,15 @@ pub struct IssueListArgs {
         description = "Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)"
     )]
     pub updated_after: Option<String>,
-    #[schemars(description = "Issue order: priority or updatedAt")]
+    #[schemars(
+        description = "Issue order: priority or updatedAt; omitted means updatedAt, newest first"
+    )]
     pub sort: Option<mcptools_core::linear::IssueSort>,
     #[schemars(description = "Max items per page (default: 25)")]
     pub limit: Option<u32>,
     #[schemars(description = "Page cursor for pagination")]
     pub cursor: Option<String>,
-    #[schemars(description = "Fetch all pages (up to 50 items)")]
+    #[schemars(description = "Fetch all pages")]
     pub all: Option<bool>,
 }
 
@@ -51,7 +53,7 @@ pub struct CommentListArgs {
     pub limit: Option<u32>,
     #[schemars(description = "Page cursor for pagination")]
     pub cursor: Option<String>,
-    #[schemars(description = "Fetch all pages (up to 50 items)")]
+    #[schemars(description = "Fetch all pages")]
     pub all: Option<bool>,
 }
 
@@ -63,7 +65,7 @@ pub struct RelationListArgs {
     pub limit: Option<u32>,
     #[schemars(description = "Page cursor for pagination")]
     pub cursor: Option<String>,
-    #[schemars(description = "Fetch all pages (up to 50 items)")]
+    #[schemars(description = "Fetch all pages")]
     pub all: Option<bool>,
 }
 
@@ -73,7 +75,7 @@ pub struct TeamListArgs {
     pub limit: Option<u32>,
     #[schemars(description = "Page cursor for pagination")]
     pub cursor: Option<String>,
-    #[schemars(description = "Fetch all pages (up to 50 items)")]
+    #[schemars(description = "Fetch all pages")]
     pub all: Option<bool>,
 }
 
@@ -95,7 +97,7 @@ pub struct ProjectListArgs {
     pub limit: Option<u32>,
     #[schemars(description = "Page cursor for pagination")]
     pub cursor: Option<String>,
-    #[schemars(description = "Fetch all pages (up to 50 items)")]
+    #[schemars(description = "Fetch all pages")]
     pub all: Option<bool>,
 }
 

@@ -114,7 +114,7 @@ pub struct CommentsListOptions {
     /// Page cursor for pagination
     #[arg(long)]
     pub cursor: Option<String>,
-    /// Fetch all pages (up to 50 items)
+    /// Fetch all pages
     #[arg(long)]
     pub all: bool,
     /// Output as JSON
@@ -132,7 +132,7 @@ pub struct RelationsListOptions {
     /// Page cursor for pagination
     #[arg(long)]
     pub cursor: Option<String>,
-    /// Fetch all pages (up to 50 items)
+    /// Fetch all pages
     #[arg(long)]
     pub all: bool,
     /// Output as JSON
@@ -252,7 +252,7 @@ pub struct IssueListOptions {
     /// Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)
     #[arg(long)]
     pub updated_after: Option<String>,
-    /// Issue order: priority or updatedAt
+    /// Issue order: priority or updatedAt; omitted means updatedAt, newest first
     #[arg(long, value_parser = parse_issue_sort)]
     pub sort: Option<mcptools_core::linear::IssueSort>,
     /// Max items per page
@@ -261,7 +261,7 @@ pub struct IssueListOptions {
     /// Page cursor for pagination
     #[arg(long)]
     pub cursor: Option<String>,
-    /// Fetch all pages (up to 50 items)
+    /// Fetch all pages
     #[arg(long)]
     pub all: bool,
     /// Output as JSON
@@ -328,7 +328,7 @@ pub struct TeamsListOptions {
     /// Page cursor for pagination
     #[arg(long)]
     pub cursor: Option<String>,
-    /// Fetch all pages (up to 50 items)
+    /// Fetch all pages
     #[arg(long)]
     pub all: bool,
     /// Output as JSON
@@ -356,7 +356,7 @@ pub struct ProjectsListOptions {
     /// Page cursor for pagination
     #[arg(long)]
     pub cursor: Option<String>,
-    /// Fetch all pages (up to 50 items)
+    /// Fetch all pages
     #[arg(long)]
     pub all: bool,
     /// Output as JSON
@@ -640,12 +640,11 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
         .await?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !options.all || !page_info.has_next || nodes.len() >= 50 {
+        if !options.all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     if options.json {
         println!(
             "{}",
@@ -786,12 +785,11 @@ async fn comments_list_handler(options: CommentsListOptions) -> Result<()> {
                 .await?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !options.all || !page_info.has_next || nodes.len() >= 50 {
+        if !options.all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     if options.json {
         println!(
             "{}",
@@ -835,12 +833,11 @@ async fn relations_list_handler(options: RelationsListOptions) -> Result<()> {
                 .await?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !options.all || !page_info.has_next || nodes.len() >= 50 {
+        if !options.all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     if options.json {
         println!(
             "{}",
@@ -1025,12 +1022,11 @@ async fn teams_list_handler(options: TeamsListOptions) -> Result<()> {
         let page = discover::teams_list_data(&client, options.limit, cursor.clone()).await?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !options.all || !page_info.has_next || nodes.len() >= 50 {
+        if !options.all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     if options.json {
         println!(
             "{}",
@@ -1084,12 +1080,11 @@ async fn projects_list_handler(options: ProjectsListOptions) -> Result<()> {
                 .await?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !options.all || !page_info.has_next || nodes.len() >= 50 {
+        if !options.all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     if options.json {
         println!(
             "{}",

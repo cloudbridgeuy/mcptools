@@ -121,12 +121,11 @@ pub async fn handle_linear_issue_list(
         .map_err(exec)?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !fetch_all || !page_info.has_next || nodes.len() >= 50 {
+        if !fetch_all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     super::to_dual_result_projected(
         IssueListOutput::from(Paginated { nodes, page_info }),
         fields.as_deref(),
@@ -157,12 +156,11 @@ pub async fn handle_linear_comment_list(
                 .map_err(exec)?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !fetch_all || !page_info.has_next || nodes.len() >= 50 {
+        if !fetch_all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     super::to_dual_result(CommentListOutput::from(Paginated { nodes, page_info }))
 }
 
@@ -190,12 +188,11 @@ pub async fn handle_linear_relation_list(
                 .map_err(exec)?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !fetch_all || !page_info.has_next || nodes.len() >= 50 {
+        if !fetch_all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     super::to_dual_result(RelationListOutput::from(Paginated { nodes, page_info }))
 }
 
@@ -222,12 +219,11 @@ pub async fn handle_linear_team_list(
             .map_err(exec)?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !fetch_all || !page_info.has_next || nodes.len() >= 50 {
+        if !fetch_all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     super::to_dual_result(TeamListOutput::from(Paginated { nodes, page_info }))
 }
 
@@ -282,12 +278,11 @@ pub async fn handle_linear_project_list(
                 .map_err(exec)?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
-        if !fetch_all || !page_info.has_next || nodes.len() >= 50 {
+        if !fetch_all || !page_info.has_next {
             break;
         }
         cursor = page_info.end_cursor.clone();
     }
-    nodes.truncate(50);
     super::to_dual_result(ProjectListOutput::from(Paginated { nodes, page_info }))
 }
 

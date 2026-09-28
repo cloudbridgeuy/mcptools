@@ -90,11 +90,11 @@ mcptools linear cycles list --team GUZ
 - `issue get` prints snapshot fields, then `Comments (N):`, then `Activity (N):`. A missing comment author or activity actor prints as `unknown`. Activity always starts with a created row. History after created is capped at 50 events.
 - CLI `issue get --json` and MCP `linear_issue_get` serialize the same object, with top-level `comments` and `activity` arrays.
 - `--json` returns `{"nodes": [...], "pageInfo": {...}}`.
-- `--all` follows cursors and caps results at 50 items.
+- `--all` follows cursors until no pages remain.
 
 ## MCP Tools
 
-18 `linear_*` tools mirror the CLI over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text content. Reads cap at 50 items like `--all`.
+18 `linear_*` tools mirror the CLI over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text content. Single reads return one page (default 25); `all: true` follows cursors until no pages remain.
 
 ```bash
 # Reads
