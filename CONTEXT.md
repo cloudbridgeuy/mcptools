@@ -70,7 +70,7 @@ The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in cod
 
 #### Scenario: Code-mode usage text
 - **WHEN** `find_tools` runs in code mode, including a nested call inside `execute`
-- **THEN** its `usage` field is `Call each declared function as an async global inside execute.`
+- **THEN** its `usage` field is `Call each declared function as an async global inside tools.mcptools.execute.`
 
 #### Scenario: Usage text without code mode
 - **WHEN** `find_tools` runs in any other mode

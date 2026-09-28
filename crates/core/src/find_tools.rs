@@ -69,7 +69,8 @@ pub const DEFAULT_K: usize = 5;
 
 pub const USAGE: &str = "Each declaration is the call signature: the input interface is the tools/call arguments object, the Promise type is the result.";
 
-pub const CODE_MODE_USAGE: &str = "Call each declared function as an async global inside execute.";
+pub const CODE_MODE_USAGE: &str =
+    "Call each declared function as an async global inside tools.mcptools.execute.";
 
 pub fn rank_tools(
     task: &str,

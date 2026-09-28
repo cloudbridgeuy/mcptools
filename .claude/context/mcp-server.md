@@ -233,7 +233,7 @@ variable, with the same accepted values as `MCPTOOLS_DISCOVERY`. In this mode
 `execute`. Code mode wins over Discovery mode when both are enabled.
 `tools/call` still dispatches every real tool by name. The `find_tools`
 response `usage` field, also for nested `find_tools` calls inside `execute`,
-is `Call each declared function as an async global inside execute.`; other
+is `Call each declared function as an async global inside tools.mcptools.execute.`; other
 modes keep `Each declaration is the call signature: the input interface is
 the tools/call arguments object, the Promise type is the result.`
 
