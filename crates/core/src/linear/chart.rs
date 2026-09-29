@@ -155,7 +155,15 @@ pub fn build_mermaid(nodes: &[ChartNode]) -> String {
     sorted.sort_by_key(|node| (issue_number(&node.identifier), node.identifier.as_str()));
 
     let mut out = String::from("flowchart TB\n");
-    emit_scope(&top_level, &children, &containers, 1, &mut out);
+    let (solo, rest): (Vec<&ChartNode>, Vec<&ChartNode>) = top_level
+        .into_iter()
+        .partition(|node| !containers.contains(node.identifier.as_str()));
+    emit_scope(&rest, &children, &containers, 1, &mut out);
+    if !solo.is_empty() {
+        out.push_str("  subgraph Ungrouped[\"Standalone issues\"]\n");
+        emit_scope(&solo, &children, &containers, 2, &mut out);
+        out.push_str("  end\n");
+    }
 
     let mut edges: BTreeSet<(String, String)> = BTreeSet::new();
     for node in &rendered {
@@ -182,6 +190,9 @@ pub fn build_mermaid(nodes: &[ChartNode]) -> String {
             subgraph_id(identifier),
             hue
         ));
+    }
+    if !solo.is_empty() {
+        out.push_str("  style Ungrouped fill:#12141d,stroke:#64748b,stroke-width:1.5px\n");
     }
 
     out.push_str("  subgraph Legend[\"State legend\"]\n");
@@ -436,6 +447,39 @@ mod tests {
         let mut reversed = input.clone();
         reversed.reverse();
         assert_eq!(mermaid, build_mermaid(&reversed));
+    }
+
+    #[test]
+    fn top_level_childless_issues_share_standalone_subgraph() {
+        let nodes = vec![
+            node("GUZ-10", "started", None, &[]),
+            node("GUZ-11", "backlog", Some("GUZ-10"), &[]),
+            node("GUZ-20", "backlog", None, &[]),
+            node("GUZ-21", "backlog", None, &["GUZ-20"]),
+        ];
+        let mermaid = build_mermaid(&nodes);
+        assert!(mermaid.contains("  subgraph Ungrouped[\"Standalone issues\"]\n"));
+        let start = mermaid.find("subgraph Ungrouped").unwrap();
+        let tail = &mermaid[start..];
+        let end = tail.find("\n  end\n").unwrap();
+        let body = &tail[..end];
+        assert!(body.contains("GUZ_20["));
+        assert!(body.contains("GUZ_21["));
+        assert!(!body.contains("GUZ_11["));
+        assert!(mermaid.contains("GUZ_20 --> GUZ_21"));
+        assert!(
+            mermaid.contains("  style Ungrouped fill:#12141d,stroke:#64748b,stroke-width:1.5px\n")
+        );
+    }
+
+    #[test]
+    fn no_standalone_subgraph_without_top_level_leaves() {
+        let nodes = vec![
+            node("GUZ-10", "started", None, &[]),
+            node("GUZ-11", "backlog", Some("GUZ-10"), &[]),
+        ];
+        let mermaid = build_mermaid(&nodes);
+        assert!(!mermaid.contains("Ungrouped"));
     }
 
     #[test]
