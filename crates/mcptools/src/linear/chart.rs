@@ -1,7 +1,16 @@
+use super::{discover, issue};
 use crate::linear::client::execute;
-use crate::prelude::*;
-use mcptools_core::linear::ChartNode;
+use crate::prelude::{eprintln, println, *};
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::{Html, IntoResponse, Json},
+    routing::{get, post},
+    Router,
+};
+use mcptools_core::linear::{ChartClass, ChartNode};
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 pub const ISSUE_CAP: usize = 300;
 
@@ -251,6 +260,866 @@ fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+pub fn validate_serve_out(serve: bool, out: Option<&std::path::Path>) -> Result<()> {
+    if serve && out.is_some() {
+        return Err(eyre!("Linear chart --out conflicts with --serve"));
+    }
+    Ok(())
+}
+
+pub fn chart_class_name(class: &ChartClass) -> &'static str {
+    match class {
+        ChartClass::Complete => "complete",
+        ChartClass::InProgress => "inprogress",
+        ChartClass::Frontier => "frontier",
+        ChartClass::Fog => "fog",
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChartServeConfig {
+    pub client: reqwest::Client,
+    pub seeds: Vec<String>,
+    pub project: Option<String>,
+    pub team: Option<String>,
+    pub exclude_completed: bool,
+    pub limit: usize,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChartNodePayload {
+    pub identifier: String,
+    pub title: String,
+    pub state_type: String,
+    pub parent: Option<String>,
+    pub blocked_by: Vec<String>,
+    pub class: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChartPayload {
+    pub title: String,
+    pub stats_line: String,
+    pub total: usize,
+    pub complete: usize,
+    pub inprogress: usize,
+    pub frontier: usize,
+    pub fog: usize,
+    pub mermaid: String,
+    pub cap_hit: bool,
+    pub missing_blockers: Vec<(String, String)>,
+    pub nodes: Vec<ChartNodePayload>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct StatesQuery {
+    team: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct StateTransition {
+    state: Option<String>,
+    team: Option<String>,
+}
+
+pub async fn resolve_seeds(
+    client: &reqwest::Client,
+    positional: &[String],
+    project: Option<&str>,
+    team: Option<&str>,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let mut seeds = positional.to_vec();
+    if let Some(project) = project {
+        let filter = issue::resolve_issue_filter(
+            client,
+            team,
+            Some(project),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        let mut project_seeds = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = issue::issues_list_data(client, &filter, None, 50, cursor.clone()).await?;
+            let has_next = page.page_info.has_next;
+            cursor = page.page_info.end_cursor;
+            project_seeds.extend(page.nodes.into_iter().map(|node| node.identifier));
+            if !has_next || project_seeds.len() >= limit {
+                break;
+            }
+        }
+        if project_seeds.is_empty() {
+            return Err(eyre!("Linear chart --project '{}' has no issues", project));
+        }
+        project_seeds.truncate(limit);
+        seeds.extend(project_seeds);
+    }
+    Ok(seeds)
+}
+
+pub async fn build_chart_payload(config: &ChartServeConfig) -> Result<ChartPayload> {
+    let seeds = resolve_seeds(
+        &config.client,
+        &config.seeds,
+        config.project.as_deref(),
+        config.team.as_deref(),
+        config.limit,
+    )
+    .await?;
+    let closure = chart_data(
+        &config.client,
+        &seeds,
+        config.exclude_completed,
+        config.limit,
+    )
+    .await?;
+    let classes = mcptools_core::linear::classify_nodes(&closure.nodes);
+    let stats = mcptools_core::linear::chart_stats(&closure.nodes);
+    let mermaid = mcptools_core::linear::build_mermaid(&closure.nodes);
+    let mut nodes: Vec<ChartNodePayload> = closure
+        .nodes
+        .iter()
+        .map(|node| ChartNodePayload {
+            identifier: node.identifier.clone(),
+            title: node.title.clone(),
+            state_type: node.state_type.clone(),
+            parent: node.parent.clone(),
+            blocked_by: node.blocked_by.clone(),
+            class: classes
+                .get(node.identifier.as_str())
+                .map(chart_class_name)
+                .unwrap_or("fog")
+                .to_string(),
+        })
+        .collect();
+    nodes.sort_by(|a, b| a.identifier.cmp(&b.identifier));
+    Ok(ChartPayload {
+        title: config.title.clone(),
+        stats_line: mcptools_core::linear::stats_line(&stats),
+        total: stats.total,
+        complete: stats.complete,
+        inprogress: stats.inprogress,
+        frontier: stats.frontier,
+        fog: stats.fog,
+        mermaid,
+        cap_hit: closure.cap_hit,
+        missing_blockers: closure.missing_blockers,
+        nodes,
+    })
+}
+
+fn api_error(status: StatusCode, message: String) -> (StatusCode, Json<serde_json::Value>) {
+    (status, Json(serde_json::json!({"error": message})))
+}
+
+async fn index_handler(State(config): State<Arc<ChartServeConfig>>) -> Html<String> {
+    Html(render_app_html(&config.title))
+}
+
+async fn api_chart_handler(
+    State(config): State<Arc<ChartServeConfig>>,
+) -> Result<Json<ChartPayload>, (StatusCode, Json<serde_json::Value>)> {
+    build_chart_payload(&config)
+        .await
+        .map(Json)
+        .map_err(|e| api_error(StatusCode::BAD_GATEWAY, e.to_string()))
+}
+
+async fn api_issue_handler(
+    State(config): State<Arc<ChartServeConfig>>,
+    Path(id): Path<String>,
+) -> Result<Json<mcptools_core::linear::IssueGetOutput>, (StatusCode, Json<serde_json::Value>)> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "issue id must not be empty".to_string(),
+        ));
+    }
+    issue::issue_get_output(&config.client, id)
+        .await
+        .map(Json)
+        .map_err(|e| match e.to_string().contains("not found") {
+            true => api_error(StatusCode::NOT_FOUND, e.to_string()),
+            false => api_error(StatusCode::BAD_GATEWAY, e.to_string()),
+        })
+}
+
+async fn api_states_handler(
+    State(config): State<Arc<ChartServeConfig>>,
+    Query(query): Query<StatesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let team = query
+        .team
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    let team = match team {
+        Some(team) => team,
+        None => {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "query ?team= is required".to_string(),
+            ));
+        }
+    };
+    discover::states_list_data(&config.client, team)
+        .await
+        .map(|data| Json(serde_json::json!({"nodes": data.nodes})))
+        .map_err(|e| api_error(StatusCode::BAD_GATEWAY, e.to_string()))
+}
+
+async fn api_transition_handler(
+    State(config): State<Arc<ChartServeConfig>>,
+    Path(id): Path<String>,
+    Json(body): Json<StateTransition>,
+) -> Result<Json<mcptools_core::linear::IssueMini>, (StatusCode, Json<serde_json::Value>)> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(api_error(
+            StatusCode::BAD_REQUEST,
+            "issue id must not be empty".to_string(),
+        ));
+    }
+    let state = body
+        .state
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let state = match state {
+        Some(state) => state,
+        None => {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "body.state must not be empty".to_string(),
+            ));
+        }
+    };
+    let team = body
+        .team
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
+    issue::issue_update_data(
+        &config.client,
+        id,
+        None,
+        None,
+        Some(state),
+        team,
+        None,
+        None,
+        None,
+        false,
+    )
+    .await
+    .map(Json)
+    .map_err(|e| match e.to_string().contains("not found") {
+        true => api_error(StatusCode::NOT_FOUND, e.to_string()),
+        false => api_error(StatusCode::BAD_GATEWAY, e.to_string()),
+    })
+}
+
+pub async fn serve_chart(config: ChartServeConfig, port: u16, no_open: bool) -> Result<()> {
+    let state = Arc::new(config);
+    let app = Router::new()
+        .route("/", get(index_handler))
+        .route("/api/chart", get(api_chart_handler))
+        .route("/api/issues/{id}", get(api_issue_handler))
+        .route("/api/states", get(api_states_handler))
+        .route("/api/issues/{id}/state", post(api_transition_handler))
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
+        .await
+        .map_err(|e| eyre!("Failed to bind chart server to port {}: {}", port, e))?;
+    let addr = listener
+        .local_addr()
+        .map_err(|e| eyre!("Failed to read chart server address: {}", e))?;
+    let url = format!("http://{addr}/");
+    println!("{url}");
+    crate::open::maybe_open(&[url], !no_open);
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| eyre!("Chart server error: {e}"))?;
+    Ok(())
+}
+
+pub fn render_app_html(title: &str) -> String {
+    let heading = escape_html(&format!("{title} — Linear chart"));
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{heading}</title>
+<style>
+html, body {{
+  margin: 0;
+  width: 100%;
+  min-height: 100dvh;
+  background-color: #0a0e1a;
+  background-image: radial-gradient(#ffffff1c 1px, transparent 1px);
+  background-size: 26px 26px;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}}
+body {{
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}}
+header {{
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  flex-shrink: 0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 16px;
+  background: rgba(10,14,26,0.92);
+  border-bottom: 1px solid #263049;
+}}
+header h1 {{
+  font-size: 14px;
+  margin: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+#stats {{
+  font-size: 12px;
+  color: #94a3b8;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+button, select {{
+  font: inherit;
+  font-size: 12px;
+  color: #e2e8f0;
+  background: #16213a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 6px 10px;
+}}
+button {{
+  cursor: pointer;
+}}
+button:hover {{
+  border-color: #60a5fa;
+}}
+#status {{
+  font-size: 12px;
+  color: #94a3b8;
+  min-width: 120px;
+  text-align: right;
+}}
+#chart {{
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  cursor: grab;
+}}
+#chart.panning {{
+  cursor: grabbing;
+  user-select: none;
+}}
+#ticket-list {{
+  flex-shrink: 0;
+  max-height: 22dvh;
+  overflow: auto;
+}}
+#chart svg {{
+  max-width: none;
+  height: auto;
+  display: block;
+}}
+#chart g.node {{
+  cursor: pointer;
+}}
+#chart g.cluster-label text {{
+  fill: #e2e8f0;
+}}
+#chart .cluster-label {{
+  color: #e2e8f0;
+}}
+#modal-backdrop {{
+  position: fixed;
+  inset: 0;
+  background: rgba(2,6,23,0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  padding: 24px;
+}}
+#modal-backdrop.open {{
+  display: flex;
+}}
+#modal {{
+  width: min(720px, 100%);
+  max-height: 85dvh;
+  overflow: auto;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 20px;
+}}
+#modal h2 {{
+  margin: 0 0 4px 0;
+  font-size: 16px;
+}}
+#modal .meta {{
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 12px;
+}}
+#modal .row {{
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}}
+.md {{
+  font-size: 13px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.5;
+  background: #0a0e1a;
+  border: 1px solid #263049;
+  border-radius: 8px;
+  padding: 12px;
+  overflow-wrap: break-word;
+}}
+.md > :first-child {{
+  margin-top: 0;
+}}
+.md > :last-child {{
+  margin-bottom: 0;
+}}
+.md h1, .md h2, .md h3, .md h4 {{
+  color: #e2e8f0;
+  margin: 12px 0 6px 0;
+}}
+.md p {{
+  margin: 8px 0;
+}}
+.md a {{
+  color: #60a5fa;
+}}
+.md code {{
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #16213a;
+  border-radius: 4px;
+  padding: 1px 4px;
+}}
+.md pre {{
+  background: #020617;
+  border: 1px solid #263049;
+  border-radius: 8px;
+  padding: 10px;
+  overflow: auto;
+}}
+.md pre code {{
+  background: transparent;
+  padding: 0;
+}}
+.md blockquote {{
+  border-left: 3px solid #334155;
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: #94a3b8;
+}}
+.md table {{
+  border-collapse: collapse;
+  margin: 8px 0;
+}}
+.md th, .md td {{
+  border: 1px solid #334155;
+  padding: 4px 8px;
+}}
+.md img {{
+  max-width: 100%;
+}}
+.md ul, .md ol {{
+  padding-left: 20px;
+}}
+.comment-author {{
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}}
+#modal h3 {{
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  margin: 16px 0 8px 0;
+}}
+#modal ul {{
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}}
+</style>
+</head>
+<body>
+<header>
+<h1>{heading}</h1>
+<span id="stats">Loading</span>
+<button id="refresh" type="button">Refresh</button>
+<span id="status" role="status"></span>
+</header>
+<div id="chart"></div>
+<div id="modal-backdrop">
+<div id="modal" role="dialog" aria-modal="true">
+<h2 id="m-title"></h2>
+<div class="meta" id="m-meta"></div>
+<div class="row">
+<select id="m-state"></select>
+<button id="m-open" type="button">Open in Linear</button>
+<button id="m-close" type="button">Close</button>
+</div>
+<div class="row"><span id="m-msg" role="status"></span></div>
+<h3>Description</h3>
+<div id="m-desc" class="md"></div>
+<h3>Comments</h3>
+<ul id="m-comments"></ul>
+<h3>Activity</h3>
+<ul id="m-activity"></ul>
+</div>
+</div>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0/dist/mermaid-layout-elk.esm.min.mjs";
+import {{ marked }} from "https://cdn.jsdelivr.net/npm/marked@12/lib/marked.esm.js";
+import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.es.js";
+mermaid.registerLayoutLoaders(elkLayouts);
+mermaid.initialize({{
+  startOnLoad: false,
+  layout: 'elk',
+  theme: 'base',
+  themeVariables: {{
+    darkMode: true,
+    background: '#0a0e1a',
+    textColor: '#e2e8f0',
+    titleColor: '#e2e8f0',
+    primaryTextColor: '#e2e8f0',
+    lineColor: '#94a3b8',
+    clusterBkg: 'rgba(18,20,29,0.85)',
+    clusterBorder: '#94a3b8',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize: '14px'
+  }},
+  flowchart: {{ htmlLabels: true, useMaxWidth: false, curve: 'rounded' }}
+}});
+const chartEl = document.getElementById('chart');
+const statsEl = document.getElementById('stats');
+const statusEl = document.getElementById('status');
+const refreshBtn = document.getElementById('refresh');
+const backdrop = document.getElementById('modal-backdrop');
+const mTitle = document.getElementById('m-title');
+const mMeta = document.getElementById('m-meta');
+const mState = document.getElementById('m-state');
+const mOpen = document.getElementById('m-open');
+const mClose = document.getElementById('m-close');
+const mMsg = document.getElementById('m-msg');
+const mDesc = document.getElementById('m-desc');
+const mComments = document.getElementById('m-comments');
+const mActivity = document.getElementById('m-activity');
+function renderMarkdown(text) {{
+  const source = text && text.trim() ? text : '(none)';
+  return DOMPurify.sanitize(marked.parse(source, {{ breaks: true }}));
+}}
+let renderSeq = 0;
+let currentId = '';
+let currentUrl = '';
+let issueSeq = 0;
+let lastState = '';
+function teamOf(identifier) {{
+  const dash = identifier.indexOf('-');
+  return dash > 0 ? identifier.slice(0, dash) : '';
+}}
+function setStatus(text) {{
+  statusEl.textContent = text;
+}}
+async function loadChart() {{
+  setStatus('Refreshing');
+  refreshBtn.disabled = true;
+  try {{
+    const res = await fetch('/api/chart');
+    if (!res.ok) {{
+      throw new Error('chart request failed: ' + res.status);
+    }}
+    const data = await res.json();
+    statsEl.textContent = data.stats_line;
+    renderSeq += 1;
+    const renderId = 'chartSvg' + renderSeq;
+    const rendered = await mermaid.render(renderId, data.mermaid);
+    chartEl.innerHTML = rendered.svg;
+    bindNodes(data.nodes || []);
+    const warnings = [];
+    if (data.cap_hit) {{
+      warnings.push('capped');
+    }}
+    for (const pair of (data.missing_blockers || [])) {{
+      warnings.push(pair[0] + ' blocked by outside ' + pair[1]);
+    }}
+    setStatus(warnings.join('; '));
+  }} catch (err) {{
+    setStatus(String(err && err.message ? err.message : err));
+  }} finally {{
+    refreshBtn.disabled = false;
+  }}
+}}
+function bindNodes(nodes) {{
+  const byId = new Map(nodes.map((node) => [node.identifier, node]));
+  const groups = chartEl.querySelectorAll('g.node');
+  const seen = new Set();
+  groups.forEach((group) => {{
+    const text = group.textContent || '';
+    const match = text.match(/[A-Z][A-Z0-9]*-\d+/);
+    if (!match) {{
+      return;
+    }}
+    const identifier = match[0];
+    if (!byId.has(identifier) || seen.has(group)) {{
+      return;
+    }}
+    seen.add(group);
+    group.addEventListener('click', () => openIssue(identifier));
+  }});
+  let list = document.getElementById('ticket-list');
+  if (!list) {{
+    list = document.createElement('div');
+    list.id = 'ticket-list';
+    list.style.display = 'flex';
+    list.style.flexWrap = 'wrap';
+    list.style.gap = '8px';
+    list.style.padding = '0 16px 24px 16px';
+    document.body.appendChild(list);
+  }}
+  list.innerHTML = '';
+  nodes.forEach((node) => {{
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.textContent = node.identifier + ' ' + node.class;
+    item.addEventListener('click', () => openIssue(node.identifier));
+    list.appendChild(item);
+  }});
+}}
+async function openIssue(identifier) {{
+  currentId = identifier;
+  const mySeq = ++issueSeq;
+  mState.disabled = false;
+  mMsg.textContent = 'Loading';
+  backdrop.classList.add('open');
+  try {{
+    const res = await fetch('/api/issues/' + encodeURIComponent(identifier));
+    if (!res.ok) {{
+      throw new Error('issue request failed: ' + res.status);
+    }}
+    const data = await res.json();
+    if (mySeq !== issueSeq) {{
+      return;
+    }}
+    currentUrl = data.url || '';
+    mTitle.textContent = data.identifier + ': ' + data.title;
+    mMeta.textContent = 'State ' + data.state + ' Project ' + (data.project ? data.project.name : '');
+    mDesc.innerHTML = renderMarkdown(data.description);
+    mComments.innerHTML = '';
+    (data.comments || []).forEach((comment) => {{
+      const item = document.createElement('li');
+      const author = document.createElement('div');
+      author.className = 'comment-author';
+      author.textContent = (comment.author || 'unknown') + ' (' + (comment.created_at || '') + ')';
+      const body = document.createElement('div');
+      body.className = 'md';
+      body.innerHTML = renderMarkdown(comment.body);
+      item.appendChild(author);
+      item.appendChild(body);
+      mComments.appendChild(item);
+    }});
+    mActivity.innerHTML = '';
+    (data.activity || []).forEach((event) => {{
+      const item = document.createElement('li');
+      item.textContent = event.summary;
+      mActivity.appendChild(item);
+    }});
+    await loadStates(teamOf(identifier), data.state, mySeq);
+    if (mySeq !== issueSeq) {{
+      return;
+    }}
+    lastState = mState.value;
+    mMsg.textContent = '';
+  }} catch (err) {{
+    if (mySeq !== issueSeq) {{
+      return;
+    }}
+    mMsg.textContent = String(err && err.message ? err.message : err);
+  }}
+}}
+async function loadStates(team, current, mySeq) {{
+  mState.innerHTML = '';
+  if (!team) {{
+    return;
+  }}
+  const res = await fetch('/api/states?team=' + encodeURIComponent(team));
+  if (!res.ok) {{
+    throw new Error('states request failed: ' + res.status);
+  }}
+  if (mySeq !== issueSeq) {{
+    return;
+  }}
+  const data = await res.json();
+  (data.nodes || []).forEach((state) => {{
+    const option = document.createElement('option');
+    option.value = state.name;
+    option.textContent = state.name;
+    if (state.name === current) {{
+      option.selected = true;
+    }}
+    mState.appendChild(option);
+  }});
+}}
+function closeModal() {{
+  issueSeq += 1;
+  backdrop.classList.remove('open');
+  currentId = '';
+}}
+mState.addEventListener('change', async () => {{
+  if (!currentId) {{
+    return;
+  }}
+  const savedId = currentId;
+  const next = mState.value;
+  const previous = lastState;
+  mState.disabled = true;
+  mMsg.textContent = 'Saving';
+  try {{
+    const res = await fetch('/api/issues/' + encodeURIComponent(savedId) + '/state', {{
+      method: 'POST',
+      headers: {{ 'content-type': 'application/json' }},
+      body: JSON.stringify({{ state: next }})
+    }});
+    if (!res.ok) {{
+      const payload = await res.json().catch(() => ({{}}));
+      throw new Error(payload.error || ('transition failed: ' + res.status));
+    }}
+    lastState = next;
+  }} catch (err) {{
+    lastState = previous;
+    await loadChart();
+    if (currentId !== savedId) {{
+      return;
+    }}
+    mState.value = previous;
+    mState.disabled = false;
+    mMsg.textContent = String(err && err.message ? err.message : err);
+    return;
+  }}
+  await loadChart();
+  if (currentId !== savedId) {{
+    return;
+  }}
+  mState.disabled = false;
+  mMsg.textContent = 'Saved';
+}});
+mOpen.addEventListener('click', () => {{
+  if (currentUrl) {{
+    window.open(currentUrl, '_blank', 'noopener');
+  }}
+}});
+mClose.addEventListener('click', closeModal);
+backdrop.addEventListener('click', (event) => {{
+  if (event.target === backdrop) {{
+    closeModal();
+  }}
+}});
+document.addEventListener('keydown', (event) => {{
+  if (event.key === 'Escape' && backdrop.classList.contains('open')) {{
+    closeModal();
+    return;
+  }}
+  const tag = (event.target && event.target.tagName ? event.target.tagName : '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') {{
+    return;
+  }}
+  if (event.key === 'r' || event.key === 'R') {{
+    loadChart();
+  }}
+}});
+refreshBtn.addEventListener('click', loadChart);
+let panX = 0;
+let panY = 0;
+let panLeft = 0;
+let panTop = 0;
+let panning = false;
+let panMoved = false;
+chartEl.addEventListener('mousedown', (event) => {{
+  if (event.button !== 0) {{
+    return;
+  }}
+  panning = true;
+  panMoved = false;
+  panX = event.clientX;
+  panY = event.clientY;
+  panLeft = chartEl.scrollLeft;
+  panTop = chartEl.scrollTop;
+  chartEl.classList.add('panning');
+  event.preventDefault();
+}});
+document.addEventListener('mousemove', (event) => {{
+  if (!panning) {{
+    return;
+  }}
+  if (event.buttons === 0) {{
+    panning = false;
+    chartEl.classList.remove('panning');
+    return;
+  }}
+  const dx = event.clientX - panX;
+  const dy = event.clientY - panY;
+  if (!panMoved && Math.abs(dx) + Math.abs(dy) > 4) {{
+    panMoved = true;
+  }}
+  if (panMoved) {{
+    chartEl.scrollLeft = panLeft - dx;
+    chartEl.scrollTop = panTop - dy;
+  }}
+}});
+document.addEventListener('mouseup', () => {{
+  panning = false;
+  chartEl.classList.remove('panning');
+}});
+chartEl.addEventListener('click', (event) => {{
+  if (panMoved) {{
+    event.stopPropagation();
+    event.preventDefault();
+    panMoved = false;
+  }}
+}}, true);
+loadChart();
+</script>
+</body>
+</html>
+"#
+    )
 }
 
 pub struct FetchedIssue {
@@ -542,5 +1411,73 @@ mod tests {
                 .unwrap(),
             "mcptools-linear-chart-My-Project.html"
         );
+    }
+
+    #[test]
+    fn serve_rejects_out_path() {
+        let err = validate_serve_out(true, Some(std::path::Path::new("/tmp/x.html"))).unwrap_err();
+        assert!(err.to_string().contains("--out"));
+        validate_serve_out(true, None).unwrap();
+        validate_serve_out(false, Some(std::path::Path::new("/tmp/x.html"))).unwrap();
+    }
+
+    #[test]
+    fn class_names_cover_every_variant() {
+        assert_eq!(chart_class_name(&ChartClass::Complete), "complete");
+        assert_eq!(chart_class_name(&ChartClass::InProgress), "inprogress");
+        assert_eq!(chart_class_name(&ChartClass::Frontier), "frontier");
+        assert_eq!(chart_class_name(&ChartClass::Fog), "fog");
+    }
+
+    #[test]
+    fn app_html_exposes_interactive_contract() {
+        let html = render_app_html("GUZ-185");
+        for marker in [
+            "id=\"refresh\"",
+            "/api/chart",
+            "keydown",
+            "/api/issues/",
+            "/api/states",
+            "id=\"modal-backdrop\"",
+            "id=\"m-state\"",
+            "issueSeq",
+            "marked@12",
+            "dompurify@3",
+            "renderMarkdown",
+            "comment-author",
+            "panning",
+            "cluster-label",
+            "min-height: 0",
+        ] {
+            assert!(html.contains(marker), "missing {marker}");
+        }
+        assert!(html.contains("GUZ-185"));
+    }
+
+    #[test]
+    fn chart_payload_serializes_nodes_with_class() {
+        let payload = ChartPayload {
+            title: "GUZ-1".to_string(),
+            stats_line: "1 issues: 0 complete, 0 in progress, 1 frontier, 0 fog".to_string(),
+            total: 1,
+            complete: 0,
+            inprogress: 0,
+            frontier: 1,
+            fog: 0,
+            mermaid: "flowchart TB\n".to_string(),
+            cap_hit: false,
+            missing_blockers: Vec::new(),
+            nodes: vec![ChartNodePayload {
+                identifier: "GUZ-1".to_string(),
+                title: "Title GUZ-1".to_string(),
+                state_type: "backlog".to_string(),
+                parent: None,
+                blocked_by: Vec::new(),
+                class: "frontier".to_string(),
+            }],
+        };
+        let value = serde_json::to_value(&payload).unwrap();
+        assert_eq!(value["nodes"][0]["class"], "frontier");
+        assert_eq!(value["total"], 1);
     }
 }

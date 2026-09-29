@@ -71,9 +71,12 @@ mcptools linear chart GUZ-185 --out /tmp/linear-chart.html
 mcptools linear chart GUZ-185 --no-open
 mcptools linear chart --project modelops-cycles --team GUZ
 mcptools linear chart --project modelops-cycles --team GUZ --exclude-completed --limit 1000
+# Interactive server: refresh button + `r` key, click ticket for detail modal + state transition
+mcptools linear chart GUZ-185 --serve
+mcptools linear chart GUZ-185 --serve --port 8080 --no-open
 ```
 
-`chart` walks the transitive closure of children, parents, `blocked_by` blockers, and forward `blocks` targets (cap `--limit`, default 300, warning on the cap), drops canceled issues, and classifies the rest as complete, in progress, frontier (ready to start), or fog (prerequisite incomplete). `--exclude-completed` hides completed issues and drops their blocker edges so dependents render as frontier. Output defaults to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html`. Empty issue ids reject before any request. `--project` seeds the chart with every issue in the project (project names need `--team`); issue ids and `--project` are mutually alternative inputs.
+`chart` walks the transitive closure of children, parents, `blocked_by` blockers, and forward `blocks` targets (cap `--limit`, default 300, warning on the cap), drops canceled issues, and classifies the rest as complete, in progress, frontier (ready to start), or fog (prerequisite incomplete). `--exclude-completed` hides completed issues and drops their blocker edges so dependents render as frontier. Output defaults to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html`. Empty issue ids reject before any request. `--project` seeds the chart with every issue in the project (project names need `--team`); issue ids and `--project` are mutually alternative inputs. `--serve` starts a foreground loopback server instead of writing a file (default `--port 0` assigns a random open port, `PORT` env also read; `--out` rejects): `GET /api/chart` rebuilds the closure, click-drag pans the diagram, ticket clicks open a detail modal with markdown-rendered description and comments plus activity, the state select auto-posts to `POST /api/issues/:id/state` and refreshes the diagram only, Refresh button and `r` keybinding reload.
 
 ### Discovery
 

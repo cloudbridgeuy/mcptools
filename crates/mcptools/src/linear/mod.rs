@@ -458,6 +458,19 @@ pub struct ChartOptions {
     pub out: Option<std::path::PathBuf>,
     #[arg(long, help = "Do not open the chart in the default browser")]
     pub no_open: bool,
+    #[arg(
+        long,
+        help = "Serve an interactive chart with refresh, detail modal, and state transitions"
+    )]
+    pub serve: bool,
+    #[arg(
+        long,
+        env = "PORT",
+        default_value_t = 0,
+        value_name = "PORT",
+        help = "Serve port (0 assigns a random open port)"
+    )]
+    pub port: u16,
 }
 
 pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
@@ -516,39 +529,34 @@ async fn chart_handler(options: ChartOptions) -> Result<()> {
     if options.limit == 0 {
         return Err(eyre!("Linear chart --limit must be at least 1"));
     };
+    chart::validate_serve_out(options.serve, options.out.as_deref())?;
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
-    let mut seeds = positional;
-    if let Some(project) = project.as_deref() {
-        let filter = issue::resolve_issue_filter(
-            &client,
-            team.as_deref(),
-            Some(project),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await?;
-        let mut project_seeds = Vec::new();
-        let mut cursor: Option<String> = None;
-        loop {
-            let page = issue::issues_list_data(&client, &filter, None, 50, cursor.clone()).await?;
-            let has_next = page.page_info.has_next;
-            cursor = page.page_info.end_cursor;
-            project_seeds.extend(page.nodes.into_iter().map(|node| node.identifier));
-            if !has_next || project_seeds.len() >= options.limit {
-                break;
-            }
-        }
-        if project_seeds.is_empty() {
-            return Err(eyre!("Linear chart --project '{}' has no issues", project));
-        }
-        project_seeds.truncate(options.limit);
-        seeds.extend(project_seeds);
+    let seeds = positional;
+    if options.serve {
+        let title = match &project {
+            Some(project) => project.clone(),
+            None => seeds[0].clone(),
+        };
+        let serve_config = chart::ChartServeConfig {
+            client,
+            seeds,
+            project,
+            team,
+            exclude_completed: options.exclude_completed,
+            limit: options.limit,
+            title,
+        };
+        return chart::serve_chart(serve_config, options.port, options.no_open).await;
     }
+    let seeds = chart::resolve_seeds(
+        &client,
+        &seeds,
+        project.as_deref(),
+        team.as_deref(),
+        options.limit,
+    )
+    .await?;
     let title = match &project {
         Some(project) => project.clone(),
         None => seeds[0].clone(),
