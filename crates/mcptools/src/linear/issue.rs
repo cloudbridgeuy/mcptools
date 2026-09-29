@@ -1,22 +1,22 @@
 use crate::linear::client::execute;
 use crate::prelude::*;
 use mcptools_core::linear::{
-    is_uuid, issue_create_input, issue_filter_value, issue_sort_value, issue_update_input,
-    match_state, parse_state_selector, team_key_from_identifier, transform_issue_create,
-    transform_issue_update, Activity, IssueGetOutput, IssueListFilter, IssueMini, IssueSort,
-    StateResolution,
+    format_label_candidates, is_uuid, issue_create_input, issue_filter_value, issue_sort_value,
+    issue_update_input, match_label, match_state, parse_label_selector, parse_state_selector,
+    team_key_from_identifier, transform_issue_create, transform_issue_update, Activity,
+    IssueGetOutput, IssueListFilter, IssueMini, IssueSort, LabelResolution, StateResolution,
 };
 
 pub const ISSUE_QUERY: &str =
-    "query ($id: String!) { issue(id: $id) { id identifier title description priorityLabel url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } createdAt creator { name displayName } history(first: 50) { nodes { createdAt actor { name displayName } botActor { name } fromState { name } toState { name } fromTitle toTitle updatedDescription addedLabels { name } removedLabels { name } fromParent { identifier } toParent { identifier } fromAssignee { name displayName } toAssignee { name displayName } fromCycle { number name } toCycle { number name } fromProject { name } toProject { name } attachment { title } relationChanges { identifier type } } pageInfo { hasNextPage } } } }";
+    "query ($id: String!) { issue(id: $id) { id identifier title description priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } createdAt creator { name displayName } history(first: 50) { nodes { createdAt actor { name displayName } botActor { name } fromState { name } toState { name } fromTitle toTitle updatedDescription addedLabels { name } removedLabels { name } fromParent { identifier } toParent { identifier } fromAssignee { name displayName } toAssignee { name displayName } fromCycle { number name } toCycle { number name } fromProject { name } toProject { name } attachment { title } relationChanges { identifier type } } pageInfo { hasNextPage } } } }";
 
-pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title priorityLabel url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
+pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
 
-pub const ISSUES_SORT_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter, $sort: [IssueSortInput!]) { issues(first: $first, after: $after, filter: $filter, sort: $sort) { nodes { id identifier title priorityLabel url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
+pub const ISSUES_SORT_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter, $sort: [IssueSortInput!]) { issues(first: $first, after: $after, filter: $filter, sort: $sort) { nodes { id identifier title priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
 
-pub const ISSUE_CREATE_MUTATION: &str = "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title priorityLabel url state { name } parent { identifier } } } }";
+pub const ISSUE_CREATE_MUTATION: &str = "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } } } }";
 
-pub const ISSUE_UPDATE_MUTATION: &str = "mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title priorityLabel url state { name } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } } }";
+pub const ISSUE_UPDATE_MUTATION: &str = "mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } } }";
 
 pub async fn issue_get_data(
     client: &reqwest::Client,
@@ -162,6 +162,7 @@ pub async fn issues_list_data(
     mcptools_core::linear::transform_issues(data).map_err(|e| eyre!("{}", e))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn issue_create_data(
     client: &reqwest::Client,
     team: &str,
@@ -171,6 +172,7 @@ pub async fn issue_create_data(
     assignee: Option<&str>,
     project: Option<&str>,
     parent: Option<&str>,
+    labels: &[String],
 ) -> Result<IssueMini> {
     if team.trim().is_empty() {
         return Err(eyre!("Linear issue create --team must not be empty"));
@@ -211,6 +213,7 @@ pub async fn issue_create_data(
     };
     let state_id = resolve_state_id(client, state, Some(team.trim()), "create").await?;
     let assignee_id = resolve_assignee_id(client, assignee, "create").await?;
+    let label_ids = resolve_label_ids(client, labels, Some(team.trim()), "create").await?;
     let input = issue_create_input(
         &team_id,
         title.trim(),
@@ -219,6 +222,7 @@ pub async fn issue_create_data(
         assignee_id.as_deref(),
         project_id.as_deref(),
         parent.map(str::trim),
+        label_ids.as_deref(),
     );
     let data = execute(
         client,
@@ -244,6 +248,8 @@ pub async fn issue_update_data(
     team: Option<&str>,
     assignee: Option<&str>,
     parent: Option<Option<String>>,
+    labels: Option<&[String]>,
+    clear_labels: bool,
 ) -> Result<IssueMini> {
     let selector = id.trim();
     if selector.is_empty() {
@@ -269,10 +275,12 @@ pub async fn issue_update_data(
     let has_field = [title, description, state, assignee]
         .iter()
         .any(|value| value.map(str::trim).is_some_and(|text| !text.is_empty()))
-        || parent.is_some();
+        || parent.is_some()
+        || labels.is_some()
+        || clear_labels;
     if !has_field {
         return Err(eyre!(
-            "Linear issue update needs at least one of --title, --description, --state, --assignee, --parent, --clear-parent"
+            "Linear issue update needs at least one of --title, --description, --state, --assignee, --parent, --clear-parent, --label, --clear-labels"
         ));
     }
     if let Some(value) = assignee.map(str::trim).filter(|text| !text.is_empty()) {
@@ -289,12 +297,22 @@ pub async fn issue_update_data(
         .or_else(|| team_key_from_identifier(selector));
     let state_id = resolve_state_id(client, state, team_for_state, "update").await?;
     let assignee_id = resolve_assignee_id(client, assignee, "update").await?;
+    let label_ids = match (labels, clear_labels) {
+        (_, true) => Some(None),
+        (Some(items), false) => Some(Some(
+            resolve_label_ids(client, items, team_for_state, "update")
+                .await?
+                .unwrap_or_default(),
+        )),
+        (None, false) => None,
+    };
     let input = issue_update_input(
         title.map(str::trim),
         description.map(str::trim),
         state_id.as_deref(),
         assignee_id.as_deref(),
         parent,
+        label_ids.as_ref().map(|slot| slot.as_deref()),
     );
     let data = execute(
         client,
@@ -308,6 +326,60 @@ pub async fn issue_update_data(
         }
         other => eyre!("{}", other),
     })
+}
+
+async fn resolve_label_ids(
+    client: &reqwest::Client,
+    labels: &[String],
+    team: Option<&str>,
+    op: &str,
+) -> Result<Option<Vec<String>>> {
+    let mut names = Vec::new();
+    for entry in labels {
+        for part in entry.split(',') {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                return Err(eyre!("Linear issue {} --label must not be empty", op));
+            }
+            names.push(trimmed.to_string());
+        }
+    }
+    if names.is_empty() {
+        return Ok(None);
+    }
+    if names.iter().all(|name| is_uuid(name)) {
+        return Ok(Some(names));
+    }
+    let team_selector = match team.map(str::trim).filter(|text| !text.is_empty()) {
+        None => {
+            return Err(eyre!(
+                "Linear issue {} --label needs --team to resolve the label name. Pass a label UUID to skip team resolution",
+                op
+            ));
+        }
+        Some(value) => value,
+    };
+    let listed = super::discover::labels_list_data(client, team_selector).await?;
+    let mut ids = Vec::with_capacity(names.len());
+    for name in &names {
+        if is_uuid(name) {
+            ids.push(name.clone());
+            continue;
+        }
+        let parsed = parse_label_selector(name)
+            .ok_or_else(|| eyre!("Linear issue {} --label must not be empty", op))?;
+        match match_label(&parsed, &listed.nodes) {
+            LabelResolution::Resolved(item) => ids.push(item.id),
+            LabelResolution::NotFound(input) => {
+                return Err(eyre!(
+                    "Linear label not found: '{}'. Candidates: {}",
+                    input,
+                    format_label_candidates(&listed.nodes)
+                ));
+            }
+        }
+    }
+    Ok(Some(ids))
 }
 
 async fn resolve_assignee_id(
@@ -385,10 +457,20 @@ mod tests {
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
         for selector in ["", "   "] {
-            let err =
-                issue_update_data(&client, selector, None, None, None, None, None, Some(None))
-                    .await
-                    .unwrap_err();
+            let err = issue_update_data(
+                &client,
+                selector,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(None),
+                None,
+                false,
+            )
+            .await
+            .unwrap_err();
             assert!(err.to_string().contains("must not be empty"));
         }
         let err = issue_update_data(
@@ -400,6 +482,8 @@ mod tests {
             None,
             None,
             Some(Some("   ".to_string())),
+            None,
+            false,
         )
         .await
         .unwrap_err();
@@ -478,7 +562,7 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_create_data(&client, "GUZ", "   ", None, None, None, None, None)
+        let err = issue_create_data(&client, "GUZ", "   ", None, None, None, None, None, &[])
             .await
             .unwrap_err();
         assert!(err.to_string().contains("--title"));
@@ -490,9 +574,20 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_update_data(&client, "   ", Some("T"), None, None, None, None, None)
-            .await
-            .unwrap_err();
+        let err = issue_update_data(
+            &client,
+            "   ",
+            Some("T"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("must not be empty"));
     }
 
@@ -502,9 +597,11 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_update_data(&client, "i1", None, None, None, None, None, None)
-            .await
-            .unwrap_err();
+        let err = issue_update_data(
+            &client, "i1", None, None, None, None, None, None, None, false,
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("at least one"));
     }
 
@@ -514,9 +611,20 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_update_data(&client, "i1", None, None, Some("Todo"), None, None, None)
-            .await
-            .unwrap_err();
+        let err = issue_update_data(
+            &client,
+            "i1",
+            None,
+            None,
+            Some("Todo"),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("--team"));
     }
 }

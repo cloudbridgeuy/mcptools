@@ -10,6 +10,7 @@
       "description": "Wire the thing.",
       "id": "9d1a2b3c-0000-4000-8000-000000000001",
       "identifier": "GUZ-79",
+      "labels": ["docs"],
       "parent": "p1",
       "priority": "High",
       "state": "In Progress",

@@ -618,7 +618,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueMini>(),
             name: "linear_issue_create".to_string(),
-            description: "Create a Linear issue in a team. Returns id, identifier, title, URL, state, priority, parent. Requires LINEAR_API_KEY environment variable.".to_string(),
+            description: "Create a Linear issue in a team. Accepts labels (label names or UUIDs). Returns id, identifier, title, URL, state, priority, parent, labels. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueCreateArgs>(),
             summary: "Create a Linear issue in a team",
             kind: ToolKind::Write,
@@ -626,7 +626,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueMini>(),
             name: "linear_issue_update".to_string(),
-            description: "Update a Linear issue by id or identifier. Needs at least one of title, description, state, assignee, parent, clearParent. Returns the updated issue with its priority label. Requires LINEAR_API_KEY environment variable.".to_string(),
+            description: "Update a Linear issue by id or identifier. Needs at least one of title, description, state, assignee, parent, clearParent, labels, clearLabels. Labels replace the full set; clearLabels empties it. Returns the updated issue with its priority label and labels. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueUpdateArgs>(),
             summary: "Update a Linear issue: state (close, reopen), title, assignee, parent",
             kind: ToolKind::Write,
@@ -1305,7 +1305,7 @@ mod declaration_tests {
     #[test]
     fn linear_issue_list_declaration() {
         let tool = named("linear_issue_list");
-        let head = "interface LinearIssueListInput {\n  /** Fetch all pages */\n  all?: boolean;\n  /** Assignee user UUID or 'me' */\n  assignee?: string;\n  /** Page cursor for pagination */\n  cursor?: string;\n  /** Cycle number or id */\n  cycle?: string;\n  fields?: string[];\n  /** Label name */\n  label?: string;\n  /** Max items per page @default 25 */\n  limit?: number;\n  /** Project id or name (names need team) */\n  project?: string;\n  /** Title substring to search */\n  query?: string;\n  /** Issue order: priority or updatedAt; omitted means updatedAt, newest first */\n  sort?: \"priority\" | \"updatedAt\";\n  /** Workflow state name (e.g. Todo) */\n  state?: string;\n  /** Team id, key, or name */\n  team?: string;\n  /** Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z) */\n  updatedAfter?: string;\n}\n\ninterface LinearIssueListBlocker {\n  identifier?: string;\n  state?: string;\n}\n\ninterface LinearIssueListIssueMini {\n  blocked_by?: LinearIssueListBlocker[];\n  description?: string | null;\n  id?: string;\n  identifier?: string;\n  parent?: string | null;\n  priority?: string | null;\n  state?: string;\n  title?: string;\n  url?: string;\n}\n\ninterface LinearIssueListPageInfo {\n  endCursor?: string | null;\n  hasNextPage?: boolean;\n}\n\ninterface LinearIssueListOutput {\n  nodes?: LinearIssueListIssueMini[];\n  pageInfo?: LinearIssueListPageInfo;\n}\n\n";
+        let head = "interface LinearIssueListInput {\n  /** Fetch all pages */\n  all?: boolean;\n  /** Assignee user UUID or 'me' */\n  assignee?: string;\n  /** Page cursor for pagination */\n  cursor?: string;\n  /** Cycle number or id */\n  cycle?: string;\n  fields?: string[];\n  /** Label name */\n  label?: string;\n  /** Max items per page @default 25 */\n  limit?: number;\n  /** Project id or name (names need team) */\n  project?: string;\n  /** Title substring to search */\n  query?: string;\n  /** Issue order: priority or updatedAt; omitted means updatedAt, newest first */\n  sort?: \"priority\" | \"updatedAt\";\n  /** Workflow state name (e.g. Todo) */\n  state?: string;\n  /** Team id, key, or name */\n  team?: string;\n  /** Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z) */\n  updatedAfter?: string;\n}\n\ninterface LinearIssueListBlocker {\n  identifier?: string;\n  state?: string;\n}\n\ninterface LinearIssueListIssueMini {\n  blocked_by?: LinearIssueListBlocker[];\n  description?: string | null;\n  id?: string;\n  identifier?: string;\n  labels?: string[];\n  parent?: string | null;\n  priority?: string | null;\n  state?: string;\n  title?: string;\n  url?: string;\n}\n\ninterface LinearIssueListPageInfo {\n  endCursor?: string | null;\n  hasNextPage?: boolean;\n}\n\ninterface LinearIssueListOutput {\n  nodes?: LinearIssueListIssueMini[];\n  pageInfo?: LinearIssueListPageInfo;\n}\n\n";
         let want =
             format!("{head}/** {} */\ndeclare function linear_issue_list(input: LinearIssueListInput): Promise<LinearIssueListOutput>;\n", tool.description);
         assert_eq!(super::declaration(&tool), want);

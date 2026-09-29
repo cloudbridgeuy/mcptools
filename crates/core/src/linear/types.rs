@@ -77,6 +77,8 @@ pub struct IssueMini {
     pub parent: Option<String>,
     #[serde(default)]
     pub blocked_by: Vec<Blocker>,
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -391,6 +393,13 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
                 priority: present_text(raw.priority_label),
                 parent: raw.parent.map(|parent| parent.identifier),
                 blocked_by: blockers_of(raw.inverse_relations),
+                labels: raw
+                    .labels
+                    .unwrap_or_default()
+                    .nodes
+                    .into_iter()
+                    .map(|item| item.name)
+                    .collect(),
             })
         }
     }
@@ -572,6 +581,13 @@ pub fn transform_issues(data: serde_json::Value) -> Result<Paginated<IssueMini>,
                         priority: present_text(raw.priority_label),
                         parent: raw.parent.map(|parent| parent.identifier),
                         blocked_by: blockers_of(raw.inverse_relations),
+                        labels: raw
+                            .labels
+                            .unwrap_or_default()
+                            .nodes
+                            .into_iter()
+                            .map(|item| item.name)
+                            .collect(),
                     })
                     .collect(),
                 page_info: paged.page_info,
@@ -946,6 +962,7 @@ pub fn transform_team_cycles(data: serde_json::Value) -> Result<Paginated<Cycle>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn issue_create_input(
     team_id: &str,
     title: &str,
@@ -954,6 +971,7 @@ pub fn issue_create_input(
     assignee_id: Option<&str>,
     project_id: Option<&str>,
     parent_id: Option<&str>,
+    label_ids: Option<&[String]>,
 ) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     out.insert(
@@ -994,6 +1012,16 @@ pub fn issue_create_input(
             serde_json::Value::String(value.to_string()),
         );
     }
+    if let Some(ids) = label_ids {
+        out.insert(
+            "labelIds".to_string(),
+            serde_json::Value::Array(
+                ids.iter()
+                    .map(|id| serde_json::Value::String(id.clone()))
+                    .collect(),
+            ),
+        );
+    }
     serde_json::Value::Object(out)
 }
 
@@ -1003,6 +1031,7 @@ pub fn issue_update_input(
     state_id: Option<&str>,
     assignee_id: Option<&str>,
     parent: Option<Option<String>>,
+    label_ids: Option<Option<&[String]>>,
 ) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     if let Some(value) = title.and_then(non_blank) {
@@ -1035,6 +1064,19 @@ pub fn issue_update_input(
             match slot {
                 Some(id) => serde_json::Value::String(id.trim().to_string()),
                 None => serde_json::Value::Null,
+            },
+        );
+    }
+    if let Some(slot) = label_ids {
+        out.insert(
+            "labelIds".to_string(),
+            match slot {
+                Some(ids) => serde_json::Value::Array(
+                    ids.iter()
+                        .map(|id| serde_json::Value::String(id.clone()))
+                        .collect(),
+                ),
+                None => serde_json::Value::Array(Vec::new()),
             },
         );
     }
@@ -1110,6 +1152,8 @@ struct RawIssue {
     parent: Option<RawParent>,
     #[serde(default, rename = "inverseRelations")]
     inverse_relations: Option<RawRelationConnection>,
+    #[serde(default)]
+    labels: Option<RawLabelConnection>,
 }
 
 #[derive(Deserialize)]
@@ -1121,6 +1165,12 @@ struct RawParent {
 struct RawRelationConnection {
     #[serde(default)]
     nodes: Vec<RawRelationNode>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawLabelConnection {
+    #[serde(default)]
+    nodes: Vec<RawNamed>,
 }
 
 #[derive(Deserialize)]
@@ -1537,6 +1587,7 @@ mod tests {
                     identifier: "GUZ-80".to_string(),
                     state: "Done".to_string(),
                 }],
+                labels: Vec::new(),
             }
         );
     }
@@ -1584,6 +1635,7 @@ mod tests {
             priority: None,
             parent: None,
             blocked_by: Vec::new(),
+            labels: Vec::new(),
         };
         let value = serde_json::to_value(&issue).unwrap();
         assert!(value.get("description").is_none());
@@ -1645,6 +1697,7 @@ mod tests {
                 identifier: "GUZ-80".to_string(),
                 state: "Done".to_string(),
             }],
+            labels: Vec::new(),
         };
         let value = serde_json::to_value(&issue).unwrap();
         assert_eq!(
@@ -2049,21 +2102,27 @@ mod tests {
     #[test]
     fn issue_update_input_omits_key_without_parent() {
         assert_eq!(
-            issue_update_input(None, None, None, None, None),
+            issue_update_input(None, None, None, None, None, None),
             serde_json::json!({})
         );
     }
 
     #[test]
     fn issue_update_input_sets_parent_id_trimmed() {
-        let value =
-            issue_update_input(None, None, None, None, Some(Some("  GUZ-78  ".to_string())));
+        let value = issue_update_input(
+            None,
+            None,
+            None,
+            None,
+            Some(Some("  GUZ-78  ".to_string())),
+            None,
+        );
         assert_eq!(value, serde_json::json!({"parentId": "GUZ-78"}));
     }
 
     #[test]
     fn issue_update_input_clears_parent_with_null() {
-        let value = issue_update_input(None, None, None, None, Some(None));
+        let value = issue_update_input(None, None, None, None, Some(None), None);
         assert_eq!(value, serde_json::json!({"parentId": null}));
     }
 
@@ -2217,6 +2276,7 @@ mod tests {
 
     #[test]
     fn issue_create_input_maps_ids_and_skips_blanks() {
+        let labels = vec!["l1".to_string()];
         let value = issue_create_input(
             "t1",
             " Title ",
@@ -2225,6 +2285,7 @@ mod tests {
             Some("u1"),
             Some("p1"),
             Some("GUZ-78"),
+            Some(&labels),
         );
         assert_eq!(value.get("teamId"), Some(&serde_json::json!("t1")));
         assert_eq!(value.get("title"), Some(&serde_json::json!("Title")));
@@ -2233,6 +2294,7 @@ mod tests {
         assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
         assert_eq!(value.get("projectId"), Some(&serde_json::json!("p1")));
         assert_eq!(value.get("parentId"), Some(&serde_json::json!("GUZ-78")));
+        assert_eq!(value.get("labelIds"), Some(&serde_json::json!(["l1"])));
         let minimal = issue_create_input(
             "t1",
             "T",
@@ -2241,22 +2303,24 @@ mod tests {
             Some(""),
             Some("  "),
             Some("   "),
+            None,
         );
         assert!(minimal.get("description").is_none());
         assert!(minimal.get("stateId").is_none());
         assert!(minimal.get("assigneeId").is_none());
         assert!(minimal.get("projectId").is_none());
         assert!(minimal.get("parentId").is_none());
+        assert!(minimal.get("labelIds").is_none());
     }
 
     #[test]
     fn issue_update_input_skips_blank_values() {
-        let value = issue_update_input(Some("  T  "), None, Some("   "), Some("u1"), None);
+        let value = issue_update_input(Some("  T  "), None, Some("   "), Some("u1"), None, None);
         assert_eq!(value.get("title"), Some(&serde_json::json!("T")));
         assert!(value.get("description").is_none());
         assert!(value.get("stateId").is_none());
         assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
-        let empty = issue_update_input(None, None, None, None, None);
+        let empty = issue_update_input(None, None, None, None, None, None);
         assert_eq!(empty, serde_json::json!({}));
     }
 

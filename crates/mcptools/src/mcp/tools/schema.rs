@@ -213,12 +213,30 @@ mod tests {
             .collect::<Vec<_>>()
         );
         assert_eq!(
+            prop_names(&input_schema_for::<IssueCreateArgs>()),
+            [
+                "assignee",
+                "description",
+                "labels",
+                "parent",
+                "project",
+                "state",
+                "team",
+                "title"
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+        );
+        assert_eq!(
             prop_names(&input_schema_for::<IssueUpdateArgs>()),
             [
                 "assignee",
+                "clearLabels",
                 "clearParent",
                 "description",
                 "id",
+                "labels",
                 "parent",
                 "state",
                 "team",

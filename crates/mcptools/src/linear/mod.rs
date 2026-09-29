@@ -290,6 +290,12 @@ pub struct IssueCreateOptions {
     pub project: Option<String>,
     #[arg(long, help = "Parent issue id or identifier")]
     pub parent: Option<String>,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        help = "Label name or UUID (repeatable or comma-separated)"
+    )]
+    pub label: Vec<String>,
     #[arg(long, help = "Output as JSON")]
     pub json: bool,
 }
@@ -318,6 +324,18 @@ pub struct IssueUpdateOptions {
     pub parent: Option<String>,
     #[arg(long, help = "Clear the parent issue")]
     pub clear_parent: bool,
+    #[arg(
+        long,
+        value_delimiter = ',',
+        help = "Label name or UUID (repeatable or comma-separated; replaces labels)"
+    )]
+    pub label: Vec<String>,
+    #[arg(
+        long = "clear-labels",
+        alias = "clear-label",
+        help = "Clear all labels (cannot combine with --label)"
+    )]
+    pub clear_labels: bool,
     #[arg(long, help = "Output as JSON")]
     pub json: bool,
 }
@@ -442,7 +460,6 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
             IssueCommands::Get(options) => issue_get_handler(options).await,
             IssueCommands::List(options) => issues_list_handler(options).await,
             IssueCommands::Create(options) => issue_create_handler(options).await,
-            IssueCommands::Update(options) => issue_update_handler(options).await,
             IssueCommands::Update(options) => issue_update_handler(options).await,
             IssueCommands::Comments(cmd) => match cmd {
                 IssueCommentsCommands::List(options) => comments_list_handler(options).await,
@@ -699,6 +716,7 @@ async fn issue_create_handler(options: IssueCreateOptions) -> Result<()> {
         options.assignee.as_deref(),
         options.project.as_deref(),
         options.parent.as_deref(),
+        &options.label,
     )
     .await?;
     if options.json {
@@ -730,10 +748,19 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
             "Linear issue update accepts only one of --parent or --clear-parent"
         ));
     }
+    if !options.label.is_empty() && options.clear_labels {
+        return Err(eyre!(
+            "Linear issue update accepts only one of --label or --clear-labels"
+        ));
+    }
     let parent = if options.clear_parent {
         Some(None)
     } else {
         options.parent.map(Some)
+    };
+    let labels = match options.label.is_empty() {
+        true => None,
+        false => Some(options.label.as_slice()),
     };
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
@@ -746,6 +773,8 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
         options.team.as_deref(),
         options.assignee.as_deref(),
         parent,
+        labels,
+        options.clear_labels,
     )
     .await?;
     if options.json {

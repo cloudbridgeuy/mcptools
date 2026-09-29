@@ -40,9 +40,15 @@ mcptools linear issue list --all
 # Output as JSON
 mcptools linear issue list --json
 
-# Update fields. State names use the identifier team; --team overrides
+# Create one issue (labels repeatable or comma-separated)
+mcptools linear issue create --team GUZ --title "Wire the thing" --label docs
+mcptools linear issue create --team GUZ --title "Wire the thing" --label docs,api --label urgent
+
+# Update fields. State and label names use the identifier team; --team overrides
 mcptools linear issue update GUZ-22 --state Done
 mcptools linear issue update GUZ-22 --state Done --team GUZ
+mcptools linear issue update GUZ-22 --label docs,api
+mcptools linear issue update GUZ-22 --clear-labels
 ```
 
 Selector rules:
@@ -50,10 +56,11 @@ Selector rules:
 - `--team` accepts id, key, or name.
 - `--project` accepts id or name. Names need `--team`.
 - `--assignee` accepts a user UUID or `me` (current viewer). Find UUIDs with `linear users list --query NAME`.
-- `--state` and `--label` match by name. `--cycle` accepts a cycle number or id.
+- `--state` and `--label` match by name (labels also accept UUIDs). `--cycle` accepts a cycle number or id.
 - `--query` matches a title substring. `--updated-after` needs RFC3339 and is rejected before any request when malformed.
 - `--sort` accepts `priority` or `updatedAt`. Omitted, the order stays newest-first.
-- Issue update `--state` names resolve from the issue identifier team (`GUZ-22` → `GUZ`). `--team` overrides. UUID issue ids still need `--team` or a state UUID.
+- Issue update `--state` and `--label` names resolve from the issue identifier team (`GUZ-22` → `GUZ`). `--team` overrides. UUID issue ids still need `--team` or a state/label UUID.
+- Issue update `--label` replaces the full label set; `--clear-labels` (alias `--clear-label`) empties it. The two flags reject when combined.
 
 ### Chart
 
@@ -85,7 +92,7 @@ mcptools linear cycles list --team GUZ
 ## Output
 
 - Tables show compact rows plus a `hasMore/endCursor` line. Truncation is never hidden.
-- `issue get` and `issue list` include `Parent` (parent issue identifier, empty when none) and `BlockedBy` (comma-separated identifiers of issues blocking this one). `--json` carries the same data as `parent` and `blocked_by` fields.
+- `issue get` and `issue list` include `Parent` (parent issue identifier, empty when none) and `BlockedBy` (comma-separated identifiers of issues blocking this one). `--json` carries the same data as `parent` and `blocked_by` fields. Issue `labels` (name list, empty when none) ride along in `--json` and in create/update output.
 - `issue get` and `issue list` include `priority`, the label string (`Urgent`, `High`, `Medium`, `Low`, `No priority`), never the 0–4 number. `--json` carries it as `priority`. A `--sort` table run adds a `Priority` column between `State` and `Parent`; the default table keeps its original columns.
 - `issue get` prints snapshot fields, then `Comments (N):`, then `Activity (N):`. A missing comment author or activity actor prints as `unknown`. Activity always starts with a created row. History after created is capped at 50 events.
 - CLI `issue get --json` and MCP `linear_issue_get` serialize the same object, with top-level `comments` and `activity` arrays.
@@ -105,8 +112,8 @@ linear_project_list, linear_project_get
 linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 
 # Writes
-linear_issue_create (needs team, title)
-linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent; state names resolve from the issue identifier team, or team)
+linear_issue_create (needs team, title; accepts labels string-or-array)
+linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent, labels, clearLabels; state and label names resolve from the issue identifier team, or team; labels replaces, clearLabels empties, the two reject when combined)
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```

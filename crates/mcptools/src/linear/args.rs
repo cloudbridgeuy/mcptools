@@ -1,5 +1,5 @@
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AuthStatusArgs {}
@@ -153,6 +153,13 @@ pub struct IssueCreateArgs {
     pub project: Option<String>,
     #[schemars(description = "Parent issue id or identifier")]
     pub parent: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_vec",
+        alias = "label"
+    )]
+    #[schemars(description = "Label names or UUIDs (string or array, comma-separated accepted)")]
+    pub labels: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -178,6 +185,23 @@ pub struct IssueUpdateArgs {
     #[serde(default, alias = "clear_parent")]
     #[schemars(description = "Clear the parent issue (cannot combine with parent)")]
     pub clear_parent: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_vec",
+        alias = "label"
+    )]
+    #[schemars(
+        description = "Label names or UUIDs (string or array, comma-separated accepted; replaces labels)"
+    )]
+    pub labels: Option<Vec<String>>,
+    #[serde(
+        default,
+        alias = "clear_labels",
+        alias = "clear_label",
+        alias = "clearLabel"
+    )]
+    #[schemars(description = "Clear all labels (cannot combine with labels)")]
+    pub clear_labels: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -208,4 +232,58 @@ pub struct RelationRemoveArgs {
     #[serde(rename = "type")]
     #[schemars(rename = "type", description = "Relation type: blocks or related")]
     pub rel_type: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StringOrVec {
+    Single(String),
+    Many(Vec<String>),
+}
+
+fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: Option<StringOrVec> = Option::deserialize(deserializer)?;
+    Ok(value.map(|item| match item {
+        StringOrVec::Single(text) => split_label_text(&text),
+        StringOrVec::Many(items) => items
+            .iter()
+            .flat_map(|item| split_label_text(item))
+            .collect(),
+    }))
+}
+
+fn split_label_text(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|part| part.trim().to_string())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn labels_accept_string_array_and_singular_alias() {
+        let from_string: IssueCreateArgs = serde_json::from_value(
+            serde_json::json!({"team": "GUZ", "title": "T", "labels": "docs, api"}),
+        )
+        .unwrap();
+        assert_eq!(
+            from_string.labels,
+            Some(vec!["docs".to_string(), "api".to_string()])
+        );
+        let from_alias: IssueCreateArgs = serde_json::from_value(
+            serde_json::json!({"team": "GUZ", "title": "T", "label": ["docs"]}),
+        )
+        .unwrap();
+        assert_eq!(from_alias.labels, Some(vec!["docs".to_string()]));
+        let cleared: IssueUpdateArgs =
+            serde_json::from_value(serde_json::json!({"id": "GUZ-1", "clear_labels": true}))
+                .unwrap();
+        assert_eq!(cleared.clear_labels, Some(true));
+    }
 }

@@ -1,4 +1,4 @@
-use super::types::{Project, Team, WorkflowState};
+use super::types::{Label, Project, Team, WorkflowState};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -171,6 +171,55 @@ pub fn team_key_from_identifier(input: &str) -> Option<&str> {
     is_key(key).then_some(key)
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum LabelSelector {
+    Id(String),
+    Name(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LabelResolution {
+    Resolved(Label),
+    NotFound(String),
+}
+
+pub fn parse_label_selector(input: &str) -> Option<LabelSelector> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if is_uuid(trimmed) {
+        return Some(LabelSelector::Id(trimmed.to_string()));
+    }
+    Some(LabelSelector::Name(trimmed.to_string()))
+}
+
+pub fn match_label(selector: &LabelSelector, candidates: &[Label]) -> LabelResolution {
+    match selector {
+        LabelSelector::Id(id) => match candidates.iter().find(|item| item.id == *id) {
+            Some(item) => LabelResolution::Resolved(item.clone()),
+            None => LabelResolution::NotFound(id.clone()),
+        },
+        LabelSelector::Name(name) => {
+            match candidates
+                .iter()
+                .find(|item| item.name.eq_ignore_ascii_case(name))
+            {
+                Some(item) => LabelResolution::Resolved(item.clone()),
+                None => LabelResolution::NotFound(name.clone()),
+            }
+        }
+    }
+}
+
+pub fn format_label_candidates(candidates: &[Label]) -> String {
+    candidates
+        .iter()
+        .map(|item| item.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,5 +371,28 @@ mod tests {
         assert_eq!(team_key_from_identifier("i1"), None);
         assert_eq!(team_key_from_identifier("GUZ-"), None);
         assert_eq!(team_key_from_identifier("guz-22"), None);
+    }
+
+    #[test]
+    fn matches_label_by_name_case_insensitively() {
+        let items = vec![
+            Label {
+                id: "l1".to_string(),
+                name: "docs".to_string(),
+            },
+            Label {
+                id: "l2".to_string(),
+                name: "api".to_string(),
+            },
+        ];
+        let found = match_label(&LabelSelector::Name("DOCS".to_string()), &items);
+        match found {
+            LabelResolution::Resolved(item) => assert_eq!(item.id, "l1"),
+            other => panic!("expected resolved, got {other:?}"),
+        }
+        let missing = match_label(&LabelSelector::Name("nope".to_string()), &items);
+        assert!(matches!(missing, LabelResolution::NotFound(_)));
+        assert_eq!(format_label_candidates(&items), "docs, api");
+        assert_eq!(parse_label_selector("   "), None);
     }
 }

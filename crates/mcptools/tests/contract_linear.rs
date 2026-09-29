@@ -109,6 +109,7 @@ fn recorded_issue_list() -> serde_json::Value {
                 "state": "In Progress",
                 "parent": "GUZ-78",
                 "blocked_by": [{"identifier": "GUZ-80", "state": "Done"}],
+                "labels": [],
             }
         ],
         "pageInfo": {"hasNextPage": true, "endCursor": "cur1"},

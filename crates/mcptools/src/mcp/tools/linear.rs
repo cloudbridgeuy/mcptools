@@ -363,6 +363,7 @@ pub async fn handle_linear_issue_create(
         );
     }
     let client = linear_client()?;
+    let labels = args.labels.unwrap_or_default();
     let created = crate::linear::issue::issue_create_data(
         &client,
         &args.team,
@@ -372,6 +373,7 @@ pub async fn handle_linear_issue_create(
         args.assignee.as_deref(),
         args.project.as_deref(),
         args.parent.as_deref(),
+        &labels,
     )
     .await
     .map_err(exec)?;
@@ -387,6 +389,12 @@ pub async fn handle_linear_issue_update(
     if args.parent.is_some() && clear_parent {
         return Err(exec(color_eyre::eyre::eyre!(
             "Linear issue update accepts only one of parent or clearParent"
+        )));
+    }
+    let clear_labels = args.clear_labels.unwrap_or(false);
+    if args.labels.is_some() && clear_labels {
+        return Err(exec(color_eyre::eyre::eyre!(
+            "Linear issue update accepts only one of labels or clearLabels"
         )));
     }
     if global.verbose {
@@ -407,6 +415,8 @@ pub async fn handle_linear_issue_update(
         args.team.as_deref(),
         args.assignee.as_deref(),
         parent,
+        args.labels.as_deref(),
+        clear_labels,
     )
     .await
     .map_err(exec)?;
