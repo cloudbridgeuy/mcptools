@@ -876,6 +876,15 @@ async function loadChart() {{
     const renderId = 'chartSvg' + renderSeq;
     const rendered = await mermaid.render(renderId, data.mermaid);
     chartEl.innerHTML = rendered.svg;
+    const svg = chartEl.querySelector('svg');
+    if (svg) {{
+      const box = svg.getBoundingClientRect();
+      baseW = box.width;
+      baseH = box.height;
+      zoom = 1;
+      svg.style.width = baseW + 'px';
+      svg.style.height = baseH + 'px';
+    }}
     bindNodes(data.nodes || []);
     const warnings = [];
     if (data.cap_hit) {{
@@ -1077,6 +1086,27 @@ let panLeft = 0;
 let panTop = 0;
 let panning = false;
 let panMoved = false;
+let zoom = 1;
+let baseW = 0;
+let baseH = 0;
+function applyZoom(next, clientX, clientY) {{
+  const svg = chartEl.querySelector('svg');
+  if (!svg || !baseW || !baseH) {{
+    return;
+  }}
+  const clamped = Math.min(3, Math.max(0.25, next));
+  const rect = chartEl.getBoundingClientRect();
+  const px = clientX === undefined ? rect.left + rect.width / 2 : clientX;
+  const py = clientY === undefined ? rect.top + rect.height / 2 : clientY;
+  const cx = px - rect.left + chartEl.scrollLeft;
+  const cy = py - rect.top + chartEl.scrollTop;
+  const ratio = clamped / zoom;
+  zoom = clamped;
+  svg.style.width = baseW * zoom + 'px';
+  svg.style.height = baseH * zoom + 'px';
+  chartEl.scrollLeft = cx * ratio - (px - rect.left);
+  chartEl.scrollTop = cy * ratio - (py - rect.top);
+}}
 chartEl.addEventListener('mousedown', (event) => {{
   if (event.button !== 0) {{
     return;
@@ -1120,6 +1150,20 @@ chartEl.addEventListener('click', (event) => {{
     panMoved = false;
   }}
 }}, true);
+chartEl.addEventListener('wheel', (event) => {{
+  if (event.ctrlKey || event.metaKey) {{
+    return;
+  }}
+  event.preventDefault();
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 800 : 1;
+  applyZoom(zoom * Math.exp(-event.deltaY * unit * 0.0015), event.clientX, event.clientY);
+}}, {{ passive: false }});
+chartEl.addEventListener('dblclick', (event) => {{
+  if (event.target && event.target.closest && event.target.closest('g.node')) {{
+    return;
+  }}
+  applyZoom(1);
+}});
 loadChart();
 </script>
 </body>
@@ -1454,6 +1498,8 @@ mod tests {
             "panning",
             "cluster-label",
             "min-height: 0",
+            "applyZoom",
+            "dblclick",
             "payload.error || ('chart request failed",
             "payload.error || ('issue request failed",
             "payload.error || ('states request failed",
