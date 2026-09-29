@@ -56,14 +56,26 @@ async fn execute_with_url(
             .send()
             .await
         {
-            Err(e) if e.is_timeout() => return uncertain_outcome(e),
+            Err(e) if e.is_timeout() => {
+                if should_retry_timeout(attempt, readonly) {
+                    pause(attempt, 0).await;
+                    continue;
+                }
+                return timeout_result(e, readonly);
+            }
             Err(e) => return Err(eyre!("Failed to send request to Linear: {}", e)),
             Ok(response) => response,
         };
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         let body = match response.text().await {
-            Err(e) if e.is_timeout() => return uncertain_outcome(e),
+            Err(e) if e.is_timeout() => {
+                if should_retry_timeout(attempt, readonly) {
+                    pause(attempt, 0).await;
+                    continue;
+                }
+                return timeout_result(e, readonly);
+            }
             Err(e) => return Err(eyre!("Failed to read Linear response body: {}", e)),
             Ok(body) => body,
         };
@@ -94,19 +106,38 @@ async fn execute_with_url(
                     )),
                 };
             }
-            let wait = backoff_ms(attempt, hint);
-            let jitter = {
-                use rand::Rng;
-                rand::thread_rng().gen_range(0..=JITTER_MS)
-            };
-            tokio::time::sleep(std::time::Duration::from_millis(
-                wait.saturating_add(jitter),
-            ))
-            .await;
+            pause(attempt, hint).await;
             continue;
         }
         return check_response(status, &body).map_err(|e| eyre!("{}", e));
     }
+}
+
+fn should_retry_timeout(attempt: u32, readonly: bool) -> bool {
+    readonly && attempt < MAX_READ_ATTEMPTS
+}
+
+fn timeout_result<T>(e: reqwest::Error, readonly: bool) -> Result<T> {
+    match readonly {
+        true => Err(eyre!(
+            "Linear request timed out after {} attempts: {}",
+            MAX_READ_ATTEMPTS,
+            e
+        )),
+        false => uncertain_outcome(e),
+    }
+}
+
+async fn pause(attempt: u32, hint: u64) {
+    let wait = backoff_ms(attempt, hint);
+    let jitter = {
+        use rand::Rng;
+        rand::thread_rng().gen_range(0..=JITTER_MS)
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(
+        wait.saturating_add(jitter),
+    ))
+    .await;
 }
 
 fn uncertain_outcome<T>(e: reqwest::Error) -> Result<T> {
@@ -123,6 +154,7 @@ mod tests {
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    #[derive(Clone)]
     struct Stub {
         status: u16,
         headers: Vec<(&'static str, &'static str)>,
@@ -151,53 +183,55 @@ mod tests {
                     Err(_) => return,
                 };
                 let index = hits.fetch_add(1, Ordering::SeqCst);
-                let stub = &stubs[index.min(stubs.len() - 1)];
-                let mut raw = vec![0u8; 65536];
-                let mut read = 0usize;
-                while !raw[..read].windows(4).any(|w| w == b"\r\n\r\n") && read < raw.len() {
-                    match stream.read(&mut raw[read..]).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => read += n,
-                    }
-                }
-                let header_text = String::from_utf8_lossy(&raw[..read]).to_string();
-                let content_len = header_text
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        match name.trim().eq_ignore_ascii_case("content-length") {
-                            true => value.trim().parse::<usize>().ok(),
-                            false => None,
+                let stub = stubs[index.min(stubs.len() - 1)].clone();
+                tokio::spawn(async move {
+                    let mut raw = vec![0u8; 65536];
+                    let mut read = 0usize;
+                    while !raw[..read].windows(4).any(|w| w == b"\r\n\r\n") && read < raw.len() {
+                        match stream.read(&mut raw[read..]).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => read += n,
                         }
-                    })
-                    .unwrap_or(0);
-                let body_start = raw[..read]
-                    .windows(4)
-                    .position(|w| w == b"\r\n\r\n")
-                    .map(|i| i + 4)
-                    .unwrap_or(read);
-                let mut buffered = read.saturating_sub(body_start);
-                while buffered < content_len {
-                    match stream.read(&mut raw[..]).await {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => buffered += n,
                     }
-                }
-                if stub.delay_ms > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(stub.delay_ms)).await;
-                }
-                let mut extra = String::new();
-                for (name, value) in &stub.headers {
-                    extra.push_str(&format!("{name}: {value}\r\n"));
-                }
-                let response = format!(
-                    "HTTP/1.1 {} x\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n{}\r\n{}",
-                    stub.status,
-                    stub.body.len(),
-                    extra,
-                    stub.body
-                );
-                let _ = stream.write_all(response.as_bytes()).await;
+                    let header_text = String::from_utf8_lossy(&raw[..read]).to_string();
+                    let content_len = header_text
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            match name.trim().eq_ignore_ascii_case("content-length") {
+                                true => value.trim().parse::<usize>().ok(),
+                                false => None,
+                            }
+                        })
+                        .unwrap_or(0);
+                    let body_start = raw[..read]
+                        .windows(4)
+                        .position(|w| w == b"\r\n\r\n")
+                        .map(|i| i + 4)
+                        .unwrap_or(read);
+                    let mut buffered = read.saturating_sub(body_start);
+                    while buffered < content_len {
+                        match stream.read(&mut raw[..]).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => buffered += n,
+                        }
+                    }
+                    if stub.delay_ms > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(stub.delay_ms)).await;
+                    }
+                    let mut extra = String::new();
+                    for (name, value) in &stub.headers {
+                        extra.push_str(&format!("{name}: {value}\r\n"));
+                    }
+                    let response = format!(
+                        "HTTP/1.1 {} x\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n{}\r\n{}",
+                        stub.status,
+                        stub.body.len(),
+                        extra,
+                        stub.body
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                });
             }
         });
         url
@@ -277,7 +311,77 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reports_timeout_as_uncertain_without_retry() {
+    async fn reports_timeout_as_uncertain_without_retry_for_mutation() {
+        let cfg = LinearConfig {
+            api_key: "timeout-key".to_string(),
+        };
+        let client =
+            build_client_with_timeout(&cfg, std::time::Duration::from_millis(100)).unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let url = spawn_stub(
+            vec![Stub {
+                status: 200,
+                headers: vec![],
+                body: r#"{"data":{"viewer":{"id":"u1"}}}"#,
+                delay_ms: 2000,
+            }],
+            Arc::clone(&hits),
+        )
+        .await;
+        let err = execute_with_url(
+            &client,
+            &url,
+            "mutation { createIssue(input: {}) { id } }",
+            serde_json::json!({}),
+        )
+        .await
+        .unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("uncertain"), "{text}");
+        assert!(text.contains("query by ID"), "{text}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retries_query_timeout_then_succeeds() {
+        let cfg = LinearConfig {
+            api_key: "timeout-key".to_string(),
+        };
+        let client =
+            build_client_with_timeout(&cfg, std::time::Duration::from_millis(100)).unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let url = spawn_stub(
+            vec![
+                Stub {
+                    status: 200,
+                    headers: vec![],
+                    body: r#"{"data":{"viewer":{"id":"u1"}}}"#,
+                    delay_ms: 2000,
+                },
+                Stub::ok(r#"{"data":{"viewer":{"id":"u2"}}}"#),
+            ],
+            Arc::clone(&hits),
+        )
+        .await;
+        let data = execute_with_url(
+            &client,
+            &url,
+            "query { viewer { id } }",
+            serde_json::json!({}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            data.get("viewer")
+                .and_then(|v| v.get("id"))
+                .and_then(|v| v.as_str()),
+            Some("u2")
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn times_out_query_after_max_attempts() {
         let cfg = LinearConfig {
             api_key: "timeout-key".to_string(),
         };
@@ -303,9 +407,9 @@ mod tests {
         .await
         .unwrap_err();
         let text = err.to_string();
-        assert!(text.contains("uncertain"), "{text}");
-        assert!(text.contains("query by ID"), "{text}");
-        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert!(text.contains("3 attempts"), "{text}");
+        assert!(!text.contains("uncertain"), "{text}");
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
