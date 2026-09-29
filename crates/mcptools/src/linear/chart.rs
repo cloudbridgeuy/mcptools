@@ -418,6 +418,9 @@ pub async fn build_chart_payload(config: &ChartServeConfig) -> Result<ChartPaylo
 }
 
 fn api_error(status: StatusCode, message: String) -> (StatusCode, Json<serde_json::Value>) {
+    if status.is_server_error() {
+        eprintln!("chart server backend error ({status}): {message}");
+    }
     (status, Json(serde_json::json!({"error": message})))
 }
 
@@ -864,7 +867,8 @@ async function loadChart() {{
   try {{
     const res = await fetch('/api/chart');
     if (!res.ok) {{
-      throw new Error('chart request failed: ' + res.status);
+      const payload = await res.json().catch(() => ({{}}));
+      throw new Error(payload.error || ('chart request failed: ' + res.status));
     }}
     const data = await res.json();
     statsEl.textContent = data.stats_line;
@@ -932,7 +936,8 @@ async function openIssue(identifier) {{
   try {{
     const res = await fetch('/api/issues/' + encodeURIComponent(identifier));
     if (!res.ok) {{
-      throw new Error('issue request failed: ' + res.status);
+      const payload = await res.json().catch(() => ({{}}));
+      throw new Error(payload.error || ('issue request failed: ' + res.status));
     }}
     const data = await res.json();
     if (mySeq !== issueSeq) {{
@@ -981,7 +986,8 @@ async function loadStates(team, current, mySeq) {{
   }}
   const res = await fetch('/api/states?team=' + encodeURIComponent(team));
   if (!res.ok) {{
-    throw new Error('states request failed: ' + res.status);
+    const payload = await res.json().catch(() => ({{}}));
+    throw new Error(payload.error || ('states request failed: ' + res.status));
   }}
   if (mySeq !== issueSeq) {{
     return;
@@ -1448,6 +1454,9 @@ mod tests {
             "panning",
             "cluster-label",
             "min-height: 0",
+            "payload.error || ('chart request failed",
+            "payload.error || ('issue request failed",
+            "payload.error || ('states request failed",
         ] {
             assert!(html.contains(marker), "missing {marker}");
         }
