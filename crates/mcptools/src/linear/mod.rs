@@ -288,6 +288,8 @@ pub struct IssueCreateOptions {
     pub assignee: Option<String>,
     #[arg(long, help = "Project id or name (names resolve against --team)")]
     pub project: Option<String>,
+    #[arg(long, help = "Parent issue id or identifier")]
+    pub parent: Option<String>,
     #[arg(long, help = "Output as JSON")]
     pub json: bool,
 }
@@ -696,6 +698,7 @@ async fn issue_create_handler(options: IssueCreateOptions) -> Result<()> {
         options.state.as_deref(),
         options.assignee.as_deref(),
         options.project.as_deref(),
+        options.parent.as_deref(),
     )
     .await?;
     if options.json {

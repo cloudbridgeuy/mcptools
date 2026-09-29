@@ -151,6 +151,8 @@ pub struct IssueCreateArgs {
     pub assignee: Option<String>,
     #[schemars(description = "Project id or name (names resolve against team)")]
     pub project: Option<String>,
+    #[schemars(description = "Parent issue id or identifier")]
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

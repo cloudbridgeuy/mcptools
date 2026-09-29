@@ -953,6 +953,7 @@ pub fn issue_create_input(
     state_id: Option<&str>,
     assignee_id: Option<&str>,
     project_id: Option<&str>,
+    parent_id: Option<&str>,
 ) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     out.insert(
@@ -984,6 +985,12 @@ pub fn issue_create_input(
     if let Some(value) = project_id.and_then(non_blank) {
         out.insert(
             "projectId".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = parent_id.and_then(non_blank) {
+        out.insert(
+            "parentId".to_string(),
             serde_json::Value::String(value.to_string()),
         );
     }
@@ -2217,6 +2224,7 @@ mod tests {
             Some("s1"),
             Some("u1"),
             Some("p1"),
+            Some("GUZ-78"),
         );
         assert_eq!(value.get("teamId"), Some(&serde_json::json!("t1")));
         assert_eq!(value.get("title"), Some(&serde_json::json!("Title")));
@@ -2224,11 +2232,21 @@ mod tests {
         assert_eq!(value.get("stateId"), Some(&serde_json::json!("s1")));
         assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
         assert_eq!(value.get("projectId"), Some(&serde_json::json!("p1")));
-        let minimal = issue_create_input("t1", "T", Some("   "), None, Some(""), Some("  "));
+        assert_eq!(value.get("parentId"), Some(&serde_json::json!("GUZ-78")));
+        let minimal = issue_create_input(
+            "t1",
+            "T",
+            Some("   "),
+            None,
+            Some(""),
+            Some("  "),
+            Some("   "),
+        );
         assert!(minimal.get("description").is_none());
         assert!(minimal.get("stateId").is_none());
         assert!(minimal.get("assigneeId").is_none());
         assert!(minimal.get("projectId").is_none());
+        assert!(minimal.get("parentId").is_none());
     }
 
     #[test]

@@ -170,6 +170,7 @@ pub async fn issue_create_data(
     state: Option<&str>,
     assignee: Option<&str>,
     project: Option<&str>,
+    parent: Option<&str>,
 ) -> Result<IssueMini> {
     if team.trim().is_empty() {
         return Err(eyre!("Linear issue create --team must not be empty"));
@@ -182,6 +183,7 @@ pub async fn issue_create_data(
         ("--state", state),
         ("--assignee", assignee),
         ("--project", project),
+        ("--parent", parent),
     ] {
         if value.is_some_and(|text| text.trim().is_empty()) {
             return Err(eyre!("Linear issue create {} must not be empty", flag));
@@ -216,6 +218,7 @@ pub async fn issue_create_data(
         state_id.as_deref(),
         assignee_id.as_deref(),
         project_id.as_deref(),
+        parent.map(str::trim),
     );
     let data = execute(
         client,
@@ -475,7 +478,7 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_create_data(&client, "GUZ", "   ", None, None, None, None)
+        let err = issue_create_data(&client, "GUZ", "   ", None, None, None, None, None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("--title"));

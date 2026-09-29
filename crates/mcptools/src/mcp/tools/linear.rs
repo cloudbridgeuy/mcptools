@@ -371,6 +371,7 @@ pub async fn handle_linear_issue_create(
         args.state.as_deref(),
         args.assignee.as_deref(),
         args.project.as_deref(),
+        args.parent.as_deref(),
     )
     .await
     .map_err(exec)?;
