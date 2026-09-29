@@ -158,13 +158,17 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 - **THEN** the server returns a JSON-RPC error with code `-32602`
 
 ### Requirement: Linear chart rendering
-`linear chart` takes one or more **Issue identifier**s **or a `--project` selector (project names need `--team`)**, fetches the transitive closure of sub-issues and `blocked_by` blockers (cap 300 issues, stderr warning when the cap stops expansion), drops canceled issues, and classifies the rest as complete, in progress, frontier (no incomplete blocker), or fog (at least one incomplete blocker). It writes a full-viewport dark-themed HTML Mermaid page — one subgraph per parent issue, state legend — to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html` unless `--out` overrides it, prints the output path and a stats line, and opens the page in the default browser unless `--no-open`.
+`linear chart` takes one or more **Issue identifier**s **or a `--project` selector (project names need `--team`)**, fetches the transitive closure of sub-issues, parents, `blocked_by` blockers, and forward `blocks` targets (cap `--limit`, default 300 issues, stderr warning when the cap stops expansion), drops canceled issues, and classifies the rest as complete, in progress, frontier (no incomplete blocker), or fog (at least one incomplete blocker). `--exclude-completed` hides completed issues and drops their blocker edges so dependents render as frontier. It writes a full-viewport dark-themed HTML Mermaid page — one subgraph per parent issue, state legend — to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html` unless `--out` overrides it, prints the output path and a stats line, and opens the page in the default browser unless `--no-open`.
 
 #### Scenario: Closure and classification
 - **WHEN** chart runs on a set of **Issue identifier**s
-- **THEN** every transitive sub-issue and blocker appears as a node, grouped into one subgraph per parent issue
+- **THEN** every transitive sub-issue, parent, blocker, and forward-blocked issue appears as a node, grouped into one subgraph per parent issue
 - **AND** completed issues are complete, started issues are in progress, not-yet-started issues with no incomplete blocker are frontier, and issues with at least one incomplete blocker are fog
 - **AND** canceled issues are absent and do not block dependents
+
+#### Scenario: Exclude completed
+- **WHEN** chart runs with `--exclude-completed`
+- **THEN** completed issues are absent, their parent links and blocker edges are dropped, and dependents of completed blockers render as frontier with no missing-blocker warning for completed blockers
 
 #### Scenario: Project seed
 - **WHEN** chart runs with `--project` (and `--team` when the selector is a project name)
@@ -172,7 +176,7 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 - **AND** the page title is the project selector
 
 #### Scenario: Cap stops expansion
-- **WHEN** the closure exceeds 300 issues
+- **WHEN** the closure exceeds `--limit` (default 300 issues)
 - **THEN** expansion stops, stderr prints a cap warning, and the partial chart still renders
 
 #### Scenario: Blocker outside the fetched set

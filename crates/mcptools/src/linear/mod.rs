@@ -44,7 +44,7 @@ pub enum Commands {
     /// Cycle operations
     #[command(subcommand)]
     Cycles(CyclesCommands),
-    #[command(about = "Render an HTML Mermaid chart of issues, sub-issues, and blockers")]
+    #[command(about = "Render an HTML Mermaid chart of issues, sub-issues, parents, and blockers")]
     Chart(ChartOptions),
 }
 
@@ -440,6 +440,18 @@ pub struct ChartOptions {
     pub team: Option<String>,
     #[arg(
         long,
+        help = "Hide completed issues; dependents of completed blockers render as frontier"
+    )]
+    pub exclude_completed: bool,
+    #[arg(
+        long,
+        default_value = "300",
+        value_name = "N",
+        help = "Max issues in the closure expansion; increase for huge plans"
+    )]
+    pub limit: usize,
+    #[arg(
+        long,
         value_name = "PATH",
         help = "Output HTML path (default: <temp dir>/mcptools-linear-chart-<slug>.html)"
     )]
@@ -501,6 +513,9 @@ async fn chart_handler(options: ChartOptions) -> Result<()> {
         options.project.as_deref(),
         options.team.as_deref(),
     )?;
+    if options.limit == 0 {
+        return Err(eyre!("Linear chart --limit must be at least 1"));
+    };
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
     let mut seeds = positional;
@@ -524,25 +539,26 @@ async fn chart_handler(options: ChartOptions) -> Result<()> {
             let has_next = page.page_info.has_next;
             cursor = page.page_info.end_cursor;
             project_seeds.extend(page.nodes.into_iter().map(|node| node.identifier));
-            if !has_next || project_seeds.len() >= chart::ISSUE_CAP {
+            if !has_next || project_seeds.len() >= options.limit {
                 break;
             }
         }
         if project_seeds.is_empty() {
             return Err(eyre!("Linear chart --project '{}' has no issues", project));
         }
-        project_seeds.truncate(chart::ISSUE_CAP);
+        project_seeds.truncate(options.limit);
         seeds.extend(project_seeds);
     }
     let title = match &project {
         Some(project) => project.clone(),
         None => seeds[0].clone(),
     };
-    let closure = chart::chart_data(&client, &seeds).await?;
+    let closure =
+        chart::chart_data(&client, &seeds, options.exclude_completed, options.limit).await?;
     if closure.cap_hit {
         eprintln!(
             "warning: linear chart capped at {} issues; expansion stopped early",
-            chart::ISSUE_CAP
+            options.limit
         );
     }
     for (issue, blocker) in &closure.missing_blockers {

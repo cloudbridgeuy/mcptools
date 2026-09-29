@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 
 pub const ISSUE_CAP: usize = 300;
 
-const CHART_ISSUE_QUERY: &str = "query ($id: String!, $after: String) { issue(id: $id) { id identifier title url state { name type } parent { identifier } inverseRelations(first: 25) { nodes { type issue { identifier } } } children(first: 50, after: $after) { nodes { identifier } pageInfo { hasNextPage endCursor } } } }";
+const CHART_ISSUE_QUERY: &str = "query ($id: String!, $after: String) { issue(id: $id) { id identifier title url state { name type } parent { identifier } relations(first: 25) { nodes { type relatedIssue { identifier } } } inverseRelations(first: 25) { nodes { type issue { identifier } } } children(first: 50, after: $after) { nodes { identifier } pageInfo { hasNextPage endCursor } } } }";
 
 #[derive(Debug)]
 pub struct ChartClosure {
@@ -57,8 +57,16 @@ pub fn validate_chart_args(
     ))
 }
 
-pub async fn chart_data(client: &reqwest::Client, seeds: &[String]) -> Result<ChartClosure> {
+pub async fn chart_data(
+    client: &reqwest::Client,
+    seeds: &[String],
+    exclude_completed: bool,
+    limit: usize,
+) -> Result<ChartClosure> {
     let seeds = validate_issue_ids(seeds)?;
+    if limit == 0 {
+        return Err(eyre!("Linear chart limit must be at least 1"));
+    }
     let mut fetched: BTreeMap<String, FetchedIssue> = BTreeMap::new();
     let mut queue: VecDeque<String> = seeds.iter().cloned().collect();
     let mut seen: HashSet<String> = seeds.iter().cloned().collect();
@@ -67,41 +75,84 @@ pub async fn chart_data(client: &reqwest::Client, seeds: &[String]) -> Result<Ch
         if fetched.contains_key(&selector) {
             continue;
         }
-        if fetched.len() >= ISSUE_CAP {
+        if fetched.len() >= limit {
             cap_hit = true;
             break;
         }
         let issue = fetch_issue(client, &selector).await?;
-        for id in issue.children.iter().chain(issue.blocked_by.iter()) {
+        for id in issue
+            .children
+            .iter()
+            .chain(issue.blocked_by.iter())
+            .chain(issue.blocks.iter())
+        {
             if seen.insert(id.clone()) {
                 queue.push_back(id.clone());
             }
         }
-        fetched.insert(issue.identifier.clone(), issue);
-    }
-    let mut missing_blockers = Vec::new();
-    for issue in fetched.values() {
-        for blocker in &issue.blocked_by {
-            if !fetched.contains_key(blocker) {
-                missing_blockers.push((issue.identifier.clone(), blocker.clone()));
+        if let Some(parent) = issue.parent.clone() {
+            if seen.insert(parent.clone()) {
+                queue.push_back(parent);
             }
         }
+        fetched.insert(issue.identifier.clone(), issue);
     }
-    let nodes = fetched
-        .values()
-        .map(|issue| ChartNode {
-            identifier: issue.identifier.clone(),
-            title: issue.title.clone(),
-            state_type: issue.state_type.clone(),
-            parent: issue.parent.clone(),
-            blocked_by: issue.blocked_by.clone(),
-        })
-        .collect();
+    let (nodes, missing_blockers) = closure_nodes(&fetched, exclude_completed);
     Ok(ChartClosure {
         nodes,
         cap_hit,
         missing_blockers,
     })
+}
+
+pub fn closure_nodes(
+    fetched: &BTreeMap<String, FetchedIssue>,
+    exclude_completed: bool,
+) -> (Vec<ChartNode>, Vec<(String, String)>) {
+    let mut excluded: HashSet<&str> = HashSet::new();
+    if exclude_completed {
+        for issue in fetched.values() {
+            if issue.state_type == "completed" {
+                excluded.insert(issue.identifier.as_str());
+            }
+        }
+    }
+    let mut missing_blockers = Vec::new();
+    for issue in fetched.values() {
+        if excluded.contains(issue.identifier.as_str()) {
+            continue;
+        }
+        for blocker in &issue.blocked_by {
+            if excluded.contains(blocker.as_str()) {
+                continue;
+            }
+            match fetched.get(blocker) {
+                None => missing_blockers.push((issue.identifier.clone(), blocker.clone())),
+                Some(other) if excluded.contains(other.identifier.as_str()) => continue,
+                _ => {}
+            }
+        }
+    }
+    let nodes = fetched
+        .values()
+        .filter(|issue| !excluded.contains(issue.identifier.as_str()))
+        .map(|issue| ChartNode {
+            identifier: issue.identifier.clone(),
+            title: issue.title.clone(),
+            state_type: issue.state_type.clone(),
+            parent: issue
+                .parent
+                .clone()
+                .filter(|p| !excluded.contains(p.as_str())),
+            blocked_by: issue
+                .blocked_by
+                .iter()
+                .filter(|blocker| !excluded.contains(blocker.as_str()))
+                .cloned()
+                .collect(),
+        })
+        .collect();
+    (nodes, missing_blockers)
 }
 
 pub fn slugify(input: &str) -> String {
@@ -202,14 +253,15 @@ fn escape_html(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-struct FetchedIssue {
-    identifier: String,
-    title: String,
-    url: String,
-    state_type: String,
-    parent: Option<String>,
-    blocked_by: Vec<String>,
-    children: Vec<String>,
+pub struct FetchedIssue {
+    pub identifier: String,
+    pub title: String,
+    pub url: String,
+    pub state_type: String,
+    pub parent: Option<String>,
+    pub blocked_by: Vec<String>,
+    pub blocks: Vec<String>,
+    pub children: Vec<String>,
 }
 
 async fn fetch_issue(client: &reqwest::Client, selector: &str) -> Result<FetchedIssue> {
@@ -264,6 +316,18 @@ async fn fetch_issue(client: &reqwest::Client, selector: &str) -> Result<Fetched
             .filter(|node| node.rel_type == "blocks")
             .filter_map(|node| node.issue.map(|issue| issue.identifier))
             .collect(),
+        blocks: issue
+            .relations
+            .unwrap_or_default()
+            .nodes
+            .into_iter()
+            .filter(|node| node.rel_type == "blocks")
+            .filter_map(|node| {
+                node.related_issue
+                    .map(|issue| issue.identifier)
+                    .or(node.issue.map(|issue| issue.identifier))
+            })
+            .collect(),
         children,
     })
 }
@@ -280,12 +344,14 @@ fn parse_issue(data: serde_json::Value, selector: &str) -> Result<RawIssue> {
 }
 
 #[derive(Clone, serde::Deserialize)]
-struct RawIssue {
+pub struct RawIssue {
     identifier: String,
     title: String,
     url: String,
     state: RawState,
     parent: Option<RawParent>,
+    #[serde(default)]
+    relations: Option<RawRelations>,
     #[serde(rename = "inverseRelations")]
     inverse_relations: Option<RawRelations>,
     children: Option<RawChildren>,
@@ -312,7 +378,10 @@ struct RawRelations {
 struct RawRelationNode {
     #[serde(rename = "type")]
     rel_type: String,
+    #[serde(default)]
     issue: Option<RawIdentifier>,
+    #[serde(default, rename = "relatedIssue")]
+    related_issue: Option<RawIdentifier>,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -348,11 +417,91 @@ mod tests {
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
         for seed in ["", "   "] {
-            let err = chart_data(&client, &[seed.to_string()]).await.unwrap_err();
+            let err = chart_data(&client, &[seed.to_string()], false, ISSUE_CAP)
+                .await
+                .unwrap_err();
             assert!(err.to_string().contains("must not be empty"));
         }
-        let err = chart_data(&client, &[]).await.unwrap_err();
+        let err = chart_data(&client, &[], false, ISSUE_CAP)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("at least one issue id"));
+    }
+
+    #[tokio::test]
+    async fn rejects_zero_limit_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        let err = chart_data(&client, &["GUZ-1".to_string()], false, 0)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("at least 1"));
+    }
+
+    fn fetched(id: &str, state: &str, parent: Option<&str>, blocked_by: &[&str]) -> FetchedIssue {
+        FetchedIssue {
+            identifier: id.to_string(),
+            title: format!("Title {id}"),
+            url: format!("https://example.test/{id}"),
+            state_type: state.to_string(),
+            parent: parent.map(str::to_string),
+            blocked_by: blocked_by.iter().map(|item| item.to_string()).collect(),
+            blocks: Vec::new(),
+            children: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn exclude_completed_drops_nodes_and_unblocks_dependents() {
+        let mut map = BTreeMap::new();
+        for item in [
+            fetched("GUZ-1", "completed", None, &[]),
+            fetched("GUZ-2", "unstarted", None, &["GUZ-1"]),
+            fetched("GUZ-3", "unstarted", Some("GUZ-1"), &[]),
+        ] {
+            map.insert(item.identifier.clone(), item);
+        }
+        let (nodes, missing) = closure_nodes(&map, true);
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes.iter().all(|node| node.state_type != "completed"));
+        let guz2 = nodes
+            .iter()
+            .find(|node| node.identifier == "GUZ-2")
+            .unwrap();
+        assert!(guz2.blocked_by.is_empty());
+        let guz3 = nodes
+            .iter()
+            .find(|node| node.identifier == "GUZ-3")
+            .unwrap();
+        assert!(guz3.parent.is_none());
+        assert!(missing.is_empty());
+        let classes = mcptools_core::linear::classify_nodes(&nodes);
+        assert_eq!(
+            classes["GUZ-2"],
+            mcptools_core::linear::ChartClass::Frontier
+        );
+    }
+
+    #[test]
+    fn keep_completed_without_flag_and_report_outside_blockers() {
+        let mut map = BTreeMap::new();
+        for item in [
+            fetched("GUZ-2", "unstarted", None, &["GUZ-1"]),
+            fetched("GUZ-4", "unstarted", None, &["GUZ-99"]),
+        ] {
+            map.insert(item.identifier.clone(), item);
+        }
+        let (nodes, missing) = closure_nodes(&map, false);
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(
+            missing,
+            vec![
+                ("GUZ-2".to_string(), "GUZ-1".to_string()),
+                ("GUZ-4".to_string(), "GUZ-99".to_string()),
+            ]
+        );
     }
 
     #[test]
