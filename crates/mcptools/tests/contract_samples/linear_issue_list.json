@@ -13,6 +13,10 @@
       "labels": ["docs"],
       "parent": "p1",
       "priority": "High",
+      "project": {
+        "id": "p1",
+        "name": "MCPTools"
+      },
       "state": "In Progress",
       "title": "Wire the thing",
       "url": "https://linear.app/acme/issue/GUZ-79/wire-the-thing"

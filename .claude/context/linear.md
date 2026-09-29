@@ -92,8 +92,8 @@ mcptools linear cycles list --team GUZ
 ## Output
 
 - Tables show compact rows plus a `hasMore/endCursor` line. Truncation is never hidden.
-- `issue get` and `issue list` include `Parent` (parent issue identifier, empty when none) and `BlockedBy` (comma-separated identifiers of issues blocking this one). `--json` carries the same data as `parent` and `blocked_by` fields. Issue `labels` (name list, empty when none) ride along in `--json` and in create/update output.
-- `issue get` and `issue list` include `priority`, the label string (`Urgent`, `High`, `Medium`, `Low`, `No priority`), never the 0–4 number. `--json` carries it as `priority`. A `--sort` table run adds a `Priority` column between `State` and `Parent`; the default table keeps its original columns.
+- `issue get` and `issue list` include `Project` (project name, empty when none), `Parent` (parent issue identifier, empty when none) and `BlockedBy` (comma-separated identifiers of issues blocking this one). `--json` carries the same data as `project` (`{id, name}`, absent when none), `parent` and `blocked_by` fields. Issue `labels` (name list, empty when none) ride along in `--json` and in create/update output.
+- `issue get` and `issue list` include `priority`, the label string (`Urgent`, `High`, `Medium`, `Low`, `No priority`), never the 0–4 number. `--json` carries it as `priority`. A `--sort` table run adds a `Priority` column between `State` and `Project`; the table otherwise shows `ID Identifier Title State [Priority] Project Parent BlockedBy`. `issue get` prints a `Project:` line and create/update tables show a `Project` column.
 - `issue get` prints snapshot fields, then `Comments (N):`, then `Activity (N):`. A missing comment author or activity actor prints as `unknown`. Activity always starts with a created row. History after created is capped at 50 events.
 - CLI `issue get --json` and MCP `linear_issue_get` serialize the same object, with top-level `comments` and `activity` arrays.
 - `--json` returns `{"nodes": [...], "pageInfo": {...}}`.

@@ -73,6 +73,8 @@ pub struct IssueMini {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<Project>,
     #[serde(default)]
     pub parent: Option<String>,
     #[serde(default)]
@@ -99,6 +101,8 @@ pub struct IssueGetOutput {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<Project>,
     #[serde(default)]
     pub parent: Option<String>,
     #[serde(default)]
@@ -391,6 +395,7 @@ pub fn transform_issue(data: serde_json::Value) -> Result<IssueMini, LinearError
                 state: raw.state.name,
                 description: present_text(raw.description),
                 priority: present_text(raw.priority_label),
+                project: raw.project,
                 parent: raw.parent.map(|parent| parent.identifier),
                 blocked_by: blockers_of(raw.inverse_relations),
                 labels: raw
@@ -579,6 +584,7 @@ pub fn transform_issues(data: serde_json::Value) -> Result<Paginated<IssueMini>,
                         state: raw.state.name,
                         description: present_text(raw.description),
                         priority: present_text(raw.priority_label),
+                        project: raw.project,
                         parent: raw.parent.map(|parent| parent.identifier),
                         blocked_by: blockers_of(raw.inverse_relations),
                         labels: raw
@@ -1149,6 +1155,8 @@ struct RawIssue {
     #[serde(default, rename = "priorityLabel")]
     priority_label: Option<String>,
     #[serde(default)]
+    project: Option<Project>,
+    #[serde(default)]
     parent: Option<RawParent>,
     #[serde(default, rename = "inverseRelations")]
     inverse_relations: Option<RawRelationConnection>,
@@ -1565,6 +1573,7 @@ mod tests {
             "state": {"name": "In Progress"},
             "description": "Fix **auth** flow",
             "priorityLabel": "High",
+            "project": {"id": "p1", "name": "MCPTools"},
             "parent": {"identifier": "GUZ-78"},
             "inverseRelations": {"nodes": [
                 {"type": "blocks", "issue": {"identifier": "GUZ-80", "state": {"name": "Done"}}},
@@ -1582,6 +1591,10 @@ mod tests {
                 state: "In Progress".to_string(),
                 description: Some("Fix **auth** flow".to_string()),
                 priority: Some("High".to_string()),
+                project: Some(Project {
+                    id: "p1".to_string(),
+                    name: "MCPTools".to_string(),
+                }),
                 parent: Some("GUZ-78".to_string()),
                 blocked_by: vec![Blocker {
                     identifier: "GUZ-80".to_string(),
@@ -1633,12 +1646,14 @@ mod tests {
             state: "Todo".to_string(),
             description: None,
             priority: None,
+            project: None,
             parent: None,
             blocked_by: Vec::new(),
             labels: Vec::new(),
         };
         let value = serde_json::to_value(&issue).unwrap();
         assert!(value.get("description").is_none());
+        assert!(value.get("project").is_none());
         let issue = IssueMini {
             description: Some("Fix **auth** flow".to_string()),
             ..issue
@@ -1692,6 +1707,7 @@ mod tests {
             state: "Todo".to_string(),
             description: None,
             priority: None,
+            project: None,
             parent: Some("GUZ-78".to_string()),
             blocked_by: vec![Blocker {
                 identifier: "GUZ-80".to_string(),

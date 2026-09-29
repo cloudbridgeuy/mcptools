@@ -578,6 +578,14 @@ async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
         println!("Title: {}", output.title);
         println!("State: {}", output.state);
         println!("URL: {}", output.url);
+        println!(
+            "Project: {}",
+            output
+                .project
+                .as_ref()
+                .map(|p| p.name.as_str())
+                .unwrap_or("")
+        );
         println!("Parent: {}", output.parent.as_deref().unwrap_or(""));
         println!(
             "BlockedBy: {}",
@@ -678,7 +686,7 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
         if with_priority {
             headers.push("Priority");
         }
-        headers.extend(["Parent", "BlockedBy"]);
+        headers.extend(["Project", "Parent", "BlockedBy"]);
         table.add_row(table_row(&headers));
         for issue in &nodes {
             let mut values = vec![
@@ -690,6 +698,13 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
             if with_priority {
                 values.push(issue.priority.clone().unwrap_or_default());
             }
+            values.push(
+                issue
+                    .project
+                    .as_ref()
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default(),
+            );
             values.push(issue.parent.clone().unwrap_or_default());
             values.push(mcptools_core::linear::format_blocked_by(&issue.blocked_by));
             table.add_row(table_row(&values));
@@ -728,14 +743,20 @@ async fn issue_create_handler(options: IssueCreateOptions) -> Result<()> {
             "Identifier",
             "Title",
             "State",
-            "URL"
+            "URL",
+            "Project"
         ]);
         table.add_row(prettytable::row![
             found.id,
             found.identifier,
             found.title,
             found.state,
-            found.url
+            found.url,
+            found
+                .project
+                .as_ref()
+                .map(|p| p.name.as_str())
+                .unwrap_or("")
         ]);
         table.printstd();
     }
@@ -787,6 +808,7 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
             "Title",
             "State",
             "URL",
+            "Project",
             "Parent"
         ]);
         table.add_row(prettytable::row![
@@ -795,6 +817,11 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
             found.title,
             found.state,
             found.url,
+            found
+                .project
+                .as_ref()
+                .map(|p| p.name.as_str())
+                .unwrap_or(""),
             found.parent.as_deref().unwrap_or("")
         ]);
         table.printstd();

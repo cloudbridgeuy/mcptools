@@ -8,15 +8,15 @@ use mcptools_core::linear::{
 };
 
 pub const ISSUE_QUERY: &str =
-    "query ($id: String!) { issue(id: $id) { id identifier title description priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } createdAt creator { name displayName } history(first: 50) { nodes { createdAt actor { name displayName } botActor { name } fromState { name } toState { name } fromTitle toTitle updatedDescription addedLabels { name } removedLabels { name } fromParent { identifier } toParent { identifier } fromAssignee { name displayName } toAssignee { name displayName } fromCycle { number name } toCycle { number name } fromProject { name } toProject { name } attachment { title } relationChanges { identifier type } } pageInfo { hasNextPage } } } }";
+    "query ($id: String!) { issue(id: $id) { id identifier title description priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } createdAt creator { name displayName } history(first: 50) { nodes { createdAt actor { name displayName } botActor { name } fromState { name } toState { name } fromTitle toTitle updatedDescription addedLabels { name } removedLabels { name } fromParent { identifier } toParent { identifier } fromAssignee { name displayName } toAssignee { name displayName } fromCycle { number name } toCycle { number name } fromProject { name } toProject { name } attachment { title } relationChanges { identifier type } } pageInfo { hasNextPage } } } }";
 
-pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
+pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
 
-pub const ISSUES_SORT_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter, $sort: [IssueSortInput!]) { issues(first: $first, after: $after, filter: $filter, sort: $sort) { nodes { id identifier title priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
+pub const ISSUES_SORT_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter, $sort: [IssueSortInput!]) { issues(first: $first, after: $after, filter: $filter, sort: $sort) { nodes { id identifier title priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
 
-pub const ISSUE_CREATE_MUTATION: &str = "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } } } }";
+pub const ISSUE_CREATE_MUTATION: &str = "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } } } }";
 
-pub const ISSUE_UPDATE_MUTATION: &str = "mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title priorityLabel url state { name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } } }";
+pub const ISSUE_UPDATE_MUTATION: &str = "mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } } }";
 
 pub async fn issue_get_data(
     client: &reqwest::Client,
@@ -63,6 +63,7 @@ pub async fn issue_get_output(client: &reqwest::Client, id: &str) -> Result<Issu
         state: snapshot.state,
         description: snapshot.description,
         priority: snapshot.priority,
+        project: snapshot.project,
         parent: snapshot.parent,
         blocked_by: snapshot.blocked_by,
         comments,
