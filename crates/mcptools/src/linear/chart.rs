@@ -644,8 +644,15 @@ button:hover {{
 }}
 #ticket-list {{
   flex-shrink: 0;
-  max-height: 22dvh;
+  max-height: 30vh;
   overflow: auto;
+  display: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 16px 16px;
+}}
+#ticket-list.open {{
+  display: flex;
 }}
 #chart svg {{
   max-width: none;
@@ -786,9 +793,11 @@ button:hover {{
 <h1>{heading}</h1>
 <span id="stats">Loading</span>
 <button id="refresh" type="button">Refresh</button>
+<button id="tickets" type="button" aria-expanded="false" aria-controls="ticket-list">Show issues</button>
 <span id="status" role="status"></span>
 </header>
 <div id="chart"></div>
+<div id="ticket-list"></div>
 <div id="modal-backdrop">
 <div id="modal" role="dialog" aria-modal="true">
 <h2 id="m-title"></h2>
@@ -835,6 +844,8 @@ const chartEl = document.getElementById('chart');
 const statsEl = document.getElementById('stats');
 const statusEl = document.getElementById('status');
 const refreshBtn = document.getElementById('refresh');
+const ticketsBtn = document.getElementById('tickets');
+const ticketList = document.getElementById('ticket-list');
 const backdrop = document.getElementById('modal-backdrop');
 const mTitle = document.getElementById('m-title');
 const mMeta = document.getElementById('m-meta');
@@ -917,16 +928,7 @@ function bindNodes(nodes) {{
     seen.add(group);
     group.addEventListener('click', () => openIssue(identifier));
   }});
-  let list = document.getElementById('ticket-list');
-  if (!list) {{
-    list = document.createElement('div');
-    list.id = 'ticket-list';
-    list.style.display = 'flex';
-    list.style.flexWrap = 'wrap';
-    list.style.gap = '8px';
-    list.style.padding = '0 16px 24px 16px';
-    document.body.appendChild(list);
-  }}
+  const list = ticketList;
   list.innerHTML = '';
   nodes.forEach((node) => {{
     const item = document.createElement('button');
@@ -935,6 +937,10 @@ function bindNodes(nodes) {{
     item.addEventListener('click', () => openIssue(node.identifier));
     list.appendChild(item);
   }});
+  const count = nodes.length;
+  const isOpen = list.classList.contains('open');
+  ticketsBtn.textContent = (isOpen ? 'Hide issues' : 'Show issues') + ' (' + count + ')';
+  ticketsBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
 }}
 async function openIssue(identifier) {{
   currentId = identifier;
@@ -1080,6 +1086,13 @@ document.addEventListener('keydown', (event) => {{
   }}
 }});
 refreshBtn.addEventListener('click', loadChart);
+ticketsBtn.addEventListener('click', () => {{
+  const isOpen = ticketList.classList.toggle('open');
+  ticketsBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  const match = ticketsBtn.textContent.match(/\((\d+)\)/);
+  const n = match ? match[1] : '0';
+  ticketsBtn.textContent = (isOpen ? 'Hide issues' : 'Show issues') + ' (' + n + ')';
+}});
 let panX = 0;
 let panY = 0;
 let panLeft = 0;
@@ -1503,6 +1516,11 @@ mod tests {
             "payload.error || ('chart request failed",
             "payload.error || ('issue request failed",
             "payload.error || ('states request failed",
+            "id=\"tickets\"",
+            "id=\"ticket-list\"",
+            "max-height: 30vh",
+            "aria-expanded=\"false\"",
+            "aria-controls=\"ticket-list\"",
         ] {
             assert!(html.contains(marker), "missing {marker}");
         }
