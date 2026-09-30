@@ -199,7 +199,7 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 
 #### Scenario: Serve loop
 - **WHEN** chart runs with `--serve`
-- **THEN** a foreground loopback server serves an interactive page; `GET /api/chart` rebuilds the closure, click-drag pans and scrollwheel zooms the diagram, ticket clicks open a detail modal with markdown-rendered description plus comments and activity, state select auto-posts to Linear and refreshes the diagram only, stale responses never touch a moved-on modal, Refresh button and `r` keybinding reload, and `--out` rejects
+- **THEN** a foreground loopback server serves an interactive page; `GET /api/chart` rebuilds the closure, click-drag pans and scrollwheel zooms the diagram, ticket clicks open a detail modal with markdown-rendered description plus comments and activity, a Refresh issue button reloads one ticket, state select optimistically posts to Linear and refreshes the diagram only, stale responses never touch a moved-on modal, Refresh button and `r` keybinding reload, and `--out` rejects
 
 #### Scenario: Deterministic output
 - **WHEN** chart runs twice on the same issue set

@@ -804,6 +804,7 @@ button:hover {{
 <div class="meta" id="m-meta"></div>
 <div class="row">
 <select id="m-state"></select>
+<button id="m-refresh" type="button">Refresh issue</button>
 <button id="m-open" type="button">Open in Linear</button>
 <button id="m-close" type="button">Close</button>
 </div>
@@ -850,6 +851,7 @@ const backdrop = document.getElementById('modal-backdrop');
 const mTitle = document.getElementById('m-title');
 const mMeta = document.getElementById('m-meta');
 const mState = document.getElementById('m-state');
+const mRefresh = document.getElementById('m-refresh');
 const mOpen = document.getElementById('m-open');
 const mClose = document.getElementById('m-close');
 const mMsg = document.getElementById('m-msg');
@@ -865,6 +867,7 @@ let currentId = '';
 let currentUrl = '';
 let issueSeq = 0;
 let lastState = '';
+let currentProject = '';
 function teamOf(identifier) {{
   const dash = identifier.indexOf('-');
   return dash > 0 ? identifier.slice(0, dash) : '';
@@ -945,7 +948,6 @@ function bindNodes(nodes) {{
 async function openIssue(identifier) {{
   currentId = identifier;
   const mySeq = ++issueSeq;
-  mState.disabled = false;
   mMsg.textContent = 'Loading';
   backdrop.classList.add('open');
   try {{
@@ -960,7 +962,9 @@ async function openIssue(identifier) {{
     }}
     currentUrl = data.url || '';
     mTitle.textContent = data.identifier + ': ' + data.title;
-    mMeta.textContent = 'State ' + data.state + ' Project ' + (data.project ? data.project.name : '');
+    currentProject = data.project ? data.project.name : '';
+    lastState = data.state;
+    mMeta.textContent = 'State ' + lastState + ' Project ' + currentProject;
     mDesc.innerHTML = renderMarkdown(data.description);
     mComments.innerHTML = '';
     (data.comments || []).forEach((comment) => {{
@@ -1030,7 +1034,8 @@ mState.addEventListener('change', async () => {{
   const savedId = currentId;
   const next = mState.value;
   const previous = lastState;
-  mState.disabled = true;
+  lastState = next;
+  mMeta.textContent = 'State ' + next + ' Project ' + currentProject;
   mMsg.textContent = 'Saving';
   try {{
     const res = await fetch('/api/issues/' + encodeURIComponent(savedId) + '/state', {{
@@ -1042,15 +1047,14 @@ mState.addEventListener('change', async () => {{
       const payload = await res.json().catch(() => ({{}}));
       throw new Error(payload.error || ('transition failed: ' + res.status));
     }}
-    lastState = next;
   }} catch (err) {{
-    lastState = previous;
     await loadChart();
-    if (currentId !== savedId) {{
+    if (currentId !== savedId || lastState !== next) {{
       return;
     }}
+    lastState = previous;
     mState.value = previous;
-    mState.disabled = false;
+    mMeta.textContent = 'State ' + previous + ' Project ' + currentProject;
     mMsg.textContent = String(err && err.message ? err.message : err);
     return;
   }}
@@ -1058,8 +1062,12 @@ mState.addEventListener('change', async () => {{
   if (currentId !== savedId) {{
     return;
   }}
-  mState.disabled = false;
   mMsg.textContent = 'Saved';
+}});
+mRefresh.addEventListener('click', () => {{
+  if (currentId) {{
+    openIssue(currentId);
+  }}
 }});
 mOpen.addEventListener('click', () => {{
   if (currentUrl) {{
@@ -1503,7 +1511,8 @@ mod tests {
             "/api/states",
             "id=\"modal-backdrop\"",
             "id=\"m-state\"",
-            "issueSeq",
+            "id=\"m-refresh\"",
+            "Refresh issue",
             "marked@12",
             "dompurify@3",
             "renderMarkdown",
