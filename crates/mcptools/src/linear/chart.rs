@@ -625,6 +625,38 @@ button {{
 button:hover {{
   border-color: #60a5fa;
 }}
+#ticket-list button.complete {{
+  background: #dcfce7;
+  border-color: #15803d;
+  color: #14532d;
+}}
+#ticket-list button.inprogress {{
+  background: #fef9c3;
+  border-color: #ca8a04;
+  color: #713f12;
+}}
+#ticket-list button.frontier {{
+  background: #dbeafe;
+  border-color: #2563eb;
+  color: #1e3a8a;
+}}
+#ticket-list button.fog {{
+  background: #f1f5f9;
+  border-color: #64748b;
+  color: #334155;
+}}
+#ticket-list button.complete:hover {{
+  border-color: #15803d;
+}}
+#ticket-list button.inprogress:hover {{
+  border-color: #ca8a04;
+}}
+#ticket-list button.frontier:hover {{
+  border-color: #2563eb;
+}}
+#ticket-list button.fog:hover {{
+  border-color: #64748b;
+}}
 #status {{
   font-size: 12px;
   color: #94a3b8;
@@ -914,6 +946,41 @@ async function loadChart() {{
     refreshBtn.disabled = false;
   }}
 }}
+function centerOn(identifier) {{
+  let target = null;
+  const nodeGroups = chartEl.querySelectorAll('g.node');
+  for (const group of nodeGroups) {{
+    const text = group.textContent || '';
+    const match = text.match(/[A-Z][A-Z0-9]*-\d+/);
+    if (match && match[0] === identifier) {{
+      target = group;
+      break;
+    }}
+  }}
+  if (!target) {{
+    const clusters = chartEl.querySelectorAll('g.cluster');
+    for (const cl of clusters) {{
+      const label = cl.querySelector(':scope > g.cluster-label, :scope > .cluster-label');
+      if (label && (label.textContent || '').includes(identifier)) {{
+        target = cl;
+        break;
+      }}
+    }}
+  }}
+  if (!target) {{
+    return;
+  }}
+  const targetRect = target.getBoundingClientRect();
+  const chartRect = chartEl.getBoundingClientRect();
+  const targetCenterX = targetRect.left + targetRect.width / 2;
+  const targetCenterY = targetRect.top + targetRect.height / 2;
+  const viewCenterX = chartRect.left + chartRect.width / 2;
+  const viewCenterY = chartRect.top + chartRect.height / 2;
+  const deltaX = targetCenterX - viewCenterX;
+  const deltaY = targetCenterY - viewCenterY;
+  chartEl.scrollLeft += deltaX;
+  chartEl.scrollTop += deltaY;
+}}
 function bindNodes(nodes) {{
   const byId = new Map(nodes.map((node) => [node.identifier, node]));
   const groups = chartEl.querySelectorAll('g.node');
@@ -936,8 +1003,9 @@ function bindNodes(nodes) {{
   nodes.forEach((node) => {{
     const item = document.createElement('button');
     item.type = 'button';
+    item.className = node.class;
     item.textContent = node.identifier + ' ' + node.class;
-    item.addEventListener('click', () => openIssue(node.identifier));
+    item.addEventListener('click', () => {{ centerOn(node.identifier); openIssue(node.identifier); }});
     list.appendChild(item);
   }});
   const count = nodes.length;
@@ -1530,6 +1598,11 @@ mod tests {
             "max-height: 30vh",
             "aria-expanded=\"false\"",
             "aria-controls=\"ticket-list\"",
+            "#ticket-list button.complete",
+            "#ticket-list button.inprogress",
+            "#ticket-list button.frontier",
+            "#ticket-list button.fog",
+            "function centerOn",
         ] {
             assert!(html.contains(marker), "missing {marker}");
         }
