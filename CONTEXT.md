@@ -162,7 +162,7 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 
 #### Scenario: Closure and classification
 - **WHEN** chart runs on a set of **Issue identifier**s
-- **THEN** every transitive sub-issue, parent, blocker, and forward-blocked issue appears as a node, grouped into one subgraph per parent issue, with top-level issues without sub-issues sharing a Standalone subgraph
+- **THEN** every transitive sub-issue, parent, blocker, and forward-blocked issue appears as a node, grouped into one subgraph per parent issue, with top-level issues without sub-issues sharing a Standalone subgraph laid out as a grid
 - **AND** completed issues are complete, started issues are in progress, not-yet-started issues with no incomplete blocker are frontier, and issues with at least one incomplete blocker are fog
 - **AND** canceled issues are absent and do not block dependents
 

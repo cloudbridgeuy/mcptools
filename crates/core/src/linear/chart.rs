@@ -155,14 +155,37 @@ pub fn build_mermaid(nodes: &[ChartNode]) -> String {
     sorted.sort_by_key(|node| (issue_number(&node.identifier), node.identifier.as_str()));
 
     let mut out = String::from("flowchart TB\n");
+    out.push_str("  subgraph Legend[\"State legend\"]\n");
+    out.push_str("    LFrontier[\"Frontier: ready to start\"]\n");
+    out.push_str("    LComplete[\"Complete\"]\n");
+    out.push_str("    LProgress[\"In progress\"]\n");
+    out.push_str("    LFog[\"Fog: prerequisite incomplete\"]\n");
+    out.push_str("  end\n");
     let (solo, rest): (Vec<&ChartNode>, Vec<&ChartNode>) = top_level
         .into_iter()
         .partition(|node| !containers.contains(node.identifier.as_str()));
     emit_scope(&rest, &children, &containers, 1, &mut out);
     if !solo.is_empty() {
+        let cols = (solo.len() as f64).sqrt().ceil() as usize;
+        let rows = solo.len().div_ceil(cols);
         out.push_str("  subgraph Ungrouped[\"Standalone issues\"]\n");
-        emit_scope(&solo, &children, &containers, 2, &mut out);
+        for node in &solo {
+            out.push_str(&format!(
+                "    {}[\"{}\"]\n",
+                node_id(&node.identifier),
+                label(&node.identifier, &node.title)
+            ));
+        }
         out.push_str("  end\n");
+        for chunk in solo.chunks(rows) {
+            for pair in chunk.windows(2) {
+                out.push_str(&format!(
+                    "  {} ~~~ {}\n",
+                    node_id(&pair[0].identifier),
+                    node_id(&pair[1].identifier)
+                ));
+            }
+        }
     }
 
     let mut edges: BTreeSet<(String, String)> = BTreeSet::new();
@@ -195,12 +218,6 @@ pub fn build_mermaid(nodes: &[ChartNode]) -> String {
         out.push_str("  style Ungrouped fill:#12141d,stroke:#64748b,stroke-width:1.5px\n");
     }
 
-    out.push_str("  subgraph Legend[\"State legend\"]\n");
-    out.push_str("    LFrontier[\"Frontier: ready to start\"]\n");
-    out.push_str("    LComplete[\"Complete\"]\n");
-    out.push_str("    LProgress[\"In progress\"]\n");
-    out.push_str("    LFog[\"Fog: prerequisite incomplete\"]\n");
-    out.push_str("  end\n");
     out.push_str("  style Legend fill:#12141d,stroke:#f59e0b,stroke-width:1.5px\n");
     out.push_str(
         "  classDef complete fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px\n",
@@ -450,26 +467,60 @@ mod tests {
     }
 
     #[test]
-    fn top_level_childless_issues_share_standalone_subgraph() {
+    fn top_level_childless_issues_share_standalone_grid() {
         let nodes = vec![
             node("GUZ-10", "started", None, &[]),
             node("GUZ-11", "backlog", Some("GUZ-10"), &[]),
             node("GUZ-20", "backlog", None, &[]),
             node("GUZ-21", "backlog", None, &["GUZ-20"]),
+            node("GUZ-22", "backlog", None, &[]),
+            node("GUZ-23", "backlog", None, &[]),
+            node("GUZ-24", "backlog", None, &[]),
         ];
         let mermaid = build_mermaid(&nodes);
         assert!(mermaid.contains("  subgraph Ungrouped[\"Standalone issues\"]\n"));
-        let start = mermaid.find("subgraph Ungrouped").unwrap();
-        let tail = &mermaid[start..];
-        let end = tail.find("\n  end\n").unwrap();
-        let body = &tail[..end];
-        assert!(body.contains("GUZ_20["));
-        assert!(body.contains("GUZ_21["));
-        assert!(!body.contains("GUZ_11["));
-        assert!(mermaid.contains("GUZ_20 --> GUZ_21"));
+        assert!(!mermaid.contains("UCol"));
+        assert!(mermaid.contains("    GUZ_20[\"GUZ-20: Title GUZ-20\"]\n"));
+        assert!(mermaid.contains("    GUZ_24[\"GUZ-24: Title GUZ-24\"]\n"));
+        let ungrouped = &mermaid[mermaid.find("subgraph Ungrouped").unwrap()..];
+        assert!(!ungrouped.contains("GUZ_11[\"GUZ-11"));
+        assert!(mermaid.contains("  GUZ_20 ~~~ GUZ_21\n"));
+        assert!(mermaid.contains("  GUZ_22 ~~~ GUZ_23\n"));
+        assert!(!mermaid.contains("GUZ_21 ~~~ GUZ_22"));
+        assert!(!mermaid.contains("GUZ_23 ~~~ GUZ_24"));
+        assert!(mermaid.contains("  GUZ_20 --> GUZ_21\n"));
         assert!(
             mermaid.contains("  style Ungrouped fill:#12141d,stroke:#64748b,stroke-width:1.5px\n")
         );
+    }
+
+    #[test]
+    fn standalone_grid_links_nine_nodes_into_three_chains() {
+        let nodes: Vec<ChartNode> = (30..39)
+            .map(|n| node(&format!("GUZ-{n}"), "backlog", None, &[]))
+            .collect();
+        let mermaid = build_mermaid(&nodes);
+        assert_eq!(mermaid.matches("~~~").count(), 6);
+        assert!(mermaid.contains("  GUZ_30 ~~~ GUZ_31\n"));
+        assert!(mermaid.contains("  GUZ_31 ~~~ GUZ_32\n"));
+        assert!(mermaid.contains("  GUZ_33 ~~~ GUZ_34\n"));
+        assert!(mermaid.contains("  GUZ_36 ~~~ GUZ_37\n"));
+        assert!(mermaid.contains("  GUZ_37 ~~~ GUZ_38\n"));
+        assert!(!mermaid.contains("GUZ_32 ~~~ GUZ_33"));
+        assert!(!mermaid.contains("GUZ_35 ~~~ GUZ_36"));
+    }
+
+    #[test]
+    fn legend_renders_before_epic_and_standalone_subgraphs() {
+        let nodes = vec![
+            node("GUZ-10", "started", None, &[]),
+            node("GUZ-11", "backlog", Some("GUZ-10"), &[]),
+            node("GUZ-20", "backlog", None, &[]),
+        ];
+        let mermaid = build_mermaid(&nodes);
+        let legend = mermaid.find("subgraph Legend").unwrap();
+        assert!(legend < mermaid.find("subgraph E10").unwrap());
+        assert!(legend < mermaid.find("subgraph Ungrouped").unwrap());
     }
 
     #[test]
