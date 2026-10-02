@@ -2,7 +2,7 @@ use super::{registered_tools, to_dual_result, JsonRpcError, Tool, ToolKind};
 use crate::sandbox;
 use mcptools_core::sandbox::execute_output;
 
-pub const DESCRIPTION: &str = r#"Runs JavaScript in a sandbox. Call find_tools first: each declaration it returns is an async global named after the tool, e.g. `const r = await jira_search({ jql: "..." })`. console.log lines return as logs, and the final expression or top-level return value as result. Only read tools are bound unless allowWrites or allowSpend is true."#;
+pub const DESCRIPTION: &str = r#"Runs JavaScript in a sandbox. Call find_tools first: each declaration it returns is an async global only inside the code string passed to tools.mcptools.execute (one fresh sandbox per call). The outer Code Mode scope has only find_tools and execute. A ReferenceError on a declared name outside execute, such as await linear_issue_list(), is not a TTL, expiry, or a tool that disappeared. It means the name was never a host tool. console.log lines return as logs, and the final expression or top-level return value as result. Only read tools are bound unless allowWrites or allowSpend is true."#;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ExecuteArgs {

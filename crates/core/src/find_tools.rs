@@ -70,7 +70,7 @@ pub const DEFAULT_K: usize = 5;
 pub const USAGE: &str = "Each declaration is the call signature: the input interface is the tools/call arguments object, the Promise type is the result.";
 
 pub const CODE_MODE_USAGE: &str =
-    "Call each declared function as an async global inside tools.mcptools.execute.";
+    "Call each declared function as an async global only inside the code string passed to tools.mcptools.execute (one fresh sandbox per call). The outer Code Mode scope has only find_tools and execute. A ReferenceError on a declared name outside execute, such as await linear_issue_list(), is not a TTL, expiry, or a tool that disappeared. It means the name was never a host tool.";
 
 pub fn rank_tools(
     task: &str,
