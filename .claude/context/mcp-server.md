@@ -193,7 +193,7 @@ adds write tools, `allowSpend` adds spend tools, and `execute` never binds as
 a global inside its own sandbox. A missing gated tool rejects with a
 `ReferenceError` whose message names the tool, its kind, and the flag to pass
 (e.g. `jira_update is a write tool; pass allowWrites: true to execute`); any
-other missing global keeps QuickJS's plain `<name> is not defined` message. Outer-scope ReferenceError (e.g. await linear_issue_list() outside execute) is distinct from the in-sandbox gated-tool ReferenceError.
+other missing global keeps QuickJS's plain `<name> is not defined` message. A ReferenceError from calling a declared name outside execute means that name was never a host tool, not a TTL or an expired binding. That is separate from the in-sandbox gated-tool ReferenceError above.
 
 Limits come from the server flags `--execute-timeout-secs` (default 30),
 `--execute-memory-mb` (default 64), and `--execute-output-kb` (default 256).
