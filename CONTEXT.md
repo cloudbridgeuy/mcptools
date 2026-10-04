@@ -70,7 +70,7 @@ The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in cod
 
 #### Scenario: Code-mode usage text
 - **WHEN** `find_tools` runs in code mode, including a nested call inside `execute`
-- **THEN** its `usage` field is `Call each declared function as an async global inside tools.mcptools.execute.`
+- **THEN** its `usage` field is `Call each declared function as an async global only inside the code string passed to tools.mcptools.execute (one fresh sandbox per call). The outer Code Mode scope has only find_tools and execute. A ReferenceError on a declared name outside execute, such as await linear_issue_list(), is not a TTL, expiry, or a tool that disappeared. It means the name was never a host tool.`
 
 #### Scenario: Usage text without code mode
 - **WHEN** `find_tools` runs in any other mode
