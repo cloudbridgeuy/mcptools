@@ -142,6 +142,14 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 
 `find_tools` is advisory: it never dispatches a tool, and a Jev outage never blocks the caller.
 
+**Rank score semantics**
+
+- `none` = `1.0 - top1`. An empty catalog reports `none = 1.0`.
+- Local backend: each score is matched-weighted-IDF over twice the task IDF sum, with name 2.0 / domain 1.5 / summary 1.0 weights, so values near 0.2 are normal. Compare tools relative to each other, not against an absolute cutoff.
+- Cross-domain leakage is expected: Jira tools can surface for a Linear task when the top-1 match is right but `none` stays near 0.8.
+- Jev backend contrast: scores are verbatim classifier probabilities, kept at or above 0.05 with at most 3 tools returned, so extremes like 1.0 or 0 are normal.
+- Jev enables via `JEV_PROVIDER` plus `JEV_API_KEY` or the provider's conventional key var (see table).
+
 **Jev environment variables**
 
 | Variable | Default | Description |
