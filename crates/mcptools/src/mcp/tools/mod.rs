@@ -664,9 +664,9 @@ pub fn registered_tools() -> Vec<Tool> {
                 s
             },
             name: "find_tools".to_string(),
-            description: "Rank task, list domains via listDomains, or list a domain's tools. Never calls others.".to_string(),
+            description: "Ranks the tool catalog against a task and returns a TypeScript declaration per tool, and never calls another tool. Every tool it returns is callable by name through tools/call, even when tools/list does not list it. `listDomains: true` lists domain prefixes, and `domain` lists every tool in that prefix with its declaration and does not rank.".to_string(),
             input_schema: schema::input_schema_for::<find_tools::FindToolsArgs>(),
-            summary: "Rank or list domains/tools",
+            summary: "Rank for task, listDomains, or domain",
             kind: ToolKind::Read,
         },
         Tool {
@@ -974,7 +974,7 @@ mod catalog_tests {
         assert_eq!(super::registered_tools().len(), 63);
     }
 
-    const FIND_TOOLS_BUDGET_CHARS: usize = 1800;
+    const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
     const JOINT_BUDGET_TOKENS: usize = 1000;
 
     #[test]

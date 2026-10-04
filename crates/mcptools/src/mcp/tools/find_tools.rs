@@ -63,6 +63,12 @@ pub enum FindToolsOutput {
     },
 }
 
+enum Selector {
+    ListDomains,
+    Domain(String),
+    Task { task: String, k: Option<usize> },
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
     #[error("set exactly one of task, domain, listDomains")]
@@ -79,10 +85,18 @@ pub enum QueryError {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct FindToolsArgs {
+    #[schemars(description = "Natural-language description of the task")]
     pub task: Option<String>,
+    #[schemars(description = "Maximum number of tools to return (default 5)")]
     pub k: Option<usize>,
+    #[schemars(
+        description = "Domain prefix; lists every tool in that prefix with its declaration and does not rank"
+    )]
     pub domain: Option<String>,
     #[serde(rename = "listDomains")]
+    #[schemars(
+        description = "When true lists the sorted catalog domain prefixes; false is not a selector"
+    )]
     pub list_domains: Option<bool>,
 }
 
@@ -203,7 +217,7 @@ fn usage_for(code_mode: bool) -> String {
     }
 }
 
-pub async fn query(args: FindToolsArgs, code_mode: bool) -> Result<FindToolsOutput, QueryError> {
+fn decide(args: FindToolsArgs, known_domains: &[String]) -> Result<Selector, QueryError> {
     let task = args.task.as_deref().map(str::trim);
     let domain = args.domain.as_deref().map(str::trim);
     let list = args.list_domains == Some(true);
@@ -224,37 +238,47 @@ pub async fn query(args: FindToolsArgs, code_mode: bool) -> Result<FindToolsOutp
         return Err(QueryError::SetExactlyOne);
     }
     if list {
-        let domains = list_domain_names();
-        return Ok(FindToolsOutput::Domains { domains });
+        return Ok(Selector::ListDomains);
     }
     if let Some(d) = domain.filter(|&d| !d.is_empty()) {
         let d = d.to_string();
-        let catalog = super::tool_catalog();
-        let mut valids: Vec<String> = catalog.into_iter().map(|e| e.domain).collect();
-        valids.sort();
-        valids.dedup();
-        if !valids.contains(&d) {
-            return Err(QueryError::UnknownDomain(d, valids.join(", ")));
+        if !known_domains.contains(&d) {
+            return Err(QueryError::UnknownDomain(d, known_domains.join(", ")));
         }
-        let tools = list_domain(&d);
-        let usage = usage_for(code_mode);
-        return Ok(FindToolsOutput::Domain {
-            domain: d,
-            tools,
-            usage,
-        });
+        return Ok(Selector::Domain(d));
     }
     let t = task.unwrap().to_string();
-    let k = args.k.unwrap_or(mcptools_core::find_tools::DEFAULT_K);
-    let inner = find_tools(&t, k).await?;
-    let usage = usage_for(code_mode);
-    Ok(FindToolsOutput::Rank {
-        none: inner.none,
-        tools: inner.tools,
-        backend: inner.backend,
-        fallback: inner.fallback,
-        usage,
-    })
+    let k = args.k;
+    Ok(Selector::Task { task: t, k })
+}
+
+pub async fn query(args: FindToolsArgs, code_mode: bool) -> Result<FindToolsOutput, QueryError> {
+    let domains = list_domain_names();
+    let sel = decide(args, &domains)?;
+    match sel {
+        Selector::ListDomains => Ok(FindToolsOutput::Domains { domains }),
+        Selector::Domain(d) => {
+            let tools = list_domain(&d);
+            let usage = usage_for(code_mode);
+            Ok(FindToolsOutput::Domain {
+                domain: d,
+                tools,
+                usage,
+            })
+        }
+        Selector::Task { task, k } => {
+            let k = k.unwrap_or(mcptools_core::find_tools::DEFAULT_K);
+            let inner = find_tools(&task, k).await?;
+            let usage = usage_for(code_mode);
+            Ok(FindToolsOutput::Rank {
+                none: inner.none,
+                tools: inner.tools,
+                backend: inner.backend,
+                fallback: inner.fallback,
+                usage,
+            })
+        }
+    }
 }
 
 pub async fn handle_find_tools(
