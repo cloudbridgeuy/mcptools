@@ -73,6 +73,7 @@ fn mcp_contract_pilot() {
             "bitbucket_repo_branches",
             "bitbucket_repo_list",
             "bitbucket_workspace_list",
+            "call_tool",
             "confluence_search",
             "execute",
             "find_tools",

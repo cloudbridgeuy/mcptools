@@ -108,6 +108,7 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "linear_relation_remove" => roundtrip::<mcptools_core::linear::RelationRemoveOutput>(value),
         "find_tools" => roundtrip::<super::find_tools::FindToolsOutput>(value),
         "execute" => roundtrip::<mcptools_core::sandbox::ExecuteOutput>(value),
+        "call_tool" => roundtrip::<serde_json::Map<String, serde_json::Value>>(value),
         _ => panic!("unknown tool in roundtrip_by_tool: {tool}"),
     }
 }
@@ -555,6 +556,9 @@ fn output_schemas_have_no_any_nodes() {
         let mut loose = loose_nodes(schema);
         if name.as_str() == "execute" {
             loose.retain(|path| path != "/properties/result");
+        }
+        if name.as_str() == "call_tool" {
+            loose.clear();
         }
         if !loose.is_empty() {
             bad.push((name.to_string(), loose));

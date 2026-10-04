@@ -197,8 +197,8 @@ Error names:
   on); memory exhaustion surfaces as `InternalError`
 
 Flag gating is by tool kind only: read tools bind by default, `allowWrites`
-adds write tools, `allowSpend` adds spend tools, and `execute` never binds as
-a global inside its own sandbox. A missing gated tool rejects with a
+adds write tools, `allowSpend` adds spend tools, and `execute` and `call_tool` never bind as
+globals inside its own sandbox. A missing gated tool rejects with a
 `ReferenceError` whose message names the tool, its kind, and the flag to pass
 (e.g. `jira_update is a write tool; pass allowWrites: true to execute`); any
 other missing global keeps QuickJS's plain `<name> is not defined` message. A ReferenceError from calling a declared name outside execute means that name was never a host tool, not a TTL or an expired binding. That is separate from the in-sandbox gated-tool ReferenceError above.
@@ -229,7 +229,7 @@ Known limitation, planned and undesigned: hosts that declare only listed
 tools to the model, such as Claude Code, cannot yet call a tool directly
 when it is absent from `tools/list`. The returned declarations name the
 tools/call arguments and results of every tool they carry. Code mode closes
-this gap in practice: `tools/list` returns `execute` beside `find_tools`, and
+this gap in practice: `tools/list` returns `execute` and `call_tool` beside `find_tools`, and
 tools bind inside `execute` as async globals, under the flag gating
 documented in [Execute](#execute) above.
 
@@ -237,11 +237,14 @@ documented in [Execute](#execute) above.
 
 Enable with the `--code-mode` flag or the `MCPTOOLS_CODE_MODE` environment
 variable, with the same accepted values as `MCPTOOLS_DISCOVERY`. In this mode
-`tools/list` returns exactly two tools, in order: `find_tools`, then
-`execute`. Code mode wins over Discovery mode when both are enabled.
+`tools/list` returns exactly three tools, in order: `find_tools`,
+`execute`, then `call_tool`. Agents call one tool directly with
+`await tools.mcptools.call_tool({ name: "linear_issue_list", input: { team: "GUZ" } })`
+(`allowWrites` and `allowSpend` gate write and spend tools; the meta tools
+cannot be called through it) and chain many calls with `execute`. Code mode wins over Discovery mode when both are enabled.
 `tools/call` still dispatches every real tool by name. The `find_tools`
 response `usage` field, also for nested `find_tools` calls inside `execute`,
-is `Call each declared function as an async global only inside the code string passed to tools.mcptools.execute (one fresh sandbox per call). The outer Code Mode scope has only find_tools and execute. A ReferenceError on a declared name outside execute, such as await linear_issue_list(), is not a TTL, expiry, or a tool that disappeared. It means the name was never a host tool.`; other
+is `Call a single tool with tools.mcptools.call_tool, e.g. await tools.mcptools.call_tool({ name: "linear_issue_list", input: { team: "GUZ" } }). To chain many calls in one round trip, pass code as a string to tools.mcptools.execute, where each declared function is an async global (one fresh sandbox per call). The outer Code Mode scope has only find_tools, execute and call_tool; a declared name called there is a ReferenceError, not a TTL or expiry.`; other
 modes keep `Each declaration is the call signature: the input interface is
 the tools/call arguments object, the Promise type is the result.`
 

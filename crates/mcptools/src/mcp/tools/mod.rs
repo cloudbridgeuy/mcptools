@@ -1,6 +1,7 @@
 mod annotations;
 mod atlas;
 mod atlassian;
+mod call_tool;
 mod execute;
 pub mod find_tools;
 mod hn;
@@ -677,14 +678,28 @@ pub fn registered_tools() -> Vec<Tool> {
             summary: "Run JavaScript that calls the tools find_tools returns",
             kind: ToolKind::Write,
         },
+        Tool {
+            output_schema: schema::output_schema_for::<serde_json::Map<String, serde_json::Value>>(),
+            name: "call_tool".to_string(),
+            description: call_tool::DESCRIPTION.to_string(),
+            input_schema: schema::input_schema_for::<call_tool::CallToolArgs>(),
+            summary: "Call one catalog tool by name",
+            kind: ToolKind::Write,
+        },
     ]
+}
+
+const META_TOOLS: [&str; 3] = ["find_tools", "execute", "call_tool"];
+
+pub fn is_meta_tool(name: &str) -> bool {
+    META_TOOLS.contains(&name)
 }
 
 pub fn listed_tools(tools: Vec<Tool>, flags: ServeFlags) -> Vec<Tool> {
     if flags.code_mode {
         tools
             .into_iter()
-            .filter(|tool| tool.name == "find_tools" || tool.name == "execute")
+            .filter(|tool| is_meta_tool(&tool.name))
             .collect()
     } else if flags.discovery {
         tools
@@ -721,7 +736,7 @@ pub fn tool_catalog() -> Vec<mcptools_core::catalog::CatalogEntry> {
     mcptools_core::catalog::build_catalog(
         registered_tools()
             .iter()
-            .filter(|tool| tool.name != "find_tools" && tool.name != "execute")
+            .filter(|tool| !is_meta_tool(&tool.name))
             .map(|tool| (tool.name.as_str(), tool.summary)),
     )
 }
@@ -858,6 +873,7 @@ pub async fn handle_tools_call(
         }
         "find_tools" => find_tools::handle_find_tools(params.arguments, global, flags).await,
         "execute" => execute::handle_execute(params.arguments, global, flags).await,
+        "call_tool" => call_tool::handle_call_tool(params.arguments, global, flags).await,
         _ => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", params.name),
@@ -903,15 +919,15 @@ mod catalog_tests {
     }
 
     #[test]
-    fn catalog_names_equal_registered_names_minus_find_tools_and_execute() {
+    fn catalog_names_equal_registered_names_minus_meta_tools() {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
-        assert_eq!(catalog.len() + 2, registered.len());
+        assert_eq!(catalog.len() + 3, registered.len());
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
             .map(|tool| tool.name)
-            .filter(|n| n != "find_tools" && n != "execute")
+            .filter(|n| !super::is_meta_tool(n))
             .collect();
         assert_eq!(catalog_names, registry_names);
     }
@@ -971,7 +987,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_holds_sixty_three_tools() {
-        assert_eq!(super::registered_tools().len(), 63);
+        assert_eq!(super::registered_tools().len(), 64);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -986,7 +1002,7 @@ mod catalog_tests {
         .unwrap();
         let tools = list["tools"].as_array().unwrap();
         let mut total = 0;
-        for name in ["find_tools", "execute"] {
+        for name in ["find_tools", "execute", "call_tool"] {
             let entry = tools
                 .iter()
                 .find(|tool| tool.get("name") == Some(&serde_json::json!(name)))
@@ -1046,21 +1062,21 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 63);
+        assert_eq!(names(serve_flags(false)).len(), 64);
         assert_eq!(names(serve_flags(true)), ["find_tools"]);
         assert_eq!(
             names(ServeFlags {
                 discovery: false,
                 code_mode: true
             }),
-            ["find_tools", "execute"]
+            ["find_tools", "execute", "call_tool"]
         );
         assert_eq!(
             names(ServeFlags {
                 discovery: true,
                 code_mode: true
             }),
-            ["find_tools", "execute"]
+            ["find_tools", "execute", "call_tool"]
         );
     }
 
@@ -1123,11 +1139,12 @@ mod catalog_tests {
             "ui_annotations_resolve",
             "ui_annotations_clear",
             "execute",
+            "call_tool",
         ];
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 63);
+        assert_eq!(tools.len(), 64);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1145,7 +1162,7 @@ mod catalog_tests {
             .iter()
             .filter(|t| t["annotations"] == readonly)
             .count();
-        assert_eq!(read_count, 63 - mutable_names.len());
+        assert_eq!(read_count, 64 - mutable_names.len());
     }
 
     #[test]
@@ -1168,6 +1185,7 @@ mod catalog_tests {
             "ui_annotations_resolve",
             "ui_annotations_clear",
             "execute",
+            "call_tool",
         ]
         .into_iter()
         .collect();
@@ -1224,7 +1242,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 63);
+        assert_eq!(union.len(), 64);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();
@@ -1415,7 +1433,7 @@ mod declaration_tests {
                 "{}: raw #/$defs leaked",
                 tool.name
             );
-            if text.contains("unknown") && tool.name != "execute" {
+            if text.contains("unknown") && tool.name != "execute" && tool.name != "call_tool" {
                 unknown_tools.insert(tool.name.clone());
             }
         }

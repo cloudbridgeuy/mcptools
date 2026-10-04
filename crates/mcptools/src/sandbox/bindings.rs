@@ -7,7 +7,7 @@ use rquickjs::{Ctx, Exception, Function, Value};
 pub fn bound_names(tools: &[Tool], allowed: &[ToolKind]) -> Vec<String> {
     tools
         .iter()
-        .filter(|tool| tool.name != "execute")
+        .filter(|tool| tool.name != "execute" && tool.name != "call_tool")
         .filter(|tool| allowed.contains(&tool.kind))
         .map(|tool| tool.name.clone())
         .collect()
