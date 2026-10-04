@@ -29,7 +29,7 @@ fn resolves(value: &serde_json::Value, segments: &[&str]) -> bool {
             map.get(*head).is_some_and(|child| resolves(child, rest))
         }
         (serde_json::Value::Array(items), Some(_)) => {
-            items.iter().any(|item| resolves(item, segments))
+            items.is_empty() || items.iter().any(|item| resolves(item, segments))
         }
         _ => false,
     }
@@ -66,6 +66,13 @@ fn insert(
             insert(sink, child, rest, leaves);
         }
         serde_json::Value::Array(items) => {
+            if items.is_empty() {
+                if !out.is_array() {
+                    *out = serde_json::Value::Array(Vec::new());
+                }
+                *leaves += 1;
+                return;
+            }
             if !out.is_array() {
                 *out = serde_json::Value::Array(Vec::new());
             }
@@ -171,6 +178,18 @@ mod tests {
             Err(ProjectionError {
                 path: "a..b".to_string()
             })
+        );
+    }
+
+    #[test]
+    fn empty_array_projects_to_empty_array() {
+        let value = json!({
+            "nodes": [],
+            "pageInfo": {"endCursor": "e", "hasNextPage": false}
+        });
+        assert_eq!(
+            projected(value, &["nodes.identifier"]),
+            Ok(json!({"nodes": []}))
         );
     }
 
