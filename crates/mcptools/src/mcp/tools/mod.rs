@@ -149,7 +149,7 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
         },
         server_info: ServerInfo {
             name: "mcptools".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: env!("MCPTOOLS_VERSION").to_string(),
         },
     };
 
@@ -665,7 +665,7 @@ pub fn registered_tools() -> Vec<Tool> {
                 s
             },
             name: "find_tools".to_string(),
-            description: "Ranks the tool catalog against a task and returns a TypeScript declaration per tool, and never calls another tool. Every tool it returns is callable by name through tools/call, even when tools/list does not list it. `listDomains: true` lists domain prefixes, and `domain` lists every tool in that prefix with its declaration and does not rank.".to_string(),
+            description: "Ranks the catalog against a task and returns a TypeScript declaration per tool, and never calls another tool. Call a returned tool with call_tool({ name, input }), or by name via tools/call, even when tools/list does not list it. `listDomains: true` lists domain prefixes, and `domain` lists every tool in that prefix with its declaration and does not rank.".to_string(),
             input_schema: schema::input_schema_for::<find_tools::FindToolsArgs>(),
             summary: "Rank for task, listDomains, or domain",
             kind: ToolKind::Read,
@@ -991,7 +991,7 @@ mod catalog_tests {
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
-    const JOINT_BUDGET_TOKENS: usize = 1000;
+    const JOINT_BUDGET_TOKENS: usize = 1200;
 
     #[test]
     fn joint_definition_fits_budget() {

@@ -26,7 +26,7 @@ mod upgrade;
 #[derive(Debug, clap::Parser)]
 #[command(
     author,
-    version,
+    version = env!("MCPTOOLS_VERSION"),
     about,
     long_about = "MCP tools for web content, HackerNews, and Atlassian integrations"
 )]

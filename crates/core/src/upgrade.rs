@@ -25,9 +25,13 @@ pub fn parse_version_tag(tag: &str) -> &str {
 ///
 /// Compares semantic versions by splitting on '.' and comparing each part.
 /// Pads with zeros if lengths differ (e.g., "1.2" is treated as "1.2.0").
+fn strip_build_metadata(version: &str) -> &str {
+    version.split_once('+').map_or(version, |(base, _)| base)
+}
+
 pub fn is_version_up_to_date(current: &str, latest: &str) -> Result<bool, String> {
-    let current_parts: Vec<&str> = current.split('.').collect();
-    let latest_parts: Vec<&str> = latest.split('.').collect();
+    let current_parts: Vec<&str> = strip_build_metadata(current).split('.').collect();
+    let latest_parts: Vec<&str> = strip_build_metadata(latest).split('.').collect();
 
     // Pad with zeros if lengths differ
     let max_len = current_parts.len().max(latest_parts.len());
@@ -165,6 +169,12 @@ mod tests {
     fn test_is_version_up_to_date_padding_current_older() {
         // "1.2" (treated as "1.2.0") vs "1.2.1"
         assert!(!is_version_up_to_date("1.2", "1.2.1").unwrap());
+    }
+
+    #[test]
+    fn test_is_version_up_to_date_ignores_build_metadata() {
+        assert!(is_version_up_to_date("1.11.0+50.g561910e.dirty", "1.11.0").unwrap());
+        assert!(!is_version_up_to_date("1.11.0+50.g561910e", "1.12.0").unwrap());
     }
 
     #[test]
