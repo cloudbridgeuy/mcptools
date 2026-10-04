@@ -213,7 +213,7 @@ Limits come from the server flags `--execute-timeout-secs` (default 30),
 3. Call the tool by name through `tools/call`.
 4. For a same-domain follow-up (e.g. `jira_comment_list` then `jira_comment_update`), call the follow-up tool directly; do not call `find_tools` again.
 5. `find_tools` is advisory: it never dispatches a tool, and Jev is consulted only inside `find_tools` itself, never in front of or around any other tool call.
-6. In discovery mode the loop needs a host that can call a tool absent from `tools/list` — see the Known limitation in [Discovery mode](#discovery-mode) below; this section restates none of that text.
+6. In discovery mode, call the tool through `call_tool({ name, input })`; it is listed beside `find_tools`.
 
 ## Discovery mode
 
@@ -221,17 +221,13 @@ Enable with the `--discovery` flag or the `MCPTOOLS_DISCOVERY` environment
 variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 `on`, `1` enable the mode; `n`, `no`, `f`, `false`, `off`, `0` keep it off;
 any other value, including an empty one, exits with code 2 and the error
-`value was not a boolean`. In this mode `tools/list` returns exactly one tool,
-`find_tools`; `tools/call` still dispatches every real tool by name. Without
-this mode, hosts load all 63 schemas and Jev saves no context.
+`value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
+`find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
+this mode, hosts load all 64 schemas and Jev saves no context.
 
-Known limitation, planned and undesigned: hosts that declare only listed
-tools to the model, such as Claude Code, cannot yet call a tool directly
-when it is absent from `tools/list`. The returned declarations name the
-tools/call arguments and results of every tool they carry. Code mode closes
-this gap in practice: `tools/list` returns `execute` and `call_tool` beside `find_tools`, and
-tools bind inside `execute` as async globals, under the flag gating
-documented in [Execute](#execute) above.
+Hosts that declare only listed tools to the model, such as Claude Code, call
+any catalog tool through the listed `call_tool`, which takes `name`, `input`,
+`allowWrites` and `allowSpend`. `execute` is not listed in this mode.
 
 ## Code mode
 

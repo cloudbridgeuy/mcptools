@@ -665,7 +665,7 @@ pub fn registered_tools() -> Vec<Tool> {
                 s
             },
             name: "find_tools".to_string(),
-            description: "Ranks the catalog against a task and returns a TypeScript declaration per tool, and never calls another tool. Call a returned tool with call_tool({ name, input }), or by name via tools/call, even when tools/list does not list it. `listDomains: true` lists domain prefixes, and `domain` lists every tool in that prefix with its declaration and does not rank.".to_string(),
+            description: "Returns a TypeScript declaration per tool: ranked against `task`, every tool in a `domain` prefix (unranked), or the domain prefixes with `listDomains: true`. Call a returned tool with call_tool({ name, input }).".to_string(),
             input_schema: schema::input_schema_for::<find_tools::FindToolsArgs>(),
             summary: "Rank for task, listDomains, or domain",
             kind: ToolKind::Read,
@@ -704,7 +704,7 @@ pub fn listed_tools(tools: Vec<Tool>, flags: ServeFlags) -> Vec<Tool> {
     } else if flags.discovery {
         tools
             .into_iter()
-            .filter(|tool| tool.name == "find_tools")
+            .filter(|tool| matches!(tool.name.as_str(), "find_tools" | "call_tool"))
             .collect()
     } else {
         tools
@@ -1034,10 +1034,12 @@ mod catalog_tests {
     }
 
     #[test]
-    fn listed_tools_discovery_keeps_only_find_tools() {
+    fn listed_tools_discovery_keeps_find_tools_and_call_tool() {
         let tools = super::listed_tools(super::registered_tools(), serve_flags(true));
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name, "find_tools");
+        assert_eq!(
+            tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["find_tools", "call_tool"]
+        );
     }
 
     #[test]
@@ -1063,7 +1065,7 @@ mod catalog_tests {
                 .collect()
         };
         assert_eq!(names(serve_flags(false)).len(), 64);
-        assert_eq!(names(serve_flags(true)), ["find_tools"]);
+        assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
                 discovery: false,

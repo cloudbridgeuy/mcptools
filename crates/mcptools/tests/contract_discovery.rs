@@ -46,7 +46,7 @@ fn without_jev_env(command: &mut Command) -> &mut Command {
 }
 
 #[test]
-fn discovery_flag_lists_only_find_tools_then_calls_real_tool() {
+fn discovery_flag_lists_find_tools_and_call_tool_then_calls_real_tool() {
     let home = tempfile::tempdir().unwrap();
     let mut command = Command::new(binary());
     command.args(["mcp", "stdio", "--discovery"]);
@@ -73,8 +73,9 @@ fn discovery_flag_lists_only_find_tools_then_calls_real_tool() {
     );
 
     let tools = responses[0]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 1);
+    assert_eq!(tools.len(), 2);
     assert_eq!(tools[0]["name"], "find_tools");
+    assert_eq!(tools[1]["name"], "call_tool");
 
     let found = &responses[1]["result"]["structuredContent"];
     let found_tools = found["tools"].as_array().unwrap();
@@ -94,7 +95,7 @@ fn discovery_flag_lists_only_find_tools_then_calls_real_tool() {
 }
 
 #[test]
-fn discovery_env_var_alone_lists_only_find_tools() {
+fn discovery_env_var_alone_lists_find_tools_and_call_tool() {
     let home = tempfile::tempdir().unwrap();
     let mut command = Command::new(binary());
     command.args(["mcp", "stdio"]);
@@ -109,8 +110,9 @@ fn discovery_env_var_alone_lists_only_find_tools() {
     );
 
     let tools = responses[0]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 1);
+    assert_eq!(tools.len(), 2);
     assert_eq!(tools[0]["name"], "find_tools");
+    assert_eq!(tools[1]["name"], "call_tool");
 }
 
 #[test]
