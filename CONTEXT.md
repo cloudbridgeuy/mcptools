@@ -76,6 +76,25 @@ The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in cod
 - **WHEN** `find_tools` runs in any other mode
 - **THEN** its `usage` field is `Each declaration is the call signature: the input interface is the tools/call arguments object, the Promise type is the result.`
 
+### Requirement: find_tools selectors
+Exactly one of task, domain, or listDomains.
+
+#### Scenario: list domains
+- **WHEN** called with listDomains:true
+- **THEN** returns kind:domains whose domains array holds the sorted catalog prefixes
+
+#### Scenario: domain list
+- **WHEN** called with domain:linear
+- **THEN** returns kind:domain, domain:linear, tools list with one ListedTool per linear_* in registered_tools order, plus usage
+
+#### Scenario: unknown domain
+- **WHEN** called with domain:Linear
+- **THEN** errors with message containing unknown domain 'Linear'; valid domains: ...
+
+#### Scenario: rank JSON shape
+- **WHEN** called with a task
+- **THEN** output JSON has kind:rank while score, none, and backend remain unchanged
+
 ### Requirement: Issue get payload
 `linear issue get` and `linear_issue_get` return the same payload: snapshot fields, comments, and **Activity**. **Activity** always includes a created row. Comments stay on `comments`.
 

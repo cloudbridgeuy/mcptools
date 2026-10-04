@@ -35,12 +35,55 @@ pub struct FoundTools {
     pub usage: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ListedTool {
+    pub name: String,
+    pub domain: String,
+    pub declaration: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FindToolsOutput {
+    Rank {
+        none: f64,
+        tools: Vec<FoundTool>,
+        backend: Backend,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fallback: Option<FallbackReason>,
+        usage: String,
+    },
+    Domain {
+        domain: String,
+        tools: Vec<ListedTool>,
+        usage: String,
+    },
+    Domains {
+        domains: Vec<String>,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum QueryError {
+    #[error("set exactly one of task, domain, listDomains")]
+    SetExactlyOne,
+    #[error("domain is empty")]
+    DomainEmpty,
+    #[error("unknown domain '{0}'; valid domains: {1}")]
+    UnknownDomain(String, String),
+    #[error("k is only valid with task")]
+    KOnlyForTask,
+    #[error(transparent)]
+    Rank(#[from] mcptools_core::find_tools::FindToolsError),
+}
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct FindToolsArgs {
-    #[schemars(description = "Natural-language description of the task")]
-    pub task: String,
-    #[schemars(description = "Maximum number of tools to return (default 5)")]
+    pub task: Option<String>,
     pub k: Option<usize>,
+    pub domain: Option<String>,
+    #[serde(rename = "listDomains")]
+    pub list_domains: Option<bool>,
 }
 
 fn attach_schemas(
@@ -130,6 +173,90 @@ pub async fn find_tools(
     .await
 }
 
+fn list_domain_names() -> Vec<String> {
+    let mut ds: Vec<String> = super::tool_catalog()
+        .into_iter()
+        .map(|e| e.domain)
+        .collect();
+    ds.sort();
+    ds.dedup();
+    ds
+}
+
+fn list_domain(domain: &str) -> Vec<ListedTool> {
+    let reg = super::registered_tools();
+    reg.iter()
+        .filter(|t| t.name.split_once('_').map(|(p, _)| p).unwrap_or(&t.name) == domain)
+        .map(|t| ListedTool {
+            name: t.name.clone(),
+            domain: domain.to_string(),
+            declaration: super::declaration(t),
+        })
+        .collect()
+}
+
+fn usage_for(code_mode: bool) -> String {
+    if code_mode {
+        mcptools_core::find_tools::CODE_MODE_USAGE.to_string()
+    } else {
+        mcptools_core::find_tools::USAGE.to_string()
+    }
+}
+
+pub async fn query(args: FindToolsArgs, code_mode: bool) -> Result<FindToolsOutput, QueryError> {
+    let task = args.task.as_deref().map(str::trim);
+    let domain = args.domain.as_deref().map(str::trim);
+    let list = args.list_domains == Some(true);
+    let task_p = task.is_some_and(|t| !t.is_empty());
+    let domain_p = domain.is_some_and(|d| !d.is_empty());
+    let list_p = list;
+    let count = (task_p as u8) + (domain_p as u8) + (list_p as u8);
+    if args.k.is_some() && !task_p {
+        return Err(QueryError::KOnlyForTask);
+    }
+    if count != 1 {
+        if domain.is_some_and(|d| d.is_empty()) && !task_p && !list_p {
+            return Err(QueryError::DomainEmpty);
+        }
+        if task.is_some_and(|t| t.is_empty()) && !domain_p && !list_p {
+            return Err(mcptools_core::find_tools::FindToolsError::EmptyTask.into());
+        }
+        return Err(QueryError::SetExactlyOne);
+    }
+    if list {
+        let domains = list_domain_names();
+        return Ok(FindToolsOutput::Domains { domains });
+    }
+    if let Some(d) = domain.filter(|&d| !d.is_empty()) {
+        let d = d.to_string();
+        let catalog = super::tool_catalog();
+        let mut valids: Vec<String> = catalog.into_iter().map(|e| e.domain).collect();
+        valids.sort();
+        valids.dedup();
+        if !valids.contains(&d) {
+            return Err(QueryError::UnknownDomain(d, valids.join(", ")));
+        }
+        let tools = list_domain(&d);
+        let usage = usage_for(code_mode);
+        return Ok(FindToolsOutput::Domain {
+            domain: d,
+            tools,
+            usage,
+        });
+    }
+    let t = task.unwrap().to_string();
+    let k = args.k.unwrap_or(mcptools_core::find_tools::DEFAULT_K);
+    let inner = find_tools(&t, k).await?;
+    let usage = usage_for(code_mode);
+    Ok(FindToolsOutput::Rank {
+        none: inner.none,
+        tools: inner.tools,
+        backend: inner.backend,
+        fallback: inner.fallback,
+        usage,
+    })
+}
+
 pub async fn handle_find_tools(
     arguments: Option<serde_json::Value>,
     _global: &crate::Global,
@@ -141,21 +268,13 @@ pub async fn handle_find_tools(
             message: format!("Invalid arguments: {e}"),
             data: None,
         })?;
-    let mut result = find_tools(
-        &args.task,
-        args.k.unwrap_or(mcptools_core::find_tools::DEFAULT_K),
-    )
-    .await
-    .map_err(|e| JsonRpcError {
-        code: -32602,
-        message: e.to_string(),
-        data: None,
-    })?;
-    result.usage = if flags.code_mode {
-        mcptools_core::find_tools::CODE_MODE_USAGE.to_string()
-    } else {
-        mcptools_core::find_tools::USAGE.to_string()
-    };
+    let result = query(args, flags.code_mode)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32602,
+            message: e.to_string(),
+            data: None,
+        })?;
     super::to_dual_result(result)
 }
 
@@ -291,7 +410,15 @@ mod find_tools_tests {
         )
         .await
         .unwrap();
-        let shell_value = serde_json::to_value(find_tools(task, k).await.unwrap()).unwrap();
+        let inner = find_tools(task, k).await.unwrap();
+        let shell_value = serde_json::to_value(FindToolsOutput::Rank {
+            none: inner.none,
+            tools: inner.tools,
+            backend: inner.backend,
+            fallback: inner.fallback,
+            usage: inner.usage,
+        })
+        .unwrap();
         assert_eq!(mcp_result["structuredContent"], shell_value);
     }
 

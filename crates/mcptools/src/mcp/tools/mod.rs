@@ -2,7 +2,7 @@ mod annotations;
 mod atlas;
 mod atlassian;
 mod execute;
-mod find_tools;
+pub mod find_tools;
 mod hn;
 mod images;
 mod linear;
@@ -656,11 +656,17 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Write,
         },
         Tool {
-            output_schema: schema::output_schema_for::<find_tools::FoundTools>(),
+            output_schema: {
+                let mut s = schema::output_schema_for::<find_tools::FindToolsOutput>();
+                if let Some(o) = s.as_object_mut() {
+                    o.insert("type".to_string(), serde_json::json!("object"));
+                }
+                s
+            },
             name: "find_tools".to_string(),
-            description: "Ranks the tool catalog against a task and returns a TypeScript declaration per tool, and never calls another tool. Every tool it returns is callable by name through tools/call, even when tools/list does not list it.".to_string(),
+            description: "Rank task, list domains via listDomains, or list a domain's tools. Never calls others.".to_string(),
             input_schema: schema::input_schema_for::<find_tools::FindToolsArgs>(),
-            summary: "Find the best-fitting tools for a task",
+            summary: "Rank or list domains/tools",
             kind: ToolKind::Read,
         },
         Tool {
@@ -968,7 +974,7 @@ mod catalog_tests {
         assert_eq!(super::registered_tools().len(), 63);
     }
 
-    const FIND_TOOLS_BUDGET_CHARS: usize = 1300;
+    const FIND_TOOLS_BUDGET_CHARS: usize = 1800;
     const JOINT_BUDGET_TOKENS: usize = 1000;
 
     #[test]

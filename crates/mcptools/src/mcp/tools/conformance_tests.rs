@@ -106,7 +106,7 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "linear_comment_create" => roundtrip::<mcptools_core::linear::Comment>(value),
         "linear_relation_add" => roundtrip::<mcptools_core::linear::RelationAddOutput>(value),
         "linear_relation_remove" => roundtrip::<mcptools_core::linear::RelationRemoveOutput>(value),
-        "find_tools" => roundtrip::<super::find_tools::FoundTools>(value),
+        "find_tools" => roundtrip::<super::find_tools::FindToolsOutput>(value),
         "execute" => roundtrip::<mcptools_core::sandbox::ExecuteOutput>(value),
         _ => panic!("unknown tool in roundtrip_by_tool: {tool}"),
     }
@@ -139,6 +139,26 @@ fn strip_with_visited(
     } else {
         schema
     };
+    if let Some(aos) = schema
+        .get("anyOf")
+        .and_then(|a| a.as_array())
+        .or_else(|| schema.get("oneOf").and_then(|a| a.as_array()))
+    {
+        for br in aos {
+            let b = resolve_schema(br, root);
+            if !is_nullish(b) {
+                let res = strip_with_visited(b, root, value, visited);
+                if let Some(r) = &ref_str {
+                    visited.remove(r);
+                }
+                return res;
+            }
+        }
+        if let Some(r) = &ref_str {
+            visited.remove(r);
+        }
+        return value.clone();
+    }
     let result = if let Some(map) = value.as_object() {
         let empty = serde_json::Map::new();
         let sobj = schema.as_object().unwrap_or(&empty);
@@ -171,6 +191,18 @@ fn strip_with_visited(
             .collect();
         serde_json::Value::Array(sarr)
     } else if let Some(any) = schema.get("anyOf").and_then(|a| a.as_array()) {
+        for br in any {
+            let b = resolve_schema(br, root);
+            if !is_nullish(b) {
+                let res = strip_with_visited(b, root, value, visited);
+                if let Some(r) = &ref_str {
+                    visited.remove(r);
+                }
+                return res;
+            }
+        }
+        value.clone()
+    } else if let Some(any) = schema.get("oneOf").and_then(|a| a.as_array()) {
         for br in any {
             let b = resolve_schema(br, root);
             if !is_nullish(b) {
@@ -315,6 +347,16 @@ fn loose_collect(
                 loose_collect(ao, root, &child, visited, paths);
             }
         }
+        if let Some(aos) = obj.get("oneOf").and_then(|a| a.as_array()) {
+            for (i, ao) in aos.iter().enumerate() {
+                let child = if path.is_empty() {
+                    format!("/oneOf/{}", i)
+                } else {
+                    format!("{}/oneOf/{}", path, i)
+                };
+                loose_collect(ao, root, &child, visited, paths);
+            }
+        }
         if let Some(defs) = obj
             .get("$defs")
             .or_else(|| obj.get("definitions"))
@@ -345,6 +387,7 @@ fn is_loose(s: &serde_json::Value) -> bool {
         !o.contains_key("type")
             && !o.contains_key("$ref")
             && !o.contains_key("anyOf")
+            && !o.contains_key("oneOf")
             && !o.contains_key("enum")
     } else {
         false
@@ -380,6 +423,19 @@ fn unreached_collect(
         return;
     }
     if let Some(aos) = node.get("anyOf").and_then(|a| a.as_array()) {
+        if value.is_null() {
+            return;
+        }
+        for ao in aos {
+            let b = resolve_schema(ao, root);
+            if !is_nullish(b) {
+                unreached_collect(b, root, value, path, visited, paths);
+                break;
+            }
+        }
+        return;
+    }
+    if let Some(aos) = node.get("oneOf").and_then(|a| a.as_array()) {
         if value.is_null() {
             return;
         }

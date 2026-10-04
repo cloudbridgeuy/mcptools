@@ -138,7 +138,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 
 | Tool | Description |
 |------|-------------|
-| `find_tools` | Ranks registered tools for a task description. Returns `none` score, `tools` list with a TypeScript `declaration` per tool, `backend` ("local" or "jev"), optional `fallback` ("unreachable" | "http_status" | "invalid_response" | "invalid_config"), and `usage`. |
+| `find_tools` | Ranks for a task, lists domains via listDomains, or lists declarations for a domain. Returns tagged kind (rank|domain|domains) plus appropriate fields. |
 
 `find_tools` is advisory: it never dispatches a tool, and a Jev outage never blocks the caller.
 
