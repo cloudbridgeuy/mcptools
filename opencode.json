@@ -1,12 +1,15 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "mcptools": {
-      "type": "local",
-      "command": ["mcptools", "mcp", "stdio", "--code-mode"],
-      "enabled": true,
-      "environment": {
-        "JEV_PROVIDER": "opencode"
+    "servers": {
+      "mcptools": {
+        "type": "local",
+        "command": ["mcptools", "mcp", "stdio", "--code-mode"],
+        "environment": {
+          "JEV_PROVIDER": "opencode",
+          "OPENCODE_API_KEY": "{env:OPENCODE_API_KEY}",
+          "LINEAR_API_KEY": "{env:LINEAR_API_KEY}"
+        }
       }
     }
   }
