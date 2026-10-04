@@ -237,6 +237,36 @@ is `Call each declared function as an async global only inside the code string p
 modes keep `Each declaration is the call signature: the input interface is
 the tools/call arguments object, the Promise type is the result.`
 
+### Nested execute (outer harness -> inner mcptools)
+
+When the outer host is itself Code Mode (opencode `default.execute`), the
+outer scope binds only `find_tools`, `execute`, and `call_tool`. Declared
+tool names are never bound there. Sequence two writes by nesting
+`tools.mcptools.execute` inside the outer `execute`, with each inner `code`
+as a plain string. This is the value of the outer `code` argument:
+
+```javascript
+const updateArgs = JSON.stringify({ id: issueId, state: doneState });
+const commentArgs = JSON.stringify({ issueId: issueId, body: commentBody });
+const updateCode = "await linear_issue_update(" + updateArgs + ")";
+const commentCode = "await linear_comment_create(" + commentArgs + ")";
+await tools.mcptools.execute({ code: updateCode, allowWrites: true });
+return await tools.mcptools.execute({ code: commentCode, allowWrites: true });
+```
+
+Escaping rules for the inner `code` string:
+
+- Build inner code with string concatenation plus `JSON.stringify`, never a
+  raw template literal inside a template literal.
+- `JSON.stringify` every argument object and every user text value before
+  interpolating it into the inner string.
+- Keep one sandbox call per `execute`; sequence with `await` between calls.
+
+Failures here are runtime-only: a broken inner string surfaces as a
+`ReferenceError` or a syntax error from inside `execute`, never as a type
+or lint error. When that happens, log the exact inner `code` string first;
+the break is in the string building, not in the tool binding.
+
 ## Testing with curl
 
 ```bash
