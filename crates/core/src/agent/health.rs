@@ -30,6 +30,7 @@ pub enum Health {
 pub struct GlobalFacts {
     pub exe: Option<PathBuf>,
     pub exe_version: Option<String>,
+    pub running_version: String,
     pub targets: Vec<AgentTarget>,
 }
 
@@ -177,7 +178,7 @@ pub fn classify_target(
 }
 
 pub fn classify_health(facts: &GlobalFacts) -> Vec<TargetHealth> {
-    let embedded = env!("CARGO_PKG_VERSION");
+    let embedded = facts.running_version.as_str();
     let mut out = Vec::new();
     for target in facts.targets.iter().flat_map(|item| expand_targets(*item)) {
         if facts.exe.is_none() {
@@ -327,6 +328,12 @@ mod tests {
     }
 
     #[test]
+    fn build_metadata_does_not_count_as_obsolete() {
+        let health = classify(AgentTarget::Codex, Some("1.11.0+324.g9e462f6"), true, true);
+        assert_eq!(health.health, Health::Live);
+    }
+
+    #[test]
     fn older_version_counts_as_obsolete() {
         let health = classify(AgentTarget::Codex, Some("1.10.0"), true, true);
         assert_eq!(health.health, Health::ObsoleteBinary);
@@ -360,6 +367,7 @@ mod tests {
         let facts = GlobalFacts {
             exe: None,
             exe_version: None,
+            running_version: String::new(),
             targets: vec![AgentTarget::All],
         };
         let health = classify_health(&facts);

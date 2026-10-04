@@ -399,6 +399,7 @@ mod tests {
         GlobalFacts {
             exe: None,
             exe_version: None,
+            running_version: String::new(),
             targets,
         }
     }

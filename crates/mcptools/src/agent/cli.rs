@@ -81,6 +81,7 @@ pub fn gather_global_facts(target: AgentTarget) -> Result<GlobalFacts> {
     Ok(GlobalFacts {
         exe,
         exe_version,
+        running_version: env!("CARGO_PKG_VERSION").to_string(),
         targets: expand_targets(target),
     })
 }
@@ -405,12 +406,14 @@ mod tests {
         let facts = GlobalFacts {
             exe: None,
             exe_version: None,
+            running_version: String::new(),
             targets: vec![AgentTarget::Codex],
         };
         assert_eq!(codex_exe(&facts), "mcptools");
         let facts = GlobalFacts {
             exe: Some(PathBuf::from("/tmp/t 5/bin/mcptools")),
             exe_version: None,
+            running_version: String::new(),
             targets: vec![AgentTarget::Codex],
         };
         assert_eq!(codex_exe(&facts), "/tmp/t 5/bin/mcptools");
@@ -422,6 +425,7 @@ mod tests {
         let facts = GlobalFacts {
             exe: Some(PathBuf::from("/tmp/t/bin/mcptools")),
             exe_version: None,
+            running_version: String::new(),
             targets: vec![AgentTarget::Codex],
         };
         assert!(!codex_exe(&facts).contains("secret-value"));
