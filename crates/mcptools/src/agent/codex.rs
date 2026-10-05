@@ -1,13 +1,13 @@
 use crate::prelude::*;
 
-pub fn add_argv(name: &str, command: &str, args: &[String]) -> Vec<String> {
-    let mut argv = vec![
-        "mcp".to_string(),
-        "add".to_string(),
-        name.to_string(),
-        "--".to_string(),
-        command.to_string(),
-    ];
+pub fn add_argv(name: &str, command: &str, args: &[String], env: &[String]) -> Vec<String> {
+    let mut argv = vec!["mcp".to_string(), "add".to_string(), name.to_string()];
+    for pair in env {
+        argv.push("--env".to_string());
+        argv.push(pair.clone());
+    }
+    argv.push("--".to_string());
+    argv.push(command.to_string());
     argv.extend(args.iter().cloned());
     argv
 }
@@ -16,15 +16,19 @@ pub fn remove_argv(name: &str) -> Vec<String> {
     vec!["mcp".to_string(), "remove".to_string(), name.to_string()]
 }
 
-pub fn describe_add(name: &str, command: &str, args: &[String]) -> String {
+pub fn describe_add(name: &str, command: &str, args: &[String], env: &[String]) -> String {
     let mut parts = vec![
         "codex".to_string(),
         "mcp".to_string(),
         "add".to_string(),
         name.to_string(),
-        "--".to_string(),
-        command.to_string(),
     ];
+    for pair in env {
+        parts.push("--env".to_string());
+        parts.push(pair.clone());
+    }
+    parts.push("--".to_string());
+    parts.push(command.to_string());
     parts.extend(args.iter().cloned());
     parts.join(" ")
 }
@@ -42,8 +46,8 @@ fn run_codex(argv: &[String]) -> Result<()> {
     }
 }
 
-pub fn codex_mcp_add(name: &str, command: &str, args: &[String]) -> Result<()> {
-    run_codex(&add_argv(name, command, args))
+pub fn codex_mcp_add(name: &str, command: &str, args: &[String], env: &[String]) -> Result<()> {
+    run_codex(&add_argv(name, command, args, env))
 }
 
 pub fn codex_mcp_remove(name: &str) -> Result<()> {
@@ -60,6 +64,7 @@ mod tests {
             "mcptools",
             "/tmp/t/bin/mcptools",
             &["mcp".to_string(), "stdio".to_string()],
+            &[],
         );
         assert_eq!(
             argv,
@@ -81,6 +86,7 @@ mod tests {
             "mcptools",
             "/tmp/t 5/bin/mcptools",
             &["mcp".to_string(), "stdio".to_string()],
+            &[],
         );
         assert!(argv.contains(&"/tmp/t 5/bin/mcptools".to_string()));
         assert_eq!(argv.iter().filter(|item| item.as_str() == "--").count(), 1);
@@ -93,6 +99,7 @@ mod tests {
             "mcptools",
             "mcptools",
             &["mcp".to_string(), "stdio".to_string()],
+            &[],
         );
         assert!(!argv.iter().any(|item| item.contains("secret-value")));
         std::env::remove_var("LINEAR_API_KEY");
@@ -109,7 +116,8 @@ mod tests {
             describe_add(
                 "mcptools",
                 "mcptools",
-                &["mcp".to_string(), "stdio".to_string()]
+                &["mcp".to_string(), "stdio".to_string()],
+                &[]
             ),
             "codex mcp add mcptools -- mcptools mcp stdio"
         );
@@ -122,9 +130,27 @@ mod tests {
             "mcptools",
             "mcptools",
             &["mcp".to_string(), "stdio".to_string()],
+            &[],
         );
         assert!(!text.contains("secret-value"));
         std::env::remove_var("LINEAR_API_KEY");
+    }
+
+    #[test]
+    fn describe_add_renders_code_mode_command() {
+        assert_eq!(
+            describe_add(
+                "mcptools",
+                "mcptools",
+                &[
+                    "mcp".to_string(),
+                    "stdio".to_string(),
+                    "--code-mode".to_string()
+                ],
+                &["JEV_PROVIDER=opencode".to_string()],
+            ),
+            "codex mcp add mcptools --env JEV_PROVIDER=opencode -- mcptools mcp stdio --code-mode"
+        );
     }
 
     #[test]

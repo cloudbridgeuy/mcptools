@@ -4,7 +4,9 @@ use mcptools_core::agent::health::{
     classify_health, expand_targets, find_on_path, parse_version_output, target_name, AgentTarget,
     GlobalFacts, TargetHealth,
 };
-use mcptools_core::agent::plan::{format_plan, plan_global, plan_uninstall, GlobalAction};
+use mcptools_core::agent::plan::{
+    format_plan, plan_global, plan_uninstall, GlobalAction, ServerMode,
+};
 use std::path::PathBuf;
 
 use super::codex::{codex_mcp_add, codex_mcp_remove, describe_add, describe_remove};
@@ -36,11 +38,29 @@ pub enum ShellTarget {
     All,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Mode {
+    Plain,
+    Code,
+}
+
+impl From<Mode> for ServerMode {
+    fn from(mode: Mode) -> Self {
+        match mode {
+            Mode::Plain => ServerMode::Plain,
+            Mode::Code => ServerMode::Code,
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 pub struct SetupOptions {
     /// Which agent to configure
     #[arg(long, value_enum, default_value = "all")]
     pub target: ShellTarget,
+    /// Plain stdio entries or code-mode (find_tools + execute) entries
+    #[arg(long, value_enum, default_value = "plain")]
+    pub mode: Mode,
     /// Print planned paths and changes, write nothing
     #[arg(long)]
     pub dry_run: bool,
@@ -58,6 +78,9 @@ pub struct UninstallOptions {
     /// Which agent to clean
     #[arg(long, value_enum, default_value = "all")]
     pub target: ShellTarget,
+    /// Which entry shape to remove
+    #[arg(long, value_enum, default_value = "plain")]
+    pub mode: Mode,
     /// Print planned removals, remove nothing
     #[arg(long)]
     pub dry_run: bool,
@@ -113,22 +136,42 @@ pub fn codex_exe(facts: &GlobalFacts) -> String {
         .unwrap_or_else(|| "mcptools".to_string())
 }
 
-fn codex_add_args() -> Vec<String> {
-    vec!["mcp".to_string(), "stdio".to_string()]
+fn codex_add_args(mode: ServerMode) -> Vec<String> {
+    match mode {
+        ServerMode::Code => vec![
+            "mcp".to_string(),
+            "stdio".to_string(),
+            "--code-mode".to_string(),
+        ],
+        ServerMode::Plain => vec!["mcp".to_string(), "stdio".to_string()],
+    }
+}
+
+fn codex_add_env(mode: ServerMode) -> Vec<String> {
+    match mode {
+        ServerMode::Code => vec!["JEV_PROVIDER=opencode".to_string()],
+        ServerMode::Plain => Vec::new(),
+    }
 }
 
 pub async fn run(app: App, _global: crate::Global) -> Result<()> {
     match app.command {
         Commands::Setup(opts) => {
             let target: AgentTarget = opts.target.into();
+            let mode = ServerMode::from(opts.mode);
             let facts = gather_global_facts(target)?;
-            let actions = plan_global(&facts, AgentAction::Setup);
+            let actions = plan_global(&facts, AgentAction::Setup, mode);
             if opts.dry_run {
                 let mut text = format_plan(&actions);
                 if codex_included(target) {
                     let exe = codex_exe(&facts);
                     text.push('\n');
-                    text.push_str(&describe_add("mcptools", &exe, &codex_add_args()));
+                    text.push_str(&describe_add(
+                        "mcptools",
+                        &exe,
+                        &codex_add_args(mode),
+                        &codex_add_env(mode),
+                    ));
                 }
                 crate::prelude::println!("{text}");
                 return Ok(());
@@ -147,7 +190,12 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
                 if find_on_path("codex").is_none() {
                     lines.push("codex: codex CLI not found, MCP entry skipped".to_string());
                 } else {
-                    match codex_mcp_add("mcptools", &exe, &codex_add_args()) {
+                    match codex_mcp_add(
+                        "mcptools",
+                        &exe,
+                        &codex_add_args(mode),
+                        &codex_add_env(mode),
+                    ) {
                         Ok(()) => {
                             lines.push("codex: registered mcptools via codex mcp add".to_string())
                         }
@@ -166,8 +214,9 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
         }
         Commands::Uninstall(opts) => {
             let target: AgentTarget = opts.target.into();
+            let mode = ServerMode::from(opts.mode);
             let facts = gather_global_facts(target)?;
-            let actions = plan_uninstall(&facts);
+            let actions = plan_uninstall(&facts, mode);
             if opts.dry_run {
                 let mut text = format_plan(&actions);
                 if codex_included(target) {
@@ -334,6 +383,39 @@ mod tests {
     }
 
     #[test]
+    fn setup_flag_accepts_mode() {
+        use clap::Parser;
+        let app =
+            App::try_parse_from(["agent", "setup", "--target", "codex", "--mode", "code"]).unwrap();
+        match app.command {
+            Commands::Setup(opts) => assert_eq!(opts.mode, Mode::Code),
+            _ => panic!("expected setup"),
+        }
+        let app = App::try_parse_from(["agent", "setup"]).unwrap();
+        match app.command {
+            Commands::Setup(opts) => assert_eq!(opts.mode, Mode::Plain),
+            _ => panic!("expected setup"),
+        }
+    }
+
+    #[test]
+    fn codex_code_args_carry_flag_and_provider() {
+        assert_eq!(
+            codex_add_args(ServerMode::Code),
+            vec![
+                "mcp".to_string(),
+                "stdio".to_string(),
+                "--code-mode".to_string()
+            ]
+        );
+        assert_eq!(
+            codex_add_env(ServerMode::Code),
+            vec!["JEV_PROVIDER=opencode".to_string()]
+        );
+        assert!(codex_add_env(ServerMode::Plain).is_empty());
+    }
+
+    #[test]
     fn setup_plan_writes_nothing() {
         use mcptools_core::agent::health::AgentAction;
         use mcptools_core::agent::plan::plan_global_with_home;
@@ -346,9 +428,14 @@ mod tests {
             .as_ref()
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_else(|| "mcptools".to_string());
-        let actions = plan_global_with_home(&facts, AgentAction::Setup, &home, &exe, &|path| {
-            std::fs::read_to_string(path).ok()
-        });
+        let actions = plan_global_with_home(
+            &facts,
+            AgentAction::Setup,
+            ServerMode::Plain,
+            &home,
+            &exe,
+            &|path| std::fs::read_to_string(path).ok(),
+        );
         let text = format_plan(&actions);
         assert!(text.contains("mcptools"));
         let after: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
@@ -364,8 +451,14 @@ mod tests {
         std::fs::create_dir(&home).unwrap();
         let home = home.to_string_lossy().to_string();
         let facts = gather_global_facts(AgentTarget::Claude).unwrap();
-        let actions =
-            plan_global_with_home(&facts, AgentAction::Setup, &home, "mcptools", &|_| None);
+        let actions = plan_global_with_home(
+            &facts,
+            AgentAction::Setup,
+            ServerMode::Plain,
+            &home,
+            "mcptools",
+            &|_| None,
+        );
         assert!(!actions.is_empty());
         let text = format_plan(&actions);
         assert!(text.contains("t 2"));

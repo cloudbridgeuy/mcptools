@@ -68,6 +68,13 @@ pub fn stage_skill(template: &str) -> String {
         "`--limit N` and `--next-page <token>`, using the token",
         "from the previous response.",
         "",
+        "## Code mode",
+        "",
+        "Code-mode servers expose `find_tools` and `execute`",
+        "instead of every tool. Call `find_tools` with the task,",
+        "read the returned declarations, then call the tool by",
+        "name. Same-domain follow-ups need no second `find_tools`.",
+        "",
         "## Examples",
         "",
         "Read (search tickets):",
@@ -82,17 +89,48 @@ pub fn stage_skill(template: &str) -> String {
     .join("\n")
 }
 
-pub fn desired_server_value(target: AgentTarget, exe: &str) -> Option<serde_json::Value> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerMode {
+    Plain,
+    Code,
+}
+
+pub fn desired_server_value(
+    target: AgentTarget,
+    exe: &str,
+    mode: ServerMode,
+) -> Option<serde_json::Value> {
     match target {
-        AgentTarget::Claude => Some(serde_json::json!({
-            "command": exe,
-            "args": ["mcp", "stdio"],
-        })),
-        AgentTarget::Opencode => Some(serde_json::json!({
-            "type": "local",
-            "command": [exe, "mcp", "stdio"],
-            "enabled": true,
-        })),
+        AgentTarget::Claude => Some(if mode == ServerMode::Code {
+            serde_json::json!({
+                "command": exe,
+                "args": ["mcp", "stdio", "--code-mode"],
+                "env": {"JEV_PROVIDER": "opencode"},
+            })
+        } else {
+            serde_json::json!({
+                "command": exe,
+                "args": ["mcp", "stdio"],
+            })
+        }),
+        AgentTarget::Opencode => Some(if mode == ServerMode::Code {
+            serde_json::json!({
+                "type": "local",
+                "command": [exe, "mcp", "stdio", "--code-mode"],
+                "enabled": true,
+                "environment": {
+                    "JEV_PROVIDER": "opencode",
+                    "OPENCODE_API_KEY": "{env:OPENCODE_API_KEY}",
+                    "LINEAR_API_KEY": "{env:LINEAR_API_KEY}",
+                },
+            })
+        } else {
+            serde_json::json!({
+                "type": "local",
+                "command": [exe, "mcp", "stdio"],
+                "enabled": true,
+            })
+        }),
         AgentTarget::Codex | AgentTarget::Pi | AgentTarget::All => None,
     }
 }
@@ -208,13 +246,14 @@ pub fn plan_skill(path: PathBuf, existing: Option<&str>, desired: &str) -> Globa
 
 pub fn plan_target(
     target: AgentTarget,
+    mode: ServerMode,
     home: &str,
     exe: &str,
     read: &dyn Fn(&Path) -> Option<String>,
 ) -> Vec<GlobalAction> {
     let mut actions = Vec::new();
     if let Some(path) = config_path(target, home) {
-        if let Some(desired) = desired_server_value(target, exe) {
+        if let Some(desired) = desired_server_value(target, exe, mode) {
             actions.push(plan_config(
                 target,
                 path.clone(),
@@ -233,6 +272,7 @@ pub fn plan_target(
 pub fn plan_global_with_home(
     facts: &GlobalFacts,
     action: AgentAction,
+    mode: ServerMode,
     home: &str,
     exe: &str,
     read: &dyn Fn(&Path) -> Option<String>,
@@ -244,18 +284,22 @@ pub fn plan_global_with_home(
         .targets
         .iter()
         .flat_map(|item| expand_targets(*item))
-        .flat_map(|target| plan_target(target, home, exe, read))
+        .flat_map(|target| plan_target(target, mode, home, exe, read))
         .collect()
 }
 
-pub fn plan_global(facts: &GlobalFacts, action: AgentAction) -> Vec<GlobalAction> {
+pub fn plan_global(
+    facts: &GlobalFacts,
+    action: AgentAction,
+    mode: ServerMode,
+) -> Vec<GlobalAction> {
     let home = std::env::var("HOME").unwrap_or_default();
     let exe = facts
         .exe
         .as_ref()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|| "mcptools".to_string());
-    plan_global_with_home(facts, action, &home, &exe, &|path| {
+    plan_global_with_home(facts, action, mode, &home, &exe, &|path| {
         std::fs::read_to_string(path).ok()
     })
 }
@@ -320,13 +364,14 @@ pub fn plan_uninstall_skill(path: PathBuf, existing: Option<&str>, desired: &str
 
 pub fn plan_uninstall_target(
     target: AgentTarget,
+    mode: ServerMode,
     home: &str,
     exe: &str,
     read: &dyn Fn(&Path) -> Option<String>,
 ) -> Vec<GlobalAction> {
     let mut actions = Vec::new();
     if let Some(path) = config_path(target, home) {
-        if let Some(desired) = desired_server_value(target, exe) {
+        if let Some(desired) = desired_server_value(target, exe, mode) {
             actions.push(plan_uninstall_config(
                 target,
                 path.clone(),
@@ -348,6 +393,7 @@ pub fn plan_uninstall_target(
 
 pub fn plan_uninstall_with_home(
     facts: &GlobalFacts,
+    mode: ServerMode,
     home: &str,
     exe: &str,
     read: &dyn Fn(&Path) -> Option<String>,
@@ -356,18 +402,18 @@ pub fn plan_uninstall_with_home(
         .targets
         .iter()
         .flat_map(|item| expand_targets(*item))
-        .flat_map(|target| plan_uninstall_target(target, home, exe, read))
+        .flat_map(|target| plan_uninstall_target(target, mode, home, exe, read))
         .collect()
 }
 
-pub fn plan_uninstall(facts: &GlobalFacts) -> Vec<GlobalAction> {
+pub fn plan_uninstall(facts: &GlobalFacts, mode: ServerMode) -> Vec<GlobalAction> {
     let home = std::env::var("HOME").unwrap_or_default();
     let exe = facts
         .exe
         .as_ref()
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|| "mcptools".to_string());
-    plan_uninstall_with_home(facts, &home, &exe, &|path| {
+    plan_uninstall_with_home(facts, mode, &home, &exe, &|path| {
         std::fs::read_to_string(path).ok()
     })
 }
@@ -493,12 +539,14 @@ mod tests {
 
     #[test]
     fn desired_values_match_documented_shapes() {
-        let claude = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let claude =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         assert_eq!(
             claude,
             serde_json::json!({"command": "mcptools", "args": ["mcp", "stdio"]})
         );
-        let opencode = desired_server_value(AgentTarget::Opencode, "mcptools").unwrap();
+        let opencode =
+            desired_server_value(AgentTarget::Opencode, "mcptools", ServerMode::Plain).unwrap();
         assert_eq!(
             opencode,
             serde_json::json!({
@@ -507,23 +555,106 @@ mod tests {
                 "enabled": true,
             })
         );
-        assert_eq!(desired_server_value(AgentTarget::Codex, "mcptools"), None);
-        assert_eq!(desired_server_value(AgentTarget::Pi, "mcptools"), None);
+        assert_eq!(
+            desired_server_value(AgentTarget::Codex, "mcptools", ServerMode::Plain),
+            None
+        );
+        assert_eq!(
+            desired_server_value(AgentTarget::Pi, "mcptools", ServerMode::Plain),
+            None
+        );
     }
 
     #[test]
     fn desired_values_hold_no_secrets() {
         std::env::set_var("LINEAR_API_KEY", "secret-value");
-        let claude = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
-        let opencode = desired_server_value(AgentTarget::Opencode, "mcptools").unwrap();
+        let claude =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
+        let opencode =
+            desired_server_value(AgentTarget::Opencode, "mcptools", ServerMode::Plain).unwrap();
         assert!(!claude.to_string().contains("secret-value"));
         assert!(!opencode.to_string().contains("secret-value"));
         std::env::remove_var("LINEAR_API_KEY");
     }
 
     #[test]
+    fn code_values_append_code_mode_flag() {
+        let claude =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Code).unwrap();
+        assert_eq!(
+            claude,
+            serde_json::json!({
+                "command": "mcptools",
+                "args": ["mcp", "stdio", "--code-mode"],
+                "env": {"JEV_PROVIDER": "opencode"},
+            })
+        );
+        let opencode =
+            desired_server_value(AgentTarget::Opencode, "mcptools", ServerMode::Code).unwrap();
+        assert_eq!(
+            opencode,
+            serde_json::json!({
+                "type": "local",
+                "command": ["mcptools", "mcp", "stdio", "--code-mode"],
+                "enabled": true,
+                "environment": {
+                    "JEV_PROVIDER": "opencode",
+                    "OPENCODE_API_KEY": "{env:OPENCODE_API_KEY}",
+                    "LINEAR_API_KEY": "{env:LINEAR_API_KEY}",
+                },
+            })
+        );
+        assert_eq!(
+            desired_server_value(AgentTarget::Codex, "mcptools", ServerMode::Code),
+            None
+        );
+        assert_eq!(
+            desired_server_value(AgentTarget::Pi, "mcptools", ServerMode::Code),
+            None
+        );
+    }
+
+    #[test]
+    fn code_values_hold_no_secrets() {
+        std::env::set_var("JEV_API_KEY", "secret-value");
+        std::env::set_var("OPENCODE_API_KEY", "secret-value");
+        std::env::set_var("LINEAR_API_KEY", "secret-value");
+        let claude =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Code).unwrap();
+        let opencode =
+            desired_server_value(AgentTarget::Opencode, "mcptools", ServerMode::Code).unwrap();
+        assert!(!claude.to_string().contains("secret-value"));
+        assert!(!opencode.to_string().contains("secret-value"));
+        std::env::remove_var("JEV_API_KEY");
+        std::env::remove_var("OPENCODE_API_KEY");
+        std::env::remove_var("LINEAR_API_KEY");
+    }
+
+    #[test]
+    fn code_setup_refuses_plain_entry() {
+        let plain =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
+        let code = desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Code).unwrap();
+        let existing = serde_json::json!({"mcpServers": {"mcptools": plain}}).to_string();
+        let action = plan_config(
+            AgentTarget::Claude,
+            PathBuf::from("/tmp/t2/.claude.json"),
+            Some(&existing),
+            &code,
+        );
+        assert!(matches!(action, GlobalAction::Refuse { .. }));
+    }
+
+    #[test]
+    fn stage_skill_stays_under_fifty_lines() {
+        assert!(stage_skill("claude").lines().count() < 50);
+        assert!(stage_skill("claude").contains("find_tools"));
+    }
+
+    #[test]
     fn absent_config_plans_create() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let action = plan_config(
             AgentTarget::Claude,
             PathBuf::from("/tmp/t2/.claude.json"),
@@ -542,7 +673,8 @@ mod tests {
 
     #[test]
     fn missing_owned_key_plans_merge_and_keeps_foreign_keys() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let existing = r#"{"mcpServers": {"playwright": {"command": "npx"}}}"#;
         let action = plan_config(
             AgentTarget::Claude,
@@ -562,7 +694,8 @@ mod tests {
 
     #[test]
     fn identical_owned_bytes_plan_skip() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let existing = serde_json::json!({"mcpServers": {"mcptools": desired}}).to_string();
         let action = plan_config(
             AgentTarget::Claude,
@@ -581,7 +714,8 @@ mod tests {
 
     #[test]
     fn different_owned_bytes_plan_refuse() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let existing = r#"{"mcpServers": {"mcptools": {"command": "other"}}}"#;
         let action = plan_config(
             AgentTarget::Claude,
@@ -597,7 +731,8 @@ mod tests {
 
     #[test]
     fn broken_json_plans_refuse() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let action = plan_config(
             AgentTarget::Claude,
             PathBuf::from("/tmp/t2/.claude.json"),
@@ -609,7 +744,8 @@ mod tests {
 
     #[test]
     fn opencode_merges_under_mcp_key() {
-        let desired = desired_server_value(AgentTarget::Opencode, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Opencode, "mcptools", ServerMode::Plain).unwrap();
         let existing = r#"{"mcp": {"context7": {"type": "local"}}}"#;
         let action = plan_config(
             AgentTarget::Opencode,
@@ -664,13 +800,25 @@ mod tests {
 
     #[test]
     fn claude_target_plans_config_plus_skill() {
-        let actions = plan_target(AgentTarget::Claude, "/tmp/t2", "mcptools", &read_none);
+        let actions = plan_target(
+            AgentTarget::Claude,
+            ServerMode::Plain,
+            "/tmp/t2",
+            "mcptools",
+            &read_none,
+        );
         assert_eq!(actions.len(), 2);
     }
 
     #[test]
     fn pi_target_plans_skill_only() {
-        let actions = plan_target(AgentTarget::Pi, "/tmp/t2", "mcptools", &read_none);
+        let actions = plan_target(
+            AgentTarget::Pi,
+            ServerMode::Plain,
+            "/tmp/t2",
+            "mcptools",
+            &read_none,
+        );
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             GlobalAction::Create { path, .. } => {
@@ -685,7 +833,13 @@ mod tests {
 
     #[test]
     fn codex_target_plans_skill_only() {
-        let actions = plan_target(AgentTarget::Codex, "/tmp/t2", "mcptools", &read_none);
+        let actions = plan_target(
+            AgentTarget::Codex,
+            ServerMode::Plain,
+            "/tmp/t2",
+            "mcptools",
+            &read_none,
+        );
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             GlobalAction::Create { path, .. } => {
@@ -701,6 +855,7 @@ mod tests {
             let planned = plan_global_with_home(
                 &facts_of(vec![AgentTarget::Claude]),
                 action,
+                ServerMode::Plain,
                 "/tmp/t2",
                 "mcptools",
                 &read_none,
@@ -714,6 +869,7 @@ mod tests {
         let planned = plan_global_with_home(
             &facts_of(vec![AgentTarget::All]),
             AgentAction::Setup,
+            ServerMode::Plain,
             "/tmp/t2",
             "mcptools",
             &read_none,
@@ -729,6 +885,7 @@ mod tests {
         let planned = plan_global_with_home(
             &facts_of(vec![AgentTarget::All]),
             AgentAction::Setup,
+            ServerMode::Plain,
             &home,
             "mcptools",
             &read_none,
@@ -797,7 +954,8 @@ mod tests {
 
     #[test]
     fn uninstall_missing_paths_plan_not_applicable() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let config = plan_uninstall_config(
             AgentTarget::Claude,
             PathBuf::from("/tmp/t4/.claude.json"),
@@ -827,7 +985,8 @@ mod tests {
 
     #[test]
     fn uninstall_matching_owned_config_plans_remove() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let existing = serde_json::json!({
             "mcpServers": {"playwright": {"command": "npx"}, "mcptools": desired}
         })
@@ -848,7 +1007,8 @@ mod tests {
 
     #[test]
     fn uninstall_edited_owned_config_plans_user_edited() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let existing = r#"{"mcpServers": {"mcptools": {"command": "other"}}}"#;
         let action = plan_uninstall_config(
             AgentTarget::Claude,
@@ -867,7 +1027,8 @@ mod tests {
 
     #[test]
     fn uninstall_config_without_owned_key_plans_not_applicable() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let existing = r#"{"mcpServers": {"playwright": {"command": "npx"}}}"#;
         let action = plan_uninstall_config(
             AgentTarget::Claude,
@@ -886,7 +1047,8 @@ mod tests {
 
     #[test]
     fn uninstall_broken_config_plans_user_edited() {
-        let desired = desired_server_value(AgentTarget::Claude, "mcptools").unwrap();
+        let desired =
+            desired_server_value(AgentTarget::Claude, "mcptools", ServerMode::Plain).unwrap();
         let action = plan_uninstall_config(
             AgentTarget::Claude,
             PathBuf::from("/tmp/t4/.claude.json"),
@@ -932,7 +1094,13 @@ mod tests {
 
     #[test]
     fn uninstall_target_covers_config_plus_skill() {
-        let actions = plan_uninstall_target(AgentTarget::Claude, "/tmp/t4", "mcptools", &read_none);
+        let actions = plan_uninstall_target(
+            AgentTarget::Claude,
+            ServerMode::Plain,
+            "/tmp/t4",
+            "mcptools",
+            &read_none,
+        );
         assert_eq!(actions.len(), 2);
         assert!(actions.iter().all(|action| matches!(
             action,
@@ -945,7 +1113,13 @@ mod tests {
 
     #[test]
     fn uninstall_pi_target_covers_skill_only() {
-        let actions = plan_uninstall_target(AgentTarget::Pi, "/tmp/t4", "mcptools", &read_none);
+        let actions = plan_uninstall_target(
+            AgentTarget::Pi,
+            ServerMode::Plain,
+            "/tmp/t4",
+            "mcptools",
+            &read_none,
+        );
         assert_eq!(actions.len(), 1);
     }
 
@@ -953,6 +1127,7 @@ mod tests {
     fn uninstall_all_expands_to_every_config_and_skill() {
         let planned = plan_uninstall_with_home(
             &facts_of(vec![AgentTarget::All]),
+            ServerMode::Plain,
             "/tmp/t4",
             "mcptools",
             &read_none,
@@ -964,6 +1139,7 @@ mod tests {
     fn uninstall_supports_spaces_in_home() {
         let planned = plan_uninstall_with_home(
             &facts_of(vec![AgentTarget::Claude]),
+            ServerMode::Plain,
             "/tmp/t 4",
             "mcptools",
             &read_none,

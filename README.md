@@ -96,6 +96,16 @@ Add to your Claude Code config file (`~/Library/Application Support/Claude/claud
 
 After adding the configuration, restart Claude Code for the changes to take effect. The mcptools will be available for use in your coding sessions.
 
+#### Code Mode (find_tools + execute, JEV-powered)
+
+Code mode shrinks `tools/list` to `find_tools`, `execute`, and `call_tool`. Agents discover tools per task with `find_tools`, then chain calls through `execute`. Ranking uses the Jev classifier when `JEV_PROVIDER` is set (e.g. `opencode` with `OPENCODE_API_KEY` in the process environment); otherwise a local ranker applies. Keys stay in the environment and are never written to config files.
+
+```bash
+mcptools agent setup --mode code --target all
+```
+
+This writes `mcp stdio --code-mode` plus `JEV_PROVIDER=opencode` for each client (opencode additionally inherits `OPENCODE_API_KEY` and `LINEAR_API_KEY` via `{env:...}` references). Verify with a read-only chain: `find_tools` for a task, then `execute` code calling the ranked tool.
+
 #### Generic MCP Client (stdio)
 
 Any MCP client can connect by spawning the process and communicating via JSON-RPC 2.0 over stdio:
