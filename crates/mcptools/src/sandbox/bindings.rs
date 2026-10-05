@@ -147,7 +147,7 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 62);
+        assert_eq!(all.len(), 63);
     }
 
     #[tokio::test(flavor = "multi_thread")]

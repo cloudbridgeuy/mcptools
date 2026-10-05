@@ -70,6 +70,7 @@ fn mcp_contract_pilot() {
             "bitbucket_pr_create",
             "bitbucket_pr_list",
             "bitbucket_pr_read",
+            "bitbucket_pr_update",
             "bitbucket_repo_branches",
             "bitbucket_repo_list",
             "bitbucket_workspace_list",

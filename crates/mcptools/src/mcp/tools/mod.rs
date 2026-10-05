@@ -357,6 +357,14 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Write,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCreateOutput>(),
+            name: "bitbucket_pr_update".to_string(),
+            description: "Update a Bitbucket pull request: title, description, destination branch, reviewers, and state. Provide at least one metadata field or one state action (approve, unapprove, decline, merge); at most one state action per call. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::BitbucketPRUpdateArgs>(),
+            summary: "Update a Bitbucket pull request: metadata, reviewers, state",
+            kind: ToolKind::Write,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::WorkspaceListOutput>(),
             name: "bitbucket_workspace_list".to_string(),
             description: "List Bitbucket workspaces accessible to the authenticated user. Returns workspace slugs and names. Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
@@ -810,6 +818,9 @@ pub async fn handle_tools_call(
         "bitbucket_pr_create" => {
             atlassian::handle_bitbucket_pr_create(params.arguments, global).await
         }
+        "bitbucket_pr_update" => {
+            atlassian::handle_bitbucket_pr_update(params.arguments, global).await
+        }
         "bitbucket_workspace_list" => {
             atlassian::handle_bitbucket_workspace_list(params.arguments, global).await
         }
@@ -987,7 +998,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_holds_sixty_three_tools() {
-        assert_eq!(super::registered_tools().len(), 64);
+        assert_eq!(super::registered_tools().len(), 65);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1064,7 +1075,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 64);
+        assert_eq!(names(serve_flags(false)).len(), 65);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1133,6 +1144,7 @@ mod catalog_tests {
             "jira_query_save",
             "jira_query_delete",
             "bitbucket_pr_create",
+            "bitbucket_pr_update",
             "linear_issue_create",
             "linear_issue_update",
             "linear_comment_create",
@@ -1146,7 +1158,7 @@ mod catalog_tests {
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 64);
+        assert_eq!(tools.len(), 65);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1164,7 +1176,7 @@ mod catalog_tests {
             .iter()
             .filter(|t| t["annotations"] == readonly)
             .count();
-        assert_eq!(read_count, 64 - mutable_names.len());
+        assert_eq!(read_count, 65 - mutable_names.len());
     }
 
     #[test]
@@ -1179,6 +1191,7 @@ mod catalog_tests {
             "jira_query_save",
             "jira_query_delete",
             "bitbucket_pr_create",
+            "bitbucket_pr_update",
             "linear_issue_create",
             "linear_issue_update",
             "linear_comment_create",
@@ -1244,7 +1257,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 64);
+        assert_eq!(union.len(), 65);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

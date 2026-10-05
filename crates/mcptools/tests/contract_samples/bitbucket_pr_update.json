@@ -1,0 +1,10 @@
+{
+  "author": "dev",
+  "description": "Updated description",
+  "destination_branch": "main",
+  "html_link": "https://bitbucket.org/ws/repo/pull-requests/2",
+  "id": 2,
+  "source_branch": "feat",
+  "state": "OPEN",
+  "title": "Updated title"
+}

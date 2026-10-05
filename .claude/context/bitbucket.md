@@ -83,6 +83,40 @@ mcptools atlassian bitbucket pr create --repo "myworkspace/myrepo" "Fix login bu
 - `--close-source-branch`: Close source branch after merge
 - `--json`: Output as JSON
 
+### Update Pull Request
+
+```bash
+# Update title and description
+mcptools atlassian bitbucket pr update --repo "myworkspace/myrepo" 123 --title "New title" -d "New description"
+
+# Retarget the destination branch
+mcptools atlassian bitbucket pr update --repo "myworkspace/myrepo" 123 --destination develop
+
+# Set reviewers (Bitbucket user UUIDs, repeatable) and close-source-branch (takes true/false)
+mcptools atlassian bitbucket pr update --repo "myworkspace/myrepo" 123 --reviewers "{uuid1}" --reviewers "{uuid2}" --close-source-branch true
+
+# State actions (at most one per call)
+mcptools atlassian bitbucket pr update --repo "myworkspace/myrepo" 123 --approve
+mcptools atlassian bitbucket pr update --repo "myworkspace/myrepo" 123 --decline
+mcptools atlassian bitbucket pr update --repo "myworkspace/myrepo" 123 --merge --merge-strategy squash --merge-message "Squash merge"
+
+# Output as JSON
+mcptools atlassian bitbucket pr update --repo "myworkspace/myrepo" 123 --title "New title" --json
+```
+
+**Update Options:**
+
+- `--repo` / `-r`: Repository in workspace/repo_slug format (required)
+- `--title`: New PR title
+- `--description` / `-d`: New PR description
+- `--destination`: New destination branch name
+- `--reviewers`: Reviewer user UUIDs (repeatable)
+- `--close-source-branch <true|false>`: Close source branch after merge
+- `--approve` / `--unapprove` / `--decline` / `--merge`: State action (at most one)
+- `--merge-strategy`: Merge strategy (`merge_commit`, `squash`, `fast_forward`)
+- `--merge-message`: Merge commit message
+- `--json`: Output as JSON
+
 ### List Workspaces
 
 ```bash
@@ -269,6 +303,34 @@ mcptools atlassian bitbucket repo deploy-key remove -w "myworkspace" -r "myrepo"
 - `closeSourceBranch` (optional): Close source branch after merge (default: false)
 
 **Note:** Unlike the CLI, MCP requires `sourceBranch` explicitly (no git detection).
+
+### bitbucket_pr_update
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bitbucket_pr_update",
+    "arguments": {
+      "repo": "myworkspace/myrepo",
+      "prNumber": 123,
+      "title": "New title"
+    }
+  }
+}
+```
+
+**Arguments:**
+- `repo` (required): Repository in workspace/repo_slug format
+- `prNumber` (required): Pull request number
+- `title` (optional): New PR title
+- `description` (optional): New PR description
+- `destinationBranch` (optional): New destination branch name
+- `reviewers` (optional): Reviewer user UUIDs
+- `closeSourceBranch` (optional): Close source branch after merge
+- `approve` / `unapprove` / `decline` / `merge` (optional): State action (at most one)
+- `mergeStrategy` (optional): Merge strategy (`merge_commit`, `squash`, `fast_forward`)
+- `mergeMessage` (optional): Merge commit message
 
 ### bitbucket_workspace_list
 

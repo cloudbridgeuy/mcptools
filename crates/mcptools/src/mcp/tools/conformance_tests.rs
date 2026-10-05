@@ -58,7 +58,7 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
             roundtrip::<mcptools_core::atlassian::bitbucket::PRListOutput>(value)
         }
         "bitbucket_pr_read" => roundtrip::<mcptools_core::atlassian::bitbucket::PROutput>(value),
-        "bitbucket_pr_create" => {
+        "bitbucket_pr_create" | "bitbucket_pr_update" => {
             roundtrip::<mcptools_core::atlassian::bitbucket::PRCreateOutput>(value)
         }
         "bitbucket_workspace_list" => {

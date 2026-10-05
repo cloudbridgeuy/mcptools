@@ -1,6 +1,7 @@
 pub mod create;
 pub mod list;
 pub mod read;
+pub mod update;
 
 use crate::prelude::{println, *};
 use color_eyre::owo_colors::OwoColorize;
@@ -20,6 +21,10 @@ pub enum Commands {
     /// Create a new pull request
     #[clap(name = "create")]
     Create(create::CreateOptions),
+
+    /// Update a pull request: metadata and state
+    #[clap(name = "update")]
+    Update(update::UpdateOptions),
 }
 
 /// Run PR commands
@@ -36,6 +41,7 @@ pub async fn run(
         Commands::List(options) => list::handler(options, config, main_global).await,
         Commands::Read(options) => read::handler(options, config, main_global).await,
         Commands::Create(options) => create::handler(options, config, main_global).await,
+        Commands::Update(options) => update::handler(options, config, main_global).await,
     }
 }
 

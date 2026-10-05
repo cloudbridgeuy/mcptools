@@ -106,6 +106,27 @@ pub(crate) struct BitbucketPRCreateArgs {
     close_source_branch: Option<bool>,
 }
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketPRUpdateArgs {
+    repo: String,
+    #[serde(rename = "prNumber")]
+    pr_number: u64,
+    title: Option<String>,
+    description: Option<String>,
+    #[serde(rename = "destinationBranch")]
+    destination_branch: Option<String>,
+    reviewers: Option<Vec<String>>,
+    #[serde(rename = "closeSourceBranch")]
+    close_source_branch: Option<bool>,
+    approve: Option<bool>,
+    unapprove: Option<bool>,
+    decline: Option<bool>,
+    merge: Option<bool>,
+    #[serde(rename = "mergeStrategy")]
+    merge_strategy: Option<String>,
+    #[serde(rename = "mergeMessage")]
+    merge_message: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct JiraAttachmentListArgs {
     #[serde(rename = "issueKey")]
     issue_key: String,
@@ -802,6 +823,62 @@ pub async fn handle_bitbucket_pr_create(
     })?;
 
     let pr_data = create_pr_data(params, &config, None)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+
+    super::to_dual_result(pr_data)
+}
+
+pub async fn handle_bitbucket_pr_update(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{update_pr_data, UpdatePRParams};
+
+    let args: BitbucketPRUpdateArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_pr_update: repo={}, prNumber={}",
+            args.repo, args.pr_number
+        );
+    }
+
+    let params = UpdatePRParams {
+        repo: args.repo,
+        pr_number: args.pr_number,
+        title: args.title,
+        description: args.description,
+        destination_branch: args.destination_branch,
+        reviewers: args.reviewers,
+        close_source_branch: args.close_source_branch,
+        approve: args.approve.unwrap_or(false),
+        unapprove: args.unapprove.unwrap_or(false),
+        decline: args.decline.unwrap_or(false),
+        merge: args.merge.unwrap_or(false),
+        merge_strategy: args.merge_strategy,
+        merge_message: args.merge_message,
+        base_url_override: None,
+    };
+
+    let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+
+    let pr_data = update_pr_data(params, &config, None)
         .await
         .map_err(|e| JsonRpcError {
             code: -32603,

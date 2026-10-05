@@ -164,6 +164,7 @@ mcptools linear chart GUZ-185 GUZ-186 GUZ-188
 mcptools atlassian bitbucket pr list --repo "workspace/repo"
 mcptools atlassian bitbucket pr read --repo "workspace/repo" 123
 mcptools atlassian bitbucket pr create --repo "workspace/repo" "Fix login bug" --source feature-branch
+mcptools atlassian bitbucket pr update --repo "workspace/repo" 123 --title "New title" --approve
 mcptools atlassian bitbucket workspace list
 mcptools atlassian bitbucket repo list -w "my-workspace" --all
 mcptools atlassian bitbucket repo branches "my-workspace/my-repo" --all

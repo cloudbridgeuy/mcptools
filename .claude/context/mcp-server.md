@@ -76,6 +76,8 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `confluence_search` | Search Confluence pages |
 | `bitbucket_pr_list` | List Bitbucket PRs |
 | `bitbucket_pr_read` | Read PR details/diff |
+| `bitbucket_pr_create` | Create a Bitbucket PR |
+| `bitbucket_pr_update` | Update a Bitbucket PR: metadata, reviewers, state |
 
 ### Linear
 
