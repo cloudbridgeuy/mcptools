@@ -104,6 +104,15 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `linear_label_list` | List labels in a team |
 | `linear_cycle_list` | List cycles in a team |
 
+### Lanes
+
+| Tool | Description |
+|------|-------------|
+| `lane_list` | Read native Git worktree state and registered ownership in an operator-permitted repository |
+| `lane_create` | Create one guarded Worktrunk lane from an existing local base branch; write tool |
+
+Both deny access unless the server operator sets `MCPTOOLS_LANE_REPOS`. `lane_create` needs `allowWrites: true` in `call_tool` and `execute`. Direct `tools/call` uses the existing write dispatch policy and the same repository guards. No lane removal, cleanup, merge, or push tools exist. See [Lanes](lanes.md).
+
 ### HackerNews
 
 | Tool | Description |
@@ -227,7 +236,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
-either discovery or code mode, hosts load all 67 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 69 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

@@ -135,6 +135,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lane_create_requires_write_permission_before_dispatch() {
+        let denied = call(json!({"name":"lane_create", "input":{}}))
+            .await
+            .unwrap();
+        assert_eq!(denied["isError"], true);
+        assert!(denied["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("allowWrites"));
+        assert_eq!(
+            call(json!({"name":"lane_create", "input":{}, "allowWrites":true}))
+                .await
+                .unwrap_err()
+                .code,
+            -32602
+        );
+    }
+
+    #[tokio::test]
     async fn meta_and_unknown_names_are_rejected() {
         for name in ["call_tool", "execute", "find_tools"] {
             assert_eq!(call(json!({"name": name})).await.unwrap_err().code, -32602);

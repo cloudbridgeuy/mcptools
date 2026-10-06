@@ -137,6 +137,30 @@ mod tests {
         "return [typeof jira_search, typeof jira_create, typeof images_generate, typeof execute]";
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn lane_create_requires_write_permission_and_list_is_bound() {
+        let global = global_with(&[]);
+        let probe = "return [typeof lane_list, typeof lane_create]";
+        let denied = call("execute", json!({"code":probe}), &global)
+            .await
+            .unwrap();
+        assert_eq!(
+            denied["structuredContent"]["result"],
+            json!(["function", "undefined"])
+        );
+        let allowed = call(
+            "execute",
+            json!({"code":probe, "allowWrites":true}),
+            &global,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            allowed["structuredContent"]["result"],
+            json!(["function", "function"])
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn find_tools_then_execute_reaches_unlisted_tool() {
         clear_offline_env();
         let global = global_with(&[]);

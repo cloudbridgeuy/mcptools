@@ -6,6 +6,7 @@ mod execute;
 pub mod find_tools;
 mod hn;
 mod images;
+mod lane;
 mod linear;
 mod md;
 mod pdf;
@@ -162,6 +163,22 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 
 pub fn registered_tools() -> Vec<Tool> {
     vec![
+        Tool {
+            name: "lane_list".into(),
+            description: "List Git worktrees of an exact repository root permitted by server environment MCPTOOLS_LANE_REPOS. Denied when unset or empty. Native Git avoids Worktrunk cache writes. Missing HEAD is null; unavailable status is unknown. Only unchanged registered identities are managed. No lane deletion, cleanup, merge, or push tools exist.".into(),
+            summary: "Inspect Git worktree lanes and registered ownership",
+            kind: ToolKind::Read,
+            input_schema: schema::input_schema_for::<mcptools_core::lane::ListArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::lane::ListOutput>(),
+        },
+        Tool {
+            name: "lane_create".into(),
+            description: "Create a new local branch and Worktrunk lane from an explicit existing local base branch in an exact root permitted by server environment MCPTOOLS_LANE_REPOS. Uses a fixed .worktrees root, isolated configuration, disabled hooks, and durable ownership records. Requires Worktrunk 0.77.0. Executable Git filters/drivers are rejected. Errors after creation starts explicitly warn of possible partial mutation; never roll back or retry automatically. No OS sandbox is claimed.".into(),
+            summary: "Allocate a Git worktree lane on a new branch",
+            kind: ToolKind::Write,
+            input_schema: schema::input_schema_for::<mcptools_core::lane::CreateArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::lane::CreateOutput>(),
+        },
         Tool {
             output_schema: schema::projected_output_schema_for::<mcptools_core::atlassian::jira::SearchOutput>(),
             name: "jira_search".to_string(),
@@ -802,6 +819,8 @@ pub async fn handle_tools_call(
         })?;
 
     match params.name.as_str() {
+        "lane_list" => lane::list(params.arguments).await,
+        "lane_create" => lane::create(params.arguments).await,
         "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
@@ -988,6 +1007,7 @@ mod catalog_tests {
                 "hn",
                 "images",
                 "jira",
+                "lane",
                 "linear",
                 "md",
                 "pdf",
@@ -1018,7 +1038,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 67);
+        assert_eq!(super::registered_tools().len(), 69);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1095,7 +1115,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 67);
+        assert_eq!(names(serve_flags(false)).len(), 69);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1155,6 +1175,7 @@ mod catalog_tests {
     #[test]
     fn full_table_matches_oracle_annotations() {
         let write = [
+            "lane_create",
             "jira_create",
             "jira_update",
             "jira_comment_add",
@@ -1179,7 +1200,7 @@ mod catalog_tests {
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 67);
+        assert_eq!(tools.len(), 69);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1197,12 +1218,13 @@ mod catalog_tests {
             .iter()
             .filter(|t| t["annotations"] == readonly)
             .count();
-        assert_eq!(read_count, 67 - mutable_names.len());
+        assert_eq!(read_count, 69 - mutable_names.len());
     }
 
     #[test]
     fn registered_names_match_oracle_sets() {
         let write: std::collections::BTreeSet<&str> = [
+            "lane_create",
             "jira_create",
             "jira_update",
             "jira_comment_add",
@@ -1231,6 +1253,7 @@ mod catalog_tests {
                 .into_iter()
                 .collect();
         let read: std::collections::BTreeSet<&str> = [
+            "lane_list",
             "jira_search",
             "confluence_search",
             "hn_read_item",
@@ -1280,7 +1303,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 67);
+        assert_eq!(union.len(), 69);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();
@@ -1471,7 +1494,12 @@ mod declaration_tests {
                 "{}: raw #/$defs leaked",
                 tool.name
             );
-            if text.contains("unknown") && tool.name != "execute" && tool.name != "call_tool" {
+            if [": unknown", "= unknown", " | unknown"]
+                .iter()
+                .any(|pattern| text.contains(pattern))
+                && tool.name != "execute"
+                && tool.name != "call_tool"
+            {
                 unknown_tools.insert(tool.name.clone());
             }
         }

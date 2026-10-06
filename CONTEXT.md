@@ -34,6 +34,14 @@ _Avoid_: finder mode, list gating
 Linear command reference: [Linear](.claude/context/linear.md).
 MCP server reference: [MCP Server](.claude/context/mcp-server.md).
 
+### Requirement: Lane authorization and ownership
+`lane_list` and `lane_create` require exact canonical repository roots in the server environment `MCPTOOLS_LANE_REPOS`; unset or empty denies both. Repository files and request arguments cannot authorize access. Listing uses native Git because Worktrunk JSON listing writes and prunes repository caches. Creation uses isolated Worktrunk 0.77.0 with hooks disabled. Ownership requires registered filesystem identities and the creation commit's ancestry; unfamiliar identities remain unmanaged. See [Lanes](.claude/context/lanes.md).
+
+#### Scenario: Partial creation
+- **WHEN** Worktrunk creation starts but creation verification or durable registration fails
+- **THEN** return `PARTIAL_MUTATION_POSSIBLE` with requested path and branch, plus actual identity when reported
+- **AND** do not delete, roll back, or retry creation
+
 ### Requirement: Discovery mode tool list
 The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **Discovery mode** on stdio and SSE. `MCPTOOLS_DISCOVERY` also accepts `y`, `yes`, `t`, `true`, `on`, `1`, `n`, `no`, `f`, `false`, `off`, and `0`, in upper or lower case. `tools/call` dispatches every registered tool by name in every mode.
 
@@ -43,7 +51,7 @@ The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **D
 
 #### Scenario: Default list
 - **WHEN** the server starts with neither mode flag nor either mode env var
-- **THEN** `tools/list` returns all 67 registered tools
+- **THEN** `tools/list` returns all 69 registered tools
 
 #### Scenario: Unlisted tool call
 - **WHEN** a client in **Discovery mode** sends `tools/call` with the name of a tool that `tools/list` did not return

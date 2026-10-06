@@ -100,6 +100,8 @@ fn mcp_contract_pilot() {
             "jira_search",
             "jira_sprint_list",
             "jira_update",
+            "lane_create",
+            "lane_list",
             "linear_auth_status",
             "linear_comment_create",
             "linear_comment_list",

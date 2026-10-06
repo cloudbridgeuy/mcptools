@@ -128,5 +128,58 @@ fn no_flag_no_env_lists_all_tools() {
     );
 
     let tools = responses[0]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 67);
+    assert_eq!(tools.len(), 69);
+}
+
+#[test]
+fn lanes_are_discoverable_and_deny_unconfigured_access_in_all_modes() {
+    for mode in [None, Some("--discovery"), Some("--code-mode")] {
+        let mut command = Command::new(binary());
+        command.args(["mcp", "stdio"]);
+        if let Some(mode) = mode {
+            command.arg(mode);
+        }
+        without_jev_env(&mut command);
+        command
+            .env_remove("MCPTOOLS_DISCOVERY")
+            .env_remove("MCPTOOLS_CODE_MODE")
+            .env_remove("MCPTOOLS_LANE_REPOS");
+        let responses = run(
+            &mut command,
+            &[
+                request(
+                    1,
+                    "tools/call",
+                    serde_json::json!({"name":"find_tools", "arguments":{"domain":"lane"}}),
+                ),
+                request(
+                    2,
+                    "tools/call",
+                    serde_json::json!({"name":"lane_list", "arguments":{"repo":"/"}}),
+                ),
+                request(
+                    3,
+                    "tools/call",
+                    serde_json::json!({"name":"call_tool", "arguments":{"name":"lane_create", "input":{"repo":"/", "branch":"topic", "base":"main"}}}),
+                ),
+            ],
+        );
+        let found = responses[0]["result"]["structuredContent"]["tools"]
+            .as_array()
+            .unwrap();
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0]["name"], "lane_list");
+        let declaration = found[0]["declaration"].as_str().unwrap();
+        assert!(declaration.contains("string | null"));
+        assert!(declaration.contains("\"unknown\""));
+        assert!(responses[1]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("MCPTOOLS_LANE_REPOS"));
+        assert_eq!(responses[2]["result"]["isError"], true);
+        assert!(responses[2]["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("allowWrites"));
+    }
 }

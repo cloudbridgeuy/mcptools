@@ -82,6 +82,7 @@ pub mod find_tools;
 pub mod hn;
 pub mod images;
 pub mod jev;
+pub mod lane;
 pub mod linear;
 pub mod llm_stream;
 pub mod md;
