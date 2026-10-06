@@ -357,6 +357,14 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Write,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentAddOutput>(),
+            name: "bitbucket_pr_comment_add".to_string(),
+            description: "Add a Markdown comment to a Bitbucket Cloud pull request. Requires repo (workspace/repo_slug), positive prNumber, and nonblank comment. Optional inline requires a nonblank file path and positive from (old version line) and/or to (new version line); omit inline for a general PR comment. Single-line anchors only, no ranges or replies. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentAddArgs>(),
+            summary: "Add a general or inline Bitbucket pull request comment",
+            kind: ToolKind::Write,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCreateOutput>(),
             name: "bitbucket_pr_update".to_string(),
             description: "Update a Bitbucket pull request: title, description, destination branch, reviewers, and state. Provide at least one metadata field or one state action (approve, unapprove, decline, merge); at most one state action per call. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
@@ -542,6 +550,14 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "List Linear issues with filters. Returns nodes with id, identifier, title, state, priority, project, parent, blocked-by plus pageInfo. sort picks the order (priority puts the most urgent first, updatedAt matches the default order); omit it for the default updatedAt order. Requires LINEAR_API_KEY environment variable. Optional fields (array of dotted paths, e.g. [\"nodes.identifier\",\"nodes.title\",\"pageInfo\"]) returns only the named fields; omit it for the full output. Keep pageInfo if you page further.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueListArgs>(),
             summary: "List Linear issues by team, state, assignee, project, label, or cycle",
+            kind: ToolKind::Read,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::linear::IssueGraphOutput>(),
+            name: "linear_issue_graph".to_string(),
+            description: "Get a bounded structured Linear issue dependency closure from ids. Traverses children, parents, incoming blockers and outgoing blocks targets using the CLI chart traversal; no browser, HTML or local chart server. Returns canonical roots, nodes and relations, existing chart classes, frontier/inprogress lists, missing and unresolved blockers, and explicit issue/page limits, pending selectors and incomplete connections. Canceled nodes are retained with class null; stats exclude them. Frontier excludes nodes with incomplete blocked_by paging; their class/stats remain provisional chart classifications. Missing issues are reported; API failures remain errors. Default limit 100 (max 300), maxPages 2 (max 10). Requires LINEAR_API_KEY.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::IssueGraphArgs>(),
+            summary: "Get a bounded Linear dependency graph and ready-to-start frontier",
             kind: ToolKind::Read,
         },
         Tool {
@@ -821,6 +837,9 @@ pub async fn handle_tools_call(
         "bitbucket_pr_update" => {
             atlassian::handle_bitbucket_pr_update(params.arguments, global).await
         }
+        "bitbucket_pr_comment_add" => {
+            atlassian::handle_bitbucket_pr_comment_add(params.arguments, global).await
+        }
         "bitbucket_workspace_list" => {
             atlassian::handle_bitbucket_workspace_list(params.arguments, global).await
         }
@@ -861,6 +880,7 @@ pub async fn handle_tools_call(
         "linear_auth_status" => linear::handle_linear_auth_status(params.arguments, global).await,
         "linear_issue_get" => linear::handle_linear_issue_get(params.arguments, global).await,
         "linear_issue_list" => linear::handle_linear_issue_list(params.arguments, global).await,
+        "linear_issue_graph" => linear::handle_linear_issue_graph(params.arguments, global).await,
         "linear_comment_list" => linear::handle_linear_comment_list(params.arguments, global).await,
         "linear_relation_list" => {
             linear::handle_linear_relation_list(params.arguments, global).await
@@ -997,8 +1017,8 @@ mod catalog_tests {
             .any(|t| t.get("name") == Some(&serde_json::json!("find_tools"))));
     }
     #[test]
-    fn registry_holds_sixty_three_tools() {
-        assert_eq!(super::registered_tools().len(), 65);
+    fn registry_tool_count_matches_expected() {
+        assert_eq!(super::registered_tools().len(), 67);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1075,7 +1095,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 65);
+        assert_eq!(names(serve_flags(false)).len(), 67);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1144,6 +1164,7 @@ mod catalog_tests {
             "jira_query_save",
             "jira_query_delete",
             "bitbucket_pr_create",
+            "bitbucket_pr_comment_add",
             "bitbucket_pr_update",
             "linear_issue_create",
             "linear_issue_update",
@@ -1158,7 +1179,7 @@ mod catalog_tests {
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 65);
+        assert_eq!(tools.len(), 67);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1176,7 +1197,7 @@ mod catalog_tests {
             .iter()
             .filter(|t| t["annotations"] == readonly)
             .count();
-        assert_eq!(read_count, 65 - mutable_names.len());
+        assert_eq!(read_count, 67 - mutable_names.len());
     }
 
     #[test]
@@ -1191,6 +1212,7 @@ mod catalog_tests {
             "jira_query_save",
             "jira_query_delete",
             "bitbucket_pr_create",
+            "bitbucket_pr_comment_add",
             "bitbucket_pr_update",
             "linear_issue_create",
             "linear_issue_update",
@@ -1241,6 +1263,7 @@ mod catalog_tests {
             "linear_auth_status",
             "linear_issue_get",
             "linear_issue_list",
+            "linear_issue_graph",
             "linear_comment_list",
             "linear_relation_list",
             "linear_team_list",
@@ -1257,7 +1280,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 65);
+        assert_eq!(union.len(), 67);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

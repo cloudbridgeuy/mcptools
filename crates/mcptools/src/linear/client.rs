@@ -37,7 +37,7 @@ pub async fn execute(
     execute_with_url(client, LINEAR_API_URL, query, variables).await
 }
 
-async fn execute_with_url(
+pub(super) async fn execute_with_url(
     client: &reqwest::Client,
     url: &str,
     query: &str,

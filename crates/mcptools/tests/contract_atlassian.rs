@@ -65,7 +65,7 @@ fn mcp_contract_atlassian() {
             })
         })
         .collect();
-    assert_eq!(atlassian.len(), 24, "unexpected atlassian tools");
+    assert_eq!(atlassian.len(), 25, "unexpected atlassian tools");
     for tool in &atlassian {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();
         let schema = tool

@@ -132,6 +132,31 @@ pub async fn handle_linear_issue_list(
     )
 }
 
+pub async fn handle_linear_issue_graph(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::IssueGraphArgs = parse_args(arguments)?;
+    let request =
+        crate::linear::chart::IssueGraphRequest::new(&args.ids, args.limit, args.max_pages)
+            .map_err(|error| JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {error}"),
+                data: None,
+            })?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_issue_graph: limit={}, maxPages={}",
+            args.limit, args.max_pages
+        );
+    }
+    let client = linear_client()?;
+    let output = crate::linear::chart::issue_graph_data(&client, request)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_comment_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -510,4 +535,71 @@ pub async fn handle_linear_cycle_list(
         .await
         .map_err(exec)?;
     super::to_dual_result(CycleListOutput::from(data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn graph_rejects_invalid_inputs_before_configuration_or_http() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for input in [
+            serde_json::json!({"ids": []}),
+            serde_json::json!({"ids": [" "]}),
+            serde_json::json!({"ids": ["GUZ-1"], "limit": 301}),
+            serde_json::json!({"ids": ["GUZ-1"], "maxPages": 0}),
+            serde_json::json!({"ids": ["GUZ-1"], "limit": -1}),
+            serde_json::json!({"ids": ["GUZ-1"], "maxPages": null}),
+            serde_json::json!({"ids": ["GUZ-1"], "unexpected": true}),
+        ] {
+            let error = handle_linear_issue_graph(Some(input), &global)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, -32602);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn graph_is_available_in_full_discovery_and_code_mode_without_write_permission() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let flags = super::super::ServeFlags {
+            discovery: false,
+            code_mode: true,
+        };
+        for tool in [
+            serde_json::json!({"name": "linear_issue_graph", "arguments": {"ids": []}}),
+            serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_issue_graph", "input": {"ids": []}}}),
+        ] {
+            let error = super::super::handle_tools_call(Some(tool), &global, flags)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, -32602);
+            assert!(error.message.starts_with("Invalid arguments:"));
+        }
+        let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": "return await linear_issue_graph({ids: []})"}})), &global, flags).await.unwrap();
+        assert!(result["structuredContent"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid arguments:"));
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_issue_graph")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Read);
+        let declaration = super::super::declaration(&tool);
+        assert!(declaration.contains("declare function linear_issue_graph(input: LinearIssueGraphInput): Promise<LinearIssueGraphOutput>"));
+        assert!(declaration.contains("maxPages?: number"));
+        assert!(declaration.contains("ids: string[]"));
+    }
 }

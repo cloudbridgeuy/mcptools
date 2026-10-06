@@ -332,6 +332,36 @@ mcptools atlassian bitbucket repo deploy-key remove -w "myworkspace" -r "myrepo"
 - `mergeStrategy` (optional): Merge strategy (`merge_commit`, `squash`, `fast_forward`)
 - `mergeMessage` (optional): Merge commit message
 
+### bitbucket_pr_comment_add
+
+Create a general PR comment, or a single-line inline comment. MCP only; no new CLI command.
+
+```json
+{
+  "name": "bitbucket_pr_comment_add",
+  "arguments": {
+    "repo": "myworkspace/myrepo",
+    "prNumber": 123,
+    "comment": "Please check this line.",
+    "inline": {"path": "src/main.rs", "to": 9}
+  }
+}
+```
+
+**Arguments:**
+- `repo` (required): Two nonempty workspace/repo_slug identifiers. Letters, digits, `-`, `_`, `.`, and UUID braces are accepted; URL syntax and the segments `.` and `..` are rejected.
+- `prNumber` (required): Positive integer.
+- `comment` (required): Nonblank Markdown text. Text is sent unchanged as `content.raw`.
+- `inline` (optional): Nonblank `path` without control characters, plus positive integer `from` (old file line) and/or `to` (new file line). Omit absent line fields; omit the entire object for a general comment. Unknown fields are rejected.
+
+**Result:** `id`, `author`, `content`, `created_on`, `updated_on`, and `inline` (null for a general comment; otherwise `path`, `from`, and `to`). The result preserves both old and new line coordinates.
+
+**Gating:** Write tool, not spend. Discovery `call_tool` and Code Mode `execute` require `allowWrites: true`; `allowSpend` does not permit this tool. Full-mode direct calls use the existing write-tool annotations and dispatch.
+
+**REST contract:** `POST /2.0/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/comments`, JSON `content.raw` and optional `inline`; HTTP 201 returns the created comment. Official [REST reference](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-pullrequests/#api-repositories-workspace-repo-slug-pullrequests-pull-request-id-comments-post) and [OpenAPI schema](https://dac-static.atlassian.com/cloud/bitbucket/swagger.v3.json) define `from` as the old-version anchor, `to` as the new-version anchor, both minimum 1. These are file line numbers, not diff offsets or a start/end range. Multi-line ranges (`start_from`, `start_to`), path-only anchors, and replies are not exposed.
+
+HTTP failures retain status and response body. Invalid input fails before authentication or HTTP. No automatic retry: a failed or unparseable response can follow a successful remote write; check PR comments before retrying.
+
 ### bitbucket_workspace_list
 
 ```json

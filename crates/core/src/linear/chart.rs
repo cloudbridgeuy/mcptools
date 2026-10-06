@@ -9,7 +9,10 @@ pub struct ChartNode {
     pub blocked_by: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum ChartClass {
     Complete,
     InProgress,
@@ -50,7 +53,9 @@ const SUBGRAPH_HUES: [&str; 8] = [
 
 const CLUSTER_WRAP: usize = 22;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ChartStats {
     pub total: usize,
     pub complete: usize,

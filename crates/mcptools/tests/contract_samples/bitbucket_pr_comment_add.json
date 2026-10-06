@@ -1,0 +1,8 @@
+{
+  "id": 42,
+  "author": "Test User",
+  "content": "Please check this line.",
+  "created_on": "2026-10-06T10:00:00+00:00",
+  "updated_on": "2026-10-06T10:00:00+00:00",
+  "inline": {"path": "src/main.rs", "from": 7, "to": 9}
+}

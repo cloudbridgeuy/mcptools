@@ -10,6 +10,37 @@ pub struct IssueGetArgs {
     pub id: String,
 }
 
+fn graph_default_limit() -> usize {
+    100
+}
+
+fn graph_default_pages() -> usize {
+    2
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase")]
+pub struct IssueGraphArgs {
+    #[schemars(
+        length(min = 1, max = 300),
+        description = "Root issue ids or identifiers; trimmed, sorted and deduplicated. Each id is at most 128 bytes."
+    )]
+    pub ids: Vec<String>,
+    #[serde(default = "graph_default_limit")]
+    #[schemars(
+        range(min = 1, max = 300),
+        description = "Maximum issue selectors fetched, including missing issues and aliases; must cover all unique roots. Default 100."
+    )]
+    pub limit: usize,
+    #[serde(default = "graph_default_pages")]
+    #[schemars(
+        range(min = 1, max = 10),
+        description = "Maximum query pages per issue, paging children and both relation directions independently. Default 2. Each page reads up to 50 children and 25 relations per direction."
+    )]
+    pub max_pages: usize,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename_all = "camelCase")]

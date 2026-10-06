@@ -1,0 +1,21 @@
+{
+  "roots": [{"selector": "GUZ-1", "identifier": "GUZ-1"}],
+  "nodes": [
+    {"identifier": "GUZ-1", "title": "Build graph", "url": "https://linear.app/acme/issue/GUZ-1", "state_type": "unstarted", "parent": "GUZ-2", "children": ["GUZ-3", "GUZ-5"], "blocked_by": ["GUZ-99"], "blocks": ["GUZ-4"], "class": "fog"},
+    {"identifier": "GUZ-2", "title": "Parent", "url": "https://linear.app/acme/issue/GUZ-2", "state_type": "started", "parent": null, "children": ["GUZ-1"], "blocked_by": [], "blocks": [], "class": "inprogress"},
+    {"identifier": "GUZ-3", "title": "Ready", "url": "https://linear.app/acme/issue/GUZ-3", "state_type": "backlog", "parent": "GUZ-1", "children": [], "blocked_by": [], "blocks": [], "class": "frontier"}
+  ],
+  "frontier": ["GUZ-3"],
+  "inprogress": ["GUZ-2"],
+  "stats": {"total": 3, "complete": 0, "inprogress": 1, "frontier": 1, "fog": 1},
+  "missing_blockers": [{"issue": "GUZ-1", "blocker": "GUZ-99"}],
+  "unresolved_blockers": [{"issue": "GUZ-1", "blocker": "GUZ-99"}],
+  "limits": {"issues": 4, "pages_per_issue": 2, "children_per_page": 50, "relations_per_page": 25},
+  "fetched_count": 3,
+  "attempted_count": 4,
+  "cap_hit": true,
+  "truncated": true,
+  "pending": ["GUZ-4", "GUZ-99"],
+  "missing_issues": ["GUZ-5"],
+  "incomplete_connections": [{"identifier": "GUZ-1", "connection": "blocked_by", "reason": "page_limit", "cursor": "cur1"}]
+}

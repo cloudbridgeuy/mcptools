@@ -8,13 +8,20 @@ use axum::{
     routing::{get, post},
     Router,
 };
+pub use mcptools_core::linear::{closure_nodes, FetchedIssue};
 use mcptools_core::linear::{ChartClass, ChartNode};
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use mcptools_core::linear::{
+    ConnectionStop, GraphConnection, IncompleteConnection, IssueClosure, IssueGraphLimits,
+    IssueGraphOutput,
+};
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 pub const ISSUE_CAP: usize = 300;
 
 const CHART_ISSUE_QUERY: &str = "query ($id: String!, $after: String) { issue(id: $id) { id identifier title url state { name type } parent { identifier } relations(first: 25) { nodes { type relatedIssue { identifier } } } inverseRelations(first: 25) { nodes { type issue { identifier } } } children(first: 50, after: $after) { nodes { identifier } pageInfo { hasNextPage endCursor } } } }";
+
+const GRAPH_ISSUE_QUERY: &str = "query ($id: String!, $after: String, $blocksAfter: String, $blockedByAfter: String, $children: Boolean!, $blocks: Boolean!, $blockedBy: Boolean!) { issue(id: $id) { identifier title url state { type } parent { identifier } relations(first: 25, after: $blocksAfter) @include(if: $blocks) { nodes { type relatedIssue { identifier } } pageInfo { hasNextPage endCursor } } inverseRelations(first: 25, after: $blockedByAfter) @include(if: $blockedBy) { nodes { type issue { identifier } } pageInfo { hasNextPage endCursor } } children(first: 50, after: $after) @include(if: $children) { nodes { identifier } pageInfo { hasNextPage endCursor } } } }";
 
 #[derive(Debug)]
 pub struct ChartClosure {
@@ -76,19 +83,127 @@ pub async fn chart_data(
     if limit == 0 {
         return Err(eyre!("Linear chart limit must be at least 1"));
     }
-    let mut fetched: BTreeMap<String, FetchedIssue> = BTreeMap::new();
+    let closure = fetch_closure(&seeds, limit, None, |selector| async move {
+        let (issue, incomplete) = fetch_issue_with(&selector, None, |query, variables| {
+            execute(client, query, variables)
+        })
+        .await?;
+        let issue = issue.ok_or_else(|| eyre!("Linear issue not found: {}", selector))?;
+        Ok((Some(issue), incomplete))
+    })
+    .await?;
+    let (nodes, missing_blockers) = closure_nodes(&closure.fetched, exclude_completed);
+    Ok(ChartClosure {
+        nodes,
+        cap_hit: !closure.pending.is_empty(),
+        missing_blockers,
+    })
+}
+
+pub async fn issue_graph_data(
+    client: &reqwest::Client,
+    request: IssueGraphRequest,
+) -> Result<IssueGraphOutput> {
+    let IssueGraphRequest {
+        seeds,
+        limit,
+        max_pages,
+    } = request;
+    let closure = fetch_closure(&seeds, limit, Some(limit), |selector| async move {
+        fetch_issue_with(&selector, Some(max_pages), |query, variables| {
+            execute(client, query, variables)
+        })
+        .await
+    })
+    .await?;
+    Ok(mcptools_core::linear::issue_graph_output(
+        &seeds,
+        closure,
+        IssueGraphLimits {
+            issues: limit,
+            pages_per_issue: max_pages,
+            children_per_page: 50,
+            relations_per_page: 25,
+        },
+    ))
+}
+
+#[derive(Debug)]
+pub struct IssueGraphRequest {
+    seeds: Vec<String>,
+    limit: usize,
+    max_pages: usize,
+}
+
+impl IssueGraphRequest {
+    pub fn new(ids: &[String], limit: usize, max_pages: usize) -> Result<Self> {
+        if !(1..=ISSUE_CAP).contains(&limit) {
+            return Err(eyre!(
+                "Linear issue graph limit must be between 1 and {}",
+                ISSUE_CAP
+            ));
+        }
+        if !(1..=10).contains(&max_pages) {
+            return Err(eyre!(
+                "Linear issue graph maxPages must be between 1 and 10"
+            ));
+        }
+        if ids.len() > ISSUE_CAP {
+            return Err(eyre!(
+                "Linear issue graph accepts at most {} ids",
+                ISSUE_CAP
+            ));
+        }
+        let mut seeds = validate_issue_ids(ids)?;
+        if seeds.iter().any(|id| id.len() > 128) {
+            return Err(eyre!("Linear issue graph ids must be at most 128 bytes"));
+        }
+        seeds.sort();
+        seeds.dedup();
+        if seeds.len() > limit {
+            return Err(eyre!(
+                "Linear issue graph limit must cover all unique root ids"
+            ));
+        }
+        Ok(Self {
+            seeds,
+            limit,
+            max_pages,
+        })
+    }
+}
+
+async fn fetch_closure<F, Fut>(
+    seeds: &[String],
+    limit: usize,
+    max_fetches: Option<usize>,
+    mut fetch: F,
+) -> Result<IssueClosure>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<(Option<FetchedIssue>, Vec<IncompleteConnection>)>>,
+{
+    let mut closure = IssueClosure::default();
     let mut queue: VecDeque<String> = seeds.iter().cloned().collect();
     let mut seen: HashSet<String> = seeds.iter().cloned().collect();
-    let mut cap_hit = false;
     while let Some(selector) = queue.pop_front() {
-        if fetched.contains_key(&selector) {
+        if closure.fetched.contains_key(&selector) || closure.resolved.contains_key(&selector) {
             continue;
         }
-        if fetched.len() >= limit {
-            cap_hit = true;
+        if closure.fetched.len() >= limit || max_fetches.is_some_and(|cap| closure.attempted >= cap)
+        {
+            queue.push_front(selector);
             break;
         }
-        let issue = fetch_issue(client, &selector).await?;
+        closure.attempted += 1;
+        let (issue, incomplete) = fetch(selector.clone()).await?;
+        let Some(issue) = issue else {
+            closure.missing.push(selector);
+            continue;
+        };
+        closure.resolved.insert(selector, issue.identifier.clone());
+        seen.insert(issue.identifier.clone());
+        closure.incomplete_connections.extend(incomplete);
         for id in issue
             .children
             .iter()
@@ -104,64 +219,20 @@ pub async fn chart_data(
                 queue.push_back(parent);
             }
         }
-        fetched.insert(issue.identifier.clone(), issue);
+        closure.fetched.insert(issue.identifier.clone(), issue);
     }
-    let (nodes, missing_blockers) = closure_nodes(&fetched, exclude_completed);
-    Ok(ChartClosure {
-        nodes,
-        cap_hit,
-        missing_blockers,
-    })
-}
-
-pub fn closure_nodes(
-    fetched: &BTreeMap<String, FetchedIssue>,
-    exclude_completed: bool,
-) -> (Vec<ChartNode>, Vec<(String, String)>) {
-    let mut excluded: HashSet<&str> = HashSet::new();
-    if exclude_completed {
-        for issue in fetched.values() {
-            if issue.state_type == "completed" {
-                excluded.insert(issue.identifier.as_str());
-            }
-        }
-    }
-    let mut missing_blockers = Vec::new();
-    for issue in fetched.values() {
-        if excluded.contains(issue.identifier.as_str()) {
-            continue;
-        }
-        for blocker in &issue.blocked_by {
-            if excluded.contains(blocker.as_str()) {
-                continue;
-            }
-            match fetched.get(blocker) {
-                None => missing_blockers.push((issue.identifier.clone(), blocker.clone())),
-                Some(other) if excluded.contains(other.identifier.as_str()) => continue,
-                _ => {}
-            }
-        }
-    }
-    let nodes = fetched
-        .values()
-        .filter(|issue| !excluded.contains(issue.identifier.as_str()))
-        .map(|issue| ChartNode {
-            identifier: issue.identifier.clone(),
-            title: issue.title.clone(),
-            state_type: issue.state_type.clone(),
-            parent: issue
-                .parent
-                .clone()
-                .filter(|p| !excluded.contains(p.as_str())),
-            blocked_by: issue
-                .blocked_by
-                .iter()
-                .filter(|blocker| !excluded.contains(blocker.as_str()))
-                .cloned()
-                .collect(),
-        })
+    closure.pending = queue
+        .into_iter()
+        .filter(|id| !closure.fetched.contains_key(id) && !closure.resolved.contains_key(id))
         .collect();
-    (nodes, missing_blockers)
+    closure.pending.sort();
+    closure.pending.dedup();
+    closure.missing.sort();
+    closure.missing.dedup();
+    closure
+        .incomplete_connections
+        .sort_by(|a, b| a.identifier.cmp(&b.identifier));
+    Ok(closure)
 }
 
 pub fn slugify(input: &str) -> String {
@@ -1261,94 +1332,198 @@ loadChart();
     )
 }
 
-pub struct FetchedIssue {
-    pub identifier: String,
-    pub title: String,
-    pub url: String,
-    pub state_type: String,
-    pub parent: Option<String>,
-    pub blocked_by: Vec<String>,
-    pub blocks: Vec<String>,
-    pub children: Vec<String>,
-}
-
-async fn fetch_issue(client: &reqwest::Client, selector: &str) -> Result<FetchedIssue> {
+async fn fetch_issue_with<F, Fut>(
+    selector: &str,
+    max_pages: Option<usize>,
+    mut query: F,
+) -> Result<(Option<FetchedIssue>, Vec<IncompleteConnection>)>
+where
+    F: FnMut(&'static str, serde_json::Value) -> Fut,
+    Fut: std::future::Future<Output = Result<serde_json::Value>>,
+{
     let mut root: Option<RawIssue> = None;
-    let mut children: Vec<String> = Vec::new();
-    let mut after: Option<String> = None;
-    let mut last_cursor: Option<String> = None;
+    let mut links: [Vec<String>; 3] = Default::default();
+    let mut cursors: [Option<String>; 3] = Default::default();
+    let mut seen_cursors: [HashSet<String>; 3] = Default::default();
+    let mut active = [true; 3];
+    let mut incomplete = Vec::new();
+    let mut pages = 0;
     loop {
-        let data = execute(
-            client,
-            CHART_ISSUE_QUERY,
-            serde_json::json!({"id": selector, "after": after}),
+        let data = query(
+            if max_pages.is_some() { GRAPH_ISSUE_QUERY } else { CHART_ISSUE_QUERY },
+            serde_json::json!({"id": selector, "after": cursors[0], "blocksAfter": cursors[1], "blockedByAfter": cursors[2], "children": active[0], "blocks": active[1], "blockedBy": active[2]}),
         )
         .await?;
-        let issue = parse_issue(data, selector)?;
-        let page = issue.children.as_ref().map(|kids| kids.page_info.clone());
-        children.extend(
-            issue
-                .children
+        let Some(issue) = parse_issue(data, selector)? else {
+            if root.is_some() {
+                return Err(eyre!("Linear issue disappeared while paging: {}", selector));
+            }
+            return Ok((None, Vec::new()));
+        };
+        if root
+            .as_ref()
+            .is_some_and(|root| root.identifier != issue.identifier)
+        {
+            return Err(eyre!(
+                "Linear issue identifier changed while paging: {}",
+                selector
+            ));
+        }
+        if max_pages.is_some()
+            && (issue
+                .relations
                 .iter()
-                .flat_map(|kids| kids.nodes.iter().map(|node| node.identifier.clone())),
-        );
+                .flat_map(|rels| &rels.nodes)
+                .any(|node| {
+                    node.rel_type == "blocks"
+                        && node.related_issue.is_none()
+                        && node.issue.is_none()
+                })
+                || issue
+                    .inverse_relations
+                    .iter()
+                    .flat_map(|rels| &rels.nodes)
+                    .any(|node| node.rel_type == "blocks" && node.issue.is_none()))
+        {
+            return Err(eyre!(
+                "Linear graph response missing blocker endpoint: {}",
+                selector
+            ));
+        }
+        pages += 1;
+        if active[0] {
+            links[0].extend(
+                issue
+                    .children
+                    .iter()
+                    .flat_map(|kids| kids.nodes.iter().map(|node| node.identifier.clone())),
+            );
+        }
+        if active[1] {
+            links[1].extend(
+                issue
+                    .relations
+                    .iter()
+                    .flat_map(|rels| rels.nodes.iter())
+                    .filter(|node| node.rel_type == "blocks")
+                    .filter_map(|node| {
+                        node.related_issue
+                            .as_ref()
+                            .or(node.issue.as_ref())
+                            .map(|issue| issue.identifier.clone())
+                    }),
+            );
+        }
+        if active[2] {
+            links[2].extend(
+                issue
+                    .inverse_relations
+                    .iter()
+                    .flat_map(|rels| rels.nodes.iter())
+                    .filter(|node| node.rel_type == "blocks")
+                    .filter_map(|node| node.issue.as_ref().map(|issue| issue.identifier.clone())),
+            );
+        }
+        let page_info = [
+            issue.children.as_ref().map(|kids| &kids.page_info),
+            issue
+                .relations
+                .as_ref()
+                .and_then(|rels| rels.page_info.as_ref()),
+            issue
+                .inverse_relations
+                .as_ref()
+                .and_then(|rels| rels.page_info.as_ref()),
+        ];
+        for index in 0..3 {
+            if !active[index] {
+                continue;
+            }
+            if max_pages.is_none() && index > 0 {
+                active[index] = false;
+                continue;
+            }
+            let Some(page) = page_info[index] else {
+                if max_pages.is_some() {
+                    return Err(eyre!(
+                        "Linear graph response missing connection pageInfo: {}",
+                        selector
+                    ));
+                }
+                active[index] = false;
+                continue;
+            };
+            if !page.has_next {
+                active[index] = false;
+                continue;
+            }
+            let valid_cursor = page
+                .end_cursor
+                .as_ref()
+                .filter(|cursor| !cursor.is_empty())
+                .is_some_and(|cursor| seen_cursors[index].insert(cursor.clone()));
+            let reason = if !valid_cursor {
+                Some(ConnectionStop::InvalidCursor)
+            } else if max_pages.is_some_and(|cap| pages >= cap) {
+                Some(ConnectionStop::PageLimit)
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                if max_pages.is_some() {
+                    incomplete.push(IncompleteConnection {
+                        identifier: issue.identifier.clone(),
+                        connection: [
+                            GraphConnection::Children,
+                            GraphConnection::Blocks,
+                            GraphConnection::BlockedBy,
+                        ][index]
+                            .clone(),
+                        reason,
+                        cursor: page.end_cursor.clone(),
+                    });
+                }
+                active[index] = false;
+            } else {
+                cursors[index] = page.end_cursor.clone();
+            }
+        }
         if root.is_none() {
             root = Some(issue);
         }
-        let (has_next, cursor) = match page {
-            Some(info) => (info.has_next, info.end_cursor),
-            None => (false, None),
-        };
-        if !has_next {
+        if active.iter().all(|active| !active) {
             break;
         }
-        let cursor = match cursor {
-            Some(cursor) if last_cursor.as_deref() != Some(cursor.as_str()) => cursor,
-            _ => break,
-        };
-        last_cursor = Some(cursor.clone());
-        after = Some(cursor);
     }
     let issue = root.ok_or_else(|| eyre!("Linear issue not found: {}", selector))?;
-    Ok(FetchedIssue {
-        identifier: issue.identifier,
-        title: issue.title,
-        url: issue.url,
-        state_type: issue.state.state_type,
-        parent: issue.parent.map(|parent| parent.identifier),
-        blocked_by: issue
-            .inverse_relations
-            .unwrap_or_default()
-            .nodes
-            .into_iter()
-            .filter(|node| node.rel_type == "blocks")
-            .filter_map(|node| node.issue.map(|issue| issue.identifier))
-            .collect(),
-        blocks: issue
-            .relations
-            .unwrap_or_default()
-            .nodes
-            .into_iter()
-            .filter(|node| node.rel_type == "blocks")
-            .filter_map(|node| {
-                node.related_issue
-                    .map(|issue| issue.identifier)
-                    .or(node.issue.map(|issue| issue.identifier))
-            })
-            .collect(),
-        children,
-    })
+    if max_pages.is_some() {
+        for links in &mut links {
+            links.sort();
+            links.dedup();
+        }
+    }
+    let [children, blocks, blocked_by] = links;
+    Ok((
+        Some(FetchedIssue {
+            identifier: issue.identifier,
+            title: issue.title,
+            url: issue.url,
+            state_type: issue.state.state_type,
+            parent: issue.parent.map(|parent| parent.identifier),
+            blocked_by,
+            blocks,
+            children,
+        }),
+        incomplete,
+    ))
 }
 
-fn parse_issue(data: serde_json::Value, selector: &str) -> Result<RawIssue> {
-    #[derive(serde::Deserialize)]
-    struct Root {
-        issue: Option<RawIssue>,
-    }
-    let root: Root = serde_json::from_value(data)
-        .map_err(|e| eyre!("Failed to parse Linear issue {}: {}", selector, e))?;
-    root.issue
-        .ok_or_else(|| eyre!("Linear issue not found: {}", selector))
+fn parse_issue(data: serde_json::Value, selector: &str) -> Result<Option<RawIssue>> {
+    let issue = data
+        .get("issue")
+        .ok_or_else(|| eyre!("Linear response missing issue field: {}", selector))?;
+    serde_json::from_value(issue.clone())
+        .map_err(|e| eyre!("Failed to parse Linear issue {}: {}", selector, e))
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -1380,6 +1555,8 @@ struct RawParent {
 struct RawRelations {
     #[serde(default)]
     nodes: Vec<RawRelationNode>,
+    #[serde(default, rename = "pageInfo")]
+    page_info: Option<RawPageInfo>,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -1417,6 +1594,222 @@ struct RawPageInfo {
 mod tests {
     use super::*;
     use crate::linear::config::LinearConfig;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn graph_request_validates_and_normalizes_before_io() {
+        for (ids, limit, pages) in [
+            (vec![], 100, 2),
+            (vec![" ".to_string()], 100, 2),
+            (vec!["a".repeat(129)], 100, 2),
+            (vec!["GUZ-1".to_string()], 0, 2),
+            (vec!["GUZ-1".to_string()], 301, 2),
+            (vec!["GUZ-1".to_string()], 100, 0),
+            (vec!["GUZ-1".to_string()], 100, 11),
+            (vec!["GUZ-1".to_string(); 301], 100, 2),
+            (vec!["GUZ-1".to_string(), "GUZ-2".to_string()], 1, 2),
+        ] {
+            assert!(IssueGraphRequest::new(&ids, limit, pages).is_err());
+        }
+        let request = IssueGraphRequest::new(
+            &[
+                " GUZ-2 ".to_string(),
+                "GUZ-1".to_string(),
+                "GUZ-1".to_string(),
+            ],
+            2,
+            1,
+        )
+        .unwrap();
+        assert_eq!(request.seeds, ["GUZ-1", "GUZ-2"]);
+    }
+
+    #[tokio::test]
+    async fn graph_http_reads_only_the_root_and_honors_both_caps() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"issue": {
+                "identifier": "GUZ-1", "title": "One", "url": "https://example.test/1", "state": {"type": "backlog"}, "parent": null,
+                "children": {"nodes": [{"identifier": "GUZ-2"}], "pageInfo": {"hasNextPage": false, "endCursor": null}},
+                "relations": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}},
+                "inverseRelations": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "more"}}
+            }}})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = crate::linear::client::build_client(&LinearConfig {
+            api_key: "test-key".to_string(),
+        })
+        .unwrap();
+        let url = format!("{}/graphql", server.uri());
+        let seeds = vec!["GUZ-1".to_string()];
+        let closure = fetch_closure(&seeds, 1, Some(1), |selector| {
+            let client = &client;
+            let url = &url;
+            async move {
+                fetch_issue_with(&selector, Some(1), |query, variables| {
+                    crate::linear::client::execute_with_url(client, url, query, variables)
+                })
+                .await
+            }
+        })
+        .await
+        .unwrap();
+        let graph = mcptools_core::linear::issue_graph_output(
+            &seeds,
+            closure,
+            IssueGraphLimits {
+                issues: 1,
+                pages_per_issue: 1,
+                children_per_page: 50,
+                relations_per_page: 25,
+            },
+        );
+        assert_eq!(graph.nodes.len(), 1);
+        assert!(graph.frontier.is_empty());
+        assert!(graph.cap_hit && graph.truncated);
+        assert_eq!(graph.pending, ["GUZ-2"]);
+        assert_eq!(
+            graph.incomplete_connections[0].connection,
+            GraphConnection::BlockedBy
+        );
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["query"], GRAPH_ISSUE_QUERY);
+        assert_eq!(body["variables"]["id"], "GUZ-1");
+        assert!(!mcptools_core::linear::is_mutation(
+            body["query"].as_str().unwrap()
+        ));
+    }
+
+    #[tokio::test]
+    async fn graph_closure_handles_cycles_aliases_missing_and_exact_bounds() {
+        let mut first = fetched("GUZ-1", "unstarted", Some("GUZ-2"), &["GUZ-3"]);
+        first.children = vec!["GUZ-2".to_string()];
+        first.blocks = vec!["GUZ-4".to_string()];
+        let mut calls = Vec::new();
+        let seeds = vec!["alias".to_string()];
+        let full = fetch_closure(&seeds, 4, Some(4), |id| {
+            calls.push(id.clone());
+            let issue = match id.as_str() {
+                "alias" => Some(first.clone()),
+                "GUZ-2" => Some(fetched("GUZ-2", "started", Some("GUZ-1"), &[])),
+                "GUZ-3" => None,
+                "GUZ-4" => Some(fetched("GUZ-4", "unstarted", None, &["GUZ-1"])),
+                other => panic!("unexpected fetch: {other}"),
+            };
+            std::future::ready(Ok((issue, Vec::new())))
+        })
+        .await
+        .unwrap();
+        assert_eq!(calls, ["alias", "GUZ-2", "GUZ-3", "GUZ-4"]);
+        assert!(full.pending.is_empty());
+        assert_eq!(full.missing, ["GUZ-3"]);
+        let graph = mcptools_core::linear::issue_graph_output(
+            &seeds,
+            full,
+            IssueGraphLimits {
+                issues: 4,
+                pages_per_issue: 2,
+                children_per_page: 50,
+                relations_per_page: 25,
+            },
+        );
+        assert_eq!(graph.roots[0].identifier.as_deref(), Some("GUZ-1"));
+        assert_eq!(graph.nodes.len(), 3);
+        assert_eq!(graph.inprogress, ["GUZ-2"]);
+        assert!(graph.frontier.is_empty());
+        assert_eq!(graph.missing_blockers[0].blocker, "GUZ-3");
+        assert_eq!(graph.unresolved_blockers.len(), 2);
+        assert!(!graph.truncated);
+
+        let capped = fetch_closure(&seeds, 1, Some(1), |_| {
+            std::future::ready(Ok((Some(first.clone()), Vec::new())))
+        })
+        .await
+        .unwrap();
+        assert_eq!(capped.attempted, 1);
+        assert_eq!(capped.pending, ["GUZ-2", "GUZ-3", "GUZ-4"]);
+    }
+
+    #[tokio::test]
+    async fn graph_pages_connections_independently_and_reports_page_cap() {
+        let mut calls = Vec::new();
+        let (issue, incomplete) = fetch_issue_with("GUZ-1", Some(2), |query, variables| {
+            assert_eq!(query, GRAPH_ISSUE_QUERY);
+            let second = !calls.is_empty();
+            calls.push(variables);
+            std::future::ready(Ok(serde_json::json!({"issue": {
+                "identifier": "GUZ-1", "title": "One", "url": "https://example.test/1", "state": {"type": "backlog"}, "parent": null,
+                "children": {"nodes": [{"identifier": if second { "GUZ-3" } else { "GUZ-2" }}], "pageInfo": {"hasNextPage": !second, "endCursor": "kids1"}},
+                "relations": {"nodes": [{"type": "blocks", "relatedIssue": {"identifier": if second { "GUZ-5" } else { "GUZ-4" }}}, {"type": "related", "relatedIssue": {"identifier": "GUZ-99"}}], "pageInfo": {"hasNextPage": true, "endCursor": if second { "blocks2" } else { "blocks1" }}},
+                "inverseRelations": {"nodes": [{"type": "blocks", "issue": {"identifier": "GUZ-6"}}], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+            }})))
+        }).await.unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1]["after"], "kids1");
+        assert_eq!(calls[1]["blocksAfter"], "blocks1");
+        assert_eq!(calls[1]["blockedBy"], false);
+        let issue = issue.unwrap();
+        assert_eq!(issue.children, ["GUZ-2", "GUZ-3"]);
+        assert_eq!(issue.blocks, ["GUZ-4", "GUZ-5"]);
+        assert_eq!(issue.blocked_by, ["GUZ-6"]);
+        assert_eq!(incomplete.len(), 1);
+        assert_eq!(incomplete[0].connection, GraphConnection::Blocks);
+        assert!(matches!(incomplete[0].reason, ConnectionStop::PageLimit));
+        assert_eq!(incomplete[0].cursor.as_deref(), Some("blocks2"));
+    }
+
+    #[tokio::test]
+    async fn graph_stalled_cursor_is_explicit_and_cli_query_is_preserved() {
+        for cursor in [serde_json::Value::Null, serde_json::json!("stalled")] {
+            let mut calls = 0;
+            let (_, incomplete) = fetch_issue_with("GUZ-1", Some(10), |_, _| {
+                calls += 1;
+                std::future::ready(Ok(serde_json::json!({"issue": {
+                    "identifier": "GUZ-1", "title": "One", "url": "https://example.test/1", "state": {"type": "backlog"}, "parent": null,
+                    "children": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": cursor}},
+                    "relations": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}},
+                    "inverseRelations": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+                }})))
+            }).await.unwrap();
+            assert!(calls <= 2);
+            assert!(matches!(
+                incomplete[0].reason,
+                ConnectionStop::InvalidCursor
+            ));
+        }
+        let mut pages = 0;
+        let (issue, incomplete) = fetch_issue_with("GUZ-1", None, |query, variables| {
+            assert_eq!(query, CHART_ISSUE_QUERY);
+            let second = pages > 0;
+            pages += 1;
+            assert_eq!(variables["after"], if second { serde_json::json!("kids1") } else { serde_json::Value::Null });
+            std::future::ready(Ok(serde_json::json!({"issue": {
+                "identifier": "GUZ-1", "title": "One", "url": "https://example.test/1", "state": {"type": "backlog"}, "parent": null,
+                "children": {"nodes": [{"identifier": if second { "GUZ-3" } else { "GUZ-2" }}], "pageInfo": {"hasNextPage": !second, "endCursor": "kids1"}},
+                "relations": {"nodes": [{"type": "blocks", "relatedIssue": {"identifier": if second { "GUZ-5" } else { "GUZ-4" }}}]},
+                "inverseRelations": {"nodes": [{"type": "blocks", "issue": {"identifier": "GUZ-6"}}]}
+            }})))
+        })
+        .await
+        .unwrap();
+        let issue = issue.unwrap();
+        assert_eq!(pages, 2);
+        assert_eq!(issue.children, ["GUZ-2", "GUZ-3"]);
+        assert_eq!(issue.blocks, ["GUZ-4"]);
+        assert_eq!(issue.blocked_by, ["GUZ-6"]);
+        assert!(incomplete.is_empty());
+        assert!(parse_issue(serde_json::json!({}), "GUZ-1").is_err());
+        assert!(parse_issue(serde_json::json!({"issue": null}), "GUZ-1")
+            .unwrap()
+            .is_none());
+    }
 
     #[tokio::test]
     async fn rejects_empty_issue_ids_before_io() {

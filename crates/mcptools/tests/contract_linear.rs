@@ -134,7 +134,7 @@ fn mcp_contract_linear() {
                 .is_some_and(|n| n.starts_with("linear_"))
         })
         .collect();
-    assert_eq!(linear.len(), 18, "unexpected linear tools: {linear:?}");
+    assert_eq!(linear.len(), 19, "unexpected linear tools: {linear:?}");
     for tool in &linear {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();
         let schema = tool.get("outputSchema").unwrap_or_else(|| {

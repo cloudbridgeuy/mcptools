@@ -76,7 +76,7 @@ mcptools linear chart GUZ-185 --serve
 mcptools linear chart GUZ-185 --serve --port 8080 --no-open
 ```
 
-`chart` walks the transitive closure of children, parents, `blocked_by` blockers, and forward `blocks` targets (cap `--limit`, default 300, warning on the cap), drops canceled issues, and classifies the rest as complete, in progress, frontier (ready to start), or fog (prerequisite incomplete). Nodes group into one subgraph per parent issue; top-level issues without sub-issues share a Standalone subgraph laid out as a grid instead of floating. `--exclude-completed` hides completed issues and drops their blocker edges so dependents render as frontier. Output defaults to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html`. Empty issue ids reject before any request. `--project` seeds the chart with every issue in the project (project names need `--team`); issue ids and `--project` are mutually alternative inputs. `--serve` starts a foreground loopback server instead of writing a file (default `--port 0` assigns a random open port, `PORT` env also read; `--out` rejects): `GET /api/chart` rebuilds the closure, click-drag pans and scrollwheel zooms the diagram, ticket clicks open a detail modal with markdown-rendered description and comments plus activity, a Refresh issue button reloads one ticket, the state select optimistically posts to `POST /api/issues/:id/state` and refreshes the diagram only, Refresh button and `r` keybinding reload.
+`chart` walks the transitive closure of children, parents, `blocked_by` blockers, and forward `blocks` targets (cap `--limit`, default 300, warning on the cap), drops canceled issues, and classifies the rest as complete, in progress, frontier (ready to start), or fog (prerequisite incomplete). Nodes group into one subgraph per parent issue; top-level issues without sub-issues share a Standalone subgraph laid out as a grid instead of floating. `--exclude-completed` hides completed issues and drops their blocker edges so dependents render as frontier. Output defaults to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html`. Empty issue ids reject before any request. `--project` seeds the chart with every issue in the project (project names need `--team`); positional issue ids can be combined with `--project`. `--serve` starts a foreground loopback server instead of writing a file (default `--port 0` assigns a random open port, `PORT` env also read; `--out` rejects): `GET /api/chart` rebuilds the closure, click-drag pans and scrollwheel zooms the diagram, ticket clicks open a detail modal with markdown-rendered description and comments plus activity, a Refresh issue button reloads one ticket, the state select optimistically posts to `POST /api/issues/:id/state` and refreshes the diagram only, Refresh button and `r` keybinding reload.
 
 ### Discovery
 
@@ -105,11 +105,11 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-18 `linear_*` tools mirror the CLI over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text content. Single reads return one page (default 25); `all: true` follows cursors until no pages remain.
+19 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
-linear_auth_status, linear_issue_get, linear_issue_list
+linear_auth_status, linear_issue_get, linear_issue_list, linear_issue_graph
 linear_comment_list, linear_relation_list
 linear_team_list, linear_team_get
 linear_project_list, linear_project_get
@@ -121,5 +121,19 @@ linear_issue_update (needs id plus one of title, description, state, assignee, p
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```
+
+### Structured issue graph
+
+`linear_issue_graph({ids: ["GUZ-185"], limit: 100, maxPages: 2})` returns the chart's dependency closure without rendering Mermaid/HTML, opening a browser, writing a file, or starting a chart server. It is a read-only, non-spend tool in full mode, discovery via `call_tool`, declarations, and code-mode `execute`.
+
+- Input: nonempty `ids` array, at most 300 entries; each trimmed selector is nonempty and at most 128 bytes. Roots are sorted and deduplicated. `limit` defaults to 100, range 1–300, and must cover all unique roots. `maxPages` defaults to 2, range 1–10. Unknown properties, null bounds, negative/fractional bounds, and invalid input reject before configuration or HTTP.
+- Traversal: breadth-first through children, incoming `blocks` blockers (`blocked_by`), outgoing `blocks` targets, and parents. Other relation types are not dependencies. Each issue query fetches at most 50 children and 25 relations per direction, with independent cursors. Completed connections are not fetched again. Fetch attempts, including missing selectors and aliases, cannot exceed `limit`; each attempt uses at most `maxPages` queries. The existing HTTP client's bounded read retries still apply. No workspace-wide issue list is fetched.
+- `roots`: `{selector, identifier}` pairs; canonical identifier is null when unresolved. `nodes`: sorted by identifier, each with `identifier`, `title`, `url`, `state_type`, `parent`, sorted/deduplicated `children`, `blocked_by`, `blocks`, and `class`. Relation identifiers can refer outside the fetched set. Classes reuse the CLI's `complete`, `inprogress`, `frontier`, `fog`; canceled nodes remain in this structured graph with class null. Completed and canceled blockers satisfy dependencies. Parent/child containment alone does not block an issue.
+- `frontier`: ready-to-start identifiers from chart classification, excluding issues whose incoming blocker connection is incomplete. `inprogress`: started identifiers. `stats`: chart counts; canceled nodes are excluded. Per-node classes and stats remain provisional when blocker paging is incomplete, so `stats.frontier` can exceed `frontier.length`.
+- `missing_blockers`: `{issue, blocker}` pairs whose blocker is outside the fetched set. `unresolved_blockers`: all observed blockers that are missing or neither completed nor canceled, including blockers of started/completed issues. These lists describe observed relations, not unseen pages.
+- `limits`: `{issues, pages_per_issue, children_per_page, relations_per_page}`; `fetched_count` counts distinct returned nodes, `attempted_count` counts selector fetches. `cap_hit` means the selector bound left work in sorted `pending`. `truncated` means pending selectors or incomplete connection pages remain. `missing_issues` contains sorted selectors whose lookup returned null; missing issues are reported separately and do not alone set `truncated`.
+- `incomplete_connections`: `{identifier, connection, reason, cursor}` records. Connections are `children`, `blocks`, `blocked_by`; reasons are `page_limit` or `invalid_cursor` (missing, empty, or repeated cursor). A page-limit cursor is the last fetched page's end cursor. Root/dependency null lookups are reported, but authentication, transport, GraphQL, malformed response, and disappearing-while-paging failures are errors, never a successful partial graph.
+
+For a truncated graph, fetch `pending` as roots or raise the bounds within the hard limits. Use the issue list and relation list tools for larger inventories and explicit paging. Code-mode's own time/output limits still apply; use `call_tool` for graphs that exceed its envelope.
 
 `linear_relation_add` returns `created` or `already_exists`. `linear_relation_remove` matches the `(source, related, type)` triple and returns the deleted relation id.

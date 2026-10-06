@@ -78,6 +78,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `bitbucket_pr_read` | Read PR details/diff |
 | `bitbucket_pr_create` | Create a Bitbucket PR |
 | `bitbucket_pr_update` | Update a Bitbucket PR: metadata, reviewers, state |
+| `bitbucket_pr_comment_add` | Add a general or single-line inline PR comment (write; `allowWrites` required in discovery/Code Mode) |
 
 ### Linear
 
@@ -86,6 +87,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `linear_auth_status` | Show Linear viewer identity |
 | `linear_issue_get` | Get one Linear issue |
 | `linear_issue_list` | List Linear issues with filters |
+| `linear_issue_graph` | Bounded dependency closure, frontier, blocker status, and explicit truncation; no chart rendering or browser |
 | `linear_issue_create` | Create a Linear issue |
 | `linear_issue_update` | Update a Linear issue |
 | `linear_comment_list` | List comments on an issue |
@@ -225,7 +227,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
-this mode, hosts load all 64 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 67 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

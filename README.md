@@ -8,7 +8,8 @@ Useful MCP Tools to use with LLM Coding Agents
 
 - **Atlassian Jira**: Search, create, update tickets, and saved queries (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_query_list`, `jira_query_save`, `jira_query_delete`, `jira_query_load`)
 - **Atlassian Confluence**: Search pages using CQL (`confluence_search`)
-- **Atlassian Bitbucket**: List and read pull requests with diff support (`bitbucket_pr_list`, `bitbucket_pr_read`)
+- **Atlassian Bitbucket**: List and read pull requests with diff support; add general or single-line inline comments (`bitbucket_pr_list`, `bitbucket_pr_read`, `bitbucket_pr_comment_add`)
+- **Linear**: Read a bounded issue dependency graph and ready-to-start frontier (`linear_issue_graph`); see [Linear](.claude/context/linear.md) for all Linear tools.
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
 - **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
 - **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)

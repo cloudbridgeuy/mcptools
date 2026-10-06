@@ -17,7 +17,7 @@ Time-ordered issue events from Linear history, always starting with created.
 _Avoid_: history, timeline, audit log
 
 **Discovery mode**:
-MCP server mode in which `tools/list` returns only `find_tools`.
+MCP server mode in which `tools/list` returns exactly two tools: `find_tools`, then `call_tool`.
 _Avoid_: finder mode, list gating
 
 ## Relationships
@@ -39,11 +39,11 @@ The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **D
 
 #### Scenario: Flag or env enables the mode
 - **WHEN** the server starts with `--discovery`, or with `MCPTOOLS_DISCOVERY=true` and no flag
-- **THEN** `tools/list` returns exactly one tool, `find_tools`
+- **THEN** `tools/list` returns exactly two tools, in order: `find_tools`, then `call_tool`
 
 #### Scenario: Default list
-- **WHEN** the server starts with neither the flag nor the env var
-- **THEN** `tools/list` returns every registered tool
+- **WHEN** the server starts with neither mode flag nor either mode env var
+- **THEN** `tools/list` returns all 67 registered tools
 
 #### Scenario: Unlisted tool call
 - **WHEN** a client in **Discovery mode** sends `tools/call` with the name of a tool that `tools/list` did not return
@@ -58,11 +58,11 @@ The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in cod
 
 #### Scenario: Flag or env enables the mode
 - **WHEN** the server starts with `--code-mode`, or with `MCPTOOLS_CODE_MODE=true` and no flag
-- **THEN** `tools/list` returns exactly two tools, in order: `find_tools`, then `execute`
+- **THEN** `tools/list` returns exactly three tools, in order: `find_tools`, `execute`, then `call_tool`
 
 #### Scenario: Code mode wins over discovery
 - **WHEN** the server starts with `--discovery` and `--code-mode`, or with both env vars enabled
-- **THEN** `tools/list` returns `find_tools` and `execute`, not one tool
+- **THEN** `tools/list` returns `find_tools`, `execute`, and `call_tool`, not the two discovery tools
 
 #### Scenario: Unlisted tool call
 - **WHEN** a client in code mode sends `tools/call` with the name of a tool that `tools/list` did not return
@@ -70,7 +70,7 @@ The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in cod
 
 #### Scenario: Code-mode usage text
 - **WHEN** `find_tools` runs in code mode, including a nested call inside `execute`
-- **THEN** its `usage` field is `Call each declared function as an async global only inside the code string passed to tools.mcptools.execute (one fresh sandbox per call). The outer Code Mode scope has only find_tools and execute. A ReferenceError on a declared name outside execute, such as await linear_issue_list(), is not a TTL, expiry, or a tool that disappeared. It means the name was never a host tool.`
+- **THEN** its `usage` field is `Call a single tool with tools.mcptools.call_tool, e.g. await tools.mcptools.call_tool({ name: "linear_issue_list", input: { team: "GUZ" } }). To chain many calls in one round trip, pass code as a string to tools.mcptools.execute, where each declared function is an async global (one fresh sandbox per call). The outer Code Mode scope has only find_tools, execute and call_tool; a declared name called there is a ReferenceError, not a TTL or expiry.`
 
 #### Scenario: Usage text without code mode
 - **WHEN** `find_tools` runs in any other mode
@@ -177,7 +177,7 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 - **THEN** the server returns a JSON-RPC error with code `-32602`
 
 ### Requirement: Linear chart rendering
-`linear chart` takes one or more **Issue identifier**s **or a `--project` selector (project names need `--team`)**, fetches the transitive closure of sub-issues, parents, `blocked_by` blockers, and forward `blocks` targets (cap `--limit`, default 300 issues, stderr warning when the cap stops expansion), drops canceled issues, and classifies the rest as complete, in progress, frontier (no incomplete blocker), or fog (at least one incomplete blocker). `--exclude-completed` hides completed issues and drops their blocker edges so dependents render as frontier. It writes a full-viewport dark-themed HTML Mermaid page — one subgraph per parent issue, state legend — to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html` unless `--out` overrides it, prints the output path and a stats line, and opens the page in the default browser unless `--no-open`. `--serve` instead starts a foreground loopback server (default `--port 0` assigns a random open port, `PORT` env also read) that serves an interactive page plus JSON APIs: `GET /api/chart` refreshes the closure, `GET /api/issues/:id` returns full details, `GET /api/states?team=` lists workflow states, `POST /api/issues/:id/state` transitions state. The page has a Refresh button plus `r` keybinding, click-drag pans and scrollwheel zooms the diagram, ticket clicks open a detail modal with markdown-rendered description and comments, and a state select that auto-posts a transition then refreshes the diagram only. `--out` conflicts with `--serve`.
+`linear chart` takes **Issue identifier**s, a `--project` selector, or both (project names need `--team`), fetches the transitive closure of sub-issues, parents, `blocked_by` blockers, and forward `blocks` targets (cap `--limit`, default 300 issues, stderr warning when the cap stops expansion), drops canceled issues, and classifies the rest as complete, in progress, frontier (no incomplete blocker), or fog (at least one incomplete blocker). `--exclude-completed` hides completed issues and drops their blocker edges so dependents render as frontier. It writes a full-viewport dark-themed HTML Mermaid page — one subgraph per parent issue, state legend — to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html` unless `--out` overrides it, prints the output path and a stats line, and opens the page in the default browser unless `--no-open`. `--serve` instead starts a foreground loopback server (default `--port 0` assigns a random open port, `PORT` env also read) that serves an interactive page plus JSON APIs: `GET /api/chart` refreshes the closure, `GET /api/issues/:id` returns full details, `GET /api/states?team=` lists workflow states, `POST /api/issues/:id/state` transitions state. The page has a Refresh button plus `r` keybinding, click-drag pans and scrollwheel zooms the diagram, ticket clicks open a detail modal with markdown-rendered description and comments, and a state select that auto-posts a transition then refreshes the diagram only. `--out` conflicts with `--serve`.
 
 #### Scenario: Closure and classification
 - **WHEN** chart runs on a set of **Issue identifier**s

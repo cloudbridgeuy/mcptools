@@ -833,6 +833,43 @@ pub async fn handle_bitbucket_pr_create(
     super::to_dual_result(pr_data)
 }
 
+pub async fn handle_bitbucket_pr_comment_add(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: mcptools_core::atlassian::bitbucket::PRCommentAddArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|e| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {e}"),
+                data: None,
+            }
+        })?;
+    let request = args.into_request().map_err(|e| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {e}"),
+        data: None,
+    })?;
+
+    if global.verbose {
+        eprintln!("Calling bitbucket_pr_comment_add: {}", request.endpoint());
+    }
+
+    let config = crate::atlassian::BitbucketConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+    let output = crate::atlassian::bitbucket::add_pr_comment_data(request, &config)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_bitbucket_pr_update(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,

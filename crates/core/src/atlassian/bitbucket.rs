@@ -129,8 +129,7 @@ pub struct BitbucketContent {
     pub html: Option<String>,
 }
 
-/// Inline comment location
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, JsonSchema)]
 pub struct BitbucketInlineComment {
     pub path: String,
     #[serde(default)]
@@ -213,6 +212,107 @@ pub struct CommentOutput {
     pub is_inline: bool,
     pub inline_path: Option<String>,
     pub inline_line: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PRCommentAddArgs {
+    pub repo: String,
+    #[serde(rename = "prNumber")]
+    pub pr_number: std::num::NonZeroU64,
+    pub comment: String,
+    pub inline: Option<PRCommentInlineArgs>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PRCommentInlineArgs {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<std::num::NonZeroU32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<std::num::NonZeroU32>,
+}
+
+pub struct PRCommentRequest {
+    endpoint: String,
+    payload: serde_json::Value,
+}
+
+impl PRCommentAddArgs {
+    pub fn into_request(self) -> Result<PRCommentRequest, String> {
+        let parts: Vec<&str> = self.repo.split('/').collect();
+        if parts.len() != 2
+            || parts.iter().any(|part| {
+                part.is_empty()
+                    || matches!(*part, "." | "..")
+                    || !part.chars().all(|c| {
+                        c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '{' | '}')
+                    })
+            })
+        {
+            return Err("repo must be workspace/repo_slug, with two nonempty identifiers".into());
+        }
+        if self.comment.trim().is_empty() {
+            return Err("comment must not be blank".into());
+        }
+        if let Some(inline) = &self.inline {
+            if inline.path.trim().is_empty() || inline.path.chars().any(char::is_control) {
+                return Err(
+                    "inline.path must be nonblank and contain no control characters".into(),
+                );
+            }
+            if inline.from.is_none() && inline.to.is_none() {
+                return Err("inline must specify from (old line) or to (new line)".into());
+            }
+        }
+        let mut payload = serde_json::json!({"content": {"raw": self.comment}});
+        if let Some(inline) = self.inline {
+            payload["inline"] = serde_json::to_value(inline).map_err(|e| e.to_string())?;
+        }
+        Ok(PRCommentRequest {
+            endpoint: format!(
+                "repositories/{}/pullrequests/{}/comments",
+                self.repo, self.pr_number
+            ),
+            payload,
+        })
+    }
+}
+
+impl PRCommentRequest {
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn payload(&self) -> &serde_json::Value {
+        &self.payload
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct PRCommentAddOutput {
+    pub id: u64,
+    pub author: String,
+    pub content: String,
+    pub created_on: String,
+    pub updated_on: String,
+    pub inline: Option<BitbucketInlineComment>,
+}
+
+pub fn transform_pr_comment_add_response(comment: BitbucketComment) -> PRCommentAddOutput {
+    PRCommentAddOutput {
+        id: comment.id,
+        author: comment.user.display_name,
+        content: comment
+            .content
+            .raw
+            .or_else(|| comment.content.html.map(|html| strip_html(&html)))
+            .unwrap_or_default(),
+        created_on: comment.created_on,
+        updated_on: comment.updated_on,
+        inline: comment.inline,
+    }
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]

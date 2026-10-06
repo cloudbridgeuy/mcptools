@@ -116,7 +116,7 @@ fn discovery_env_var_alone_lists_find_tools_and_call_tool() {
 }
 
 #[test]
-fn no_flag_no_env_lists_all_64() {
+fn no_flag_no_env_lists_all_tools() {
     let mut command = Command::new(binary());
     command.args(["mcp", "stdio"]);
     without_jev_env(&mut command);
@@ -128,5 +128,5 @@ fn no_flag_no_env_lists_all_64() {
     );
 
     let tools = responses[0]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 65);
+    assert_eq!(tools.len(), 67);
 }

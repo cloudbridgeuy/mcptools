@@ -93,7 +93,7 @@ pub async fn run(
     }
 }
 
-// Re-export public data functions for external use (e.g., MCP)
+pub use pr::comment::add_pr_comment_data;
 pub use pr::create::{create_pr_data, CreatePRParams};
 pub use pr::list::{list_pr_data, ListPRParams};
 pub use pr::read::{read_pr_data, ReadPRParams};
