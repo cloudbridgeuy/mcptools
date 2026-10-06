@@ -111,7 +111,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `lane_list` | Read native Git worktree state and registered ownership in an operator-permitted repository |
 | `lane_create` | Create one guarded Worktrunk lane from an existing local base branch; write tool |
 
-Both deny access unless the server operator sets `MCPTOOLS_LANE_REPOS`. `lane_create` needs `allowWrites: true` in `call_tool` and `execute`. Direct `tools/call` uses the existing write dispatch policy and the same repository guards. No lane removal, cleanup, merge, or push tools exist. See [Lanes](lanes.md).
+Both deny access when the operator-controlled server environment `MCPTOOLS_LANE_REPOS` is unset or empty. Set an exact canonical path list, or explicitly set the whole value to `'*'` to authorize all otherwise-supported repository roots. Mixed wildcard/path lists and whitespace wildcards are invalid; repository-root, containment, identity, and executable-filter guards remain unchanged. Requests and repository configuration cannot opt in. `lane_create` needs `allowWrites: true` in `call_tool` and `execute`. Direct `tools/call` uses the existing write dispatch policy and the same repository guards. No lane removal, cleanup, merge, or push tools exist. See [Lanes](lanes.md).
 
 ### HackerNews
 

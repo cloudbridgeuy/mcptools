@@ -35,7 +35,7 @@ Linear command reference: [Linear](.claude/context/linear.md).
 MCP server reference: [MCP Server](.claude/context/mcp-server.md).
 
 ### Requirement: Lane authorization and ownership
-`lane_list` and `lane_create` require exact canonical repository roots in the server environment `MCPTOOLS_LANE_REPOS`; unset or empty denies both. Repository files and request arguments cannot authorize access. Listing uses native Git because Worktrunk JSON listing writes and prunes repository caches. Creation uses isolated Worktrunk 0.77.0 with hooks disabled. Ownership requires registered filesystem identities and the creation commit's ancestry; unfamiliar identities remain unmanaged. See [Lanes](.claude/context/lanes.md).
+`lane_list` and `lane_create` require an exact canonical repository-root allowlist in the operator-controlled server environment `MCPTOOLS_LANE_REPOS`, or the exact whole value `'*'` to authorize all otherwise-supported roots; unset or empty denies both. Wildcard mode broadens operator trust, not supported root types or other safety guards. Mixed wildcard/path lists and whitespace wildcards are invalid. Repository files and request arguments cannot authorize access. Listing uses native Git because Worktrunk JSON listing writes and prunes repository caches. Creation uses isolated Worktrunk 0.77.0 with hooks disabled. Ownership requires registered filesystem identities and the creation commit's ancestry; unfamiliar identities remain unmanaged. See [Lanes](.claude/context/lanes.md).
 
 #### Scenario: Partial creation
 - **WHEN** Worktrunk creation starts but creation verification or durable registration fails

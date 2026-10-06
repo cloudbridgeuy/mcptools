@@ -4,7 +4,9 @@ Only MCP `lane_list` and `lane_create` exist. There is no lane deletion, cleanup
 
 ## Operator authorization
 
-Set `MCPTOOLS_LANE_REPOS` in the MCP server environment. It is a platform path list parsed with `std::env::split_paths`, for example `/absolute/repo-one:/absolute/repo-two` on Unix. Every entry must resolve to an absolute canonical repository root. Unset, empty, unresolved entries, descendants, outside repositories, and Git common directories outside the permitted root fail closed. Aliases are compared after canonicalization. Request arguments and repository configuration never authorize access. No current-directory trust is implied.
+Set `MCPTOOLS_LANE_REPOS` in the operator-controlled MCP server environment. By default it is an exact platform path list parsed with `std::env::split_paths`, for example `/absolute/repo-one:/absolute/repo-two` on Unix. Every entry must be absolute and canonicalizable; requested repositories must match a canonical entry. Unset, empty, invalid entries, and repositories outside that list fail closed. Aliases are compared after canonicalization. Request arguments and repository configuration never authorize access. No current-directory trust is implied.
+
+Only the exact whole value `MCPTOOLS_LANE_REPOS='*'` explicitly authorizes all otherwise-supported repository roots accessible to the server. This broadens the operator's trust scope beyond listed repositories; it does not discover repositories or enable path-component globbing. Mixed wildcard/path lists and whitespace around `*` are invalid. Requests must still be nonempty, absolute, canonicalizable Git repository roots. Descendants, non-repositories, and roots with Git common directories outside the root remain rejected, including linked worktree roots. All storage, symlink, identity, executable-filter, and write-permission guards remain unchanged.
 
 This feature currently requires Unix filesystem identity. Git must be on the operator-controlled PATH. Only creation needs Worktrunk, pinned to verified 0.77.0 behavior.
 

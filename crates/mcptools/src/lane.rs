@@ -270,6 +270,13 @@ pub fn permitted_repo(repo: &str, allowed: Option<OsString>) -> Result<PathBuf> 
     let allowed = allowed
         .filter(|value| !value.is_empty())
         .ok_or("MCPTOOLS_LANE_REPOS is unset or empty; lane access denied")?;
+    if repo.is_empty() || !Path::new(repo).is_absolute() {
+        return Err("repo must be an absolute repository root".into());
+    }
+    let repo = canonical(Path::new(repo))?;
+    if allowed == "*" {
+        return Ok(repo);
+    }
     let roots = std::env::split_paths(&allowed)
         .map(|path| {
             if !path.is_absolute() || path.as_os_str().is_empty() {
@@ -278,10 +285,6 @@ pub fn permitted_repo(repo: &str, allowed: Option<OsString>) -> Result<PathBuf> 
             canonical(&path)
         })
         .collect::<Result<Vec<_>>>()?;
-    if repo.is_empty() || !Path::new(repo).is_absolute() {
-        return Err("repo must be an absolute repository root".into());
-    }
-    let repo = canonical(Path::new(repo))?;
     if !roots.contains(&repo) {
         return Err("Repository is not in MCPTOOLS_LANE_REPOS".into());
     }
@@ -779,6 +782,72 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
         assert!(contained(&root.join("alias/new"), &root).is_err());
         symlink(root.join("missing"), root.join("dangling")).unwrap();
         assert!(contained(&root.join("dangling/new"), &root).is_err());
+    }
+
+    #[tokio::test]
+    async fn wildcard_admits_distinct_roots_without_bypassing_repository_guards() {
+        let repositories = [repository().await, repository().await];
+        assert!(permitted_repo(
+            text(&repositories[1].2).unwrap(),
+            Some(repositories[0].2.clone().into_os_string())
+        )
+        .is_err());
+        for (_directory, mut runner, root) in repositories {
+            let permitted =
+                permitted_repo(text(&root.join(".")).unwrap(), Some("*".into())).unwrap();
+            assert_eq!(permitted, root);
+            assert_eq!(
+                list(&runner, permitted.clone()).await.unwrap().lanes.len(),
+                1
+            );
+            fake_wt(&mut runner, "");
+            let created = create(&runner, permitted, args(&root, "topic"))
+                .await
+                .unwrap();
+            assert!(list(&runner, root.clone())
+                .await
+                .unwrap()
+                .lanes
+                .iter()
+                .any(|lane| lane.id.as_deref() == Some(&created.id) && lane.managed));
+            let child = root.join("child");
+            std::fs::create_dir(&child).unwrap();
+            for (path, error) in [
+                (child, "not a descendant"),
+                (PathBuf::from(&created.path), "common directory is outside"),
+                (canonical(runner.home.path()).unwrap(), "subprocess failed"),
+            ] {
+                let permitted = permitted_repo(text(&path).unwrap(), Some("*".into())).unwrap();
+                assert!(list(&runner, permitted.clone())
+                    .await
+                    .unwrap_err()
+                    .contains(error));
+                assert!(create(&runner, permitted, args(&path, "other"))
+                    .await
+                    .unwrap_err()
+                    .contains(error));
+            }
+        }
+    }
+
+    #[test]
+    fn wildcard_requires_exact_operator_value_and_valid_absolute_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = canonical(directory.path()).unwrap();
+        let repo = text(&root).unwrap();
+        for allowed in [" *", "* ", "*\n", "**", "*:/", "/:*"] {
+            assert!(permitted_repo(repo, Some(allowed.into())).is_err());
+        }
+        for paths in [
+            [root.clone(), PathBuf::from("*")],
+            [root.clone(), root.join("missing")],
+        ] {
+            assert!(permitted_repo(repo, Some(std::env::join_paths(paths).unwrap())).is_err());
+        }
+        for request in ["", ".", "repo", "*", text(&root.join("missing")).unwrap()] {
+            assert!(permitted_repo(request, Some("*".into())).is_err());
+        }
+        assert!(permitted_repo(text(&root.join("*")).unwrap(), Some("*".into())).is_err());
     }
 
     #[tokio::test]
