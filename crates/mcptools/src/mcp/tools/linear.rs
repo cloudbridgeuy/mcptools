@@ -370,6 +370,29 @@ pub async fn handle_linear_project_milestone_list(
     super::to_dual_result(output)
 }
 
+pub async fn handle_linear_project_update_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::ProjectUpdateListArgs = parse_args(arguments)?;
+    args.validate().map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_project_update_list: project={}",
+            args.project
+        );
+    }
+    let client = linear_client()?;
+    let output = crate::linear::discover::project_updates_list_data(&client, args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_project_create(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1121,6 +1144,87 @@ mod tests {
         ] {
             assert!(declaration.contains(field), "{field}: {declaration}");
         }
+        assert_eq!(tool.input_schema["properties"]["limit"]["default"], 25);
+        assert_eq!(tool.input_schema["additionalProperties"], false);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn progress_report_list_strict_inputs_read_dispatch_and_declarations() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for input in [
+            serde_json::json!({}),
+            serde_json::json!({"project": " "}),
+            serde_json::json!({"project": "Example"}),
+            serde_json::json!({"project": "Example", "team": " "}),
+            serde_json::json!({"project": "12345678-1234-1234-1234-123456789xyz"}),
+            serde_json::json!({"project": id, "team": null}),
+            serde_json::json!({"project": id, "team": "bad\nteam"}),
+            serde_json::json!({"project": id, "limit": 0}),
+            serde_json::json!({"project": id, "limit": 251}),
+            serde_json::json!({"project": id, "limit": 1.5}),
+            serde_json::json!({"project": id, "limit": null}),
+            serde_json::json!({"project": id, "cursor": " "}),
+            serde_json::json!({"project": id, "cursor": null}),
+            serde_json::json!({"project": id, "all": null}),
+            serde_json::json!({"project": id, "all": "true"}),
+            serde_json::json!({"project": id, "body": "Not accepted"}),
+        ] {
+            assert_eq!(
+                handle_linear_project_update_list(Some(input), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+        }
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            for request in [
+                serde_json::json!({"name": "linear_project_update_list", "arguments": {"project": id, "limit": 0}}),
+                serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_update_list", "input": {"project": id, "limit": 0}, "allowWrites": false}}),
+            ] {
+                let error = super::super::handle_tools_call(Some(request), &global, flags)
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code, -32602);
+                assert!(error.message.starts_with("Invalid arguments:"));
+            }
+            let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_update_list({{project: '{id}', limit: 0}})"), "allowWrites": false}})), &global, flags).await.unwrap();
+            assert!(result["structuredContent"]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid arguments:"));
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_project_update_list")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Read);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_project_update_list(input: LinearProjectUpdateListInput): Promise<LinearProjectUpdateListOutput>",
+            "project: string", "team?: string", "limit?: number", "cursor?: string", "all?: boolean",
+            "body: string", "createdAt: string", "updatedAt: string", "url: string", "pageInfo:",
+            "\"onTrack\"", "\"atRisk\"", "\"offTrack\"",
+        ] { assert!(declaration.contains(field), "{field}: {declaration}"); }
         assert_eq!(tool.input_schema["properties"]["limit"]["default"], 25);
         assert_eq!(tool.input_schema["additionalProperties"], false);
     }

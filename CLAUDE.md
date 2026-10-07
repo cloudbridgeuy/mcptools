@@ -79,7 +79,7 @@ For detailed usage of each feature, see the context files:
 
 ### Integrations
 - **[Jira](.claude/context/jira.md)** - Search, create, update tickets; saved queries; MCP tools
-- **[Linear](.claude/context/linear.md)** - Issues and discovery; MCP project creation, partial property updates, workspace project statuses
+- **[Linear](.claude/context/linear.md)** - Issues and discovery; MCP project creation, partial property updates, published progress report creation/listing, workspace project statuses
 - **[Confluence](.claude/context/confluence.md)** - Search pages; CQL queries
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories

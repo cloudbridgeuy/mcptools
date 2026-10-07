@@ -156,6 +156,7 @@ pub struct ProjectMilestoneListArgs {
 }
 
 pub use mcptools_core::linear::ProjectMilestoneCreateArgs;
+pub use ProjectMilestoneListArgs as ProjectUpdateListArgs;
 
 impl ProjectMilestoneListArgs {
     pub fn validate(&self) -> Result<(), &'static str> {

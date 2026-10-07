@@ -51,7 +51,7 @@ The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **D
 
 #### Scenario: Default list
 - **WHEN** the server starts with neither mode flag nor either mode env var
-- **THEN** `tools/list` returns all 76 registered tools
+- **THEN** `tools/list` returns all 77 registered tools
 
 #### Scenario: Unlisted tool call
 - **WHEN** a client in **Discovery mode** sends `tools/call` with the name of a tool that `tools/list` did not return

@@ -51,6 +51,76 @@ pub struct ProjectUpdateCreateOutput {
     pub project: Project,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectProgressReport {
+    pub id: String,
+    pub body: String,
+    pub health: ProjectUpdateHealth,
+    pub created_at: String,
+    pub updated_at: String,
+    pub url: String,
+    pub project: Project,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectUpdateListOutput {
+    pub project: Project,
+    pub nodes: Vec<ProjectProgressReport>,
+    pub page_info: PageInfo,
+}
+
+pub fn transform_project_updates(
+    data: serde_json::Value,
+    expected_project: &Project,
+) -> Result<ProjectUpdateListOutput, String> {
+    let raw = &data["project"];
+    let project: Project = serde_json::from_value(raw.clone())
+        .map_err(|error| format!("Project not found or malformed: {error}"))?;
+    if !super::resolve::is_uuid(&project.id)
+        || !project.id.eq_ignore_ascii_case(&expected_project.id)
+        || project.name.trim().is_empty()
+    {
+        return Err("Malformed or mismatched project identity".into());
+    }
+    let connection = &raw["projectUpdates"];
+    if connection["pageInfo"]["hasNextPage"].as_bool().is_none()
+        || connection["pageInfo"].get("endCursor").is_none()
+    {
+        return Err("Malformed progress report pageInfo".into());
+    }
+    let page: RawPaged<ProjectProgressReport> = serde_json::from_value(connection.clone())
+        .map_err(|error| format!("Malformed progress report connection: {error}"))?;
+    if page
+        .page_info
+        .end_cursor
+        .as_deref()
+        .is_some_and(|cursor| cursor.trim().is_empty() || cursor.chars().any(char::is_control))
+    {
+        return Err("Malformed progress report pagination cursor".into());
+    }
+    for report in &page.nodes {
+        if !super::resolve::is_uuid(&report.id)
+            || chrono::DateTime::parse_from_rfc3339(&report.created_at).is_err()
+            || chrono::DateTime::parse_from_rfc3339(&report.updated_at).is_err()
+            || !reqwest::Url::parse(&report.url).is_ok_and(|url| {
+                matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+            })
+            || !super::resolve::is_uuid(&report.project.id)
+            || !report.project.id.eq_ignore_ascii_case(&project.id)
+            || report.project.name.trim().is_empty()
+        {
+            return Err("Malformed progress report or mismatched project identity".into());
+        }
+    }
+    Ok(ProjectUpdateListOutput {
+        project,
+        nodes: page.nodes,
+        page_info: page.page_info,
+    })
+}
+
 pub fn project_update_create_input(
     args: &ProjectUpdateCreateArgs,
 ) -> Result<serde_json::Value, String> {

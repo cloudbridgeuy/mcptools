@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-25 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+26 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -115,6 +115,7 @@ linear_team_list, linear_team_get
 linear_project_list, linear_project_get
 linear_project_status_list
 linear_project_milestone_list
+linear_project_update_list (published progress reports; project UUID or name with team; limit/cursor/all)
 linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 
 # Writes
@@ -131,6 +132,8 @@ linear_relation_add / linear_relation_remove (source, related, type triple; type
 ### Project progress reports (MCP only)
 
 `linear_project_update_create({project: "project-UUID", body: "# Progress\nShipping soon.", health: "onTrack"})` creates a progress report, not a project property edit. Names require `team` and use the same all-page resolution with missing/ambiguous matches rejected. Nonblank Markdown body preserves exact whitespace. Optional health is `onTrack`, `atRisk`, or `offTrack`; omitted or null health is not sent, with no invented default. Invalid selectors, blank body, malformed types and unknown health reject before configuration or HTTP. Returns report `id`, `body`, required API `health`, `createdAt`, `url`, and `project: {id, name}`. Requires strict success and complete well-typed fields; HTTP/GraphQL errors, including partial data, fail. MCP-only Write tool; `call_tool` and `execute` require `allowWrites: true`. No CLI command added.
+
+`linear_project_update_list({project: "project-UUID"})` lists published progress reports, not project property changes. It uses the same selectors and strict inputs as milestone listing. It returns `project: {id, name}`, explicit `nodes` (including `[]`), and `pageInfo`. Each node has required `id`, verbatim Markdown `body`, `health` (`onTrack`, `atRisk`, `offTrack`), `createdAt`, `updatedAt`, `url`, and `project: {id, name}`. Null, missing, or malformed non-null fields and mismatched envelope/report project UUIDs fail; project names must be nonblank but may differ after a rename. Names and body whitespace are not changed. The query explicitly requests `orderBy: createdAt` and preserves API order across pages; direction is not asserted. `all` traverses remaining pages with missing, repeated, and non-progressing cursor checks (also checked on a single page) and a 1000-report-page cap. HTTP/GraphQL errors, including partial data, fail without partial output. MCP-only Read; read-only `call_tool` and `execute` need no `allowWrites`. No CLI command added.
 
 ### Project property updates (MCP only)
 

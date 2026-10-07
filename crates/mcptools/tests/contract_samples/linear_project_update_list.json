@@ -1,0 +1,15 @@
+{
+  "project": {"id": "12345678-1234-1234-1234-123456789abc", "name": "Example"},
+  "nodes": [
+    {
+      "id": "12345678-1234-1234-1234-123456789def",
+      "body": "    code\n\n# Progress\nShipping **soon**.\n",
+      "health": "onTrack",
+      "createdAt": "2026-10-07T12:00:00Z",
+      "updatedAt": "2026-10-07T13:00:00Z",
+      "url": "https://linear.app/acme/project/example/updates/report",
+      "project": {"id": "12345678-1234-1234-1234-123456789abc", "name": "Example"}
+    }
+  ],
+  "pageInfo": {"hasNextPage": false, "endCursor": "report-final"}
+}

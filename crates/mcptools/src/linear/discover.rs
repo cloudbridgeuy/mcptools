@@ -14,6 +14,62 @@ pub const PROJECT_CREATE_MUTATION: &str = "mutation ($input: ProjectCreateInput!
 pub const PROJECT_GET_QUERY: &str = "query ($id: String!) { project(id: $id) { id name } }";
 pub const PROJECT_UPDATE_MUTATION: &str = "mutation ($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) { success project { id name url description content status { id name type } lead { id name email } startDate targetDate priority } } }";
 pub const PROJECT_UPDATE_CREATE_MUTATION: &str = "mutation ($input: ProjectUpdateCreateInput!) { projectUpdateCreate(input: $input) { success projectUpdate { id body health createdAt url project { id name } } } }";
+pub const PROJECT_UPDATES_QUERY: &str = "query ($id: String!, $first: Int!, $after: String) { project(id: $id) { id name projectUpdates(first: $first, after: $after, orderBy: createdAt) { nodes { id body health createdAt updatedAt url project { id name } } pageInfo { hasNextPage endCursor } } } }";
+
+pub async fn project_updates_list_data(
+    client: &reqwest::Client,
+    args: crate::linear::args::ProjectUpdateListArgs,
+) -> Result<mcptools_core::linear::ProjectUpdateListOutput> {
+    project_updates_list_data_with_url(client, LINEAR_API_URL, args).await
+}
+
+async fn project_updates_list_data_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    args: crate::linear::args::ProjectUpdateListArgs,
+) -> Result<mcptools_core::linear::ProjectUpdateListOutput> {
+    args.validate().map_err(|error| eyre!(error))?;
+    let project =
+        resolve_project_with_url(client, url, &args.project, args.team.as_deref()).await?;
+    if !mcptools_core::linear::is_uuid(&project.id) {
+        return Err(eyre!("Malformed project identity"));
+    }
+    let mut cursor = args.cursor;
+    let mut seen = std::collections::HashSet::new();
+    if let Some(cursor) = &cursor {
+        seen.insert(cursor.clone());
+    }
+    let mut nodes = Vec::new();
+    for _ in 0..1000 {
+        let data = execute_with_url(
+            client,
+            url,
+            PROJECT_UPDATES_QUERY,
+            serde_json::json!({"id": project.id, "first": args.limit, "after": cursor}),
+        )
+        .await?;
+        let page = mcptools_core::linear::transform_project_updates(data, &project)
+            .map_err(|error| eyre!(error))?;
+        if page.page_info.has_next && page.page_info.end_cursor.is_none() {
+            return Err(eyre!("Progress report pagination cursor missing"));
+        }
+        if let Some(next) = &page.page_info.end_cursor {
+            if !seen.insert(next.clone()) {
+                return Err(eyre!("Progress report pagination cursor did not progress"));
+            }
+        }
+        nodes.extend(page.nodes);
+        if !args.all || !page.page_info.has_next {
+            return Ok(mcptools_core::linear::ProjectUpdateListOutput {
+                project: page.project,
+                nodes,
+                page_info: page.page_info,
+            });
+        }
+        cursor = page.page_info.end_cursor;
+    }
+    Err(eyre!("Progress report pagination exceeded 1000 pages"))
+}
 
 pub async fn project_updates_create_data(
     client: &reqwest::Client,
@@ -574,6 +630,417 @@ pub async fn cycles_list_data(client: &reqwest::Client, team: &str) -> Result<Pa
 mod tests {
     use super::*;
     use crate::linear::config::LinearConfig;
+
+    #[tokio::test]
+    async fn progress_report_rename_after_lookup_preserves_response_names() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_project_update_list.json"
+        ))
+        .unwrap();
+        let id = sample["project"]["id"].as_str().unwrap();
+        let mut report = sample["nodes"][0].clone();
+        report["project"]["name"] = serde_json::json!("  Renamed again  ");
+        report["project"]["id"] = serde_json::json!(id.to_uppercase());
+        let server = MockServer::start().await;
+        for (query, variables, response) in [
+            (
+                PROJECT_GET_QUERY,
+                serde_json::json!({"id": id}),
+                serde_json::json!({"data": {"project": sample["project"]}}),
+            ),
+            (
+                PROJECT_UPDATES_QUERY,
+                serde_json::json!({"id": id, "first": 25, "after": null}),
+                serde_json::json!({"data": {"project": {"id": id, "name": "  Renamed  ", "projectUpdates": {"nodes": [report], "pageInfo": sample["pageInfo"]}}}}),
+            ),
+        ] {
+            Mock::given(method("POST"))
+                .and(body_json(
+                    serde_json::json!({"query": query, "variables": variables}),
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(response))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        let args = serde_json::from_value(serde_json::json!({"project": id})).unwrap();
+        let output =
+            project_updates_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                .await
+                .unwrap();
+        assert_eq!(output.project.name, "  Renamed  ");
+        assert_eq!(serde_json::to_value(&output.nodes[0]).unwrap(), report);
+    }
+
+    #[tokio::test]
+    async fn progress_report_thousand_page_boundary() {
+        use wiremock::matchers::{body_json, body_partial_json, method};
+        use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for terminal in [true, false] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(
+                    serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": id}}),
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"data": {"project": {"id": id, "name": "Example"}}}),
+                ))
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("POST"))
+                .and(body_partial_json(serde_json::json!({"query": PROJECT_UPDATES_QUERY, "variables": {"id": id, "first": 25}})))
+                .respond_with(move |request: &Request| {
+                    let body: serde_json::Value = request.body_json().unwrap();
+                    let page = body["variables"]["after"].as_str().map_or(1, |cursor| cursor.parse::<usize>().unwrap() + 1);
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"project": {"id": id, "name": "Renamed", "projectUpdates": {"nodes": [], "pageInfo": {"hasNextPage": !terminal || page < 1000, "endCursor": page.to_string()}}}}}))
+                })
+                .expect(1000)
+                .mount(&server)
+                .await;
+            let args =
+                serde_json::from_value(serde_json::json!({"project": id, "all": true})).unwrap();
+            let result =
+                project_updates_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                    .await;
+            if terminal {
+                let output = result.unwrap();
+                assert!(output.nodes.is_empty());
+                assert_eq!(output.project.name, "Renamed");
+                assert!(!output.page_info.has_next);
+                assert_eq!(output.page_info.end_cursor.as_deref(), Some("1000"));
+            } else {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("exceeded 1000 pages"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_report_pages_preserve_order_body_and_empty_results() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_project_update_list.json"
+        ))
+        .unwrap();
+        let project = &sample["project"];
+        for (all, empty) in [(false, false), (true, false), (true, true)] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": project["id"].as_str().unwrap().to_uppercase()}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"project": project}})))
+                .expect(1).mount(&server).await;
+            let pages = if all && !empty { 2 } else { 1 };
+            for index in 0..pages {
+                let mut report = sample["nodes"][0].clone();
+                report["health"] = serde_json::json!(if index == 0 { "onTrack" } else { "atRisk" });
+                let nodes = if empty {
+                    serde_json::json!([])
+                } else {
+                    serde_json::json!([report])
+                };
+                Mock::given(method("POST"))
+                    .and(body_json(serde_json::json!({"query": PROJECT_UPDATES_QUERY, "variables": {"id": project["id"], "first": 1, "after": if index == 0 { "start" } else { "next" }}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"project": {"id": project["id"], "name": project["name"], "projectUpdates": {"nodes": nodes, "pageInfo": {"hasNextPage": index == 0 && !empty, "endCursor": if index == 0 && !empty { "next" } else { "final" }}}}}})))
+                    .expect(1).mount(&server).await;
+            }
+            let args = serde_json::from_value(serde_json::json!({"project": project["id"].as_str().unwrap().to_uppercase(), "limit": 1, "cursor": "start", "all": all})).unwrap();
+            let output =
+                project_updates_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                    .await
+                    .unwrap();
+            assert_eq!(output.nodes.len(), if empty { 0 } else { pages });
+            assert_eq!(output.page_info.has_next, !all && !empty);
+            assert_eq!(
+                output.page_info.end_cursor.as_deref(),
+                Some(if all || empty { "final" } else { "next" })
+            );
+            let result = crate::mcp::tools::to_dual_result(output).unwrap();
+            let text: serde_json::Value =
+                serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(text, result["structuredContent"]);
+            if empty {
+                assert_eq!(text["nodes"], serde_json::json!([]));
+            } else {
+                assert_eq!(text["nodes"][0], sample["nodes"][0]);
+                if all {
+                    assert_eq!(text["nodes"][1]["health"], "atRisk");
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_report_strict_fields_scope_and_transport_failures() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_project_update_list.json"
+        ))
+        .unwrap();
+        let project = &sample["project"];
+        let valid = serde_json::json!({"data": {"project": {"id": project["id"], "name": project["name"], "projectUpdates": {"nodes": sample["nodes"], "pageInfo": sample["pageInfo"]}}}});
+        let mut cases = vec![
+            (401, serde_json::json!({"errors": [{"message": "Denied"}]})),
+            (500, serde_json::json!({"error": "Unavailable"})),
+            (
+                200,
+                serde_json::json!({"errors": [{"message": "Partial failure"}], "data": valid["data"]}),
+            ),
+            (200, serde_json::json!({"data": {"project": null}})),
+            (200, serde_json::json!({"data": {}})),
+        ];
+        for pointer in [
+            "/data/project",
+            "/data/project/projectUpdates/nodes/0",
+            "/data/project/projectUpdates/nodes/0/project",
+            "/data/project/projectUpdates/pageInfo",
+            "/data/project/projectUpdates",
+        ] {
+            let fields: Vec<String> = valid
+                .pointer(pointer)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect();
+            for field in fields {
+                for value in [
+                    None,
+                    Some(serde_json::Value::Null),
+                    Some(serde_json::json!(17)),
+                ] {
+                    if field == "endCursor" && value == Some(serde_json::Value::Null) {
+                        continue;
+                    }
+                    let mut body = valid.clone();
+                    let object = body.pointer_mut(pointer).unwrap().as_object_mut().unwrap();
+                    if let Some(value) = value {
+                        object.insert(field.clone(), value);
+                    } else {
+                        object.remove(&field);
+                    }
+                    cases.push((200, body));
+                }
+            }
+        }
+        for (pointer, value) in [
+            ("/data/project/id", "22345678-1234-1234-1234-123456789abc"),
+            ("/data/project/name", " "),
+            ("/data/project/projectUpdates/nodes/0/id", "bad"),
+            ("/data/project/projectUpdates/nodes/0/health", "unknown"),
+            (
+                "/data/project/projectUpdates/nodes/0/createdAt",
+                "yesterday",
+            ),
+            (
+                "/data/project/projectUpdates/nodes/0/updatedAt",
+                "2026-99-01T00:00:00Z",
+            ),
+            ("/data/project/projectUpdates/nodes/0/url", "file:///report"),
+            (
+                "/data/project/projectUpdates/nodes/0/project/id",
+                "22345678-1234-1234-1234-123456789abc",
+            ),
+            ("/data/project/projectUpdates/nodes/0/project/name", " "),
+        ] {
+            let mut body = valid.clone();
+            *body.pointer_mut(pointer).unwrap() = serde_json::json!(value);
+            cases.push((200, body));
+        }
+        for (status, body) in cases {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": project["id"]}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"project": project}})))
+                .expect(1).mount(&server).await;
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": PROJECT_UPDATES_QUERY, "variables": {"id": project["id"], "first": 25, "after": null}})))
+                .respond_with(ResponseTemplate::new(status).set_body_json(body.clone()))
+                .expect(1).mount(&server).await;
+            let args =
+                serde_json::from_value(serde_json::json!({"project": project["id"]})).unwrap();
+            assert!(
+                project_updates_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                    .await
+                    .is_err(),
+                "{body}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_report_cursor_hazards_and_later_failures_discard_output() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for (all, has_next, cursors) in [
+            (false, true, vec![None]),
+            (true, true, vec![None]),
+            (false, true, vec![Some(" ")]),
+            (false, true, vec![Some("start")]),
+            (false, false, vec![Some("start")]),
+            (false, false, vec![Some("bad\ncursor")]),
+            (true, true, vec![Some("a"), Some("b"), Some("a")]),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(
+                    serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": id}}),
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"data": {"project": {"id": id, "name": "Example"}}}),
+                ))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let mut after = Some("start");
+            for next in cursors {
+                Mock::given(method("POST"))
+                    .and(body_json(serde_json::json!({"query": PROJECT_UPDATES_QUERY, "variables": {"id": id, "first": 25, "after": after}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"project": {"id": id, "name": "Example", "projectUpdates": {"nodes": [], "pageInfo": {"hasNextPage": has_next, "endCursor": next}}}}})))
+                    .expect(1).mount(&server).await;
+                after = next;
+            }
+            let args = serde_json::from_value(
+                serde_json::json!({"project": id, "cursor": "start", "all": all}),
+            )
+            .unwrap();
+            assert!(project_updates_list_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                args
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("pagination cursor"));
+        }
+        for body in [
+            serde_json::json!({"data": {"project": null}}),
+            serde_json::json!({"errors": [{"message": "Later page failure"}]}),
+            serde_json::json!({"data": {"project": {"id": "22345678-1234-1234-1234-123456789abc", "name": "Example", "projectUpdates": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}),
+        ] {
+            let server = MockServer::start().await;
+            for (query, variables, response) in [
+                (
+                    PROJECT_GET_QUERY,
+                    serde_json::json!({"id": id}),
+                    serde_json::json!({"data": {"project": {"id": id, "name": "Example"}}}),
+                ),
+                (
+                    PROJECT_UPDATES_QUERY,
+                    serde_json::json!({"id": id, "first": 25, "after": null}),
+                    serde_json::json!({"data": {"project": {"id": id, "name": "Example", "projectUpdates": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "next"}}}}}),
+                ),
+                (
+                    PROJECT_UPDATES_QUERY,
+                    serde_json::json!({"id": id, "first": 25, "after": "next"}),
+                    body,
+                ),
+            ] {
+                Mock::given(method("POST"))
+                    .and(body_json(
+                        serde_json::json!({"query": query, "variables": variables}),
+                    ))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(response))
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+            }
+            let args =
+                serde_json::from_value(serde_json::json!({"project": id, "all": true})).unwrap();
+            assert!(project_updates_list_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                args
+            )
+            .await
+            .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn progress_report_resolves_team_selectors_and_rejects_missing_projects() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let team = "22345678-1234-1234-1234-123456789abc";
+        for selector in [team.to_uppercase(), "GUZ".to_string(), "Team".to_string()] {
+            for count in 0..=2 {
+                let server = MockServer::start().await;
+                Mock::given(method("POST"))
+                    .and(body_json(serde_json::json!({"query": TEAMS_QUERY, "variables": {"first": 50, "after": null}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"teams": {"nodes": [{"id": team, "key": "GUZ", "name": "Team"}], "pageInfo": {"hasNextPage": false, "endCursor": null}}}})))
+                    .expect(1).mount(&server).await;
+                for (index, after) in [None, Some("next")].into_iter().enumerate() {
+                    let nodes = if index >= 2 - count {
+                        serde_json::json!([{"id": if index == 1 { id } else { team }, "name": "Example"}])
+                    } else {
+                        serde_json::json!([])
+                    };
+                    Mock::given(method("POST"))
+                        .and(body_json(serde_json::json!({"query": TEAM_PROJECTS_QUERY, "variables": {"id": team, "first": 50, "after": after}})))
+                        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"team": {"id": team, "projects": {"nodes": nodes, "pageInfo": {"hasNextPage": index == 0, "endCursor": if index == 0 { Some("next") } else { None }}}}}})))
+                        .expect(1).mount(&server).await;
+                }
+                if count == 1 {
+                    Mock::given(method("POST"))
+                        .and(body_json(serde_json::json!({"query": PROJECT_UPDATES_QUERY, "variables": {"id": id, "first": 25, "after": null}})))
+                        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"project": {"id": id, "name": "Example", "projectUpdates": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}})))
+                        .expect(1).mount(&server).await;
+                }
+                let args = serde_json::from_value(
+                    serde_json::json!({"project": " example ", "team": selector}),
+                )
+                .unwrap();
+                let result = project_updates_list_data_with_url(
+                    &reqwest::Client::new(),
+                    &server.uri(),
+                    args,
+                )
+                .await;
+                assert_eq!(result.is_ok(), count == 1, "{result:?}");
+                assert_eq!(
+                    server.received_requests().await.unwrap().len(),
+                    if count == 1 { 4 } else { 3 }
+                );
+            }
+        }
+        for project in [
+            serde_json::Value::Null,
+            serde_json::json!({"id": team, "name": "Example"}),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(
+                    serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": id}}),
+                ))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"data": {"project": project}})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            let args = serde_json::from_value(serde_json::json!({"project": id})).unwrap();
+            assert!(project_updates_list_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                args
+            )
+            .await
+            .is_err());
+            assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        }
+    }
 
     #[tokio::test]
     async fn milestone_pages_preserve_scope_nulls_whitespace_and_final_cursor() {
