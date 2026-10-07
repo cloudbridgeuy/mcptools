@@ -36,6 +36,39 @@ pub const PROJECT_STATUSES_QUERY: &str = "query ($first: Int!, $after: String) {
 
 pub const PROJECT_MILESTONES_QUERY: &str = "query ($id: String!, $first: Int!, $after: String) { project(id: $id) { id name projectMilestones(first: $first, after: $after) { nodes { id name description targetDate status sortOrder project { id name } } pageInfo { hasNextPage endCursor } } } }";
 
+pub const PROJECT_MILESTONE_CREATE_MUTATION: &str = "mutation ($input: ProjectMilestoneCreateInput!) { projectMilestoneCreate(input: $input) { success projectMilestone { id name description targetDate status sortOrder project { id name } } } }";
+
+pub async fn project_milestones_create_data(
+    client: &reqwest::Client,
+    args: &crate::linear::args::ProjectMilestoneCreateArgs,
+) -> Result<mcptools_core::linear::ProjectMilestone> {
+    project_milestones_create_data_with_url(client, LINEAR_API_URL, args).await
+}
+
+async fn project_milestones_create_data_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    args: &crate::linear::args::ProjectMilestoneCreateArgs,
+) -> Result<mcptools_core::linear::ProjectMilestone> {
+    let mut input = mcptools_core::linear::project_milestone_create_input(args)
+        .map_err(|error| eyre!(error))?;
+    let project =
+        resolve_project_with_url(client, url, &args.project, args.team.as_deref()).await?;
+    if !mcptools_core::linear::is_uuid(&project.id) {
+        return Err(eyre!("Malformed project identity"));
+    }
+    input["projectId"] = serde_json::json!(project.id);
+    let data = execute_with_url(
+        client,
+        url,
+        PROJECT_MILESTONE_CREATE_MUTATION,
+        serde_json::json!({"input": input}),
+    )
+    .await?;
+    mcptools_core::linear::transform_project_milestone_create(data, &project)
+        .map_err(|error| eyre!(error))
+}
+
 pub async fn project_milestones_list_data(
     client: &reqwest::Client,
     args: crate::linear::args::ProjectMilestoneListArgs,
@@ -1335,6 +1368,298 @@ mod tests {
             )
             .await
             .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn milestone_create_validates_inputs_and_mutation_responses() {
+        use mcptools_core::linear::{project_milestone_create_input, ProjectMilestoneCreateArgs};
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_project_milestone_create.json"
+        ))
+        .unwrap();
+        for (fields, expected) in [
+            (
+                serde_json::json!({}),
+                serde_json::json!({"name": "Release"}),
+            ),
+            (
+                serde_json::json!({"team": null, "description": null, "targetDate": null, "sortOrder": null}),
+                serde_json::json!({"name": "Release"}),
+            ),
+            (
+                serde_json::json!({"description": "    code\n\n# Heading\n", "targetDate": "2028-02-29", "sortOrder": -1.5}),
+                serde_json::json!({"name": "Release", "description": "    code\n\n# Heading\n", "targetDate": "2028-02-29", "sortOrder": -1.5}),
+            ),
+            (
+                serde_json::json!({"description": ""}),
+                serde_json::json!({"name": "Release", "description": ""}),
+            ),
+            (
+                serde_json::json!({"description": " \t\n "}),
+                serde_json::json!({"name": "Release", "description": " \t\n "}),
+            ),
+        ] {
+            let server = MockServer::start().await;
+            let mut raw = serde_json::json!({"project": id, "name": " Release "});
+            raw.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let args: ProjectMilestoneCreateArgs = serde_json::from_value(raw).unwrap();
+            let mut input = project_milestone_create_input(&args).unwrap();
+            assert_eq!(input, expected);
+            input["projectId"] = serde_json::json!(id);
+            let mut sample = sample.clone();
+            if fields
+                .get("description")
+                .is_some_and(serde_json::Value::is_null)
+            {
+                sample["description"] = serde_json::Value::Null;
+                sample["targetDate"] = serde_json::Value::Null;
+            }
+            Mock::given(method("POST"))
+                .and(body_json(
+                    serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": id}}),
+                ))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"data": {"project": sample["project"]}})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": PROJECT_MILESTONE_CREATE_MUTATION, "variables": {"input": input}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"projectMilestoneCreate": {"success": true, "projectMilestone": sample}}})))
+                .expect(1).mount(&server).await;
+            let created = project_milestones_create_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args,
+            )
+            .await
+            .unwrap();
+            assert_eq!(serde_json::to_value(&created).unwrap(), sample);
+            let dual = crate::mcp::tools::to_dual_result(created).unwrap();
+            let text: serde_json::Value =
+                serde_json::from_str(dual["content"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(text, dual["structuredContent"]);
+        }
+        for fields in [
+            serde_json::json!({"project": " "}),
+            serde_json::json!({"project": "Example"}),
+            serde_json::json!({"name": " "}),
+            serde_json::json!({"team": " "}),
+            serde_json::json!({"targetDate": "2026-02-29"}),
+            serde_json::json!({"targetDate": "2026-2-01"}),
+            serde_json::json!({"targetDate": "0000-01-01"}),
+            serde_json::json!({"project": "12345678-1234-1234-1234-123456789xyz"}),
+        ] {
+            let server = MockServer::start().await;
+            let mut raw = serde_json::json!({"project": id, "name": "Release"});
+            raw.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let args = serde_json::from_value(raw).unwrap();
+            assert!(project_milestones_create_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args
+            )
+            .await
+            .is_err());
+            assert!(server.received_requests().await.unwrap().is_empty());
+        }
+        let mut args: ProjectMilestoneCreateArgs =
+            serde_json::from_value(serde_json::json!({"project": id, "name": "Release"})).unwrap();
+        for order in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            args.sort_order = Some(order);
+            assert!(project_milestone_create_input(&args).is_err());
+        }
+        args.sort_order = None;
+        let valid = serde_json::json!({"data": {"projectMilestoneCreate": {"success": true, "projectMilestone": sample}}});
+        let mut responses = vec![
+            serde_json::json!({"data": {}}),
+            serde_json::json!({"data": {"projectMilestoneCreate": {"success": true}}}),
+            serde_json::json!({"data": {"projectMilestoneCreate": {"projectMilestone": sample}}}),
+            serde_json::json!({"data": {"projectMilestoneCreate": null}}),
+        ];
+        for (pointer, value) in [
+            (
+                "/data/projectMilestoneCreate/success",
+                serde_json::json!(false),
+            ),
+            (
+                "/data/projectMilestoneCreate/success",
+                serde_json::Value::Null,
+            ),
+            (
+                "/data/projectMilestoneCreate/success",
+                serde_json::json!("true"),
+            ),
+            (
+                "/data/projectMilestoneCreate/projectMilestone",
+                serde_json::Value::Null,
+            ),
+            (
+                "/data/projectMilestoneCreate/projectMilestone/id",
+                serde_json::json!("bad"),
+            ),
+            (
+                "/data/projectMilestoneCreate/projectMilestone/name",
+                serde_json::json!(" "),
+            ),
+            (
+                "/data/projectMilestoneCreate/projectMilestone/project/id",
+                serde_json::json!("22345678-1234-1234-1234-123456789abc"),
+            ),
+            (
+                "/data/projectMilestoneCreate/projectMilestone/status",
+                serde_json::json!("bad"),
+            ),
+            (
+                "/data/projectMilestoneCreate/projectMilestone/sortOrder",
+                serde_json::json!("1"),
+            ),
+            (
+                "/data/projectMilestoneCreate/projectMilestone/description",
+                serde_json::json!(3),
+            ),
+            (
+                "/data/projectMilestoneCreate/projectMilestone/targetDate",
+                serde_json::json!("2026-02-29"),
+            ),
+        ] {
+            let mut response = valid.clone();
+            *response.pointer_mut(pointer).unwrap() = value;
+            responses.push(response);
+        }
+        for field in [
+            "id",
+            "name",
+            "description",
+            "targetDate",
+            "status",
+            "sortOrder",
+            "project",
+        ] {
+            let mut response = valid.clone();
+            response["data"]["projectMilestoneCreate"]["projectMilestone"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            responses.push(response);
+        }
+        let mut partial = valid.clone();
+        partial["errors"] = serde_json::json!([{"message": "partial failure"}]);
+        responses.push(partial);
+        for response in responses {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(
+                    serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": id}}),
+                ))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"data": {"project": sample["project"]}})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("POST")).and(body_json(serde_json::json!({"query": PROJECT_MILESTONE_CREATE_MUTATION, "variables": {"input": {"projectId": id, "name": "Release"}}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(response))
+                .expect(1).mount(&server).await;
+            assert!(project_milestones_create_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args
+            )
+            .await
+            .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn milestone_create_resolves_all_pages_and_never_mutates_failed_selectors() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let project = "12345678-1234-1234-1234-123456789abc";
+        let team = "32345678-1234-1234-1234-123456789abc";
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_project_milestone_create.json"
+        ))
+        .unwrap();
+        for mode in [
+            "resolved",
+            "missing",
+            "ambiguous",
+            "team-missing",
+            "team-ambiguous",
+        ] {
+            let server = MockServer::start().await;
+            let teams = match mode {
+                "team-missing" => serde_json::json!([]),
+                "team-ambiguous" => {
+                    serde_json::json!([{"id": team, "key": "GUZ", "name": "Team"}, {"id": project, "key": "GUZ", "name": "Other"}])
+                }
+                _ => serde_json::json!([{"id": team, "key": "GUZ", "name": "Team"}]),
+            };
+            for (after, nodes, has_next, next) in [
+                (None, serde_json::json!([]), true, Some("teams-next")),
+                (Some("teams-next"), teams, false, None),
+            ] {
+                Mock::given(method("POST")).and(body_json(serde_json::json!({"query": TEAMS_QUERY, "variables": {"first": 50, "after": after}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"teams": {"nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": next}}}})))
+                    .expect(1).mount(&server).await;
+            }
+            if !mode.starts_with("team-") {
+                let nodes = match mode {
+                    "missing" => serde_json::json!([]),
+                    "ambiguous" => {
+                        serde_json::json!([{"id": project, "name": "Example"}, {"id": team, "name": "Example"}])
+                    }
+                    _ => serde_json::json!([{"id": project, "name": "Example"}]),
+                };
+                for (after, nodes, has_next, next) in [
+                    (None, serde_json::json!([]), true, Some("projects-next")),
+                    (Some("projects-next"), nodes, false, None),
+                ] {
+                    Mock::given(method("POST")).and(body_json(serde_json::json!({"query": TEAM_PROJECTS_QUERY, "variables": {"id": team, "first": 50, "after": after}})))
+                        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"team": {"id": team, "projects": {"nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": next}}}}})))
+                        .expect(1).mount(&server).await;
+                }
+            }
+            if mode == "resolved" {
+                Mock::given(method("POST")).and(body_json(serde_json::json!({"query": PROJECT_MILESTONE_CREATE_MUTATION, "variables": {"input": {"projectId": project, "name": "Release"}}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"projectMilestoneCreate": {"success": true, "projectMilestone": sample}}})))
+                    .expect(1).mount(&server).await;
+            }
+            let args = serde_json::from_value(
+                serde_json::json!({"project": " example ", "team": " GUZ ", "name": "Release"}),
+            )
+            .unwrap();
+            let result = project_milestones_create_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args,
+            )
+            .await;
+            assert_eq!(result.is_ok(), mode == "resolved", "{mode}: {result:?}");
+            let mutations = server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .filter(|request| {
+                    request.body_json::<serde_json::Value>().unwrap()["query"]
+                        == PROJECT_MILESTONE_CREATE_MUTATION
+                })
+                .count();
+            assert_eq!(mutations, usize::from(mode == "resolved"));
         }
     }
 

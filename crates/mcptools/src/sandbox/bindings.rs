@@ -65,7 +65,19 @@ fn arguments<'js>(
         Some(value) if value.is_undefined() => return Ok(None),
         Some(value) => value,
     };
-    match ctx.json_stringify(value)? {
+    let replacer = Function::new(
+        ctx.clone(),
+        |ctx: Ctx<'js>, _key: String, value: Value<'js>| {
+            if value.as_number().is_some_and(|number| !number.is_finite()) {
+                return Err(Exception::throw_type(
+                    &ctx,
+                    "Tool arguments must not contain non-finite numbers",
+                ));
+            }
+            Ok(value)
+        },
+    )?;
+    match ctx.json_stringify_replacer(value, replacer)? {
         None => Ok(None),
         Some(text) => {
             let text = text.to_string()?;
@@ -135,6 +147,95 @@ mod tests {
         }
     }
 
+    #[test]
+    fn arguments_reject_nonfinite_numbers_before_json_conversion() {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            for number in ["NaN", "Infinity", "-Infinity"] {
+                for source in [
+                    number.to_string(),
+                    format!("({{nested: {{number: {number}}}}})"),
+                    format!("[0, {{nested: [null, {number}]}}]"),
+                ] {
+                    let value = ctx.eval::<Value, _>(source).unwrap();
+                    assert!(arguments(&ctx, Some(value)).is_err());
+                    let error = ctx.catch().into_object().unwrap();
+                    assert_eq!(error.get::<_, String>("name").unwrap(), "TypeError");
+                    assert_eq!(
+                        error.get::<_, String>("message").unwrap(),
+                        "Tool arguments must not contain non-finite numbers"
+                    );
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn arguments_preserve_json_semantics_and_serialization_errors() {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            assert_eq!(arguments(&ctx, None).unwrap(), None);
+            for source in [
+                "undefined",
+                "null",
+                "-1.5",
+                "({number: 1e308, nil: null, omitted: undefined, values: [0, -1.5, null, undefined]})",
+                "({toJSON() { return {number: 2, nil: null}; }})",
+            ] {
+                let value = ctx.eval::<Value, _>(source).unwrap();
+                let expected = ctx
+                    .json_stringify(value.clone())
+                    .unwrap()
+                    .map(|text| serde_json::from_str::<serde_json::Value>(&text.to_string().unwrap()).unwrap());
+                assert_eq!(arguments(&ctx, Some(value)).unwrap(), expected);
+            }
+            for source in [
+                "(() => { const value = {}; value.self = value; return value; })()",
+                "1n",
+                "({get value() { throw new Error('getter failed'); }})",
+            ] {
+                let value = ctx.eval::<Value, _>(source).unwrap();
+                assert!(ctx.json_stringify(value.clone()).is_err());
+                let expected = ctx.catch().into_object().unwrap();
+                assert!(arguments(&ctx, Some(value)).is_err());
+                let actual = ctx.catch().into_object().unwrap();
+                for field in ["name", "message"] {
+                    assert_eq!(
+                        actual.get::<_, String>(field).unwrap(),
+                        expected.get::<_, String>(field).unwrap()
+                    );
+                }
+            }
+        });
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn execute_rejects_nonfinite_milestone_order_before_dispatch() {
+        for number in ["NaN", "Infinity", "-Infinity"] {
+            let result = handle_tools_call(
+                Some(json!({
+                    "name": "execute",
+                    "arguments": {
+                        "code": format!("return await linear_project_milestone_create({{project: '12345678-1234-1234-1234-123456789abc', name: ' ', sortOrder: {number}}})"),
+                        "allowWrites": true,
+                    },
+                })),
+                &test_global(),
+                test_flags(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(result["isError"], true);
+            assert_eq!(result["structuredContent"]["error"]["name"], "TypeError");
+            assert_eq!(
+                result["structuredContent"]["error"]["message"],
+                "Tool arguments must not contain non-finite numbers"
+            );
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn read_only_set_has_forty_eight_names_and_no_writes() {
         let read = bound_names(&registered_tools(), &[ToolKind::Read]);
@@ -156,7 +257,7 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 72);
+        assert_eq!(all.len(), 73);
         assert!(all.contains(&"linear_project_create".to_string()));
         assert!(all.contains(&"linear_project_update".to_string()));
         assert!(all.contains(&"bitbucket_pr_comment_add".to_string()));

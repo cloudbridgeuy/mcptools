@@ -394,6 +394,29 @@ pub async fn handle_linear_project_create(
     super::to_dual_result(created)
 }
 
+pub async fn handle_linear_project_milestone_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::ProjectMilestoneCreateArgs = parse_args(arguments)?;
+    mcptools_core::linear::project_milestone_create_input(&args).map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_project_milestone_create: project={}",
+            args.project
+        );
+    }
+    let client = linear_client()?;
+    let created = crate::linear::discover::project_milestones_create_data(&client, &args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(created)
+}
+
 pub async fn handle_linear_project_update(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -628,6 +651,105 @@ pub async fn handle_linear_cycle_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn milestone_create_contract_dispatch_and_write_gates() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for input in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"project": id, "name": null}),
+            serde_json::json!({"project": id, "name": 1}),
+            serde_json::json!({"project": id, "name": " "}),
+            serde_json::json!({"project": id, "name": "Release", "team": 1}),
+            serde_json::json!({"project": id, "name": "Release", "description": []}),
+            serde_json::json!({"project": id, "name": "Release", "targetDate": false}),
+            serde_json::json!({"project": id, "name": "Release", "sortOrder": "1"}),
+            serde_json::json!({"project": id, "name": "Release", "extra": 1}),
+        ] {
+            assert_eq!(
+                handle_linear_project_milestone_create(Some(input), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+        }
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_milestone_create", "arguments": {"project": id}})), &global, flags).await.unwrap_err();
+            assert_eq!(direct.code, -32602);
+            for allow in [false, true] {
+                let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_milestone_create", "input": {"project": id}, "allowWrites": allow}})), &global, flags).await;
+                if allow {
+                    assert_eq!(call.unwrap_err().code, -32602);
+                } else {
+                    let denied = call.unwrap();
+                    assert_eq!(denied["isError"], true);
+                    assert!(denied["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("allowWrites"));
+                }
+                let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_milestone_create({{project: '{id}'}})"), "allowWrites": allow}})), &global, flags).await.unwrap();
+                assert!(result["structuredContent"]["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(if allow {
+                        "Invalid arguments:"
+                    } else {
+                        "allowWrites"
+                    }));
+            }
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_project_milestone_create")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Write);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_project_milestone_create",
+            "project: string",
+            "name: string",
+            "description?: string",
+            "targetDate?: string",
+            "sortOrder?: number",
+        ] {
+            assert!(declaration.contains(field), "{field}: {declaration}");
+        }
+        let validator = jsonschema::draft202012::new(&tool.input_schema).unwrap();
+        assert!(validator.is_valid(&serde_json::json!({"project": id, "name": "Release", "team": null, "description": null, "targetDate": null, "sortOrder": null})));
+        let output_validator = jsonschema::draft202012::new(&tool.output_schema).unwrap();
+        let mut sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/contract_samples/linear_project_milestone_create.json"
+        ))
+        .unwrap();
+        sample["description"] = serde_json::Value::Null;
+        sample["targetDate"] = serde_json::Value::Null;
+        assert!(output_validator.is_valid(&sample));
+        let milestone: mcptools_core::linear::ProjectMilestone =
+            serde_json::from_value(sample.clone()).unwrap();
+        assert_eq!(serde_json::to_value(milestone).unwrap(), sample);
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn project_update_validates_before_configuration_and_requires_write_permission() {

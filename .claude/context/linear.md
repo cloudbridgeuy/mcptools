@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-23 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+24 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -118,6 +118,7 @@ linear_project_milestone_list
 linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 
 # Writes
+linear_project_milestone_create (needs project, name; names require team; accepts Markdown description, targetDate, sortOrder)
 linear_project_create (needs team, name; accepts description and Markdown content)
 linear_project_update (project UUID, or name with team; partial property updates and explicit clear flags)
 linear_issue_create (needs team, title; accepts labels string-or-array)
@@ -141,6 +142,8 @@ Output returns `id`, `name`, `url`, non-null `description`, nullable `content`, 
 `linear_project_milestone_list({project: "project-UUID"})` reads one project's milestones. Project names require `team` (UUID, key, or name); resolution scans all team and project pages and rejects missing or ambiguous matches. Unknown fields, null inputs, blank selectors/cursors, malformed UUID-shaped selectors, and invalid limits reject before HTTP. `limit` defaults to 25, range 1–250; `cursor` starts at that page; `all` defaults to false and traverses remaining pages.
 
 Output is `{project: {id, name}, nodes, pageInfo}`. Nodes contain usable milestone UUID `id`, `name`, nullable `description` and `targetDate` (explicit nulls), `status` (`done`, `next`, `overdue`, `unstarted`), numeric `sortOrder`, and `project: {id, name}`. Markdown whitespace and API order remain unchanged. Existing empty projects return empty nodes; missing projects fail. Each returned project and milestone project identity must match the requested UUID; malformed payloads or pagination cursors fail without partial success. All-page output carries the final pageInfo, including endCursor. Read-only in direct calls, discovery and code mode; no `allowWrites` required. No CLI command added.
+
+`linear_project_milestone_create({project: "project-UUID", name: "Release"})` is an MCP-only Write tool. Project names require `team` and use the same all-page selector resolution. Optional `description` preserves Markdown and whitespace verbatim, including empty and whitespace-only strings; `targetDate` must be a valid YYYY-MM-DD calendar date; `sortOrder` must be finite. Absent or null optional inputs are omitted, with no invented defaults. Blank names or selectors, unknown fields and malformed types reject before HTTP. Returns milestone id, name, nullable description/targetDate, status, sortOrder and project identity. Requires strict mutation success and complete well-typed output; GraphQL errors fail even with partial data. `call_tool` and `execute` require `allowWrites: true`; no CLI command is added.
 
 ### Workspace project statuses
 

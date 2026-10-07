@@ -154,6 +154,8 @@ pub struct ProjectMilestoneListArgs {
     pub all: bool,
 }
 
+pub use mcptools_core::linear::ProjectMilestoneCreateArgs;
+
 impl ProjectMilestoneListArgs {
     pub fn validate(&self) -> Result<(), &'static str> {
         use mcptools_core::linear::{is_uuid, parse_project_selector, ProjectSelector};

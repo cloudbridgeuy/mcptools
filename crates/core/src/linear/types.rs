@@ -37,6 +37,115 @@ pub struct ProjectMilestone {
     pub project: Project,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectMilestoneCreateArgs {
+    #[schemars(description = "Project UUID or project name; names require team")]
+    pub project: String,
+    #[schemars(description = "Milestone name; must not be blank")]
+    pub name: String,
+    #[schemars(description = "Team UUID, key, or name for project name resolution")]
+    pub team: Option<String>,
+    #[schemars(description = "Markdown description; whitespace is preserved")]
+    pub description: Option<String>,
+    #[schemars(description = "Valid calendar date YYYY-MM-DD")]
+    pub target_date: Option<String>,
+    #[schemars(description = "Finite milestone sort order")]
+    pub sort_order: Option<f64>,
+}
+
+pub fn project_milestone_create_input(
+    args: &ProjectMilestoneCreateArgs,
+) -> Result<serde_json::Value, String> {
+    use super::resolve::{is_uuid, parse_project_selector, ProjectSelector};
+    let selector = parse_project_selector(&args.project).ok_or("Missing project selector")?;
+    for (field, value) in [
+        ("project", Some(&args.project)),
+        ("team", args.team.as_ref()),
+    ] {
+        if let Some(value) = value {
+            let value = value.trim();
+            if value.is_empty()
+                || value.chars().any(char::is_control)
+                || (value.len() == 36
+                    && value.chars().filter(|c| *c == '-').count() == 4
+                    && !is_uuid(value))
+            {
+                return Err(format!("Malformed {field} selector"));
+            }
+        }
+    }
+    if matches!(selector, ProjectSelector::Name(_)) && args.team.is_none() {
+        return Err("Project names require team".into());
+    }
+    if args.name.trim().is_empty() {
+        return Err("Milestone name must not be blank".into());
+    }
+    if args
+        .target_date
+        .as_deref()
+        .is_some_and(|value| !valid_milestone_date(value))
+    {
+        return Err("targetDate must be a valid YYYY-MM-DD calendar date".into());
+    }
+    if args.sort_order.is_some_and(|value| !value.is_finite()) {
+        return Err("sortOrder must be finite".into());
+    }
+    let mut input = serde_json::json!({"name": args.name.trim()});
+    if let Some(value) = &args.description {
+        input["description"] = serde_json::json!(value);
+    }
+    if let Some(value) = &args.target_date {
+        input["targetDate"] = serde_json::json!(value);
+    }
+    if let Some(value) = args.sort_order {
+        input["sortOrder"] = serde_json::json!(value);
+    }
+    Ok(input)
+}
+
+fn valid_milestone_date(value: &str) -> bool {
+    value.len() == 10
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if index == 4 || index == 7 {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+        && !value.starts_with("0000")
+        && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+}
+
+pub fn transform_project_milestone_create(
+    data: serde_json::Value,
+    expected_project: &Project,
+) -> Result<ProjectMilestone, String> {
+    let payload = &data["projectMilestoneCreate"];
+    if payload["success"].as_bool() != Some(true) {
+        return Err("Linear projectMilestoneCreate failed: success was not true".into());
+    }
+    let milestone: ProjectMilestone =
+        serde_json::from_value(payload["projectMilestone"].clone())
+            .map_err(|error| format!("Malformed created milestone: {error}"))?;
+    if !super::resolve::is_uuid(&milestone.id)
+        || milestone.name.trim().is_empty()
+        || !milestone
+            .project
+            .id
+            .eq_ignore_ascii_case(&expected_project.id)
+        || milestone.project.name != expected_project.name
+        || !milestone.sort_order.is_finite()
+        || milestone
+            .target_date
+            .as_deref()
+            .is_some_and(|value| !valid_milestone_date(value))
+    {
+        return Err("Malformed milestone or mismatched project identity".into());
+    }
+    Ok(milestone)
+}
+
 fn nullable_string_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     generator.subschema_for::<Option<String>>()
 }
