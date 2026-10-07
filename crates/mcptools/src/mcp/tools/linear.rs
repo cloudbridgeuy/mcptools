@@ -371,6 +371,26 @@ pub async fn handle_linear_project_create(
     super::to_dual_result(created)
 }
 
+pub async fn handle_linear_project_update(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::ProjectUpdateArgs = parse_args(arguments)?;
+    mcptools_core::linear::project_update_input(&args).map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_project_update: id={}", args.id);
+    }
+    let client = linear_client()?;
+    let updated = crate::linear::discover::projects_update_data(&client, &args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(updated)
+}
+
 pub async fn handle_linear_user_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -585,6 +605,123 @@ pub async fn handle_linear_cycle_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn project_update_validates_before_configuration_and_requires_write_permission() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for input in [
+            serde_json::json!({"id": id}),
+            serde_json::json!({"id": id, "name": " "}),
+            serde_json::json!({"id": id, "startDate": "2026-02-29"}),
+            serde_json::json!({"id": id, "priority": 5}),
+            serde_json::json!({"id": id, "lead": "Ada"}),
+            serde_json::json!({"id": id, "content": "", "clearContent": true}),
+            serde_json::json!({"id": id, "clearStatus": true}),
+            serde_json::json!({"id": id, "lead": null}),
+        ] {
+            let error = handle_linear_project_update(Some(input), &global)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, -32602);
+        }
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            let direct = super::super::handle_tools_call(
+                Some(serde_json::json!({"name": "linear_project_update", "arguments": {"id": id}})),
+                &global,
+                flags,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(direct.code, -32602);
+            for allow in [false, true] {
+                let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_update", "input": {"id": id}, "allowWrites": allow}})), &global, flags).await;
+                if allow {
+                    let error = call.unwrap_err();
+                    assert_eq!(error.code, -32602);
+                    assert!(error.message.contains("Invalid arguments:"));
+                } else {
+                    let denied = call.unwrap();
+                    assert_eq!(denied["isError"], true);
+                    assert!(denied["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("allowWrites"));
+                }
+                let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_update({{id: '{id}'}})"), "allowWrites": allow}})), &global, flags).await.unwrap();
+                assert!(result["structuredContent"]["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(if allow {
+                        "Invalid arguments:"
+                    } else {
+                        "allowWrites"
+                    }));
+            }
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_project_update")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Write);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_project_update",
+            "id: string",
+            "status?: string",
+            "startDate?: string",
+            "clearDescription?: boolean",
+            "clearLead?: boolean",
+            "priority?: number",
+            "description: string",
+        ] {
+            assert!(declaration.contains(field), "{field}: {declaration}");
+        }
+        assert_eq!(tool.input_schema["additionalProperties"], false);
+        assert_eq!(tool.input_schema["required"], serde_json::json!(["id"]));
+        let validator = jsonschema::draft202012::new(&tool.input_schema).unwrap();
+        for (field, value) in [
+            ("team", serde_json::json!("GUZ")),
+            ("name", serde_json::json!("New")),
+            ("description", serde_json::json!("")),
+            ("content", serde_json::json!("    code\n")),
+            ("status", serde_json::json!("Custom")),
+            ("lead", serde_json::json!("me")),
+            ("startDate", serde_json::json!("2028-02-29")),
+            ("targetDate", serde_json::json!("2028-03-01")),
+            ("priority", serde_json::json!(0)),
+        ] {
+            let valid = serde_json::json!({"id": id, field: value});
+            assert!(validator.is_valid(&valid), "{field}");
+            assert!(
+                serde_json::from_value::<crate::linear::args::ProjectUpdateArgs>(valid).is_ok()
+            );
+            let null = serde_json::json!({"id": id, field: null});
+            assert!(!validator.is_valid(&null), "{field}");
+            assert!(
+                serde_json::from_value::<crate::linear::args::ProjectUpdateArgs>(null).is_err()
+            );
+        }
+        assert!(tool.output_schema["properties"].get("status").is_some());
+    }
 
     #[tokio::test]
     async fn project_status_rejects_invalid_arguments_before_configuration() {

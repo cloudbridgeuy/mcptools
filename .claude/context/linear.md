@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-21 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+22 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -118,11 +118,22 @@ linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 
 # Writes
 linear_project_create (needs team, name; accepts description and Markdown content)
+linear_project_update (project UUID, or name with team; partial property updates and explicit clear flags)
 linear_issue_create (needs team, title; accepts labels string-or-array)
 linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent, labels, clearLabels; state and label names resolve from the issue identifier team, or team; labels replaces, clearLabels empties, the two reject when combined)
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```
+
+### Project property updates (MCP only)
+
+`linear_project_update({id: "project-UUID", content: "    indented Markdown\n", priority: 2})` changes only supplied properties. `id` accepts a UUID without team, or a case-insensitive project name with `team` (id, key, or name). Name resolution reads every team and team-project page and rejects missing or ambiguous matches before mutation. UUID lookup must return the requested project identity before mutation.
+
+Optional properties: nonblank `name`, `description`, Markdown `content` (exact indentation and whitespace preserved), `status` (workspace project status UUID or case-insensitive name), `lead` (user UUID or `me`), `startDate`, `targetDate` (valid `YYYY-MM-DD` calendar dates), and `priority` (integer 0–4; 0 resets priority). Status resolution reads all workspace project-status pages; never issue workflow states. Missing or ambiguous statuses fail before mutation.
+
+Explicit clears: `clearDescription` and `clearContent` set empty strings; `clearLead`, `clearStartDate`, and `clearTargetDate` set null. A property plus its clear flag rejects. Status cannot clear because project status is non-null. Null input values reject; use clear flags. Omitted fields are not sent. Empty updates, blank names/selectors, malformed UUID-shaped selectors, invalid dates, and invalid priority reject before configuration or HTTP.
+
+Output returns `id`, `name`, `url`, non-null `description`, nullable `content`, `status: {id, name, type}`, nullable `lead: {id, name, email}`, nullable `startDate` and `targetDate`, and numeric `priority`. HTTP/GraphQL errors (including partial data), unsuccessful mutations, and missing/malformed selected response fields fail; no false success. This is a Write tool: `call_tool` and `execute` require `allowWrites: true`. No CLI update command is added.
 
 ### Workspace project statuses
 

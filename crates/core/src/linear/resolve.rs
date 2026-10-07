@@ -109,8 +109,13 @@ pub fn match_projects(selector: &ProjectSelector, candidates: &[Project]) -> Pro
 
 pub fn is_uuid(value: &str) -> bool {
     value.len() == 36
-        && value.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
-        && value.chars().filter(|c| *c == '-').count() == 4
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if [8, 13, 18, 23].contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -166,6 +166,7 @@ mod tests {
             (input_schema_for::<TeamGetArgs>(), vec!["selector"]),
             (input_schema_for::<ProjectListArgs>(), vec!["team"]),
             (input_schema_for::<ProjectGetArgs>(), vec!["id", "team"]),
+            (input_schema_for::<ProjectUpdateArgs>(), vec!["id"]),
             (
                 input_schema_for::<ProjectCreateArgs>(),
                 vec!["name", "team"],

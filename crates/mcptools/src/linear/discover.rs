@@ -11,6 +11,8 @@ use mcptools_core::linear::{transform_project_statuses, ProjectStatusListOutput}
 pub const TEAMS_QUERY: &str = "query ($first: Int!, $after: String) { teams(first: $first, after: $after) { nodes { id key name } pageInfo { hasNextPage endCursor } } }";
 pub const TEAM_PROJECTS_QUERY: &str = "query ($id: String!, $first: Int!, $after: String) { team(id: $id) { id key name projects(first: $first, after: $after) { nodes { id name } pageInfo { hasNextPage endCursor } } } }";
 pub const PROJECT_CREATE_MUTATION: &str = "mutation ($input: ProjectCreateInput!) { projectCreate(input: $input) { success project { id name } } }";
+pub const PROJECT_GET_QUERY: &str = "query ($id: String!) { project(id: $id) { id name } }";
+pub const PROJECT_UPDATE_MUTATION: &str = "mutation ($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) { success project { id name url description content status { id name type } lead { id name email } startDate targetDate priority } } }";
 pub const USERS_QUERY: &str = "query ($query: String!, $first: Int!, $after: String) { users(first: $first, after: $after, filter: { name: { contains: $query } }) { nodes { id name email } pageInfo { hasNextPage endCursor } } }";
 pub const TEAM_STATES_QUERY: &str = "query ($id: String!, $first: Int!, $after: String) { team(id: $id) { id states(first: $first, after: $after) { nodes { id name type } pageInfo { hasNextPage endCursor } } } }";
 pub const TEAM_LABELS_QUERY: &str = "query ($id: String!, $first: Int!, $after: String) { team(id: $id) { id labels(first: $first, after: $after) { nodes { id name } pageInfo { hasNextPage endCursor } } } }";
@@ -97,15 +99,33 @@ async fn teams_get_data_with_url(
 ) -> Result<Team> {
     let parsed = parse_team_selector(selector)
         .ok_or_else(|| eyre!("Linear team selector must not be empty"))?;
-    let data = execute_with_url(
-        client,
-        url,
-        TEAMS_QUERY,
-        serde_json::json!({"first": 50, "after": null}),
-    )
-    .await?;
-    let listed = transform_teams(data).map_err(|e| eyre!("{}", e))?;
-    match match_teams(&parsed, &listed.nodes) {
+    let mut nodes = Vec::new();
+    let mut cursor = None;
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        let data = execute_with_url(
+            client,
+            url,
+            TEAMS_QUERY,
+            serde_json::json!({"first": 50, "after": cursor}),
+        )
+        .await?;
+        let page = transform_teams(data).map_err(|error| eyre!(error))?;
+        nodes.extend(page.nodes);
+        if !page.page_info.has_next {
+            break;
+        }
+        let next = page
+            .page_info
+            .end_cursor
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| eyre!("Team pagination cursor missing or blank"))?;
+        if !seen.insert(next.clone()) {
+            return Err(eyre!("Team pagination cursor did not progress"));
+        }
+        cursor = Some(next);
+    }
+    match match_teams(&parsed, &nodes) {
         TeamResolution::Resolved(team) => Ok(team),
         TeamResolution::NotFound(input) => Err(eyre!("Linear team not found: {}", input)),
         TeamResolution::Ambiguous(hits) => {
@@ -203,6 +223,136 @@ async fn projects_create_data_with_url(
     transform_project_create(data).map_err(|e| eyre!("{}", e))
 }
 
+pub async fn projects_update_data(
+    client: &reqwest::Client,
+    args: &crate::linear::args::ProjectUpdateArgs,
+) -> Result<mcptools_core::linear::ProjectUpdateOutput> {
+    projects_update_data_with_url(client, LINEAR_API_URL, args).await
+}
+
+async fn projects_update_data_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    args: &crate::linear::args::ProjectUpdateArgs,
+) -> Result<mcptools_core::linear::ProjectUpdateOutput> {
+    use mcptools_core::linear::{
+        project_update_input, resolve_project_status, transform_project_update, ProjectSelector,
+    };
+    let mut input = project_update_input(args).map_err(|error| eyre!(error))?;
+    let selector =
+        parse_project_selector(&args.id).ok_or_else(|| eyre!("Missing project selector"))?;
+    let project = match &selector {
+        ProjectSelector::Id(id) => {
+            let data = execute_with_url(
+                client,
+                url,
+                PROJECT_GET_QUERY,
+                serde_json::json!({"id": id}),
+            )
+            .await?;
+            let project = serde_json::from_value::<Project>(data["project"].clone())
+                .map_err(|error| eyre!("Project not found or malformed: {error}"))?;
+            if !project.id.eq_ignore_ascii_case(id) {
+                return Err(eyre!(
+                    "Project lookup returned a different project identity"
+                ));
+            }
+            project
+        }
+        ProjectSelector::Name(_) => {
+            let team = teams_get_data_with_url(
+                client,
+                url,
+                args.team
+                    .as_deref()
+                    .ok_or_else(|| eyre!("Project names require team"))?,
+            )
+            .await?;
+            let mut nodes = Vec::new();
+            let mut cursor = None;
+            let mut seen = std::collections::HashSet::new();
+            loop {
+                let data = execute_with_url(
+                    client,
+                    url,
+                    TEAM_PROJECTS_QUERY,
+                    serde_json::json!({"id": team.id, "first": 50, "after": cursor}),
+                )
+                .await?;
+                let page = transform_team_projects(data).map_err(|error| eyre!(error))?;
+                nodes.extend(page.nodes);
+                if !page.page_info.has_next {
+                    break;
+                }
+                let next = page
+                    .page_info
+                    .end_cursor
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| eyre!("Project pagination cursor missing or blank"))?;
+                if !seen.insert(next.clone()) {
+                    return Err(eyre!("Project pagination cursor did not progress"));
+                }
+                cursor = Some(next);
+            }
+            match match_projects(&selector, &nodes) {
+                ProjectResolution::Resolved(project) => project,
+                ProjectResolution::NotFound(name) => {
+                    return Err(eyre!("Linear project not found: {name}"))
+                }
+                ProjectResolution::Ambiguous(projects) => {
+                    return Err(eyre!(
+                        "Ambiguous Linear project. Candidates: {}",
+                        projects
+                            .iter()
+                            .map(|project| format!("{} ({})", project.name, project.id))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ))
+                }
+            }
+        }
+    };
+    if project.id.trim().is_empty() || project.name.trim().is_empty() {
+        return Err(eyre!("Malformed project identity"));
+    }
+    if let Some(status) = &args.status {
+        let statuses = project_statuses_list_data_with_url(
+            client,
+            url,
+            crate::linear::args::ProjectStatusListArgs {
+                limit: 250,
+                cursor: None,
+                all: true,
+            },
+        )
+        .await?;
+        input["statusId"] = serde_json::json!(
+            resolve_project_status(status, &statuses.nodes).map_err(|error| eyre!(error))?
+        );
+    }
+    if args.lead.is_some() {
+        let lead = super::issue::resolve_assignee_id_with_url(
+            client,
+            url,
+            args.lead.as_deref(),
+            "project update",
+        )
+        .await?;
+        if lead.as_deref().is_none_or(|id| id.trim().is_empty()) {
+            return Err(eyre!("Malformed lead identity"));
+        }
+        input["leadId"] = serde_json::json!(lead);
+    }
+    let data = execute_with_url(
+        client,
+        url,
+        PROJECT_UPDATE_MUTATION,
+        serde_json::json!({"id": project.id, "input": input}),
+    )
+    .await?;
+    transform_project_update(data).map_err(|error| eyre!(error))
+}
+
 pub async fn users_list_data(
     client: &reqwest::Client,
     query: &str,
@@ -261,6 +411,306 @@ pub async fn cycles_list_data(client: &reqwest::Client, team: &str) -> Result<Pa
 mod tests {
     use super::*;
     use crate::linear::config::LinearConfig;
+
+    #[tokio::test]
+    async fn team_resolution_scans_all_pages_before_accepting_a_match() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        for (first_matches, second_matches, succeeds) in [
+            (false, true, true),
+            (true, true, false),
+            (false, false, false),
+        ] {
+            let server = MockServer::start().await;
+            for (after, matches, next, id) in [
+                (None, first_matches, Some("next"), "t1"),
+                (Some("next"), second_matches, None, "t2"),
+            ] {
+                let nodes = if matches {
+                    serde_json::json!([{"id": id, "key": "GUZ", "name": "Example"}])
+                } else {
+                    serde_json::json!([])
+                };
+                Mock::given(method("POST"))
+                    .and(body_json(serde_json::json!({"query": TEAMS_QUERY, "variables": {"first": 50, "after": after}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"teams": {"nodes": nodes, "pageInfo": {"hasNextPage": next.is_some(), "endCursor": next}}}})))
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+            }
+            let result =
+                teams_get_data_with_url(&reqwest::Client::new(), &server.uri(), "GUZ").await;
+            assert_eq!(result.is_ok(), succeeds, "{result:?}");
+            if succeeds {
+                assert_eq!(result.unwrap().id, "t2");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn project_update_partial_combined_and_cleared_fields() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let status_id = "22345678-1234-1234-1234-123456789abc";
+        let lead_id = "32345678-1234-1234-1234-123456789abc";
+        for (fields, input) in [
+            (
+                serde_json::json!({"name": "New"}),
+                serde_json::json!({"name": "New"}),
+            ),
+            (
+                serde_json::json!({"content": "    code\n\n# Heading\n"}),
+                serde_json::json!({"content": "    code\n\n# Heading\n"}),
+            ),
+            (
+                serde_json::json!({"clearDescription": true, "clearContent": true, "clearLead": true, "clearStartDate": true, "clearTargetDate": true, "priority": 0}),
+                serde_json::json!({"description": "", "content": "", "leadId": null, "startDate": null, "targetDate": null, "priority": 0}),
+            ),
+            (
+                serde_json::json!({"name": "New", "description": "Summary", "content": "    code\n", "status": " custom ", "lead": "me", "startDate": "2028-02-29", "targetDate": "2028-03-01", "priority": 4}),
+                serde_json::json!({"name": "New", "description": "Summary", "content": "    code\n", "statusId": status_id, "leadId": lead_id, "startDate": "2028-02-29", "targetDate": "2028-03-01", "priority": 4}),
+            ),
+            (
+                serde_json::json!({"status": status_id, "lead": lead_id}),
+                serde_json::json!({"statusId": status_id, "leadId": lead_id}),
+            ),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(
+                    serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": id}}),
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"data": {"project": {"id": id, "name": "Existing"}}}),
+                ))
+                .expect(1)
+                .mount(&server)
+                .await;
+            if fields.get("status").is_some() {
+                for (after, nodes, next) in [
+                    (None, serde_json::json!([]), Some("next")),
+                    (
+                        Some("next"),
+                        serde_json::json!([{"id": status_id, "name": "Custom", "type": "planned", "color": "#fff", "position": 1.0}]),
+                        None,
+                    ),
+                ] {
+                    Mock::given(method("POST")).and(body_json(serde_json::json!({"query": PROJECT_STATUSES_QUERY, "variables": {"first": 250, "after": after}})))
+                        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"projectStatuses": {"nodes": nodes, "pageInfo": {"hasNextPage": next.is_some(), "endCursor": next}}}}))).expect(1).mount(&server).await;
+                }
+            }
+            if fields["lead"] == "me" {
+                Mock::given(method("POST")).and(body_json(serde_json::json!({"query": super::super::auth::VIEWER_QUERY, "variables": {}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"viewer": {"id": lead_id, "name": "Ada", "email": null}}}))).expect(1).mount(&server).await;
+            }
+            let output: serde_json::Value = serde_json::from_str(include_str!(
+                "../../tests/contract_samples/linear_project_update.json"
+            ))
+            .unwrap();
+            Mock::given(method("POST")).and(body_json(serde_json::json!({"query": PROJECT_UPDATE_MUTATION, "variables": {"id": id, "input": input}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"projectUpdate": {"success": true, "project": output}}}))).expect(1).mount(&server).await;
+            let mut args = serde_json::json!({"id": id});
+            args.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let args = serde_json::from_value(args).unwrap();
+            let updated =
+                projects_update_data_with_url(&reqwest::Client::new(), &server.uri(), &args)
+                    .await
+                    .unwrap();
+            let result = crate::mcp::tools::to_dual_result(updated).unwrap();
+            assert_eq!(result["structuredContent"], output);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(
+                    result["content"][0]["text"].as_str().unwrap()
+                )
+                .unwrap(),
+                output
+            );
+            assert!(server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .all(
+                    |request| !serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()
+                        ["query"]
+                        .as_str()
+                        .unwrap()
+                        .contains("states(")
+                ));
+        }
+    }
+
+    #[tokio::test]
+    async fn project_update_name_resolution_and_status_ambiguity_scan_all_pages() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for (project_count, status_count, succeeds) in [
+            (0, 0, false),
+            (1, 0, false),
+            (2, 1, false),
+            (1, 2, false),
+            (1, 1, true),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST")).and(body_json(serde_json::json!({"query": TEAMS_QUERY, "variables": {"first": 50, "after": null}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"teams": {"nodes": [{"id": "t1", "key": "GUZ", "name": "Example"}], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}))).expect(1).mount(&server).await;
+            for (index, after) in [None, Some("next")].into_iter().enumerate() {
+                let nodes = if index < project_count {
+                    serde_json::json!([{"id": if index == 0 { id } else { "p2" }, "name": "Existing"}])
+                } else {
+                    serde_json::json!([])
+                };
+                Mock::given(method("POST")).and(body_json(serde_json::json!({"query": TEAM_PROJECTS_QUERY, "variables": {"id": "t1", "first": 50, "after": after}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"team": {"projects": {"nodes": nodes, "pageInfo": {"hasNextPage": index == 0, "endCursor": if index == 0 { Some("next") } else { None }}}}}}))).expect(1).mount(&server).await;
+            }
+            if project_count == 1 {
+                for (index, after) in [None, Some("next")].into_iter().enumerate() {
+                    let nodes = if index < status_count {
+                        serde_json::json!([{"id": format!("s{index}"), "name": "Custom", "type": "planned", "color": "#fff", "position": 1.0}])
+                    } else {
+                        serde_json::json!([])
+                    };
+                    Mock::given(method("POST")).and(body_json(serde_json::json!({"query": PROJECT_STATUSES_QUERY, "variables": {"first": 250, "after": after}})))
+                        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"projectStatuses": {"nodes": nodes, "pageInfo": {"hasNextPage": index == 0, "endCursor": if index == 0 { Some("next") } else { None }}}}}))).expect(1).mount(&server).await;
+                }
+            }
+            if succeeds {
+                let output: serde_json::Value = serde_json::from_str(include_str!(
+                    "../../tests/contract_samples/linear_project_update.json"
+                ))
+                .unwrap();
+                Mock::given(method("POST")).and(body_json(serde_json::json!({"query": PROJECT_UPDATE_MUTATION, "variables": {"id": id, "input": {"statusId": "s0"}}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"projectUpdate": {"success": true, "project": output}}}))).expect(1).mount(&server).await;
+            }
+            let args = serde_json::from_value(
+                serde_json::json!({"id": " existing ", "team": "GUZ", "status": "CUSTOM"}),
+            )
+            .unwrap();
+            let result =
+                projects_update_data_with_url(&reqwest::Client::new(), &server.uri(), &args).await;
+            assert_eq!(result.is_ok(), succeeds, "{result:?}");
+            let writes = server
+                .received_requests()
+                .await
+                .unwrap()
+                .iter()
+                .filter(|request| {
+                    serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()["query"]
+                        == PROJECT_UPDATE_MUTATION
+                })
+                .count();
+            assert_eq!(writes, usize::from(succeeds));
+        }
+    }
+
+    #[tokio::test]
+    async fn project_update_rejects_invalid_inputs_and_failed_reads_or_mutations() {
+        use wiremock::matchers::{body_partial_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let id = "12345678-1234-1234-1234-123456789abc";
+        let args: crate::linear::args::ProjectUpdateArgs =
+            serde_json::from_value(serde_json::json!({"id": id, "name": "New"})).unwrap();
+        let server = MockServer::start().await;
+        for fields in [
+            serde_json::json!({"id": id}),
+            serde_json::json!({"id": id, "name": " "}),
+            serde_json::json!({"id": id, "startDate": "2026-02-29"}),
+            serde_json::json!({"id": id, "lead": "Ada"}),
+            serde_json::json!({"id": id, "priority": 5}),
+        ] {
+            let invalid = serde_json::from_value(fields).unwrap();
+            assert!(projects_update_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &invalid
+            )
+            .await
+            .is_err());
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+        for (query, status, response) in [
+            (
+                PROJECT_GET_QUERY,
+                200,
+                serde_json::json!({"data": {"project": null}}),
+            ),
+            (
+                PROJECT_GET_QUERY,
+                200,
+                serde_json::json!({"data": {"project": {"id": id}}}),
+            ),
+            (
+                PROJECT_GET_QUERY,
+                200,
+                serde_json::json!({"data": {"project": {"id": "22345678-1234-1234-1234-123456789abc", "name": "Other"}}}),
+            ),
+            (
+                PROJECT_UPDATE_MUTATION,
+                401,
+                serde_json::json!({"errors": [{"message": "Denied"}]}),
+            ),
+            (
+                PROJECT_UPDATE_MUTATION,
+                200,
+                serde_json::json!({"errors": [{"message": "Partial failure"}], "data": {"projectUpdate": {"success": true, "project": {"id": id, "name": "New"}}}}),
+            ),
+            (
+                PROJECT_UPDATE_MUTATION,
+                200,
+                serde_json::json!({"data": {"projectUpdate": {"success": false}}}),
+            ),
+            (
+                PROJECT_UPDATE_MUTATION,
+                200,
+                serde_json::json!({"data": {"projectUpdate": {"success": true, "project": {"id": id, "name": "New"}}}}),
+            ),
+            (
+                PROJECT_UPDATE_MUTATION,
+                200,
+                serde_json::json!({"data": {}}),
+            ),
+        ] {
+            let server = MockServer::start().await;
+            if query == PROJECT_UPDATE_MUTATION {
+                Mock::given(method("POST"))
+                    .and(body_partial_json(
+                        serde_json::json!({"query": PROJECT_GET_QUERY}),
+                    ))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(
+                        serde_json::json!({"data": {"project": {"id": id, "name": "Existing"}}}),
+                    ))
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+            }
+            Mock::given(method("POST"))
+                .and(body_partial_json(serde_json::json!({"query": query})))
+                .respond_with(ResponseTemplate::new(status).set_body_json(response))
+                .expect(1)
+                .mount(&server)
+                .await;
+            assert!(
+                projects_update_data_with_url(&reqwest::Client::new(), &server.uri(), &args)
+                    .await
+                    .is_err()
+            );
+            if query == PROJECT_GET_QUERY {
+                assert!(server
+                    .received_requests()
+                    .await
+                    .unwrap()
+                    .iter()
+                    .all(|request| {
+                        serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()["query"]
+                            == PROJECT_GET_QUERY
+                    }));
+            }
+        }
+    }
 
     #[tokio::test]
     async fn project_status_pages_preserve_order_and_final_page_info() {

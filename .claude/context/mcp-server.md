@@ -101,6 +101,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `linear_project_get` | Get one project in a team |
 | `linear_project_status_list` | List workspace project statuses; limit 1–250, cursor, all |
 | `linear_project_create` | Create a project in one team with optional description and Markdown content |
+| `linear_project_update` | Partially update project properties by UUID or name with team; explicit clear flags; Write (`allowWrites` required in discovery/Code Mode) |
 | `linear_user_list` | List users matching a query |
 | `linear_state_list` | List workflow states in a team |
 | `linear_label_list` | List labels in a team |
@@ -239,7 +240,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
-either discovery or code mode, hosts load all 72 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 73 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

@@ -1,3 +1,4 @@
+pub use mcptools_core::linear::ProjectUpdateArgs;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer};
 

@@ -388,10 +388,20 @@ async fn resolve_assignee_id(
     assignee: Option<&str>,
     op: &str,
 ) -> Result<Option<String>> {
+    resolve_assignee_id_with_url(client, super::client::LINEAR_API_URL, assignee, op).await
+}
+
+pub(super) async fn resolve_assignee_id_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    assignee: Option<&str>,
+    op: &str,
+) -> Result<Option<String>> {
     match assignee.map(str::trim).filter(|text| !text.is_empty()) {
         None => Ok(None),
         Some(selector) if selector.eq_ignore_ascii_case("me") => {
-            Ok(Some(super::auth::auth_status_data(client).await?.id))
+            let data = super::client::execute_with_url(client, url, super::auth::VIEWER_QUERY, serde_json::json!({})).await?;
+            Ok(Some(mcptools_core::linear::transform_viewer(data).map_err(|error| eyre!(error))?.id))
         }
         Some(selector) if is_uuid(selector) => Ok(Some(selector.to_string())),
         Some(selector) => Err(eyre!(

@@ -1,0 +1,12 @@
+{
+  "id": "12345678-1234-1234-1234-123456789abc",
+  "name": "MCPTools",
+  "url": "https://linear.app/example/project/mcptools",
+  "description": "Updated project",
+  "content": "    indented Markdown\n",
+  "status": { "id": "22345678-1234-1234-1234-123456789abc", "name": "Planned", "type": "planned" },
+  "lead": { "id": "32345678-1234-1234-1234-123456789abc", "name": "Example", "email": "example@example.com" },
+  "startDate": "2026-10-07",
+  "targetDate": "2026-12-01",
+  "priority": 2
+}
