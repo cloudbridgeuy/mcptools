@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-20 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+21 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -113,6 +113,7 @@ linear_auth_status, linear_issue_get, linear_issue_list, linear_issue_graph
 linear_comment_list, linear_relation_list
 linear_team_list, linear_team_get
 linear_project_list, linear_project_get
+linear_project_status_list
 linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 
 # Writes
@@ -122,6 +123,12 @@ linear_issue_update (needs id plus one of title, description, state, assignee, p
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```
+
+### Workspace project statuses
+
+`linear_project_status_list({limit: 25, cursor: "cursor", all: false})` reads the workspace `projectStatuses` connection, not team workflow states. MCP only; no CLI command or team selector. Omit arguments for the first page. `limit` defaults to 25, range 1–250; `all` defaults to false. Unknown fields, invalid types or bounds, and blank cursors reject before configuration or HTTP.
+
+Output is `{nodes, pageInfo}`. Each node has returned `id`, `name`, `type`, `color`, floating-point `position`, and optional `description` (omitted when null). Pages retain API order with explicit `orderBy: createdAt`; no category names or per-page sorting are imposed. `all: true` accumulates pages and returns the final pageInfo. Missing, blank, unchanged or repeated continuation cursors fail instead of looping or returning partial success. HTTP, GraphQL and malformed-response errors also fail. This is a read-only tool in direct calls, discovery, and code mode; no `allowWrites` needed.
 
 ### Structured issue graph
 

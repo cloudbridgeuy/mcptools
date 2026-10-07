@@ -245,7 +245,7 @@ fn recorded_annotation() -> serde_json::Value {
 fn mcp_contract_rest() {
     let response = tools_list();
     let all = tools(&response);
-    assert_eq!(all.len(), 71, "unexpected tools/list length");
+    assert_eq!(all.len(), 72, "unexpected tools/list length");
     for tool in &all {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();
         let output = tool

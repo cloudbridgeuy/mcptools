@@ -22,6 +22,52 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ProjectStatus {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub status_type: String,
+    pub color: String,
+    pub position: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ProjectStatusListOutput {
+    pub nodes: Vec<ProjectStatus>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+impl From<Paginated<ProjectStatus>> for ProjectStatusListOutput {
+    fn from(paged: Paginated<ProjectStatus>) -> Self {
+        Self {
+            nodes: paged.nodes,
+            page_info: paged.page_info,
+        }
+    }
+}
+
+pub fn transform_project_statuses(
+    data: serde_json::Value,
+) -> Result<Paginated<ProjectStatus>, serde_json::Error> {
+    if data["projectStatuses"]["pageInfo"]
+        .get("endCursor")
+        .is_none()
+    {
+        return Err(<serde_json::Error as serde::de::Error>::missing_field(
+            "endCursor",
+        ));
+    }
+    let paged: RawPaged<ProjectStatus> = serde_json::from_value(data["projectStatuses"].clone())?;
+    Ok(Paginated {
+        nodes: paged.nodes,
+        page_info: paged.page_info,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct User {
     pub id: String,
     pub name: String,

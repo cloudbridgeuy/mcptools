@@ -132,6 +132,42 @@ pub struct ProjectListArgs {
     pub all: Option<bool>,
 }
 
+fn project_status_default_limit() -> u32 {
+    25
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectStatusListArgs {
+    #[serde(default = "project_status_default_limit")]
+    #[schemars(
+        range(min = 1, max = 250),
+        description = "Items per page, 1–250 (default: 25)"
+    )]
+    pub limit: u32,
+    #[schemars(description = "Page cursor; must not be blank")]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    #[schemars(description = "Fetch all pages (default: false)")]
+    pub all: bool,
+}
+
+impl ProjectStatusListArgs {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !(1..=250).contains(&self.limit) {
+            return Err("limit must be between 1 and 250");
+        }
+        if self
+            .cursor
+            .as_deref()
+            .is_some_and(|cursor| cursor.trim().is_empty())
+        {
+            return Err("cursor must not be blank");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ProjectCreateArgs {
     #[schemars(description = "Team id, key, or name (must not be blank)")]

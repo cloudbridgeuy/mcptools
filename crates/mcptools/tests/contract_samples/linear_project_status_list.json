@@ -1,0 +1,20 @@
+{
+  "nodes": [
+    {
+      "id": "status-1",
+      "name": "Custom planning",
+      "type": "planned",
+      "color": "#aabbcc",
+      "position": 1.25,
+      "description": "Ready for planning"
+    },
+    {
+      "id": "status-2",
+      "name": "Custom delivery",
+      "type": "started",
+      "color": "#ddeeff",
+      "position": 0.5
+    }
+  ],
+  "pageInfo": {"hasNextPage": false, "endCursor": "status-2"}
+}

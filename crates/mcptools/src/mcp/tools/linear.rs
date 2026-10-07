@@ -326,6 +326,27 @@ pub async fn handle_linear_project_get(
     super::to_dual_result(item)
 }
 
+pub async fn handle_linear_project_status_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::ProjectStatusListArgs =
+        parse_args(Some(arguments.unwrap_or_else(|| serde_json::json!({}))))?;
+    args.validate().map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_project_status_list");
+    }
+    let client = linear_client()?;
+    let output = crate::linear::discover::project_statuses_list_data(&client, args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_project_create(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -564,6 +585,118 @@ pub async fn handle_linear_cycle_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn project_status_rejects_invalid_arguments_before_configuration() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for input in [
+            serde_json::json!({"limit": 0}),
+            serde_json::json!({"limit": 251}),
+            serde_json::json!({"limit": -1}),
+            serde_json::json!({"limit": 1.5}),
+            serde_json::json!({"limit": "25"}),
+            serde_json::json!({"limit": null}),
+            serde_json::json!({"cursor": " "}),
+            serde_json::json!({"cursor": 1}),
+            serde_json::json!({"all": "true"}),
+            serde_json::json!({"all": null}),
+            serde_json::json!({"team": "GUZ"}),
+            serde_json::json!([]),
+        ] {
+            let error = handle_linear_project_status_list(Some(input), &global)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, -32602);
+        }
+        let defaults: crate::linear::args::ProjectStatusListArgs =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(defaults.limit, 25);
+        assert!(!defaults.all);
+        assert_eq!(defaults.cursor, None);
+        for limit in [1, 250] {
+            let args: crate::linear::args::ProjectStatusListArgs =
+                serde_json::from_value(serde_json::json!({"limit": limit})).unwrap();
+            assert!(args.validate().is_ok());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn project_status_is_read_only_in_discovery_and_code_mode() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            for tool in [
+                serde_json::json!({"name": "linear_project_status_list", "arguments": {"limit": 0}}),
+                serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_status_list", "input": {"limit": 0}}}),
+            ] {
+                let error = super::super::handle_tools_call(Some(tool), &global, flags)
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code, -32602);
+                assert!(error.message.starts_with("Invalid arguments:"));
+            }
+        }
+        let flags = super::super::ServeFlags {
+            discovery: false,
+            code_mode: true,
+        };
+        let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": "return await linear_project_status_list({limit: 0})"}})), &global, flags).await.unwrap();
+        assert!(result["structuredContent"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid arguments:"));
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_project_status_list")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Read);
+        let declaration = super::super::declaration(&tool);
+        assert!(declaration.contains("declare function linear_project_status_list(input: LinearProjectStatusListInput): Promise<LinearProjectStatusListOutput>"));
+        for field in [
+            "limit?: number",
+            "cursor?: string",
+            "all?: boolean",
+            "position: number",
+            "type: string",
+            "pageInfo:",
+        ] {
+            assert!(declaration.contains(field), "{field}: {declaration}");
+        }
+        assert_eq!(tool.input_schema["properties"]["limit"]["type"], "integer");
+        assert_eq!(tool.input_schema["properties"]["limit"]["default"], 25);
+        let schema = schemars::schema_for!(crate::linear::args::ProjectStatusListArgs);
+        assert_eq!(
+            schema.as_value()["properties"]["limit"]["minimum"].as_f64(),
+            Some(1.0)
+        );
+        assert_eq!(
+            schema.as_value()["properties"]["limit"]["maximum"].as_f64(),
+            Some(250.0)
+        );
+        assert_eq!(tool.input_schema["additionalProperties"], false);
+    }
 
     #[tokio::test]
     async fn graph_rejects_invalid_inputs_before_configuration_or_http() {
