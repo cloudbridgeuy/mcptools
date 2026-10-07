@@ -91,7 +91,7 @@ For detailed usage of each feature, see the context files:
 - **[Agent Setup](.claude/context/agent-setup.md)** - User-level agent integration; setup, status, uninstall for codex, claude, pi, opencode
 
 ### Infrastructure
-- **[Lanes](.claude/context/lanes.md)** - Native Git read-only listing and guarded Worktrunk creation; operator-only `MCPTOOLS_LANE_REPOS` authorization
+- **[Lanes](.claude/context/lanes.md)** - Native Git read-only listing/cleanup planning and guarded Worktrunk creation; operator-only `MCPTOOLS_LANE_REPOS` authorization
 - **[MCP Server](.claude/context/mcp-server.md)** - Server configuration; available tools
 - **[Upgrade](.claude/context/upgrade.md)** - Self-update mechanism; platform support
 - **[Testing & Env Vars](.claude/context/testing.md)** - All environment variables; scripting

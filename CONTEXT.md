@@ -35,7 +35,7 @@ Linear command reference: [Linear](.claude/context/linear.md).
 MCP server reference: [MCP Server](.claude/context/mcp-server.md).
 
 ### Requirement: Lane authorization and ownership
-`lane_list` and `lane_create` require an exact canonical repository-root allowlist in the operator-controlled server environment `MCPTOOLS_LANE_REPOS`, or the exact whole value `'*'` to authorize all otherwise-supported roots; unset or empty denies both. Wildcard mode broadens operator trust, not supported root types or other safety guards. Mixed wildcard/path lists and whitespace wildcards are invalid. Repository files and request arguments cannot authorize access. Listing uses native Git because Worktrunk JSON listing writes and prunes repository caches. Creation uses isolated Worktrunk 0.77.0 with hooks disabled. Ownership requires registered filesystem identities and the creation commit's ancestry; unfamiliar identities remain unmanaged. See [Lanes](.claude/context/lanes.md).
+`lane_list`, `lane_cleanup_plan`, and `lane_create` require an exact canonical repository-root allowlist in the operator-controlled server environment `MCPTOOLS_LANE_REPOS`, or the exact whole value `'*'` to authorize all otherwise-supported roots; unset or empty denies all three. Wildcard mode broadens operator trust, not supported root types or other safety guards. Mixed wildcard/path lists and whitespace wildcards are invalid. Repository files and request arguments cannot authorize access. Listing and cleanup planning use native Git because Worktrunk JSON listing writes and prunes repository caches. Creation uses isolated Worktrunk 0.77.0 with hooks disabled. Ownership requires registered filesystem identities and the creation commit's ancestry; unfamiliar identities remain unmanaged. Cleanup plans are read-only advisory observations, not approval tokens or atomic snapshots; ignored content blocks eligibility. No removal tool exists. See [Lanes](.claude/context/lanes.md).
 
 #### Scenario: Partial creation
 - **WHEN** Worktrunk creation starts but creation verification or durable registration fails
@@ -51,7 +51,7 @@ The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **D
 
 #### Scenario: Default list
 - **WHEN** the server starts with neither mode flag nor either mode env var
-- **THEN** `tools/list` returns all 69 registered tools
+- **THEN** `tools/list` returns all 70 registered tools
 
 #### Scenario: Unlisted tool call
 - **WHEN** a client in **Discovery mode** sends `tools/call` with the name of a tool that `tools/list` did not return

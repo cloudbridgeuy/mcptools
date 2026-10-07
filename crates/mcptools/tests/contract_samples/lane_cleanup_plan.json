@@ -1,0 +1,1 @@
+{"assessments":[{"lane":{"id":"0123456789abcdef0123456789abcdef","path":"/repo/.worktrees/topic","branch":"topic","head":"0123456789abcdef0123456789abcdef01234567","managed":true,"main":false,"current":false,"locked":false,"state":"clean"},"removable":false,"blockers":["ignoredFiles"],"ignored":{"state":"complete","paths":["target/"]}}]}

@@ -128,7 +128,7 @@ fn no_flag_no_env_lists_all_tools() {
     );
 
     let tools = responses[0]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 69);
+    assert_eq!(tools.len(), 70);
 }
 
 #[test]
@@ -162,12 +162,27 @@ fn lanes_are_discoverable_and_deny_unconfigured_access_in_all_modes() {
                     "tools/call",
                     serde_json::json!({"name":"call_tool", "arguments":{"name":"lane_create", "input":{"repo":"/", "branch":"topic", "base":"main"}}}),
                 ),
+                request(
+                    4,
+                    "tools/call",
+                    serde_json::json!({"name":"lane_cleanup_plan", "arguments":{"repo":"/"}}),
+                ),
+                request(
+                    5,
+                    "tools/call",
+                    serde_json::json!({"name":"call_tool", "arguments":{"name":"lane_cleanup_plan", "input":{"repo":"/"}}}),
+                ),
+                request(
+                    6,
+                    "tools/call",
+                    serde_json::json!({"name":"execute", "arguments":{"code":"return await lane_cleanup_plan({repo:'/'});"}}),
+                ),
             ],
         );
         let found = responses[0]["result"]["structuredContent"]["tools"]
             .as_array()
             .unwrap();
-        assert_eq!(found.len(), 2);
+        assert_eq!(found.len(), 3);
         assert_eq!(found[0]["name"], "lane_list");
         let declaration = found[0]["declaration"].as_str().unwrap();
         assert!(declaration.contains("string | null"));
@@ -181,5 +196,22 @@ fn lanes_are_discoverable_and_deny_unconfigured_access_in_all_modes() {
             .as_str()
             .unwrap()
             .contains("allowWrites"));
+        let plan = found
+            .iter()
+            .find(|tool| tool["name"] == "lane_cleanup_plan")
+            .unwrap();
+        assert!(plan["declaration"].as_str().unwrap().contains("laneIds"));
+        for index in [3, 4] {
+            assert!(responses[index]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("MCPTOOLS_LANE_REPOS"));
+        }
+        assert!(
+            responses[5]["result"]["structuredContent"]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("MCPTOOLS_LANE_REPOS")
+        );
     }
 }

@@ -136,10 +136,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn read_only_set_has_forty_five_names_and_no_writes() {
+    async fn read_only_set_has_forty_six_names_and_no_writes() {
         let read = bound_names(&registered_tools(), &[ToolKind::Read]);
-        assert_eq!(read.len(), 45);
+        assert_eq!(read.len(), 46);
         assert!(read.contains(&"lane_list".to_string()));
+        assert!(read.contains(&"lane_cleanup_plan".to_string()));
         assert!(!read.contains(&"lane_create".to_string()));
         assert!(read.contains(&"find_tools".to_string()));
         assert!(read.contains(&"jira_search".to_string()));
@@ -151,7 +152,7 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 67);
+        assert_eq!(all.len(), 68);
         assert!(all.contains(&"bitbucket_pr_comment_add".to_string()));
     }
 

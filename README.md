@@ -10,7 +10,7 @@ Useful MCP Tools to use with LLM Coding Agents
 - **Atlassian Confluence**: Search pages using CQL (`confluence_search`)
 - **Atlassian Bitbucket**: List and read pull requests with diff support; add general or single-line inline comments (`bitbucket_pr_list`, `bitbucket_pr_read`, `bitbucket_pr_comment_add`)
 - **Linear**: Read a bounded issue dependency graph and ready-to-start frontier (`linear_issue_graph`); see [Linear](.claude/context/linear.md) for all Linear tools.
-- **Lanes**: Read Git worktrees and create guarded Worktrunk lanes (`lane_list`, `lane_create`). Disabled until the server operator sets `MCPTOOLS_LANE_REPOS`. No deletion, cleanup, merge, or push. See [Lane security and contracts](.claude/context/lanes.md).
+- **Lanes**: Read Git worktrees, assess cleanup eligibility, and create guarded Worktrunk lanes (`lane_list`, `lane_cleanup_plan`, `lane_create`). Disabled until the server operator sets `MCPTOOLS_LANE_REPOS`. Plans are advisory, not removal permission. No deletion, cleanup execution, merge, or push. See [Lane security and contracts](.claude/context/lanes.md).
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
 - **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
 - **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)

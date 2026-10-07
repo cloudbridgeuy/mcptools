@@ -165,11 +165,19 @@ pub fn registered_tools() -> Vec<Tool> {
     vec![
         Tool {
             name: "lane_list".into(),
-            description: "List Git worktrees of an exact repository root permitted by server environment MCPTOOLS_LANE_REPOS. Denied when unset or empty. Native Git avoids Worktrunk cache writes. Missing HEAD is null; unavailable status is unknown. Only unchanged registered identities are managed. No lane deletion, cleanup, merge, or push tools exist.".into(),
+            description: "List Git worktrees of an exact repository root permitted by server environment MCPTOOLS_LANE_REPOS. Denied when unset or empty. Native Git avoids Worktrunk cache writes. Missing HEAD is null; unavailable status is unknown. Only unchanged registered identities are managed. Cleanup planning is read-only; no lane deletion, cleanup execution, merge, or push tools exist.".into(),
             summary: "Inspect Git worktree lanes and registered ownership",
             kind: ToolKind::Read,
             input_schema: schema::input_schema_for::<mcptools_core::lane::ListArgs>(),
             output_schema: schema::output_schema_for::<mcptools_core::lane::ListOutput>(),
+        },
+        Tool {
+            name: "lane_cleanup_plan".into(),
+            description: "Assess lane removal eligibility without changing Git, ownership records, files, or Worktrunk caches. Requires an operator-permitted repository root. Omit laneIds to inspect all registered worktrees, including unmanaged blockers; otherwise supply 1 to 100 unique managed IDs from lane_list. Unknown or no longer managed IDs fail. Main, current, unmanaged, locked, dirty, unresolved, missing HEAD, ignored content, and unknown inspection states block removal. Ignored evidence is relative, sorted, capped at 100 paths; directories collapse. Advisory observation only, not an atomic snapshot or approval token. Git clean does not mean disposable. No removal tool exists.".into(),
+            summary: "Plan lane cleanup with read-only eligibility and blockers",
+            kind: ToolKind::Read,
+            input_schema: schema::input_schema_for::<mcptools_core::lane::CleanupPlanArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::lane::CleanupPlanOutput>(),
         },
         Tool {
             name: "lane_create".into(),
@@ -820,6 +828,7 @@ pub async fn handle_tools_call(
 
     match params.name.as_str() {
         "lane_list" => lane::list(params.arguments).await,
+        "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
         "lane_create" => lane::create(params.arguments).await,
         "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
@@ -973,6 +982,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
+        assert_eq!(catalog.len(), 67);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1038,7 +1048,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 69);
+        assert_eq!(super::registered_tools().len(), 70);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1115,7 +1125,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 69);
+        assert_eq!(names(serve_flags(false)).len(), 70);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1200,7 +1210,7 @@ mod catalog_tests {
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 69);
+        assert_eq!(tools.len(), 70);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1218,7 +1228,8 @@ mod catalog_tests {
             .iter()
             .filter(|t| t["annotations"] == readonly)
             .count();
-        assert_eq!(read_count, 69 - mutable_names.len());
+        assert_eq!(read_count, 46);
+        assert_eq!(read_count, 70 - mutable_names.len());
     }
 
     #[test]
@@ -1254,6 +1265,7 @@ mod catalog_tests {
                 .collect();
         let read: std::collections::BTreeSet<&str> = [
             "lane_list",
+            "lane_cleanup_plan",
             "jira_search",
             "confluence_search",
             "hn_read_item",
@@ -1303,7 +1315,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 69);
+        assert_eq!(union.len(), 70);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();
@@ -1432,6 +1444,31 @@ mod declaration_tests {
 
         let err = super::declarations(&["nope_tool".to_string()]).unwrap_err();
         assert!(err.to_string().contains("nope_tool"));
+    }
+
+    #[test]
+    fn cleanup_plan_declaration_preserves_the_advisory_read_contract() {
+        let tool = named("lane_cleanup_plan");
+        assert_eq!(tool.kind, super::ToolKind::Read);
+        let text = super::declaration(&tool);
+        for expected in [
+            "declare function lane_cleanup_plan",
+            "laneIds?: string[]",
+            "repo: string",
+            "removable: boolean",
+            "blockers:",
+            "\"ignoredInspectionUnknown\"",
+            "\"notChecked\"",
+            "\"truncated\"",
+            "lane:",
+            "ignored:",
+        ] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(!text.contains("planId"));
+        assert!(tool
+            .description
+            .contains("not an atomic snapshot or approval token"));
     }
 
     fn pascal_case(name: &str) -> String {

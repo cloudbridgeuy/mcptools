@@ -20,6 +20,7 @@ fn roundtrip<T: serde::de::DeserializeOwned + serde::Serialize>(
 fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value {
     match tool {
         "lane_list" => roundtrip::<mcptools_core::lane::ListOutput>(value),
+        "lane_cleanup_plan" => roundtrip::<mcptools_core::lane::CleanupPlanOutput>(value),
         "lane_create" => roundtrip::<mcptools_core::lane::CreateOutput>(value),
         "jira_search" => roundtrip::<mcptools_core::atlassian::jira::SearchOutput>(value),
         "confluence_search" => {

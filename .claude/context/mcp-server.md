@@ -109,9 +109,10 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | Tool | Description |
 |------|-------------|
 | `lane_list` | Read native Git worktree state and registered ownership in an operator-permitted repository |
+| `lane_cleanup_plan` | Read-only advisory removal eligibility with typed blockers and bounded ignored-path evidence; no approval token |
 | `lane_create` | Create one guarded Worktrunk lane from an existing local base branch; write tool |
 
-Both deny access when the operator-controlled server environment `MCPTOOLS_LANE_REPOS` is unset or empty. Set an exact canonical path list, or explicitly set the whole value to `'*'` to authorize all otherwise-supported repository roots. Mixed wildcard/path lists and whitespace wildcards are invalid; repository-root, containment, identity, and executable-filter guards remain unchanged. Requests and repository configuration cannot opt in. `lane_create` needs `allowWrites: true` in `call_tool` and `execute`. Direct `tools/call` uses the existing write dispatch policy and the same repository guards. No lane removal, cleanup, merge, or push tools exist. See [Lanes](lanes.md).
+All three deny access when the operator-controlled server environment `MCPTOOLS_LANE_REPOS` is unset or empty. Set an exact canonical path list, or explicitly set the whole value to `'*'` to authorize all otherwise-supported repository roots. Mixed wildcard/path lists and whitespace wildcards are invalid; repository-root, containment, identity, and executable-filter guards remain unchanged. Requests and repository configuration cannot opt in. `lane_create` needs `allowWrites: true` in `call_tool` and `execute`; `lane_cleanup_plan` is Read and needs neither write nor spend permission. Direct `tools/call` uses the existing write dispatch policy and the same repository guards. Omit plan `laneIds` to assess all registered worktrees, or pass 1 to 100 unique managed IDs; unknown IDs fail. Plans do not authorize deletion. No lane removal, cleanup execution, merge, or push tools exist. See [Lanes](lanes.md).
 
 ### HackerNews
 
@@ -236,7 +237,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
-either discovery or code mode, hosts load all 69 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 70 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

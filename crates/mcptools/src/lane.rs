@@ -472,12 +472,27 @@ async fn worktree_identity(runner: &Runner, path: &Path, repo: &Repository) -> R
 }
 
 pub async fn list(runner: &Runner, root: PathBuf) -> Result<ListOutput> {
+    inspect_lanes(runner, root, None).await
+}
+
+async fn inspect_lanes(
+    runner: &Runner,
+    root: PathBuf,
+    selection: Option<&mcptools_core::lane::CleanupSelection>,
+) -> Result<ListOutput> {
     let repo = Repository::open(runner, root).await?;
     let records = repo.records()?;
     let porcelain = runner
         .git(&repo.root, &["worktree", "list", "--porcelain", "-z"])
         .await?;
     let mut lanes = mcptools_core::lane::parse_worktrees(&porcelain, text(&repo.root)?)?;
+    if let Some(ids) = selection.and_then(mcptools_core::lane::CleanupSelection::ids) {
+        lanes.retain(|lane| {
+            records.iter().any(|record| {
+                ids.contains(&record.id) && record.worktree.path == Path::new(&lane.path)
+            })
+        });
+    }
     for lane in &mut lanes {
         let path = Path::new(&lane.path);
         let Ok(git_dir) = worktree_identity(runner, path, &repo).await else {
@@ -538,6 +553,100 @@ pub async fn list(runner: &Runner, root: PathBuf) -> Result<ListOutput> {
         }
     }
     Ok(ListOutput { lanes })
+}
+
+async fn cleanup_identity(
+    runner: &Runner,
+    path: &Path,
+    repo: &Repository,
+) -> Result<(Identity, Identity)> {
+    let tree = identity(path)?;
+    contained(&tree.path, &repo.root)?;
+    let top = runner.git(path, &["rev-parse", "--show-toplevel"]).await?;
+    if canonical(Path::new(top.trim()))? != tree.path {
+        return Err("Unresolved worktree root".into());
+    }
+    Ok((tree, worktree_identity(runner, path, repo).await?))
+}
+
+async fn ignored(runner: &Runner, path: &Path) -> mcptools_core::lane::IgnoredInspection {
+    let output = runner
+        .git(
+            path,
+            &[
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--directory",
+                "--no-empty-directory",
+                "--full-name",
+                "-z",
+            ],
+        )
+        .await;
+    mcptools_core::lane::parse_ignored(output.as_deref().map_err(String::as_str))
+}
+
+pub async fn cleanup_plan(
+    runner: &Runner,
+    root: PathBuf,
+    selection: mcptools_core::lane::CleanupSelection,
+) -> Result<mcptools_core::lane::CleanupPlanOutput> {
+    use mcptools_core::lane::{
+        cleanup_blockers, CleanupAssessment, CleanupPlanOutput, IgnoredInspection, IgnoredState,
+    };
+    let repo = Repository::open(runner, root.clone()).await?;
+    let lanes = selection.select(
+        inspect_lanes(runner, root.clone(), Some(&selection))
+            .await?
+            .lanes,
+    )?;
+    let mut assessments = Vec::new();
+    for lane in lanes {
+        let path = Path::new(&lane.path);
+        let before = cleanup_identity(runner, path, &repo).await;
+        let resolved = before.is_ok();
+        let clean = IgnoredInspection {
+            state: IgnoredState::Complete,
+            paths: Vec::new(),
+        };
+        let mut evidence = IgnoredInspection::unchecked();
+        let mut changed = false;
+        if cleanup_blockers(&lane, resolved, &clean, false).is_empty() {
+            if runner.executable_config(path).await.is_ok() {
+                evidence = ignored(runner, path).await;
+                let again = ignored(runner, path).await;
+                changed = evidence != again;
+            } else {
+                evidence.state = IgnoredState::Unknown;
+            }
+            let after = cleanup_identity(runner, path, &repo).await;
+            changed |= !matches!((&before, &after), (Ok(before), Ok(after)) if before == after);
+        }
+        let blockers = cleanup_blockers(&lane, resolved, &evidence, changed);
+        assessments.push(CleanupAssessment {
+            lane,
+            removable: blockers.is_empty(),
+            blockers,
+            ignored: evidence,
+        });
+    }
+    let final_lanes = inspect_lanes(runner, root, Some(&selection)).await?.lanes;
+    for assessment in &mut assessments {
+        if !final_lanes.iter().any(|lane| lane == &assessment.lane) {
+            assessment.removable = false;
+            if !assessment
+                .blockers
+                .contains(&mcptools_core::lane::CleanupBlocker::ChangedDuringInspection)
+            {
+                assessment
+                    .blockers
+                    .push(mcptools_core::lane::CleanupBlocker::ChangedDuringInspection);
+            }
+        }
+    }
+    Ok(CleanupPlanOutput { assessments })
 }
 
 #[derive(Deserialize)]
@@ -759,6 +868,200 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
         }
     }
 
+    #[tokio::test]
+    async fn cleanup_plans_are_read_only_and_block_ignored_dirty_locked_missing_and_unmanaged_lanes(
+    ) {
+        use mcptools_core::lane::{CleanupBlocker, CleanupSelection, IgnoredState};
+        fn snapshot(
+            root: &Path,
+        ) -> std::collections::BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTime)> {
+            let mut files = std::collections::BTreeMap::new();
+            for entry in std::fs::read_dir(root).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    files.extend(snapshot(&path));
+                } else {
+                    files.insert(
+                        path.clone(),
+                        (
+                            std::fs::read(&path).unwrap(),
+                            path.metadata().unwrap().modified().unwrap(),
+                        ),
+                    );
+                }
+            }
+            files
+        }
+        let (_directory, mut runner, root) = repository().await;
+        std::fs::write(
+            root.join(".gitignore"),
+            ".worktrees/\nignored-file\nignored-dir/\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tracked"), "base").unwrap();
+        runner
+            .git(&root, &["add", ".gitignore", "tracked"])
+            .await
+            .unwrap();
+        runner
+            .git(
+                &root,
+                &[
+                    "-c",
+                    "user.name=Lane",
+                    "-c",
+                    "user.email=lane@example.invalid",
+                    "commit",
+                    "-m",
+                    "files",
+                ],
+            )
+            .await
+            .unwrap();
+        fake_wt(&mut runner, "");
+        let mut created = Vec::new();
+        for branch in [
+            "clean",
+            "dirty",
+            "untracked",
+            "ignored-file-lane",
+            "ignored-dir-lane",
+            "locked",
+            "missing",
+            "unmanaged",
+        ] {
+            created.push(
+                create(&runner, root.clone(), args(&root, branch))
+                    .await
+                    .unwrap(),
+            );
+        }
+        std::fs::write(Path::new(&created[1].path).join("tracked"), "changed").unwrap();
+        std::fs::write(Path::new(&created[2].path).join("untracked"), "changed").unwrap();
+        std::fs::write(
+            Path::new(&created[3].path).join("ignored-file"),
+            "private content never returned",
+        )
+        .unwrap();
+        let ignored_dir = Path::new(&created[4].path).join("ignored-dir");
+        std::fs::create_dir(&ignored_dir).unwrap();
+        std::fs::write(ignored_dir.join("private"), "not evidence").unwrap();
+        runner
+            .git(&root, &["worktree", "lock", &created[5].path])
+            .await
+            .unwrap();
+        std::fs::rename(&created[6].path, root.join("missing-moved")).unwrap();
+        runner
+            .git(Path::new(&created[7].path), &["checkout", "--detach"])
+            .await
+            .unwrap();
+        std::fs::create_dir_all(root.join(".git/wt")).unwrap();
+        std::fs::write(root.join(".git/wt/cache"), "preserve").unwrap();
+        runner.wt = "/must/not/run".into();
+        let before = snapshot(&root);
+        for allowed in [root.clone().into_os_string(), "*".into()] {
+            let permitted = permitted_repo(text(&root).unwrap(), Some(allowed)).unwrap();
+            let plan = cleanup_plan(&runner, permitted, CleanupSelection::parse(None).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(plan.assessments.len(), 9);
+            let main = &plan.assessments[0];
+            assert!(main.blockers.contains(&CleanupBlocker::Main));
+            assert!(main.blockers.contains(&CleanupBlocker::Current));
+            for (index, blocker) in [
+                (1, CleanupBlocker::Dirty),
+                (2, CleanupBlocker::Dirty),
+                (3, CleanupBlocker::IgnoredFiles),
+                (4, CleanupBlocker::IgnoredFiles),
+                (5, CleanupBlocker::Locked),
+                (6, CleanupBlocker::UnresolvedWorktree),
+                (7, CleanupBlocker::Unmanaged),
+            ] {
+                let assessment = plan
+                    .assessments
+                    .iter()
+                    .find(|a| a.lane.path == created[index].path)
+                    .unwrap();
+                assert!(!assessment.removable);
+                assert!(assessment.blockers.contains(&blocker), "{assessment:?}");
+                if index == 3 || index == 4 {
+                    assert_eq!(assessment.ignored.state, IgnoredState::Complete);
+                    assert_eq!(
+                        assessment.ignored.paths,
+                        if index == 3 {
+                            vec!["ignored-file"]
+                        } else {
+                            vec!["ignored-dir/"]
+                        }
+                    );
+                } else {
+                    assert_eq!(assessment.ignored.state, IgnoredState::NotChecked);
+                }
+            }
+            let selected = CleanupSelection::parse(Some(vec![created[0].id.clone()])).unwrap();
+            let plan = cleanup_plan(&runner, root.clone(), selected).await.unwrap();
+            assert_eq!(plan.assessments.len(), 1);
+            assert!(plan.assessments[0].removable);
+            assert_eq!(plan.assessments[0].ignored.state, IgnoredState::Complete);
+        }
+        for id in ["f".repeat(32), created[6].id.clone(), created[7].id.clone()] {
+            let error = cleanup_plan(
+                &runner,
+                root.clone(),
+                CleanupSelection::parse(Some(vec![id])).unwrap(),
+            )
+            .await
+            .unwrap_err();
+            assert!(error.contains("Unknown or no longer managed"));
+        }
+        assert_eq!(snapshot(&root), before);
+    }
+
+    #[tokio::test]
+    async fn cleanup_ignored_command_failure_and_observed_changes_never_authorize_removal() {
+        use mcptools_core::lane::{CleanupBlocker, CleanupSelection, IgnoredState};
+        let (_directory, mut runner, root) = repository().await;
+        fake_wt(&mut runner, "");
+        let created = create(&runner, root.clone(), args(&root, "topic"))
+            .await
+            .unwrap();
+        let program = runner.home.path().join("fake-git");
+        let select = || CleanupSelection::parse(Some(vec![created.id.clone()])).unwrap();
+        let marker = runner.home.path().join("unselected-inspected");
+        executable(&program, &format!("#!/bin/sh\nif [ \"$1\" = status ] && [ \"$PWD\" != '{}' ]; then printf inspected > '{}'; fi\nexec /usr/bin/git \"$@\"\n", created.path, marker.display()));
+        runner.git = program.clone().into_os_string();
+        assert!(
+            cleanup_plan(&runner, root.clone(), select())
+                .await
+                .unwrap()
+                .assessments[0]
+                .removable
+        );
+        assert!(!marker.exists());
+        executable(&program, "#!/bin/sh\nif [ \"$1\" = ls-files ] && [ \"$2\" = --others ]; then printf secret >&2; exit 1; fi\nexec /usr/bin/git \"$@\"\n");
+        runner.git = program.clone().into_os_string();
+        let plan = cleanup_plan(&runner, root.clone(), select()).await.unwrap();
+        assert!(!plan.assessments[0].removable);
+        assert_eq!(plan.assessments[0].ignored.state, IgnoredState::Unknown);
+        assert!(plan.assessments[0].ignored.paths.is_empty());
+        executable(&program, "#!/bin/sh\nif [ \"$1\" = ls-files ] && [ \"$2\" = --others ]; then printf changed > untracked; fi\nexec /usr/bin/git \"$@\"\n");
+        let plan = cleanup_plan(&runner, root.clone(), select()).await.unwrap();
+        assert!(!plan.assessments[0].removable);
+        assert!(plan.assessments[0]
+            .blockers
+            .contains(&CleanupBlocker::ChangedDuringInspection));
+        runner.git = "git".into();
+        runner
+            .git(&root, &["config", "filter.unsafe.clean", "must-not-run"])
+            .await
+            .unwrap();
+        let plan = cleanup_plan(&runner, root, select()).await.unwrap();
+        assert!(!plan.assessments[0].removable);
+        assert!(plan.assessments[0]
+            .blockers
+            .contains(&CleanupBlocker::UnknownStatus));
+    }
+
     #[test]
     fn allowlist_denies_unset_empty_outside_unresolved_and_symlink_escape() {
         let directory = tempfile::tempdir().unwrap();
@@ -875,6 +1178,17 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
         let lanes = list(&runner, bare.clone()).await.unwrap().lanes;
         assert_eq!(lanes[0].head, None);
         assert_eq!(lanes[0].state, State::Unknown);
+        let plan = cleanup_plan(
+            &runner,
+            bare.clone(),
+            mcptools_core::lane::CleanupSelection::parse(None).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(!plan.assessments[0].removable);
+        assert!(plan.assessments[0]
+            .blockers
+            .contains(&mcptools_core::lane::CleanupBlocker::MissingHead));
         let tree = runner.git(&bare, &["mktree"]).await.unwrap();
         let commit = runner
             .git(

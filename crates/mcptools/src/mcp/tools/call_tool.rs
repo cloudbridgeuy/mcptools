@@ -123,6 +123,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cleanup_plan_dispatches_without_write_or_spend_permission() {
+        let error = call(json!({"name":"lane_cleanup_plan", "input":{}}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, -32602);
+        assert!(error.message.starts_with("Invalid arguments"));
+    }
+
+    #[tokio::test]
     async fn write_tool_requires_allow_writes() {
         let result = call(json!({"name": "jira_create", "input": {}}))
             .await

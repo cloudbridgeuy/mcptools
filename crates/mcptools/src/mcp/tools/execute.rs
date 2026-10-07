@@ -139,13 +139,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn lane_create_requires_write_permission_and_list_is_bound() {
         let global = global_with(&[]);
-        let probe = "return [typeof lane_list, typeof lane_create]";
+        let probe = "return [typeof lane_list, typeof lane_cleanup_plan, typeof lane_create]";
         let denied = call("execute", json!({"code":probe}), &global)
             .await
             .unwrap();
         assert_eq!(
             denied["structuredContent"]["result"],
-            json!(["function", "undefined"])
+            json!(["function", "function", "undefined"])
         );
         let allowed = call(
             "execute",
@@ -156,7 +156,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             allowed["structuredContent"]["result"],
-            json!(["function", "function"])
+            json!(["function", "function", "function"])
         );
     }
 

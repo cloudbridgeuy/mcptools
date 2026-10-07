@@ -1,4 +1,4 @@
-use mcptools_core::lane::{CreateArgs, ListArgs};
+use mcptools_core::lane::{CleanupPlanArgs, CleanupSelection, CreateArgs, ListArgs};
 
 use super::JsonRpcError;
 
@@ -42,4 +42,43 @@ pub async fn create(
             .await
             .map_err(failure)?,
     )
+}
+
+pub async fn cleanup_plan(
+    arguments: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: CleanupPlanArgs = parse(arguments)?;
+    let selection = CleanupSelection::parse(args.lane_ids).map_err(|message| JsonRpcError {
+        code: -32602,
+        message,
+        data: None,
+    })?;
+    let root = crate::lane::permitted_repo(&args.repo, std::env::var_os("MCPTOOLS_LANE_REPOS"))
+        .map_err(failure)?;
+    let runner = crate::lane::Runner::new().map_err(failure)?;
+    super::to_dual_result(
+        crate::lane::cleanup_plan(&runner, root, selection)
+            .await
+            .map_err(failure)?,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn invalid_cleanup_selectors_fail_before_repository_io() {
+        for ids in [
+            serde_json::json!([]),
+            serde_json::json!(["a".repeat(32), "a".repeat(32)]),
+            serde_json::json!(vec!["a".repeat(32); 101]),
+        ] {
+            let error = super::cleanup_plan(Some(
+                serde_json::json!({"repo":"/does/not/exist", "laneIds":ids}),
+            ))
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, -32602);
+            assert!(error.message.contains("laneIds"));
+        }
+    }
 }
