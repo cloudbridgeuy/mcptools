@@ -166,6 +166,10 @@ mod tests {
             (input_schema_for::<TeamGetArgs>(), vec!["selector"]),
             (input_schema_for::<ProjectListArgs>(), vec!["team"]),
             (input_schema_for::<ProjectGetArgs>(), vec!["id", "team"]),
+            (
+                input_schema_for::<ProjectCreateArgs>(),
+                vec!["name", "team"],
+            ),
             (input_schema_for::<UserListArgs>(), vec!["query"]),
             (input_schema_for::<StateListArgs>(), vec!["team"]),
             (input_schema_for::<LabelListArgs>(), vec!["team"]),
@@ -191,6 +195,16 @@ mod tests {
 
     #[test]
     fn property_names_match_previous_contract() {
+        let project_schema = input_schema_for::<ProjectCreateArgs>();
+        for field in ["team", "name"] {
+            assert!(project_schema["properties"][field]["description"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()));
+        }
+        assert_eq!(
+            prop_names(&input_schema_for::<ProjectCreateArgs>()),
+            ["content", "description", "name", "team"].map(str::to_string)
+        );
         assert_eq!(
             prop_names(&input_schema_for::<IssueListArgs>()),
             [

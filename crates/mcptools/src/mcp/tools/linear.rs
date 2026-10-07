@@ -326,6 +326,30 @@ pub async fn handle_linear_project_get(
     super::to_dual_result(item)
 }
 
+pub async fn handle_linear_project_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::ProjectCreateArgs = parse_args(arguments)?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_project_create: team={}, name={}",
+            args.team, args.name
+        );
+    }
+    let client = linear_client()?;
+    let created = crate::linear::discover::projects_create_data(
+        &client,
+        &args.team,
+        &args.name,
+        args.description.as_deref(),
+        args.content.as_deref(),
+    )
+    .await
+    .map_err(exec)?;
+    super::to_dual_result(created)
+}
+
 pub async fn handle_linear_user_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,

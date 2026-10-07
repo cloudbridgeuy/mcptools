@@ -146,13 +146,15 @@ mod tests {
         assert!(read.contains(&"jira_search".to_string()));
         assert!(read.contains(&"linear_issue_graph".to_string()));
         assert!(!read.contains(&"jira_create".to_string()));
+        assert!(!read.contains(&"linear_project_create".to_string()));
         assert!(!read.contains(&"bitbucket_pr_comment_add".to_string()));
         assert!(!read.contains(&"images_generate".to_string()));
         let all = bound_names(
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 68);
+        assert_eq!(all.len(), 69);
+        assert!(all.contains(&"linear_project_create".to_string()));
         assert!(all.contains(&"bitbucket_pr_comment_add".to_string()));
     }
 

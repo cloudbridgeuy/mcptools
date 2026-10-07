@@ -133,6 +133,20 @@ pub struct ProjectListArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProjectCreateArgs {
+    #[schemars(description = "Team id, key, or name (must not be blank)")]
+    pub team: String,
+    #[schemars(description = "Project name (must not be blank)")]
+    pub name: String,
+    #[schemars(description = "Short project description (must not be blank if supplied)")]
+    pub description: Option<String>,
+    #[schemars(
+        description = "Project content in Markdown (must not be blank if supplied; whitespace is preserved)"
+    )]
+    pub content: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ProjectGetArgs {
     #[schemars(description = "Project id or name")]
     pub id: String,

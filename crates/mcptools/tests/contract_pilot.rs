@@ -113,6 +113,7 @@ fn mcp_contract_pilot() {
             "linear_issue_list",
             "linear_issue_update",
             "linear_label_list",
+            "linear_project_create",
             "linear_project_get",
             "linear_project_list",
             "linear_relation_add",

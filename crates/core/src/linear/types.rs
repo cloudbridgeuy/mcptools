@@ -1089,6 +1089,39 @@ pub fn issue_update_input(
     serde_json::Value::Object(out)
 }
 
+pub fn project_create_input(
+    team_id: &str,
+    name: &str,
+    description: Option<&str>,
+    content: Option<&str>,
+) -> serde_json::Value {
+    let mut input = serde_json::json!({"teamIds": [team_id], "name": name.trim()});
+    if let Some(value) = description {
+        input["description"] = serde_json::json!(value.trim());
+    }
+    if let Some(value) = content {
+        input["content"] = serde_json::json!(value);
+    }
+    input
+}
+
+pub fn transform_project_create(data: serde_json::Value) -> Result<Project, LinearError> {
+    let payload = data
+        .get("projectCreate")
+        .filter(|value| !value.is_null())
+        .ok_or(LinearError::MissingProject)?;
+    if payload.get("success").and_then(|value| value.as_bool()) != Some(true) {
+        return Err(LinearError::Parse(
+            "Linear projectCreate failed: success was not true".to_string(),
+        ));
+    }
+    let project = payload
+        .get("project")
+        .filter(|value| !value.is_null())
+        .ok_or(LinearError::MissingProject)?;
+    serde_json::from_value(project.clone()).map_err(|e| LinearError::Parse(e.to_string()))
+}
+
 pub fn transform_issue_create(data: serde_json::Value) -> Result<IssueMini, LinearError> {
     match data.get("issueCreate") {
         None | Some(serde_json::Value::Null) => Err(LinearError::MissingIssue),
