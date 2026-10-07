@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-22 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+23 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -114,6 +114,7 @@ linear_comment_list, linear_relation_list
 linear_team_list, linear_team_get
 linear_project_list, linear_project_get
 linear_project_status_list
+linear_project_milestone_list
 linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 
 # Writes
@@ -134,6 +135,12 @@ Optional properties: nonblank `name`, `description`, Markdown `content` (exact i
 Explicit clears: `clearDescription` and `clearContent` set empty strings; `clearLead`, `clearStartDate`, and `clearTargetDate` set null. A property plus its clear flag rejects. Status cannot clear because project status is non-null. Null input values reject; use clear flags. Omitted fields are not sent. Empty updates, blank names/selectors, malformed UUID-shaped selectors, invalid dates, and invalid priority reject before configuration or HTTP.
 
 Output returns `id`, `name`, `url`, non-null `description`, nullable `content`, `status: {id, name, type}`, nullable `lead: {id, name, email}`, nullable `startDate` and `targetDate`, and numeric `priority`. HTTP/GraphQL errors (including partial data), unsuccessful mutations, and missing/malformed selected response fields fail; no false success. This is a Write tool: `call_tool` and `execute` require `allowWrites: true`. No CLI update command is added.
+
+### Project milestones (MCP only)
+
+`linear_project_milestone_list({project: "project-UUID"})` reads one project's milestones. Project names require `team` (UUID, key, or name); resolution scans all team and project pages and rejects missing or ambiguous matches. Unknown fields, null inputs, blank selectors/cursors, malformed UUID-shaped selectors, and invalid limits reject before HTTP. `limit` defaults to 25, range 1–250; `cursor` starts at that page; `all` defaults to false and traverses remaining pages.
+
+Output is `{project: {id, name}, nodes, pageInfo}`. Nodes contain usable milestone UUID `id`, `name`, nullable `description` and `targetDate` (explicit nulls), `status` (`done`, `next`, `overdue`, `unstarted`), numeric `sortOrder`, and `project: {id, name}`. Markdown whitespace and API order remain unchanged. Existing empty projects return empty nodes; missing projects fail. Each returned project and milestone project identity must match the requested UUID; malformed payloads or pagination cursors fail without partial success. All-page output carries the final pageInfo, including endCursor. Read-only in direct calls, discovery and code mode; no `allowWrites` required. No CLI command added.
 
 ### Workspace project statuses
 

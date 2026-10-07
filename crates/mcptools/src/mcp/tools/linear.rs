@@ -347,6 +347,29 @@ pub async fn handle_linear_project_status_list(
     super::to_dual_result(output)
 }
 
+pub async fn handle_linear_project_milestone_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::ProjectMilestoneListArgs = parse_args(arguments)?;
+    args.validate().map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_project_milestone_list: project={}",
+            args.project
+        );
+    }
+    let client = linear_client()?;
+    let output = crate::linear::discover::project_milestones_list_data(&client, args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_project_create(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -760,6 +783,97 @@ mod tests {
                 serde_json::from_value(serde_json::json!({"limit": limit})).unwrap();
             assert!(args.validate().is_ok());
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn milestone_strict_inputs_read_dispatch_discovery_and_declarations() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for input in [
+            serde_json::json!({}),
+            serde_json::json!({"project": " "}),
+            serde_json::json!({"project": "Example"}),
+            serde_json::json!({"project": "Example", "team": " "}),
+            serde_json::json!({"project": "12345678-1234-1234-1234-123456789xyz"}),
+            serde_json::json!({"project": id, "team": null}),
+            serde_json::json!({"project": id, "limit": 0}),
+            serde_json::json!({"project": id, "limit": 251}),
+            serde_json::json!({"project": id, "limit": 1.5}),
+            serde_json::json!({"project": id, "limit": null}),
+            serde_json::json!({"project": id, "cursor": " "}),
+            serde_json::json!({"project": id, "cursor": null}),
+            serde_json::json!({"project": id, "all": null}),
+            serde_json::json!({"project": id, "all": "true"}),
+            serde_json::json!({"project": id, "id": id}),
+            serde_json::json!([]),
+        ] {
+            assert_eq!(
+                handle_linear_project_milestone_list(Some(input), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+        }
+        for limit in [1, 250] {
+            let args: crate::linear::args::ProjectMilestoneListArgs =
+                serde_json::from_value(serde_json::json!({"project": id, "limit": limit})).unwrap();
+            assert!(args.validate().is_ok());
+        }
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            for tool in [
+                serde_json::json!({"name": "linear_project_milestone_list", "arguments": {"project": id, "limit": 0}}),
+                serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_milestone_list", "input": {"project": id, "limit": 0}}}),
+            ] {
+                let error = super::super::handle_tools_call(Some(tool), &global, flags)
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code, -32602);
+                assert!(error.message.starts_with("Invalid arguments:"));
+            }
+        }
+        let flags = super::super::ServeFlags {
+            discovery: false,
+            code_mode: true,
+        };
+        let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_milestone_list({{project: '{id}', limit: 0}})")}})), &global, flags).await.unwrap();
+        assert!(result["structuredContent"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid arguments:"));
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_project_milestone_list")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Read);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_project_milestone_list(input: LinearProjectMilestoneListInput): Promise<LinearProjectMilestoneListOutput>",
+            "project: string", "team?: string", "limit?: number", "cursor?: string", "all?: boolean",
+            "description: string | null", "targetDate: string | null", "sortOrder: number", "pageInfo:",
+        ] {
+            assert!(declaration.contains(field), "{field}: {declaration}");
+        }
+        assert_eq!(tool.input_schema["properties"]["limit"]["default"], 25);
+        assert_eq!(tool.input_schema["additionalProperties"], false);
     }
 
     #[tokio::test(flavor = "multi_thread")]

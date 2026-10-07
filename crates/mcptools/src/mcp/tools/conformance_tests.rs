@@ -106,6 +106,9 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "linear_project_status_list" => {
             roundtrip::<mcptools_core::linear::ProjectStatusListOutput>(value)
         }
+        "linear_project_milestone_list" => {
+            roundtrip::<mcptools_core::linear::ProjectMilestoneListOutput>(value)
+        }
         "linear_project_get" => roundtrip::<mcptools_core::linear::Project>(value),
         "linear_project_create" => roundtrip::<mcptools_core::linear::Project>(value),
         "linear_project_update" => roundtrip::<mcptools_core::linear::ProjectUpdateOutput>(value),

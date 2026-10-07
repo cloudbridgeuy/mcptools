@@ -642,6 +642,14 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Read,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectMilestoneListOutput>(),
+            name: "linear_project_milestone_list".to_string(),
+            description: "List milestones for exactly one Linear project UUID, or project name with team context. Returns project identity, nodes with id, name, nullable description and targetDate, status, sortOrder and project, plus pageInfo. Limit defaults to 25 (1–250); cursor must not be blank; all traverses every page. Missing or ambiguous projects and malformed responses fail. Requires LINEAR_API_KEY environment variable.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::ProjectMilestoneListArgs>(),
+            summary: "List milestones in one Linear project",
+            kind: ToolKind::Read,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::UserListOutput>(),
             name: "linear_user_list".to_string(),
             description: "List Linear users matching a name query. Returns nodes with id, name, email plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
@@ -944,6 +952,9 @@ pub async fn handle_tools_call(
         "linear_project_status_list" => {
             linear::handle_linear_project_status_list(params.arguments, global).await
         }
+        "linear_project_milestone_list" => {
+            linear::handle_linear_project_milestone_list(params.arguments, global).await
+        }
         "linear_project_create" => {
             linear::handle_linear_project_create(params.arguments, global).await
         }
@@ -1015,7 +1026,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 70);
+        assert_eq!(catalog.len(), 71);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1081,7 +1092,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 73);
+        assert_eq!(super::registered_tools().len(), 74);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1158,7 +1169,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 73);
+        assert_eq!(names(serve_flags(false)).len(), 74);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1245,7 +1256,7 @@ mod catalog_tests {
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 73);
+        assert_eq!(tools.len(), 74);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1263,8 +1274,8 @@ mod catalog_tests {
             .iter()
             .filter(|t| t["annotations"] == readonly)
             .count();
-        assert_eq!(read_count, 47);
-        assert_eq!(read_count, 73 - mutable_names.len());
+        assert_eq!(read_count, 48);
+        assert_eq!(read_count, 74 - mutable_names.len());
     }
 
     #[test]
@@ -1343,6 +1354,7 @@ mod catalog_tests {
             "linear_project_list",
             "linear_project_get",
             "linear_project_status_list",
+            "linear_project_milestone_list",
             "linear_user_list",
             "linear_state_list",
             "linear_label_list",
@@ -1353,7 +1365,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 73);
+        assert_eq!(union.len(), 74);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

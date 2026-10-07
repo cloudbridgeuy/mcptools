@@ -139,6 +139,69 @@ fn project_status_default_limit() -> u32 {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ProjectMilestoneListArgs {
+    #[schemars(description = "Project UUID or project name; names require team")]
+    pub project: String,
+    #[serde(default, deserialize_with = "deserialize_supplied_string")]
+    #[schemars(description = "Team UUID, key, or name for project name resolution")]
+    pub team: Option<String>,
+    #[serde(default = "project_status_default_limit")]
+    #[schemars(range(min = 1, max = 250))]
+    pub limit: u32,
+    #[serde(default, deserialize_with = "deserialize_supplied_string")]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub all: bool,
+}
+
+impl ProjectMilestoneListArgs {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        use mcptools_core::linear::{is_uuid, parse_project_selector, ProjectSelector};
+        let selector = parse_project_selector(&self.project).ok_or("Missing project selector")?;
+        let project = self.project.trim();
+        if project.chars().any(char::is_control)
+            || (project.len() == 36
+                && project.chars().filter(|c| *c == '-').count() == 4
+                && !is_uuid(project))
+        {
+            return Err("Malformed project UUID");
+        }
+        if self
+            .team
+            .as_deref()
+            .is_some_and(|team| team.trim().is_empty())
+        {
+            return Err("team must not be blank");
+        }
+        if self.team.as_deref().is_some_and(|team| {
+            let team = team.trim();
+            team.chars().any(char::is_control)
+                || (team.len() == 36
+                    && team.chars().filter(|c| *c == '-').count() == 4
+                    && !is_uuid(team))
+        }) {
+            return Err("Malformed team UUID");
+        }
+        if matches!(selector, ProjectSelector::Name(_)) && self.team.is_none() {
+            return Err("Project names require team");
+        }
+        ProjectStatusListArgs {
+            limit: self.limit,
+            cursor: self.cursor.clone(),
+            all: self.all,
+        }
+        .validate()
+    }
+}
+
+fn deserialize_supplied_string<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(deserializer).map(Some)
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectStatusListArgs {
     #[serde(default = "project_status_default_limit")]
     #[schemars(

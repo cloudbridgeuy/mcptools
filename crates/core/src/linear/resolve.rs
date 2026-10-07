@@ -44,7 +44,10 @@ pub fn parse_team_selector(input: &str) -> Option<TeamSelector> {
 
 pub fn match_teams(selector: &TeamSelector, candidates: &[Team]) -> TeamResolution {
     match selector {
-        TeamSelector::Id(id) => match candidates.iter().find(|team| team.id == *id) {
+        TeamSelector::Id(id) => match candidates
+            .iter()
+            .find(|team| team.id.eq_ignore_ascii_case(id))
+        {
             Some(team) => TeamResolution::Resolved(team.clone()),
             None => TeamResolution::NotFound(id.clone()),
         },
@@ -283,6 +286,23 @@ mod tests {
     fn resolves_team_by_id() {
         let found = match_teams(&TeamSelector::Id("t1".to_string()), &teams());
         assert!(matches!(found, TeamResolution::Resolved(_)));
+        let id = "e3b567ba-bcd1-42d8-8ae8-129fd11c97ab";
+        for candidate_id in [id.to_string(), id.to_uppercase()] {
+            let candidate = Team {
+                id: candidate_id,
+                key: "GUZ".to_string(),
+                name: "Guzman".to_string(),
+            };
+            for selector_id in [id.to_string(), id.to_uppercase()] {
+                assert_eq!(
+                    match_teams(
+                        &TeamSelector::Id(selector_id),
+                        std::slice::from_ref(&candidate)
+                    ),
+                    TeamResolution::Resolved(candidate.clone())
+                );
+            }
+        }
     }
 
     #[test]

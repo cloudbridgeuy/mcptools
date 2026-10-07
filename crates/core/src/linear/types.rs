@@ -22,6 +22,88 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMilestone {
+    pub id: String,
+    pub name: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schemars(schema_with = "nullable_string_schema")]
+    pub description: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schemars(schema_with = "nullable_string_schema")]
+    pub target_date: Option<String>,
+    pub status: ProjectMilestoneStatus,
+    pub sort_order: f64,
+    pub project: Project,
+}
+
+fn nullable_string_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    generator.subschema_for::<Option<String>>()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectMilestoneStatus {
+    Done,
+    Next,
+    Overdue,
+    Unstarted,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMilestoneListOutput {
+    pub project: Project,
+    pub nodes: Vec<ProjectMilestone>,
+    pub page_info: PageInfo,
+}
+
+pub fn transform_project_milestones(
+    data: serde_json::Value,
+    expected_id: &str,
+) -> Result<ProjectMilestoneListOutput, String> {
+    let raw = &data["project"];
+    let project: Project = serde_json::from_value(raw.clone())
+        .map_err(|error| format!("Project not found or malformed: {error}"))?;
+    if !super::resolve::is_uuid(&project.id)
+        || !project.id.eq_ignore_ascii_case(expected_id)
+        || project.name.trim().is_empty()
+    {
+        return Err("Malformed or mismatched project identity".into());
+    }
+    let connection = &raw["projectMilestones"];
+    if connection["pageInfo"]["hasNextPage"].as_bool().is_none()
+        || connection["pageInfo"].get("endCursor").is_none()
+    {
+        return Err("Malformed milestone pageInfo".into());
+    }
+    let page: RawPaged<ProjectMilestone> = serde_json::from_value(connection.clone())
+        .map_err(|error| format!("Malformed milestone connection: {error}"))?;
+    if page
+        .page_info
+        .end_cursor
+        .as_deref()
+        .is_some_and(|cursor| cursor.trim().is_empty() || cursor.chars().any(char::is_control))
+    {
+        return Err("Malformed milestone pagination cursor".into());
+    }
+    for node in &page.nodes {
+        if !super::resolve::is_uuid(&node.id)
+            || node.name.trim().is_empty()
+            || !node.project.id.eq_ignore_ascii_case(&project.id)
+            || node.project.name != project.name
+        {
+            return Err("Malformed milestone or mismatched project identity".into());
+        }
+    }
+    Ok(ProjectMilestoneListOutput {
+        project,
+        nodes: page.nodes,
+        page_info: page.page_info,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectStatus {
     pub id: String,
     pub name: String,
