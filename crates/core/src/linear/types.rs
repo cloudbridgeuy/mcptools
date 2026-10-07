@@ -23,6 +23,75 @@ pub struct Project {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub enum ProjectUpdateHealth {
+    OnTrack,
+    AtRisk,
+    OffTrack,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectUpdateCreateArgs {
+    #[schemars(description = "Project UUID or project name; names require team")]
+    pub project: String,
+    #[schemars(description = "Nonblank Markdown progress report; whitespace is preserved")]
+    pub body: String,
+    pub team: Option<String>,
+    pub health: Option<ProjectUpdateHealth>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectUpdateCreateOutput {
+    pub id: String,
+    pub body: String,
+    pub health: ProjectUpdateHealth,
+    pub created_at: String,
+    pub url: String,
+    pub project: Project,
+}
+
+pub fn project_update_create_input(
+    args: &ProjectUpdateCreateArgs,
+) -> Result<serde_json::Value, String> {
+    validate_project_create_selector(&args.project, args.team.as_deref())?;
+    if args.body.trim().is_empty() {
+        return Err("Progress report body must not be blank".into());
+    }
+    let mut input = serde_json::json!({"body": args.body});
+    if let Some(health) = &args.health {
+        input["health"] = serde_json::json!(health);
+    }
+    Ok(input)
+}
+
+pub fn transform_project_update_create(
+    data: serde_json::Value,
+    expected_project: &Project,
+) -> Result<ProjectUpdateCreateOutput, String> {
+    let payload = &data["projectUpdateCreate"];
+    if payload["success"].as_bool() != Some(true) {
+        return Err("Linear projectUpdateCreate failed: success was not true".into());
+    }
+    let report: ProjectUpdateCreateOutput =
+        serde_json::from_value(payload["projectUpdate"].clone())
+            .map_err(|error| format!("Malformed created progress report: {error}"))?;
+    if !super::resolve::is_uuid(&report.id)
+        || report.body.trim().is_empty()
+        || chrono::DateTime::parse_from_rfc3339(&report.created_at).is_err()
+        || !reqwest::Url::parse(&report.url)
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        || !super::resolve::is_uuid(&report.project.id)
+        || !report.project.id.eq_ignore_ascii_case(&expected_project.id)
+        || report.project.name.trim().is_empty()
+    {
+        return Err("Malformed progress report or mismatched project identity".into());
+    }
+    Ok(report)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectMilestone {
     pub id: String,
     pub name: String,
@@ -57,27 +126,7 @@ pub struct ProjectMilestoneCreateArgs {
 pub fn project_milestone_create_input(
     args: &ProjectMilestoneCreateArgs,
 ) -> Result<serde_json::Value, String> {
-    use super::resolve::{is_uuid, parse_project_selector, ProjectSelector};
-    let selector = parse_project_selector(&args.project).ok_or("Missing project selector")?;
-    for (field, value) in [
-        ("project", Some(&args.project)),
-        ("team", args.team.as_ref()),
-    ] {
-        if let Some(value) = value {
-            let value = value.trim();
-            if value.is_empty()
-                || value.chars().any(char::is_control)
-                || (value.len() == 36
-                    && value.chars().filter(|c| *c == '-').count() == 4
-                    && !is_uuid(value))
-            {
-                return Err(format!("Malformed {field} selector"));
-            }
-        }
-    }
-    if matches!(selector, ProjectSelector::Name(_)) && args.team.is_none() {
-        return Err("Project names require team".into());
-    }
+    validate_project_create_selector(&args.project, args.team.as_deref())?;
     if args.name.trim().is_empty() {
         return Err("Milestone name must not be blank".into());
     }
@@ -102,6 +151,28 @@ pub fn project_milestone_create_input(
         input["sortOrder"] = serde_json::json!(value);
     }
     Ok(input)
+}
+
+fn validate_project_create_selector(project: &str, team: Option<&str>) -> Result<(), String> {
+    use super::resolve::{is_uuid, parse_project_selector, ProjectSelector};
+    let selector = parse_project_selector(project).ok_or("Missing project selector")?;
+    for (field, value) in [("project", Some(project)), ("team", team)] {
+        if let Some(value) = value {
+            let value = value.trim();
+            if value.is_empty()
+                || value.chars().any(char::is_control)
+                || (value.len() == 36
+                    && value.chars().filter(|c| *c == '-').count() == 4
+                    && !is_uuid(value))
+            {
+                return Err(format!("Malformed {field} selector"));
+            }
+        }
+    }
+    if matches!(selector, ProjectSelector::Name(_)) && team.is_none() {
+        return Err("Project names require team".into());
+    }
+    Ok(())
 }
 
 fn valid_milestone_date(value: &str) -> bool {

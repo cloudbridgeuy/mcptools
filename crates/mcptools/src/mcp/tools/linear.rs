@@ -437,6 +437,29 @@ pub async fn handle_linear_project_update(
     super::to_dual_result(updated)
 }
 
+pub async fn handle_linear_project_update_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::ProjectUpdateCreateArgs = parse_args(arguments)?;
+    mcptools_core::linear::project_update_create_input(&args).map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_project_update_create: project={}",
+            args.project
+        );
+    }
+    let client = linear_client()?;
+    let created = crate::linear::discover::project_updates_create_data(&client, &args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(created)
+}
+
 pub async fn handle_linear_user_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -651,6 +674,110 @@ pub async fn handle_linear_cycle_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn project_update_create_contract_dispatch_and_write_gates() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for input in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"project": id}),
+            serde_json::json!({"body": "Report"}),
+            serde_json::json!({"project": id, "body": null}),
+            serde_json::json!({"project": id, "body": 1}),
+            serde_json::json!({"project": id, "body": " "}),
+            serde_json::json!({"project": "Example", "body": "Report"}),
+            serde_json::json!({"project": id, "body": "Report", "team": 1}),
+            serde_json::json!({"project": id, "body": "Report", "health": "unknown"}),
+            serde_json::json!({"project": id, "body": "Report", "health": 1}),
+            serde_json::json!({"project": id, "body": "Report", "extra": 1}),
+        ] {
+            assert_eq!(
+                handle_linear_project_update_create(Some(input), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+        }
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_update_create", "arguments": {"project": id}})), &global, flags).await.unwrap_err();
+            assert_eq!(direct.code, -32602);
+            for allow in [false, true] {
+                let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_update_create", "input": {"project": id}, "allowWrites": allow}})), &global, flags).await;
+                if allow {
+                    assert_eq!(call.unwrap_err().code, -32602);
+                } else {
+                    let denied = call.unwrap();
+                    assert_eq!(denied["isError"], true);
+                    assert!(denied["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("allowWrites"));
+                }
+                let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_update_create({{project: '{id}'}})"), "allowWrites": allow}})), &global, flags).await.unwrap();
+                assert!(result["structuredContent"]["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(if allow {
+                        "Invalid arguments:"
+                    } else {
+                        "allowWrites"
+                    }));
+            }
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_project_update_create")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Write);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_project_update_create",
+            "project: string",
+            "body: string",
+            "health?:",
+            "onTrack",
+            "atRisk",
+            "offTrack",
+        ] {
+            assert!(declaration.contains(field), "{field}: {declaration}");
+        }
+        let validator = jsonschema::draft202012::new(&tool.input_schema).unwrap();
+        assert!(validator.is_valid(&serde_json::json!({"project": id, "body": "Report"})));
+        assert!(!validator
+            .is_valid(&serde_json::json!({"project": id, "body": "Report", "health": "unknown"})));
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/contract_samples/linear_project_update_create.json"
+        ))
+        .unwrap();
+        let validator = jsonschema::draft202012::new(&tool.output_schema).unwrap();
+        assert!(validator.is_valid(&sample));
+        for field in ["id", "body", "health", "createdAt", "url", "project"] {
+            let mut incomplete = sample.clone();
+            incomplete.as_object_mut().unwrap().remove(field);
+            assert!(!validator.is_valid(&incomplete));
+        }
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn milestone_create_contract_dispatch_and_write_gates() {

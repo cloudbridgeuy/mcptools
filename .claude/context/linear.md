@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-24 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+25 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -121,11 +121,16 @@ linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 linear_project_milestone_create (needs project, name; names require team; accepts Markdown description, targetDate, sortOrder)
 linear_project_create (needs team, name; accepts description and Markdown content)
 linear_project_update (project UUID, or name with team; partial property updates and explicit clear flags)
+linear_project_update_create (needs project, nonblank Markdown body; names require team; optional health)
 linear_issue_create (needs team, title; accepts labels string-or-array)
 linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent, labels, clearLabels; state and label names resolve from the issue identifier team, or team; labels replaces, clearLabels empties, the two reject when combined)
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```
+
+### Project progress reports (MCP only)
+
+`linear_project_update_create({project: "project-UUID", body: "# Progress\nShipping soon.", health: "onTrack"})` creates a progress report, not a project property edit. Names require `team` and use the same all-page resolution with missing/ambiguous matches rejected. Nonblank Markdown body preserves exact whitespace. Optional health is `onTrack`, `atRisk`, or `offTrack`; omitted or null health is not sent, with no invented default. Invalid selectors, blank body, malformed types and unknown health reject before configuration or HTTP. Returns report `id`, `body`, required API `health`, `createdAt`, `url`, and `project: {id, name}`. Requires strict success and complete well-typed fields; HTTP/GraphQL errors, including partial data, fail. MCP-only Write tool; `call_tool` and `execute` require `allowWrites: true`. No CLI command added.
 
 ### Project property updates (MCP only)
 
