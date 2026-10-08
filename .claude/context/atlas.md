@@ -12,7 +12,7 @@ Atlas scans a repository, extracts symbols using tree-sitter, and stores them in
 ## Optional Context and Descriptions
 
 - **Project primer**: Optional operator-authored text. No command creates, reformats, or rewrites it.
-- **Cached descriptions**: Structural refresh preserves existing file/directory descriptions and enrichment metadata. Descriptions can be stale after source changes; full provenance tracking is deferred to GUZ-29.
+- **Cached descriptions**: Structural refresh preserves reusable results. Source changes invalidate the affected file and ancestors; stale descriptions remain stored but are not displayed or counted as current.
 - **Model execution**: Removed from structural commands. An explicit enrichment command is future work (GUZ-32), not available now.
 - **Config file**: `.mcptools/config.toml` for per-project paths, templates, provider/model overrides, concurrency, timeout, attempt limits, and token limits
 - **Environment variables**: Override config via `ATLAS_*` env vars
@@ -76,7 +76,7 @@ Only the listed files are indexed; unchanged hashes are reused. Other records ar
 
 ### `atlas update` — Incremental Update
 
-`atlas update` compares source hashes against the index. It extracts symbols for added/modified files and removes deleted files. It retains descriptions and never calls a model.
+`atlas update` compares source hashes against the index. It extracts symbols for added/modified files and removes deleted files. It retains cached results, invalidates changed inputs and ancestors, and never calls a model.
 
 ### `atlas sync` — Full Structural Scan
 
@@ -196,6 +196,8 @@ Generate uses llm-stream with explicit provider/model selection. `[atlas.file_ll
 |------|---------|
 | `config.rs` | Loads structural and strict enrichment config separately from `.mcptools/config.toml` plus environment overrides |
 | `db.rs` | SQLite storage: `Database::open`, insert/query symbols and files |
+| `db/enrichment.rs` | Transactional migration, input reconciliation, claims, conditional completion, recovery, invalidation, and refresh |
+| `enrichment.rs` | Pure deterministic input hashing and typed targets, states, claims, and validated descriptions; colocated with the Atlas persistence contract |
 | `fs.rs` | Gitignore-aware file walker excluding the configured primer; optional primer reads with distinct read/encoding errors |
 | `llm.rs` | `LlmStreamProvider::generate`, `request`, `failure_report` — run llm-stream in machine mode and map failures |
 | `parser.rs` | `parse_and_extract(path, source)` — tree-sitter grammar registry and extraction bridge |
@@ -210,7 +212,32 @@ Generate uses llm-stream with explicit provider/model selection. `[atlas.file_ll
 
 ## SQLite Schema
 
-Four tables: `symbols`, `files`, `directories`, `metadata`. Indexes on `symbols(file_path)` and `files(path)`. Database at `.mcptools/atlas/index.db` relative to git root.
+Five tables: `symbols`, `files`, `directories`, `metadata`, `enrichment`. Indexes on `symbols(file_path)` and `files(path)`. Database at `.mcptools/atlas/index.db` relative to git root.
+
+`enrichment` is keyed by `(kind, path)`, where kind is `files` or `directories`. It stores the desired input digest, last successful input digest, state, random claim token, lease deadline, and failure/deferral reason. Description bytes stay in the structural tables. `described_files` and `described_directories` expose description bytes only for current results; tree, peek, directory-child input queries, and status use these views.
+
+`Database::open` transactionally installs schema version `1` in metadata, reconstructs missing parent directories, and migrates legacy records. The known `[description failed]` marker becomes a retryable failed record and is removed from description columns. Other unverifiable legacy descriptions remain stored as stale, not current. Missing descriptions remain missing. Migration never reads or rewrites primer/config/template files. Unknown enrichment schema versions fail without committing changes.
+
+### Enrichment Persistence Contract (GUZ-29)
+
+GUZ-32 owns orchestration and the future `atlas enrich` command. No enrichment command or model calls are added by this persistence contract.
+
+`EnrichmentInput::identity` hashes versioned canonical JSON with SHA-256. The caller supplies full source bytes or a sorted map of the actual directory-child inputs used, effective template bytes, rendered system and user prompts, effective variables, optional context bytes, provider, model, optional immutable model revision, and all output-affecting settings. Map insertion order does not matter. Missing context differs from empty context. Child map values must encode every child attribute actually consumed, including summaries, source/provenance, or symbols when used; map keys must distinguish paths/kinds. Do not substitute timestamps, template names, or parent paths for actual inputs. Include endpoint/backend identity in settings when it can affect output; never include credentials.
+
+States are `Missing`, `Current(identity)`, `Stale`, `Failed(reason)`, `Deferred(reason)`, and `InFlight { identity, lease_until }`. Legacy failure strings cannot become validated descriptions. Callers enumerate indexed files/directories and inspect `enrichment_state`; the old NULL-only selectors and unconditional description writers are removed.
+
+Caller sequence:
+
+1. Collect current inputs, derive their identity, and call `set_enrichment_input` for an indexed target. An unchanged identity preserves its state. A different identity cancels its claim and invalidates ancestors. A retained successful result can become current again only when its complete identity matches.
+2. Call `claim_enrichment(target, identity, now, lease_until)`. Only non-current work with matching desired identity can be claimed. Unexpired claims are exclusive across connections. Use nonnegative Unix seconds and a deadline after `now`; long-running callers must supply a sufficient lease.
+3. Generate output outside the database. Recollect all inputs before completion. Pass the rechecked identity and `ValidatedDescription::parse` output to `commit_enrichment`. Success atomically saves descriptions and provenance only if the identity, claim token, and unexpired lease still match. A rejected completion returns `false`; it must not be reported as saved. Call `set_enrichment_input` with newly collected inputs to reconcile changed configuration/context.
+4. Use `finish_enrichment` for explicit failures or deferrals. It applies the same identity/token/lease guards. Use `recover_enrichment(now)` for expired abandoned claims; it preserves completed results and makes abandoned work retryable. Claiming an expired entry also replaces its token. Opening a database does not cancel another process's active claims.
+
+Structural insert/content-change/delete triggers invalidate only affected ancestors (literal path ancestry, not SQL wildcard matching); deletions remove that target's provenance. Unchanged structural upserts retain current results and ignore description fields supplied through structural `FileEntry`. Changed directory summaries invalidate ancestors. Ignore changes and renames are represented by the structural walk's additions/deletions. `index --stdin` still retains unlisted paths; callers must explicitly delete removed paths when using a targeted path list.
+
+`invalidate_enrichment(targets)` cancels targeted claims and marks their results/ancestors for identity reconciliation, retaining reusable successful provenance. `refresh_enrichment(targets)` additionally discards targeted successful identities, so even identical inputs require regeneration. Both are transactional, targeted APIs, not CLI flags. For template/context/model/settings changes, callers recompute affected identities; structural/query commands deliberately do not load enrichment configuration or read templates/context to evaluate freshness.
+
+Remote model alias limit: without a supplied immutable model revision, cache reuse proves only that the configured alias and all other supplied inputs match. It cannot detect a provider changing what that alias points to. Supply a revision when available, or explicitly refresh the affected targets to force regeneration.
 
 ## MCP Tools (V5)
 
@@ -240,7 +267,7 @@ Optional operator-authored context is exposed at `atlas://primer`. Missing text 
 
 ## Planned Features
 
-- **V2**: ~~LLM-generated file descriptions~~ Implemented
+- **V2**: Durable enrichment persistence implemented; explicit model orchestration pending GUZ-32
 - **V3**: ~~MCP tool integration~~ Implemented (V5)
 - **V4**: ~~Incremental updates~~ Implemented
 - **V5**: ~~MCP tools + status + primer resource~~ Implemented

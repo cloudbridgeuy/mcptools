@@ -2,6 +2,7 @@ pub mod cli;
 pub mod config;
 pub mod data;
 pub mod db;
+pub mod enrichment;
 pub mod fs;
 pub mod llm;
 pub mod parser;
@@ -16,21 +17,21 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
-    /// Build the symbol index for the current repository
+    #[command(about = "Build the symbol index for the current repository")]
     Index(cli::index::IndexOptions),
-    /// Show annotated directory tree
+    #[command(about = "Show annotated directory tree")]
     Tree(cli::tree::TreeOptions),
-    /// Show file summary and symbols
+    #[command(about = "Show file summary and symbols")]
     Peek(cli::peek::PeekOptions),
     #[command(about = "Prepare repository and build the structural index")]
     Init(cli::init::InitOptions),
-    /// Incremental update (changed files only)
+    #[command(about = "Incremental update (changed files only)")]
     Update(cli::update::UpdateOptions),
     #[command(about = "Refresh the full structural index, retaining cached descriptions")]
     Sync(cli::sync::SyncOptions),
-    /// Show index status and statistics
+    #[command(about = "Show index status and statistics")]
     Status(cli::status::StatusOptions),
-    /// Configure this repo for atlas (git hook; more in later slices)
+    #[command(about = "Configure this repo for atlas (git hook; more in later slices)")]
     Setup(cli::setup::SetupOptions),
 }
 

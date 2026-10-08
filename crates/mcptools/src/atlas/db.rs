@@ -8,17 +8,20 @@ use mcptools_core::atlas::{
 };
 use rusqlite::{params, Connection};
 
+mod enrichment;
+
 pub struct Database {
     conn: Connection,
 }
 
 impl Database {
-    /// Open or create database at the given path. Creates tables if needed.
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)
             .wrap_err_with(|| format!("opening database: {}", path.display()))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let tx = conn.unchecked_transaction()?;
 
-        conn.execute_batch(
+        tx.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS symbols (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,15 +57,12 @@ impl Database {
         )
         .wrap_err("creating schema")?;
 
-        // Self-healing migration: if the directories table is empty but files
-        // exist, reconstruct directory entries from file paths.  This repairs
-        // databases damaged by the former DROP TABLE bug.
-        let dir_count: i64 = conn
+        let dir_count: i64 = tx
             .query_row("SELECT COUNT(*) FROM directories", [], |row| row.get(0))
             .wrap_err("counting directories")?;
 
         if dir_count == 0 {
-            let mut stmt = conn
+            let mut stmt = tx
                 .prepare("SELECT path FROM files")
                 .wrap_err("preparing file paths for migration")?;
             let file_paths: Vec<String> = stmt
@@ -72,13 +72,16 @@ impl Database {
                 .wrap_err("reading file paths")?;
 
             for dir_path in extract_parent_paths(&file_paths) {
-                conn.execute(
+                tx.execute(
                     "INSERT OR IGNORE INTO directories (path, short_description, long_description, indexed_at) VALUES (?1, NULL, NULL, NULL)",
                     params![dir_path],
                 )
                 .wrap_err("migrating parent directory")?;
             }
         }
+
+        enrichment::migrate(&tx)?;
+        tx.commit()?;
 
         Ok(Self { conn })
     }
@@ -87,19 +90,15 @@ impl Database {
         self.conn
             .execute(
                 "INSERT INTO files (path, content_hash, tree_sitter_hash, short_description, long_description, indexed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 VALUES (?1, ?2, ?3, NULL, NULL, ?4)
                  ON CONFLICT(path) DO UPDATE SET
                  content_hash = excluded.content_hash,
                  tree_sitter_hash = excluded.tree_sitter_hash,
-                 short_description = COALESCE(excluded.short_description, files.short_description),
-                 long_description = COALESCE(excluded.long_description, files.long_description),
                  indexed_at = excluded.indexed_at",
                 params![
                     entry.path.to_string_lossy().as_ref(),
                     entry.content_hash.hex(),
                     entry.tree_sitter_hash.as_ref().map(|h| h.hex()),
-                    entry.short_description,
-                    entry.long_description,
                     entry.indexed_at,
                 ],
             )
@@ -122,7 +121,6 @@ impl Database {
         Ok(())
     }
 
-    /// Delete existing symbols for the file and insert all new ones in a single transaction.
     pub fn insert_symbols(&self, symbols: &[Symbol]) -> Result<()> {
         if symbols.is_empty() {
             return Ok(());
@@ -167,35 +165,16 @@ impl Database {
         Ok(())
     }
 
-    /// Delete all data from every table.
-    pub fn clear_all(&self) -> Result<()> {
-        self.conn
-            .execute_batch(
-                "
-                DELETE FROM symbols;
-                DELETE FROM files;
-                DELETE FROM directories;
-                DELETE FROM metadata;
-                ",
-            )
-            .wrap_err("clearing all tables")?;
-        Ok(())
-    }
-
-    /// Query files and directories under the given path up to the specified depth.
-    ///
-    /// Returns entries sorted by path so that directories appear before their children.
     pub fn tree_entries(&self, path: &Path, depth: u32) -> Result<Vec<TreeEntry>> {
         let prefix = path.to_string_lossy().to_string();
 
         let mut entries = Vec::new();
 
-        // Query directories.
         {
             let mut stmt = self
                 .conn
                 .prepare(
-                    "SELECT path, short_description FROM directories
+                    "SELECT path, short_description FROM described_directories
                      WHERE path LIKE ?1
                      ORDER BY path",
                 )
@@ -213,7 +192,6 @@ impl Database {
                 let (p, desc) = row.wrap_err("reading directory row")?;
                 let entry_path = PathBuf::from(&p);
 
-                // Depth filtering: count components relative to the base path.
                 let relative_depth = relative_depth(&prefix, &p);
                 if relative_depth > depth {
                     continue;
@@ -233,12 +211,11 @@ impl Database {
             }
         }
 
-        // Query files.
         {
             let mut stmt = self
                 .conn
                 .prepare(
-                    "SELECT path, short_description FROM files
+                    "SELECT path, short_description FROM described_files
                      WHERE path LIKE ?1
                      ORDER BY path",
                 )
@@ -280,14 +257,13 @@ impl Database {
         Ok(entries)
     }
 
-    /// Query a file entry and its symbols, returning a display-optimized `PeekView`.
     pub fn peek_file(&self, path: &Path) -> Result<Option<PeekView>> {
         let path_str = path.to_string_lossy().to_string();
 
         let file_row: Option<(Option<String>, Option<String>)> = self
             .conn
             .query_row(
-                "SELECT short_description, long_description FROM files WHERE path = ?1",
+                "SELECT short_description, long_description FROM described_files WHERE path = ?1",
                 params![path_str],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -309,19 +285,6 @@ impl Database {
         }))
     }
 
-    /// Update the short and long descriptions for a file.
-    pub fn update_file_description(&self, path: &Path, short: &str, long: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "UPDATE files SET short_description = ?1, long_description = ?2 WHERE path = ?3",
-                params![short, long, path.to_string_lossy().as_ref()],
-            )
-            .wrap_err("updating file description")?;
-        Ok(())
-    }
-
-    /// Get the tree path from root to the given file path.
-    /// Returns (directory_path, short_description) pairs.
     pub fn tree_path_to(&self, file_path: &Path) -> Result<Vec<(PathBuf, Option<String>)>> {
         let mut result = Vec::new();
         let mut current = file_path.parent();
@@ -333,7 +296,7 @@ impl Database {
             let desc: Option<String> = self
                 .conn
                 .query_row(
-                    "SELECT short_description FROM directories WHERE path = ?1",
+                    "SELECT short_description FROM described_directories WHERE path = ?1",
                     params![dir_str],
                     |row| row.get(0),
                 )
@@ -343,11 +306,10 @@ impl Database {
             result.push((dir.to_path_buf(), desc));
             current = dir.parent();
         }
-        result.reverse(); // Root first
+        result.reverse();
         Ok(result)
     }
 
-    /// Get all symbols for a file path.
     pub fn symbols_for(&self, file_path: &Path) -> Result<Vec<Symbol>> {
         let path_str = file_path.to_string_lossy().to_string();
         let mut stmt = self
@@ -402,7 +364,6 @@ impl Database {
         Ok(symbols)
     }
 
-    /// Insert or update a metadata key-value pair.
     pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
         self.conn
             .execute(
@@ -413,49 +374,17 @@ impl Database {
         Ok(())
     }
 
-    /// Insert or replace a directory entry.
-    pub fn insert_directory(&self, entry: &DirectoryEntry) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO directories (path, short_description, long_description, indexed_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    entry.path.to_string_lossy().as_ref(),
-                    entry.short_description,
-                    entry.long_description,
-                    entry.indexed_at,
-                ],
-            )
-            .wrap_err("inserting directory")?;
-        Ok(())
-    }
-
-    /// Update the short and long descriptions for a directory.
-    pub fn update_directory_description(&self, path: &Path, short: &str, long: &str) -> Result<()> {
-        self.conn
-            .execute(
-                "UPDATE directories SET short_description = ?1, long_description = ?2 WHERE path = ?3",
-                params![short, long, path.to_string_lossy().as_ref()],
-            )
-            .wrap_err("updating directory description")?;
-        Ok(())
-    }
-
-    /// Return direct children (depth 1) of the given directory as `TreeEntry` items.
     pub fn directory_children(&self, path: &Path) -> Result<Vec<TreeEntry>> {
         self.tree_entries(path, 1)
     }
 
-    /// Query a directory entry and return a display-optimized `DirectoryPeekView`.
-    ///
-    /// Includes direct children and aggregated symbols from direct child files.
     pub fn peek_directory(&self, path: &Path) -> Result<Option<DirectoryPeekView>> {
         let path_str = path.to_string_lossy().to_string();
 
         let dir_row: Option<(Option<String>, Option<String>)> = self
             .conn
             .query_row(
-                "SELECT short_description, long_description FROM directories WHERE path = ?1",
+                "SELECT short_description, long_description FROM described_directories WHERE path = ?1",
                 params![path_str],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -479,13 +408,12 @@ impl Database {
         }))
     }
 
-    /// Return all directory entries in the database.
     pub fn all_directories(&self) -> Result<Vec<DirectoryEntry>> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT path, short_description, long_description, indexed_at
-                 FROM directories ORDER BY path",
+                 FROM described_directories ORDER BY path",
             )
             .wrap_err("preparing all_directories query")?;
 
@@ -513,9 +441,6 @@ impl Database {
         Ok(entries)
     }
 
-    /// Peek a path as either a file or a directory.
-    ///
-    /// Tries the file table first; falls back to directories.
     pub fn peek_file_or_dir(&self, path: &Path) -> Result<PeekResult> {
         if let Some(file_peek) = self.peek_file(path)? {
             return Ok(PeekResult::File(file_peek));
@@ -526,11 +451,9 @@ impl Database {
         eyre::bail!("no file or directory found at: {}", path.display());
     }
 
-    /// Return all symbols from files that are direct children of the given directory.
     pub fn aggregated_symbols_for(&self, dir_path: &Path) -> Result<Vec<Symbol>> {
         let dir_str = dir_path.to_string_lossy().to_string();
 
-        // Get file paths that are direct children (depth 1).
         let mut file_stmt = self
             .conn
             .prepare("SELECT path FROM files WHERE path LIKE ?1 ORDER BY path")
@@ -544,7 +467,6 @@ impl Database {
             .wrap_err("querying files for aggregated symbols")?
             .filter_map(|row| {
                 let p = row.ok()?;
-                // Only keep direct children (depth 1).
                 if relative_depth(&dir_str, &p) == 1 {
                     Some(PathBuf::from(p))
                 } else {
@@ -559,44 +481,6 @@ impl Database {
         }
 
         Ok(symbols)
-    }
-
-    /// Return file paths that have no short description yet.
-    pub fn files_needing_descriptions(&self) -> Result<Vec<PathBuf>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT path FROM files WHERE short_description IS NULL ORDER BY path")
-            .wrap_err("preparing files_needing_descriptions query")?;
-
-        let paths = stmt
-            .query_map([], |row| {
-                let p: String = row.get(0)?;
-                Ok(PathBuf::from(p))
-            })
-            .wrap_err("querying files needing descriptions")?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .wrap_err("reading file paths")?;
-
-        Ok(paths)
-    }
-
-    /// Return directory paths that have no short description yet.
-    pub fn directories_needing_descriptions(&self) -> Result<Vec<PathBuf>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT path FROM directories WHERE short_description IS NULL ORDER BY path")
-            .wrap_err("preparing directories_needing_descriptions query")?;
-
-        let paths = stmt
-            .query_map([], |row| {
-                let p: String = row.get(0)?;
-                Ok(PathBuf::from(p))
-            })
-            .wrap_err("querying directories needing descriptions")?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .wrap_err("reading directory paths")?;
-
-        Ok(paths)
     }
 
     pub fn prune_empty_directories(&self) -> Result<()> {
@@ -622,7 +506,6 @@ impl Database {
         Ok(())
     }
 
-    /// Delete all symbols associated with a file path.
     pub fn delete_symbols_for(&self, path: &Path) -> Result<()> {
         self.conn
             .execute(
@@ -641,38 +524,32 @@ impl Database {
         Ok(count as usize)
     }
 
-    /// Count total files in the index.
     pub fn count_files(&self) -> Result<usize> {
         self.count_query("SELECT COUNT(*) FROM files", "counting files")
     }
 
-    /// Count total directories in the index.
     pub fn count_directories(&self) -> Result<usize> {
         self.count_query("SELECT COUNT(*) FROM directories", "counting directories")
     }
 
-    /// Count total symbols in the index.
     pub fn count_symbols(&self) -> Result<usize> {
         self.count_query("SELECT COUNT(*) FROM symbols", "counting symbols")
     }
 
-    /// Count files that have a short description.
     pub fn count_files_with_descriptions(&self) -> Result<usize> {
         self.count_query(
-            "SELECT COUNT(*) FROM files WHERE short_description IS NOT NULL",
+            "SELECT COUNT(*) FROM described_files WHERE short_description IS NOT NULL",
             "counting files with descriptions",
         )
     }
 
-    /// Count directories that have a short description.
     pub fn count_directories_with_descriptions(&self) -> Result<usize> {
         self.count_query(
-            "SELECT COUNT(*) FROM directories WHERE short_description IS NOT NULL",
+            "SELECT COUNT(*) FROM described_directories WHERE short_description IS NOT NULL",
             "counting directories with descriptions",
         )
     }
 
-    /// Get a metadata value by key, returning None if not found.
     pub fn get_metadata(&self, key: &str) -> Result<Option<String>> {
         self.conn
             .query_row(
@@ -684,7 +561,6 @@ impl Database {
             .wrap_err("querying metadata")
     }
 
-    /// Return all file paths and their content hashes (for incremental updates).
     pub fn file_hashes(&self) -> Result<HashMap<PathBuf, ContentHash>> {
         let mut stmt = self
             .conn
@@ -712,15 +588,11 @@ impl Database {
     }
 }
 
-/// Result of peeking at a path that could be either a file or a directory.
 pub enum PeekResult {
     File(PeekView),
     Directory(DirectoryPeekView),
 }
 
-/// Build a SQL LIKE pattern for direct and nested children of `prefix`.
-///
-/// An empty prefix (repo root) yields `"%"`, otherwise `"{prefix}/%"`.
 fn like_pattern(prefix: &str) -> String {
     if prefix.is_empty() {
         "%".to_string()
@@ -729,9 +601,6 @@ fn like_pattern(prefix: &str) -> String {
     }
 }
 
-/// Compute how many path components deep `child` is relative to `base`.
-///
-/// If `base` is empty (repo root), returns the number of components in `child`.
 fn relative_depth(base: &str, child: &str) -> u32 {
     if base.is_empty() {
         return child.matches('/').count() as u32 + 1;
@@ -743,7 +612,6 @@ fn relative_depth(base: &str, child: &str) -> u32 {
     suffix.matches('/').count() as u32 + 1
 }
 
-/// Extension trait to make `rusqlite::OptionalExtension` available.
 trait OptionalExt<T> {
     fn optional(self) -> Result<Option<T>, rusqlite::Error>;
 }
