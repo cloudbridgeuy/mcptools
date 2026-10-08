@@ -646,6 +646,87 @@ pub fn transform_document_create(
     Ok(document)
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentUpdateArgs {
+    #[schemars(description = "Required document UUID; slugs are not accepted")]
+    pub id: String,
+    #[schemars(description = "Replacement title; must not be blank")]
+    pub title: Option<String>,
+    #[schemars(
+        description = "Replacement Markdown; exact whitespace preserved; empty clears content"
+    )]
+    pub content: Option<String>,
+}
+
+pub fn document_update_input(args: &DocumentUpdateArgs) -> Result<serde_json::Value, String> {
+    if !super::is_uuid(&args.id) {
+        return Err("id must be a document UUID".into());
+    }
+    if args.title.is_none() && args.content.is_none() {
+        return Err("Supply at least one title or content".into());
+    }
+    let mut input = serde_json::json!({});
+    if let Some(title) = &args.title {
+        if title.trim().is_empty() {
+            return Err("Document title must not be blank".into());
+        }
+        input["title"] = serde_json::json!(title.trim());
+    }
+    if let Some(content) = &args.content {
+        input["content"] = serde_json::json!(content);
+    }
+    Ok(input)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentUpdateOutput {
+    pub id: String,
+    pub title: String,
+    pub content: Option<String>,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub project: Option<Project>,
+}
+
+pub fn transform_document_update(
+    data: serde_json::Value,
+    expected_id: &str,
+) -> Result<DocumentUpdateOutput, String> {
+    let payload = &data["documentUpdate"];
+    if payload["success"].as_bool() != Some(true) {
+        return Err("Linear documentUpdate failed: success was not true".into());
+    }
+    let raw = &payload["document"];
+    if raw.is_null() {
+        return Err(format!("Updated document not found: {expected_id}"));
+    }
+    if ["content", "project"]
+        .iter()
+        .any(|field| raw.get(field).is_none())
+    {
+        return Err("Malformed updated document: missing nullable field".into());
+    }
+    let document: DocumentUpdateOutput = serde_json::from_value(raw.clone())
+        .map_err(|error| format!("Malformed updated document: {error}"))?;
+    if !super::is_uuid(&document.id)
+        || !document.id.eq_ignore_ascii_case(expected_id)
+        || chrono::DateTime::parse_from_rfc3339(&document.created_at).is_err()
+        || chrono::DateTime::parse_from_rfc3339(&document.updated_at).is_err()
+        || !reqwest::Url::parse(&document.url)
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        || document
+            .project
+            .as_ref()
+            .is_some_and(|project| !super::is_uuid(&project.id) || project.name.trim().is_empty())
+    {
+        return Err("Malformed updated document fields or mismatched identity".into());
+    }
+    Ok(document)
+}
+
 pub fn transform_document(
     data: serde_json::Value,
     expected_id: &str,
@@ -1168,6 +1249,9 @@ pub fn check_response(status: u16, body: &str) -> Result<serde_json::Value, Line
             Some(describe_errors(errors))
         }
         Some(errors) if errors.is_object() => Some(errors.to_string()),
+        Some(errors) if !errors.is_null() && !errors.is_array() => {
+            return Err(LinearError::Parse("Malformed GraphQL errors field".into()));
+        }
         _ => None,
     };
     match (parsed.get("data"), message) {

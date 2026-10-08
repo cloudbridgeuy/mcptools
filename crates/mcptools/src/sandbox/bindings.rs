@@ -251,6 +251,7 @@ mod tests {
         assert!(read.contains(&"linear_initiative_get".to_string()));
         assert!(read.contains(&"linear_document_get".to_string()));
         assert!(!read.contains(&"linear_document_create".to_string()));
+        assert!(!read.contains(&"linear_document_update".to_string()));
         assert!(read.contains(&"linear_project_milestone_list".to_string()));
         assert!(read.contains(&"linear_project_update_list".to_string()));
         assert!(!read.contains(&"jira_create".to_string()));
@@ -264,8 +265,9 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 81);
+        assert_eq!(all.len(), 82);
         assert!(all.contains(&"linear_document_create".to_string()));
+        assert!(all.contains(&"linear_document_update".to_string()));
         assert!(!read.contains(&"linear_project_milestone_update".to_string()));
         assert!(all.contains(&"linear_project_milestone_update".to_string()));
         assert!(all.contains(&"linear_project_create".to_string()));

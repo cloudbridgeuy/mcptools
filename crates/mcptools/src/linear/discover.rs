@@ -16,6 +16,31 @@ pub const DOCUMENT_GET_QUERY: &str = "query ($id: String!) { document(id: $id) {
 
 pub const DOCUMENT_CREATE_MUTATION: &str = "mutation ($input: DocumentCreateInput!) { documentCreate(input: $input) { success document { id title content url createdAt updatedAt project { id name } } } }";
 
+pub const DOCUMENT_UPDATE_MUTATION: &str = "mutation ($id: String!, $input: DocumentUpdateInput!) { documentUpdate(id: $id, input: $input) { success document { id title content url createdAt updatedAt project { id name } } } }";
+
+pub async fn document_update_data(
+    client: &reqwest::Client,
+    args: &crate::linear::args::DocumentUpdateArgs,
+) -> Result<mcptools_core::linear::DocumentUpdateOutput> {
+    document_update_data_with_url(client, LINEAR_API_URL, args).await
+}
+
+async fn document_update_data_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    args: &crate::linear::args::DocumentUpdateArgs,
+) -> Result<mcptools_core::linear::DocumentUpdateOutput> {
+    let input = mcptools_core::linear::document_update_input(args).map_err(|error| eyre!(error))?;
+    let data = execute_with_url(
+        client,
+        url,
+        DOCUMENT_UPDATE_MUTATION,
+        serde_json::json!({"id": args.id, "input": input}),
+    )
+    .await?;
+    mcptools_core::linear::transform_document_update(data, &args.id).map_err(|error| eyre!(error))
+}
+
 pub async fn document_create_data(
     client: &reqwest::Client,
     args: &crate::linear::args::DocumentCreateArgs,
@@ -860,6 +885,213 @@ pub async fn cycles_list_data(client: &reqwest::Client, team: &str) -> Result<Pa
 mod tests {
     use super::*;
     use crate::linear::config::LinearConfig;
+
+    #[tokio::test]
+    async fn document_update_requests_preserve_omitted_fields_and_markdown() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_document_update.json"
+        ))
+        .unwrap();
+        let id = sample["id"].as_str().unwrap();
+        for (fields, input) in [
+            (
+                serde_json::json!({"title": " Revised "}),
+                serde_json::json!({"title": "Revised"}),
+            ),
+            (
+                serde_json::json!({"content": "    code\n\n# Heading\r\n"}),
+                serde_json::json!({"content": "    code\n\n# Heading\r\n"}),
+            ),
+            (
+                serde_json::json!({"title": "Revised", "content": "Both\n"}),
+                serde_json::json!({"title": "Revised", "content": "Both\n"}),
+            ),
+            (
+                serde_json::json!({"content": ""}),
+                serde_json::json!({"content": ""}),
+            ),
+            (
+                serde_json::json!({"title": "Revised", "content": null}),
+                serde_json::json!({"title": "Revised"}),
+            ),
+            (
+                serde_json::json!({"title": null, "content": "Body"}),
+                serde_json::json!({"content": "Body"}),
+            ),
+        ] {
+            let mut raw = fields;
+            raw["id"] = serde_json::json!(id);
+            let args = serde_json::from_value(raw).unwrap();
+            let mut expected = sample.clone();
+            expected
+                .as_object_mut()
+                .unwrap()
+                .extend(input.as_object().unwrap().clone());
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": DOCUMENT_UPDATE_MUTATION, "variables": {"id": id, "input": input}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"documentUpdate": {"success": true, "document": expected}}})))
+                .expect(1).mount(&server).await;
+            let output =
+                document_update_data_with_url(&reqwest::Client::new(), &server.uri(), &args)
+                    .await
+                    .unwrap();
+            assert_eq!(serde_json::to_value(output).unwrap(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn document_update_validation_and_failures_never_report_success() {
+        use mcptools_core::linear::transform_document_update;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_document_update.json"
+        ))
+        .unwrap();
+        let id = sample["id"].as_str().unwrap();
+        let args = serde_json::from_value(serde_json::json!({"id": id, "content": ""})).unwrap();
+        for (status, body) in [
+            (
+                403,
+                serde_json::json!({"errors": [{"message": "Forbidden"}]}),
+            ),
+            (
+                404,
+                serde_json::json!({"errors": [{"message": "Document not found"}]}),
+            ),
+            (
+                200,
+                serde_json::json!({"errors": [{"message": "Document not found"}]}),
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"documentUpdate": {"success": false, "document": sample}}}),
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"documentUpdate": {"document": sample}}}),
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"documentUpdate": {"success": true, "document": null}}}),
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"documentUpdate": {"success": true, "document": sample}}, "errors": [{"message": "partial failure"}]}),
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"documentUpdate": {"success": true, "document": sample}}, "errors": "Forbidden"}),
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"documentUpdate": {"success": true, "document": sample}}, "errors": true}),
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"documentUpdate": {"success": true, "document": sample}}, "errors": 1}),
+            ),
+            (200, serde_json::json!({"data": {}})),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(status).set_body_json(body))
+                .expect(1)
+                .mount(&server)
+                .await;
+            assert!(
+                document_update_data_with_url(&reqwest::Client::new(), &server.uri(), &args)
+                    .await
+                    .is_err()
+            );
+        }
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not JSON"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        assert!(
+            document_update_data_with_url(&reqwest::Client::new(), &server.uri(), &args)
+                .await
+                .is_err()
+        );
+        let server = MockServer::start().await;
+        for raw in [
+            serde_json::json!({"id": id}),
+            serde_json::json!({"id": id, "title": null, "content": null}),
+            serde_json::json!({"id": " ", "title": "Title"}),
+            serde_json::json!({"id": "slug", "content": "Body"}),
+            serde_json::json!({"id": id, "title": "\t\n", "content": ""}),
+        ] {
+            let args = serde_json::from_value(raw).unwrap();
+            assert!(
+                document_update_data_with_url(&reqwest::Client::new(), &server.uri(), &args)
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+        for field in [
+            "id",
+            "title",
+            "content",
+            "url",
+            "createdAt",
+            "updatedAt",
+            "project",
+        ] {
+            let mut malformed = sample.clone();
+            malformed.as_object_mut().unwrap().remove(field);
+            assert!(
+                transform_document_update(
+                    serde_json::json!({"documentUpdate": {"success": true, "document": malformed}}),
+                    id
+                )
+                .is_err(),
+                "{field}"
+            );
+        }
+        for (field, value) in [
+            (
+                "id",
+                serde_json::json!("12345678-1234-1234-1234-123456789abc"),
+            ),
+            ("title", serde_json::json!(3)),
+            ("content", serde_json::json!({})),
+            ("url", serde_json::json!("file:///document")),
+            ("createdAt", serde_json::json!("bad")),
+            ("updatedAt", serde_json::json!("bad")),
+            (
+                "project",
+                serde_json::json!({"id": "bad", "name": "Delivery"}),
+            ),
+            ("project", serde_json::json!({"id": id, "name": " "})),
+        ] {
+            let mut malformed = sample.clone();
+            malformed[field] = value;
+            assert!(
+                transform_document_update(
+                    serde_json::json!({"documentUpdate": {"success": true, "document": malformed}}),
+                    id
+                )
+                .is_err(),
+                "{field}"
+            );
+        }
+        let mut nullable = sample;
+        nullable["project"] = serde_json::Value::Null;
+        nullable["content"] = serde_json::Value::Null;
+        nullable["title"] = serde_json::json!("");
+        assert!(transform_document_update(
+            serde_json::json!({"documentUpdate": {"success": true, "document": nullable}}),
+            &args.id
+        )
+        .is_ok());
+    }
 
     #[tokio::test]
     async fn document_create_inputs_resolution_and_mutation_output() {

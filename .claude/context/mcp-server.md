@@ -104,6 +104,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `linear_initiative_get` | Get initiative by required UUID; nullable metadata and Markdown content; every directly linked project including archived projects; 250 projects/page, 1000-page cap, no silent truncation; MCP-only Read |
 | `linear_document_get` | Get document by required UUID; title, nullable verbatim Markdown, timestamps, URL, nullable owner and project; MCP-only Read |
 | `linear_document_create` | Create a document attached to an existing project UUID or name with team; nonblank title, optional verbatim Markdown; complete document and project identity; MCP-only Write, requires `allowWrites` in discovery/code mode |
+| `linear_document_update` | Update document UUID with partial nonblank title or verbatim Markdown; empty content clears body, omitted fields unchanged; nullable project identity; MCP-only Write, requires `allowWrites` in discovery/code mode |
 | `linear_initiative_project_add` | Link existing initiative UUID to existing project UUID or name with team; returns association id and initiative/project identities; duplicate links and hierarchy conflicts fail without mutation retry; MCP-only Write (`allowWrites` required) |
 | `linear_project_milestone_list` | List milestones scoped to project UUID or name with team; nullable description/date; limit 1–250, cursor, all; Read |
 | `linear_project_milestone_create` | Create a milestone in project UUID or name with team; name required, verbatim Markdown description, YYYY-MM-DD targetDate, finite sortOrder; absent/null optionals omitted; Write |
@@ -250,7 +251,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
-either discovery or code mode, hosts load all 80 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 81 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

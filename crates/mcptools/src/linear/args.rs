@@ -243,6 +243,7 @@ pub struct DocumentGetArgs {
 }
 
 pub use mcptools_core::linear::DocumentCreateArgs;
+pub use mcptools_core::linear::DocumentUpdateArgs;
 
 impl DocumentGetArgs {
     pub fn validate(&self) -> Result<(), &'static str> {
