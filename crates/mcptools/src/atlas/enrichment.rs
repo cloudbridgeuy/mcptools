@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -89,6 +90,140 @@ pub enum UnsuccessfulWork {
     Deferred(String),
 }
 
+#[derive(Debug)]
+pub struct EnrichmentCandidate {
+    pub target: EnrichmentTarget,
+    pub identity: InputIdentity,
+    pub state: EnrichmentState,
+    pub context_tokens: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanStatus {
+    Reusable,
+    Missing,
+    Stale,
+    Failed,
+    Deferred,
+    InFlight,
+}
+
+impl PlanStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reusable => "reusable",
+            Self::Missing => "missing",
+            Self::Stale => "stale",
+            Self::Failed => "failed",
+            Self::Deferred => "deferred",
+            Self::InFlight => "in-flight",
+        }
+    }
+
+    fn schedulable(self) -> bool {
+        !matches!(self, Self::Reusable | Self::InFlight)
+    }
+}
+
+#[derive(Debug)]
+pub struct EnrichmentPlanEntry {
+    pub target: EnrichmentTarget,
+    pub status: PlanStatus,
+    pub context_tokens: usize,
+    pub scheduled: bool,
+}
+
+#[derive(Debug)]
+pub struct EnrichmentPlan {
+    pub entries: Vec<EnrichmentPlanEntry>,
+}
+
+impl EnrichmentPlan {
+    pub fn expected_calls(&self) -> usize {
+        self.entries.iter().filter(|entry| entry.scheduled).count()
+    }
+
+    pub fn pending(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.status.schedulable())
+            .count()
+    }
+
+    pub fn count(&self, status: PlanStatus) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.status == status)
+            .count()
+    }
+
+    pub fn scheduled_context_tokens(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.scheduled)
+            .map(|entry| entry.context_tokens)
+            .sum()
+    }
+}
+
+pub fn plan_enrichment(
+    mut candidates: Vec<EnrichmentCandidate>,
+    refresh: bool,
+    limit: Option<usize>,
+) -> EnrichmentPlan {
+    candidates.sort_by(|left, right| target_order(&left.target, &right.target));
+    let mut remaining = limit.unwrap_or(usize::MAX);
+    let entries = candidates
+        .into_iter()
+        .map(|candidate| {
+            let status = classify(&candidate, refresh);
+            let scheduled = status.schedulable() && remaining > 0;
+            if scheduled {
+                remaining -= 1;
+            }
+            EnrichmentPlanEntry {
+                target: candidate.target,
+                status,
+                context_tokens: candidate.context_tokens,
+                scheduled,
+            }
+        })
+        .collect();
+    EnrichmentPlan { entries }
+}
+
+fn classify(candidate: &EnrichmentCandidate, refresh: bool) -> PlanStatus {
+    match &candidate.state {
+        EnrichmentState::Current(identity) if !refresh && identity == &candidate.identity => {
+            PlanStatus::Reusable
+        }
+        EnrichmentState::Current(_) | EnrichmentState::Stale => PlanStatus::Stale,
+        EnrichmentState::Missing => PlanStatus::Missing,
+        EnrichmentState::Failed(_) => PlanStatus::Failed,
+        EnrichmentState::Deferred(_) => PlanStatus::Deferred,
+        EnrichmentState::InFlight { identity, .. }
+            if refresh || identity != &candidate.identity =>
+        {
+            PlanStatus::Stale
+        }
+        EnrichmentState::InFlight { .. } => PlanStatus::InFlight,
+    }
+}
+
+fn target_order(left: &EnrichmentTarget, right: &EnrichmentTarget) -> Ordering {
+    match (left.kind, right.kind) {
+        (EntryKind::File, EntryKind::Directory) => Ordering::Less,
+        (EntryKind::Directory, EntryKind::File) => Ordering::Greater,
+        (EntryKind::File, EntryKind::File) => left.path.cmp(&right.path),
+        (EntryKind::Directory, EntryKind::Directory) => right
+            .path
+            .components()
+            .count()
+            .cmp(&left.path.components().count())
+            .then_with(|| left.path.cmp(&right.path)),
+    }
+}
+
 pub struct ValidatedDescription(pub(super) FileDescription);
 
 #[derive(Debug, thiserror::Error)]
@@ -171,5 +306,150 @@ pub(crate) mod tests {
         assert_ne!(a.identity().unwrap(), b.identity().unwrap());
         assert!(ValidatedDescription::parse("SHORT: [description failed]\nLONG: failure").is_err());
         assert!(ValidatedDescription::parse("SHORT: valid\nLONG:").is_err());
+    }
+
+    #[test]
+    fn planner_reuses_exact_hits_and_limits_pending_work_in_stable_order() {
+        let current = input(b"current").identity().unwrap();
+        let changed = input(b"changed").identity().unwrap();
+        let candidate = |kind, path: &str, identity: InputIdentity, state| EnrichmentCandidate {
+            target: EnrichmentTarget {
+                kind,
+                path: path.into(),
+            },
+            identity,
+            state,
+            context_tokens: 10,
+        };
+        let plan = plan_enrichment(
+            vec![
+                candidate(
+                    EntryKind::Directory,
+                    "src",
+                    changed.clone(),
+                    EnrichmentState::Stale,
+                ),
+                candidate(
+                    EntryKind::File,
+                    "src/b.rs",
+                    changed.clone(),
+                    EnrichmentState::Missing,
+                ),
+                candidate(
+                    EntryKind::File,
+                    "src/a.rs",
+                    current.clone(),
+                    EnrichmentState::Current(current),
+                ),
+                candidate(
+                    EntryKind::Directory,
+                    "src/nested",
+                    changed.clone(),
+                    EnrichmentState::Failed("retry".into()),
+                ),
+                candidate(
+                    EntryKind::File,
+                    "src/c.rs",
+                    changed.clone(),
+                    EnrichmentState::Current(input(b"old").identity().unwrap()),
+                ),
+            ],
+            false,
+            Some(2),
+        );
+        let paths: Vec<_> = plan
+            .entries
+            .iter()
+            .map(|entry| entry.target.path.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            paths,
+            ["src/a.rs", "src/b.rs", "src/c.rs", "src/nested", "src"]
+        );
+        assert_eq!(plan.count(PlanStatus::Reusable), 1);
+        assert_eq!(plan.count(PlanStatus::Missing), 1);
+        assert_eq!(plan.count(PlanStatus::Stale), 2);
+        assert_eq!(plan.count(PlanStatus::Failed), 1);
+        assert_eq!(plan.expected_calls(), 2);
+        assert!(!plan.entries[0].scheduled);
+        assert!(plan.entries[1].scheduled);
+        assert!(plan.entries[2].scheduled);
+        assert!(!plan.entries[3].scheduled);
+    }
+
+    #[test]
+    fn refresh_turns_reusable_hits_into_work() {
+        let identity = input(b"source").identity().unwrap();
+        let plan = plan_enrichment(
+            vec![EnrichmentCandidate {
+                target: EnrichmentTarget {
+                    kind: EntryKind::File,
+                    path: "src/lib.rs".into(),
+                },
+                identity: identity.clone(),
+                state: EnrichmentState::Current(identity),
+                context_tokens: 7,
+            }],
+            true,
+            None,
+        );
+        assert_eq!(plan.count(PlanStatus::Stale), 1);
+        assert_eq!(plan.expected_calls(), 1);
+        assert_eq!(plan.scheduled_context_tokens(), 7);
+    }
+
+    #[test]
+    fn active_claims_remain_visible_without_consuming_the_limit() {
+        let identity = input(b"source").identity().unwrap();
+        let plan = plan_enrichment(
+            vec![
+                EnrichmentCandidate {
+                    target: EnrichmentTarget {
+                        kind: EntryKind::File,
+                        path: "a.rs".into(),
+                    },
+                    identity: identity.clone(),
+                    state: EnrichmentState::InFlight {
+                        identity: identity.clone(),
+                        lease_until: 100,
+                    },
+                    context_tokens: 3,
+                },
+                EnrichmentCandidate {
+                    target: EnrichmentTarget {
+                        kind: EntryKind::File,
+                        path: "b.rs".into(),
+                    },
+                    identity,
+                    state: EnrichmentState::Missing,
+                    context_tokens: 4,
+                },
+            ],
+            false,
+            Some(1),
+        );
+        assert_eq!(plan.count(PlanStatus::InFlight), 1);
+        assert!(!plan.entries[0].scheduled);
+        assert!(plan.entries[1].scheduled);
+        assert_eq!(plan.expected_calls(), 1);
+
+        let changed = plan_enrichment(
+            vec![EnrichmentCandidate {
+                target: EnrichmentTarget {
+                    kind: EntryKind::File,
+                    path: "a.rs".into(),
+                },
+                identity: input(b"changed").identity().unwrap(),
+                state: EnrichmentState::InFlight {
+                    identity: input(b"source").identity().unwrap(),
+                    lease_until: 100,
+                },
+                context_tokens: 3,
+            }],
+            false,
+            None,
+        );
+        assert_eq!(changed.count(PlanStatus::Stale), 1);
+        assert!(changed.entries[0].scheduled);
     }
 }

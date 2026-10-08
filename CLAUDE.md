@@ -117,6 +117,7 @@ mcptools atlas sync                   # Force full re-index
 mcptools atlas status                 # Index health (--json)
 mcptools atlas index --dry-run        # Show what would be indexed
 mcptools atlas update --dry-run       # Show what would change
+mcptools atlas enrich [path] --dry-run  # Plan scoped model work without side effects
 git status --porcelain | mcptools atlas index --stdin  # Index only the listed paths
 mcptools atlas setup                  # Install post-commit hook + guidance + llm-stream templates (atlas-file/dir)
 mcptools atlas setup --no-skills --no-claude-md --no-templates  # Hook only, skip agent-guidance scaffolding

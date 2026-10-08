@@ -17,6 +17,8 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
+    #[command(about = "Plan explicit semantic enrichment for an indexed scope")]
+    Enrich(cli::enrich::EnrichOptions),
     #[command(about = "Build the symbol index for the current repository")]
     Index(cli::index::IndexOptions),
     #[command(about = "Show annotated directory tree")]
@@ -37,6 +39,7 @@ pub enum Commands {
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
     match app.command {
+        Commands::Enrich(opts) => cli::enrich::run(opts, global).await,
         Commands::Index(opts) => cli::index::run(opts, global).await,
         Commands::Tree(opts) => cli::tree::run(opts, global).await,
         Commands::Peek(opts) => cli::peek::run(opts, global).await,

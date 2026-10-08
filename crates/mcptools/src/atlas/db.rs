@@ -6,7 +6,7 @@ use mcptools_core::atlas::{
     extract_parent_paths, sort_tree_entries, ContentHash, DirectoryEntry, DirectoryPeekView,
     FileEntry, PeekView, Symbol, SymbolKind, TreeEntry, Visibility,
 };
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OpenFlags};
 
 mod enrichment;
 
@@ -83,6 +83,26 @@ impl Database {
         enrichment::migrate(&tx)?;
         tx.commit()?;
 
+        Ok(Self { conn })
+    }
+
+    pub fn open_read_only(path: &Path) -> Result<Self> {
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .wrap_err_with(|| format!("opening Atlas index read-only: {}", path.display()))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let version: Option<String> = conn
+            .query_row(
+                "SELECT value FROM metadata WHERE key = 'enrichment_schema'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .wrap_err("reading Atlas enrichment schema")?;
+        if version.as_deref() != Some("1") {
+            eyre::bail!(
+                "Atlas index lacks the current enrichment schema; run `mcptools atlas index`"
+            );
+        }
         Ok(Self { conn })
     }
 
@@ -439,6 +459,19 @@ impl Database {
             .collect::<Result<Vec<_>>>()?;
 
         Ok(entries)
+    }
+
+    pub fn all_file_paths(&self) -> Result<Vec<PathBuf>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM files ORDER BY path")
+            .wrap_err("preparing all file paths query")?;
+        let paths = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .wrap_err("querying all file paths")?
+            .map(|row| row.map(PathBuf::from).wrap_err("reading file path"))
+            .collect();
+        paths
     }
 
     pub fn peek_file_or_dir(&self, path: &Path) -> Result<PeekResult> {

@@ -13,7 +13,7 @@ Atlas scans a repository, extracts symbols using tree-sitter, and stores them in
 
 - **Project primer**: Optional operator-authored text. No command creates, reformats, or rewrites it.
 - **Cached descriptions**: Structural refresh preserves reusable results. Source changes invalidate the affected file and ancestors; stale descriptions remain stored but are not displayed or counted as current.
-- **Model execution**: Removed from structural commands. An explicit enrichment command is future work (GUZ-32), not available now.
+- **Model execution**: Removed from structural commands. `atlas enrich --dry-run` plans explicit work; execution is pending GUZ-34.
 - **Config file**: `.mcptools/config.toml` for per-project paths, templates, provider/model overrides, concurrency, timeout, attempt limits, and token limits
 - **Environment variables**: Override config via `ATLAS_*` env vars
 
@@ -34,6 +34,8 @@ mcptools atlas status                 # Index health summary
 mcptools atlas status --json          # JSON output
 mcptools atlas index --dry-run        # Show what would be indexed (by tier)
 mcptools atlas update --dry-run       # Show what would change (adds/mods/deletes)
+mcptools atlas enrich [path] --dry-run  # Plan exact scoped enrichment without side effects
+mcptools atlas enrich src --dry-run --limit 20 --refresh  # Bound work and bypass cache hits
 git status --porcelain | mcptools atlas index --stdin   # Index only the listed paths
 mcptools atlas setup                  # Install hook + guidance + llm-stream templates (atlas-file/dir)
 mcptools atlas setup --dry-run        # Preview setup actions without applying them
@@ -44,6 +46,14 @@ mcptools atlas setup --no-templates   # Skip installing llm-stream templates (at
 ```
 
 The `index` and `update` commands report structural work and elapsed time. Removed flags `--with-primer` and `--parallel` are rejected by the CLI.
+
+### `atlas enrich --dry-run` — Scoped Enrichment Plan
+
+`atlas enrich --dry-run` selects every indexed file and directory. A file path selects only that file; a directory path selects only that indexed subtree. Paths are normalized against the current directory, must remain inside the repository, and must not traverse symlinks. Missing, ignored, reserved, stale-index, and non-normalized records fail before a plan is published.
+
+Planning requires explicit provider/model configuration, an available llm-stream runner, and both selected templates. It reads the index through a read-only SQLite connection, renders inputs to calculate complete cache identities, and reports every target, cache state, estimated input tokens, model/template selection, and expected call count. Files sort lexically before directories; directories sort deepest first. Cache hits do not consume `--limit`. `--refresh` marks matching cache hits as work in the plan. Matching active leases remain visible and are not scheduled; a lease for changed input is stale work.
+
+The command currently requires `--dry-run`. It never calls a model, writes the index, installs templates, or edits the optional primer. GUZ-34 owns execution and resume behavior.
 
 ### `atlas init` Workflow
 
@@ -62,7 +72,7 @@ This CLI exposes repository navigation to coding agents.
 Pure logic lives in crates/core; I/O lives in crates/mcptools.
 ```
 
-`init`, `index`, `update`, and `sync` leave exact primer bytes untouched, even if the file is absent or is not UTF-8. The configured primer is excluded from structural indexing. Primer-only changes do not rebuild structural records or update the stored enrichment `primer_hash`. Enrichment templates still accept optional primer text; future enrichment must include it in input identity.
+`init`, `index`, `update`, and `sync` leave exact primer bytes untouched, even if the file is absent or is not UTF-8. The configured primer is excluded from structural indexing. Primer-only changes do not rebuild structural records or update the stored enrichment `primer_hash`. Enrichment templates accept optional primer text, and the planner includes its exact bytes in input identity.
 
 ### `atlas index --stdin` — Index an Explicit Path List
 
@@ -195,13 +205,14 @@ Generate uses llm-stream with explicit provider/model selection. `[atlas.file_ll
 | File | Purpose |
 |------|---------|
 | `config.rs` | Loads structural and strict enrichment config separately from `.mcptools/config.toml` plus environment overrides |
-| `db.rs` | SQLite storage: `Database::open`, insert/query symbols and files |
+| `db.rs` | SQLite storage: read-write migration/open, read-only planning open, and structural queries |
 | `db/enrichment.rs` | Transactional migration, input reconciliation, claims, conditional completion, recovery, invalidation, and refresh |
-| `enrichment.rs` | Pure deterministic input hashing and typed targets, states, claims, and validated descriptions; colocated with the Atlas persistence contract |
+| `enrichment.rs` | Pure deterministic input hashing, typed cache states, stable work planning, claims, and validated descriptions |
 | `fs.rs` | Gitignore-aware file walker excluding the configured primer; optional primer reads with distinct read/encoding errors |
 | `llm.rs` | `LlmStreamProvider::generate`, `request`, `failure_report` — run llm-stream in machine mode and map failures |
 | `parser.rs` | `parse_and_extract(path, source)` — tree-sitter grammar registry and extraction bridge |
 | `cli/init.rs` | `atlas init` handler: gitignore setup and initial structural index |
+| `cli/enrich.rs` | Read-only scoped enrichment preflight, input preparation, cache classification, budgeting, and plan output |
 | `cli/index.rs` | `atlas index` handler: structural scan, hash reuse, progress reporting |
 | `cli/tree.rs` | `atlas tree` handler: path filtering, depth, JSON output |
 | `cli/peek.rs` | `atlas peek` handler: file or directory lookup, symbol display |
@@ -220,7 +231,7 @@ Five tables: `symbols`, `files`, `directories`, `metadata`, `enrichment`. Indexe
 
 ### Enrichment Persistence Contract (GUZ-29)
 
-GUZ-32 owns orchestration and the future `atlas enrich` command. No enrichment command or model calls are added by this persistence contract.
+GUZ-32 adds the read-only `atlas enrich --dry-run` planner. GUZ-34 owns claims, model calls, persistence, cancellation, and resume behavior.
 
 `EnrichmentInput::identity` hashes versioned canonical JSON with SHA-256. The caller supplies full source bytes or a sorted map of the actual directory-child inputs used, effective template bytes, rendered system and user prompts, effective variables, optional context bytes, provider, model, optional immutable model revision, and all output-affecting settings. Map insertion order does not matter. Missing context differs from empty context. Child map values must encode every child attribute actually consumed, including summaries, source/provenance, or symbols when used; map keys must distinguish paths/kinds. Do not substitute timestamps, template names, or parent paths for actual inputs. Include endpoint/backend identity in settings when it can affect output; never include credentials.
 
@@ -235,7 +246,7 @@ Caller sequence:
 
 Structural insert/content-change/delete triggers invalidate only affected ancestors (literal path ancestry, not SQL wildcard matching); deletions remove that target's provenance. Unchanged structural upserts retain current results and ignore description fields supplied through structural `FileEntry`. Changed directory summaries invalidate ancestors. Ignore changes and renames are represented by the structural walk's additions/deletions. `index --stdin` still retains unlisted paths; callers must explicitly delete removed paths when using a targeted path list.
 
-`invalidate_enrichment(targets)` cancels targeted claims and marks their results/ancestors for identity reconciliation, retaining reusable successful provenance. `refresh_enrichment(targets)` additionally discards targeted successful identities, so even identical inputs require regeneration. Both are transactional, targeted APIs, not CLI flags. For template/context/model/settings changes, callers recompute affected identities; structural/query commands deliberately do not load enrichment configuration or read templates/context to evaluate freshness.
+`invalidate_enrichment(targets)` cancels targeted claims and marks their results/ancestors for identity reconciliation, retaining reusable successful provenance. `refresh_enrichment(targets)` additionally discards targeted successful identities, so even identical inputs require regeneration. Both are transactional, targeted APIs. The planner's `--refresh` only previews this effect and does not call either API. For template/context/model/settings changes, callers recompute affected identities; structural/query commands deliberately do not load enrichment configuration or read templates/context to evaluate freshness.
 
 Remote model alias limit: without a supplied immutable model revision, cache reuse proves only that the configured alias and all other supplied inputs match. It cannot detect a provider changing what that alias points to. Supply a revision when available, or explicitly refresh the affected targets to force regeneration.
 
@@ -267,7 +278,7 @@ Optional operator-authored context is exposed at `atlas://primer`. Missing text 
 
 ## Planned Features
 
-- **V2**: Durable enrichment persistence implemented; explicit model orchestration pending GUZ-32
+- **V2**: Durable enrichment persistence and scoped dry-run planning implemented; execution pending GUZ-34
 - **V3**: ~~MCP tool integration~~ Implemented (V5)
 - **V4**: ~~Incremental updates~~ Implemented
 - **V5**: ~~MCP tools + status + primer resource~~ Implemented
