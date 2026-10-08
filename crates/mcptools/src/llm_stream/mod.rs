@@ -22,14 +22,15 @@ const TERMINATION_GRACE: Duration = Duration::from_secs(2);
 type CancelSignal = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 pub async fn run(req: LlmStreamRequest) -> Result<String, ContractError> {
+    run_with_timeout(req, Duration::from_secs(LLM_STREAM_TIMEOUT_SECS)).await
+}
+
+pub async fn run_with_timeout(
+    req: LlmStreamRequest,
+    timeout: Duration,
+) -> Result<String, ContractError> {
     let paths = resolve_paths()?;
-    run_with_paths(
-        req,
-        paths,
-        Duration::from_secs(LLM_STREAM_TIMEOUT_SECS),
-        Box::pin(std::future::pending()),
-    )
-    .await
+    run_with_paths(req, paths, timeout, Box::pin(std::future::pending())).await
 }
 
 pub async fn run_cancellable(
@@ -163,7 +164,7 @@ async fn run_attempt(
             drop(stdout_pipe);
             drop(stderr_pipe);
             terminate(&mut child).await;
-            return Err(ContractError::TimedOut);
+            return Err(ContractError::TimedOut(timeout));
         }
         joined = async {
             futures::future::try_join3(
@@ -290,14 +291,14 @@ mod tests {
         std::env::vars().collect()
     }
 
-    fn atlas_model(env: &HashMap<String, String>) -> String {
-        env.get("ATLAS_FILE_MODEL")
+    fn ollama_test_model(env: &HashMap<String, String>) -> String {
+        env.get("LLM_STREAM_TEST_MODEL")
             .cloned()
             .unwrap_or_else(|| "atlas".to_string())
     }
 
-    fn atlas_base_url(env: &HashMap<String, String>) -> String {
-        env.get("OLLAMA_URL")
+    fn ollama_test_base_url(env: &HashMap<String, String>) -> String {
+        env.get("LLM_STREAM_TEST_OLLAMA_URL")
             .cloned()
             .unwrap_or_else(|| "http://localhost:11434".to_string())
     }
@@ -365,8 +366,8 @@ mod tests {
         if !live_binary_guard(&paths) {
             return;
         }
-        let model = atlas_model(&env);
-        let base_url = atlas_base_url(&env);
+        let model = ollama_test_model(&env);
+        let base_url = ollama_test_base_url(&env);
         let Some(models) = ollama_available_models(&base_url).await else {
             eprintln!(
                 "skipping: Ollama is not reachable at {base_url}; start it with `ollama serve`"
@@ -375,7 +376,7 @@ mod tests {
         };
         if !ollama_serves_model(&models, &model) {
             eprintln!(
-                "skipping: model {model} is not available in Ollama at {base_url}; set ATLAS_FILE_MODEL to an available model or pull it with `ollama pull {model}`; available: {models:?}"
+                "skipping: model {model} is not available in Ollama at {base_url}; set LLM_STREAM_TEST_MODEL to an available model or pull it with `ollama pull {model}`; available: {models:?}"
             );
             return;
         }
@@ -648,7 +649,7 @@ mod stub_tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(error, ContractError::TimedOut));
+        assert_eq!(error, ContractError::TimedOut(Duration::from_millis(400)));
         assert_process_gone(binary.to_str().unwrap());
     }
 

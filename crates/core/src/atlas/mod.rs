@@ -11,8 +11,9 @@ pub mod types;
 
 pub use changes::{affected_directories, compute_change_set, ChangeSet};
 pub use config::{
-    build_ignore_matcher, parse_config, AtlasConfig, BaseUrl, ConfigError, DbPath, IgnoreMatcher,
-    LlmRoleConfig, ModelName, PrimerPath,
+    build_ignore_matcher, format_enrichment_plan, parse_config, parse_enrichment_config,
+    resolve_concurrency, AtlasConfig, ConfigError, DbPath, EnrichmentConfig, IgnoreMatcher,
+    LlmRoleConfig, ModelName, PrimerPath, ProviderName, RunnerConfig, TemplateName,
 };
 pub use hash::content_hash;
 pub use parse::{parse_description, parse_stdin_line, FileDescription, ParseDescriptionError};

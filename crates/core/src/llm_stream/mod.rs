@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub mod envelope;
 
@@ -74,8 +75,8 @@ pub enum ContractError {
     Local(String),
     #[error("llm-stream binary not found on PATH; set LLM_STREAM_BIN or install llm-stream")]
     BinaryMissing,
-    #[error("llm-stream timed out after 120s")]
-    TimedOut,
+    #[error("llm-stream timed out after {0:?}")]
+    TimedOut(Duration),
     #[error("llm-stream call cancelled")]
     Cancelled,
 }
@@ -398,7 +399,7 @@ mod tests {
     #[test]
     fn timed_out_display() {
         assert_eq!(
-            ContractError::TimedOut.to_string(),
+            ContractError::TimedOut(Duration::from_secs(120)).to_string(),
             "llm-stream timed out after 120s"
         );
     }
@@ -500,8 +501,8 @@ mod tests {
             ContractError::Local("key [redacted]".to_string())
         );
         assert_eq!(
-            ContractError::TimedOut.redacted(&secrets),
-            ContractError::TimedOut
+            ContractError::TimedOut(Duration::from_secs(3)).redacted(&secrets),
+            ContractError::TimedOut(Duration::from_secs(3))
         );
     }
 }

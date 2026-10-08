@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::atlas::config::load_config;
+use crate::atlas::config::{load_config, load_enrichment_config};
 use crate::atlas::db::Database;
 use crate::atlas::fs::walk_repo;
 use crate::atlas::llm::{failure_report, LlmStreamProvider};
@@ -12,15 +12,15 @@ use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlas::{
-    content_hash, format_dry_run_index, format_symbol, render, render_system, truncate_to_tokens,
-    BaseUrl, DirectoryEntry, DryRunEntry, FileEntry, IndexTier, LoadedTemplate, Symbol,
+    content_hash, format_dry_run_index, format_enrichment_plan, format_symbol, render,
+    render_system, resolve_concurrency, truncate_to_tokens, DirectoryEntry, DryRunEntry,
+    EnrichmentConfig, FileEntry, IndexTier, LoadedTemplate, Symbol,
 };
 
 #[derive(Debug, clap::Parser)]
 pub struct IndexOptions {
-    /// Number of parallel LLM workers for file descriptions
-    #[clap(long, default_value = "1")]
-    pub parallel: usize,
+    #[clap(long, help = "Number of parallel LLM workers for file descriptions")]
+    pub parallel: Option<usize>,
 
     /// Skip files and directories that already have descriptions
     #[clap(long)]
@@ -160,24 +160,6 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         }
     };
 
-    let file_provider = Arc::new(LlmStreamProvider::new(
-        &config.api,
-        config.file_llm.model.as_str(),
-        config.base_url.as_ref().map(BaseUrl::as_str),
-    ));
-    let dir_provider = LlmStreamProvider::new(
-        &config.api,
-        config.directory_llm.model.as_str(),
-        config.base_url.as_ref().map(BaseUrl::as_str),
-    );
-
-    let templates_dir = mcptools_core::llm_stream::resolve_paths()?
-        .config_dir
-        .join("templates");
-    let file_template = mcptools_core::atlas::load(&templates_dir, &config.file_llm.template)?;
-    let dir_template = mcptools_core::atlas::load(&templates_dir, &config.directory_llm.template)?;
-    record_template_identity(&db, &[&file_template, &dir_template])?;
-
     let files_to_describe: Vec<PathBuf> = if opts.incremental {
         let needed: std::collections::HashSet<PathBuf> =
             db.files_needing_descriptions()?.into_iter().collect();
@@ -189,14 +171,12 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         indexed_paths
     };
 
-    // Group files by parent directory
     let mut files_by_dir: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
     for path in &files_to_describe {
         let parent = path.parent().unwrap_or(Path::new("")).to_path_buf();
         files_by_dir.entry(parent).or_default().push(path.clone());
     }
 
-    // Ensure the root directory ("") is in the table so root-level files get described.
     if files_by_dir.contains_key(Path::new("")) {
         db.insert_directory(&DirectoryEntry {
             path: PathBuf::new(),
@@ -216,9 +196,36 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     } else {
         collect_directories_bottom_up(&db)?
     };
-    let parallel = opts.parallel.max(1);
+    let runner = match load_enrichment_config(&root)? {
+        EnrichmentConfig::Disabled => {
+            crate::prelude::eprintln!(
+                "structural-only, enrichment pending: set Atlas api and model explicitly"
+            );
+            print_elapsed(start);
+            return Ok(());
+        }
+        EnrichmentConfig::Enabled(runner) => runner,
+    };
+    let parallel = resolve_concurrency(opts.parallel, runner.concurrency)?;
+    crate::prelude::eprintln!(
+        "{}",
+        format_enrichment_plan(
+            &runner,
+            parallel,
+            files_to_describe.len(),
+            directories.len(),
+        )
+    );
+    let file_provider = Arc::new(LlmStreamProvider::new(&runner, &runner.file.model));
+    let dir_provider = LlmStreamProvider::new(&runner, &runner.directory.model);
+    let templates_dir = mcptools_core::llm_stream::resolve_paths()?
+        .config_dir
+        .join("templates");
+    let file_template = mcptools_core::atlas::load(&templates_dir, runner.file.template.as_str())?;
+    let dir_template =
+        mcptools_core::atlas::load(&templates_dir, runner.directory.template.as_str())?;
+    record_template_identity(&db, &[&file_template, &dir_template])?;
 
-    // Progress tracking across both file and directory descriptions
     let total_files = files_to_describe.len() as u64;
     let total_dirs = directories.len() as u64;
     let progress = progress_bar(
@@ -232,7 +239,6 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     let mut dir_fail_count = 0u32;
 
     for dir_path in &directories {
-        // Step A: Describe files in this directory
         if let Some(file_paths) = files_by_dir.get(dir_path) {
             let (success, failed) = generate_descriptions(
                 &db,
@@ -250,7 +256,6 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
             file_fail_count += failed;
         }
 
-        // Step B: Describe this directory
         match describe_directory(&db, &dir_provider, &primer, &dir_template, dir_path).await {
             Ok(true) => {
                 dir_desc_count += 1;

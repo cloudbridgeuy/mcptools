@@ -1,19 +1,36 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
+
+const DEFAULT_PRIMER_PATH: &str = ".mcptools/atlas/primer.md";
+const DEFAULT_DB_PATH: &str = ".mcptools/atlas/index.db";
+const DEFAULT_MAX_FILE_TOKENS: usize = 10_000;
+const DEFAULT_FILE_TEMPLATE: &str = "atlas-file";
+const DEFAULT_DIR_TEMPLATE: &str = "atlas-dir";
+const DEFAULT_CONCURRENCY: usize = 1;
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
+const DEFAULT_MAX_ATTEMPTS: usize = 1;
+const MAX_ATTEMPTS_LIMIT: usize = 10;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("invalid TOML: {0}")]
     InvalidToml(#[from] toml::de::Error),
-
     #[error("invalid max_file_tokens value: {0}")]
     InvalidMaxFileTokens(String),
-
-    #[error("obsolete Atlas Ollama setting `{0}`. Use api, model, base_url, and template. kind and OLLAMA_URL are removed")]
+    #[error("{0} must be a positive integer")]
+    InvalidPositiveInteger(&'static str),
+    #[error("max_attempts must not exceed {MAX_ATTEMPTS_LIMIT}")]
+    TooManyAttempts,
+    #[error("explicit {0} must not be empty")]
+    EmptyName(&'static str),
+    #[error("incomplete Atlas enrichment configuration: set {0}; no provider or model is selected by default")]
+    IncompleteSelection(String),
+    #[error("obsolete Atlas Ollama settings: {0}. Keep unrelated .mcptools/config.toml fields, remove these settings, set [atlas] api = \"ollama\" and model = \"<model>\" (or per-role model overrides), and configure the Ollama endpoint in llm-stream")]
     ObsoleteOllama(String),
 }
 
@@ -43,40 +60,49 @@ impl DbPath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelName(String);
+macro_rules! name_type {
+    ($name:ident) => {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct $name(String);
 
-impl ModelName {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+        impl $name {
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+    };
 }
 
-impl fmt::Display for ModelName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BaseUrl(String);
-
-impl BaseUrl {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for BaseUrl {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+name_type!(ProviderName);
+name_type!(ModelName);
+name_type!(TemplateName);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LlmRoleConfig {
     pub model: ModelName,
-    pub template: String,
+    pub template: TemplateName,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunnerConfig {
+    pub provider: ProviderName,
+    pub file: LlmRoleConfig,
+    pub directory: LlmRoleConfig,
+    pub concurrency: usize,
+    pub timeout: Duration,
+    pub max_attempts: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnrichmentConfig {
+    Disabled,
+    Enabled(RunnerConfig),
 }
 
 #[derive(Debug, Clone)]
@@ -85,37 +111,42 @@ pub struct AtlasConfig {
     pub db_path: DbPath,
     pub max_file_tokens: usize,
     pub skip_patterns: Vec<String>,
-    pub api: String,
-    pub base_url: Option<BaseUrl>,
-    pub file_llm: LlmRoleConfig,
-    pub directory_llm: LlmRoleConfig,
 }
-
-const DEFAULT_PRIMER_PATH: &str = ".mcptools/atlas/primer.md";
-const DEFAULT_DB_PATH: &str = ".mcptools/atlas/index.db";
-const DEFAULT_MAX_FILE_TOKENS: usize = 10_000;
-const DEFAULT_API: &str = "chatgpt";
-const DEFAULT_FILE_MODEL: &str = "gpt-5.6-luna";
-const DEFAULT_DIR_MODEL: &str = "gpt-5.6-luna";
-const DEFAULT_FILE_TEMPLATE: &str = "atlas-file";
-const DEFAULT_DIR_TEMPLATE: &str = "atlas-dir";
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
-struct RawConfigFile {
+struct RawStructuralFile {
     #[serde(flatten)]
-    flat: RawConfig,
-    atlas: Option<RawConfig>,
+    flat: RawStructural,
+    atlas: Option<RawStructural>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
-struct RawConfig {
+struct RawStructural {
     primer_path: Option<String>,
     db_path: Option<String>,
     max_file_tokens: Option<usize>,
     skip_patterns: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct RawEnrichmentFile {
+    #[serde(flatten)]
+    flat: RawEnrichment,
+    atlas: Option<RawEnrichment>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+struct RawEnrichment {
     api: Option<String>,
+    model: Option<String>,
+    concurrency: Option<usize>,
+    timeout_secs: Option<u64>,
+    max_attempts: Option<usize>,
+    kind: Option<String>,
     base_url: Option<String>,
     file_llm: Option<RawLlmRole>,
     directory_llm: Option<RawLlmRole>,
@@ -127,110 +158,332 @@ struct RawLlmRole {
     kind: Option<String>,
     model: Option<String>,
     template: Option<String>,
+    base_url: Option<String>,
 }
 
 pub fn parse_config(
     toml_content: Option<&str>,
     env_vars: &HashMap<String, String>,
 ) -> Result<AtlasConfig, ConfigError> {
-    if env_vars.contains_key("OLLAMA_URL") {
-        return Err(ConfigError::ObsoleteOllama("OLLAMA_URL".to_string()));
-    }
-
-    let raw: RawConfig = match toml_content {
+    let raw = match toml_content {
         Some(content) => {
-            let file: RawConfigFile = toml::from_str(content)?;
-            merge_raw_config(file.flat, file.atlas)
+            let file: RawStructuralFile = toml::from_str(content)?;
+            merge_structural(file.flat, file.atlas)
         }
-        None => RawConfig::default(),
+        None => RawStructural::default(),
     };
-
-    if role_has_kind(raw.file_llm.as_ref()) || role_has_kind(raw.directory_llm.as_ref()) {
-        return Err(ConfigError::ObsoleteOllama("kind".to_string()));
-    }
-
     let primer_path = env_vars
         .get("ATLAS_PRIMER_PATH")
         .cloned()
         .or(raw.primer_path)
         .unwrap_or_else(|| DEFAULT_PRIMER_PATH.to_string());
-    let primer_path = PrimerPath(PathBuf::from(primer_path));
-
     let db_path = env_vars
         .get("ATLAS_DB_PATH")
         .cloned()
         .or(raw.db_path)
         .unwrap_or_else(|| DEFAULT_DB_PATH.to_string());
-    let db_path = DbPath(PathBuf::from(db_path));
-
-    let max_file_tokens = if let Some(val) = env_vars.get("ATLAS_MAX_FILE_TOKENS") {
-        val.parse::<usize>()
-            .map_err(|_| ConfigError::InvalidMaxFileTokens(val.clone()))?
-    } else {
-        raw.max_file_tokens.unwrap_or(DEFAULT_MAX_FILE_TOKENS)
+    let max_file_tokens = match env_vars.get("ATLAS_MAX_FILE_TOKENS") {
+        Some(value) => value
+            .parse::<usize>()
+            .map_err(|_| ConfigError::InvalidMaxFileTokens(value.clone()))?,
+        None => raw.max_file_tokens.unwrap_or(DEFAULT_MAX_FILE_TOKENS),
     };
-
-    let skip_patterns = raw.skip_patterns.unwrap_or_default();
-
-    let api = env_vars
-        .get("ATLAS_API")
-        .map(String::as_str)
-        .and_then(non_empty)
-        .map(str::to_string)
-        .or_else(|| raw.api.as_deref().and_then(non_empty).map(str::to_string))
-        .unwrap_or_else(|| DEFAULT_API.to_string());
-
-    let base_url = env_vars
-        .get("ATLAS_BASE_URL")
-        .map(String::as_str)
-        .and_then(non_empty)
-        .map(str::to_string)
-        .or_else(|| {
-            raw.base_url
-                .as_deref()
-                .and_then(non_empty)
-                .map(str::to_string)
-        })
-        .map(BaseUrl);
-
-    let file_llm = build_role_config(
-        raw.file_llm.as_ref(),
-        DEFAULT_FILE_MODEL,
-        DEFAULT_FILE_TEMPLATE,
-        env_vars.get("ATLAS_FILE_MODEL").map(String::as_str),
-    );
-    let directory_llm = build_role_config(
-        raw.directory_llm.as_ref(),
-        DEFAULT_DIR_MODEL,
-        DEFAULT_DIR_TEMPLATE,
-        env_vars.get("ATLAS_DIR_MODEL").map(String::as_str),
-    );
-
     Ok(AtlasConfig {
-        primer_path,
-        db_path,
+        primer_path: PrimerPath(PathBuf::from(primer_path)),
+        db_path: DbPath(PathBuf::from(db_path)),
         max_file_tokens,
-        skip_patterns,
-        api,
-        base_url,
-        file_llm,
-        directory_llm,
+        skip_patterns: raw.skip_patterns.unwrap_or_default(),
     })
 }
 
-fn merge_raw_config(flat: RawConfig, nested: Option<RawConfig>) -> RawConfig {
+pub fn parse_enrichment_config(
+    toml_content: Option<&str>,
+    env_vars: &HashMap<String, String>,
+) -> Result<EnrichmentConfig, ConfigError> {
+    let raw = match toml_content {
+        Some(content) => {
+            let file: RawEnrichmentFile = toml::from_str(content)?;
+            merge_enrichment(file.flat, file.atlas)
+        }
+        None => RawEnrichment::default(),
+    };
+    reject_obsolete(&raw, env_vars)?;
+    let provider = optional_name(
+        env_vars.get("ATLAS_API").cloned().or(raw.api),
+        "api",
+        ProviderName,
+    )?;
+    let shared_model = optional_name(
+        env_vars.get("ATLAS_MODEL").cloned().or(raw.model),
+        "model",
+        ModelName,
+    )?;
+    let file_model = role_model(
+        env_vars.get("ATLAS_FILE_MODEL"),
+        raw.file_llm.as_ref(),
+        shared_model.as_ref(),
+        "file_llm.model",
+    )?;
+    let directory_model = role_model(
+        env_vars.get("ATLAS_DIR_MODEL"),
+        raw.directory_llm.as_ref(),
+        shared_model.as_ref(),
+        "directory_llm.model",
+    )?;
+    let file_template = role_template(
+        env_vars.get("ATLAS_FILE_TEMPLATE"),
+        raw.file_llm.as_ref(),
+        DEFAULT_FILE_TEMPLATE,
+        "file_llm.template",
+    )?;
+    let directory_template = role_template(
+        env_vars.get("ATLAS_DIR_TEMPLATE"),
+        raw.directory_llm.as_ref(),
+        DEFAULT_DIR_TEMPLATE,
+        "directory_llm.template",
+    )?;
+    let concurrency = positive_setting(
+        env_vars.get("ATLAS_CONCURRENCY"),
+        raw.concurrency,
+        DEFAULT_CONCURRENCY,
+        "concurrency",
+    )?;
+    let timeout_secs = positive_u64_setting(
+        env_vars.get("ATLAS_TIMEOUT_SECS"),
+        raw.timeout_secs,
+        DEFAULT_TIMEOUT_SECS,
+        "timeout_secs",
+    )?;
+    let max_attempts = positive_setting(
+        env_vars.get("ATLAS_MAX_ATTEMPTS"),
+        raw.max_attempts,
+        DEFAULT_MAX_ATTEMPTS,
+        "max_attempts",
+    )?;
+    if max_attempts > MAX_ATTEMPTS_LIMIT {
+        return Err(ConfigError::TooManyAttempts);
+    }
+    match (provider, file_model, directory_model) {
+        (None, None, None) => Ok(EnrichmentConfig::Disabled),
+        (Some(provider), Some(file_model), Some(directory_model)) => {
+            Ok(EnrichmentConfig::Enabled(RunnerConfig {
+                provider,
+                file: LlmRoleConfig {
+                    model: file_model,
+                    template: file_template,
+                },
+                directory: LlmRoleConfig {
+                    model: directory_model,
+                    template: directory_template,
+                },
+                concurrency,
+                timeout: Duration::from_secs(timeout_secs),
+                max_attempts,
+            }))
+        }
+        (provider, file_model, directory_model) => {
+            let mut missing = Vec::new();
+            if provider.is_none() {
+                missing.push("api");
+            }
+            if file_model.is_none() {
+                missing.push("model or file_llm.model");
+            }
+            if directory_model.is_none() {
+                missing.push("model or directory_llm.model");
+            }
+            Err(ConfigError::IncompleteSelection(missing.join(", ")))
+        }
+    }
+}
+
+pub fn resolve_concurrency(cli: Option<usize>, configured: usize) -> Result<usize, ConfigError> {
+    match cli.unwrap_or(configured) {
+        0 => Err(ConfigError::InvalidPositiveInteger("concurrency")),
+        value => Ok(value),
+    }
+}
+
+pub fn format_enrichment_plan(
+    config: &RunnerConfig,
+    concurrency: usize,
+    files: usize,
+    directories: usize,
+) -> String {
+    format!(
+        "Enrichment plan\n  provider: {}\n  file: model={}, template={}, scope={}\n  directory: model={}, template={}, scope={}\n  concurrency: {}\n  timeout: {}s\n  max attempts: {}",
+        config.provider,
+        config.file.model,
+        config.file.template,
+        files,
+        config.directory.model,
+        config.directory.template,
+        directories,
+        concurrency,
+        config.timeout.as_secs(),
+        config.max_attempts,
+    )
+}
+
+fn merge_structural(flat: RawStructural, nested: Option<RawStructural>) -> RawStructural {
     let Some(nested) = nested else {
         return flat;
     };
-    RawConfig {
+    RawStructural {
         primer_path: nested.primer_path.or(flat.primer_path),
         db_path: nested.db_path.or(flat.db_path),
         max_file_tokens: nested.max_file_tokens.or(flat.max_file_tokens),
         skip_patterns: nested.skip_patterns.or(flat.skip_patterns),
+    }
+}
+
+fn merge_enrichment(flat: RawEnrichment, nested: Option<RawEnrichment>) -> RawEnrichment {
+    let Some(nested) = nested else {
+        return flat;
+    };
+    RawEnrichment {
         api: nested.api.or(flat.api),
+        model: nested.model.or(flat.model),
+        concurrency: nested.concurrency.or(flat.concurrency),
+        timeout_secs: nested.timeout_secs.or(flat.timeout_secs),
+        max_attempts: nested.max_attempts.or(flat.max_attempts),
+        kind: nested.kind.or(flat.kind),
         base_url: nested.base_url.or(flat.base_url),
-        file_llm: nested.file_llm.or(flat.file_llm),
-        directory_llm: nested.directory_llm.or(flat.directory_llm),
+        file_llm: merge_role(flat.file_llm, nested.file_llm),
+        directory_llm: merge_role(flat.directory_llm, nested.directory_llm),
+    }
+}
+
+fn merge_role(flat: Option<RawLlmRole>, nested: Option<RawLlmRole>) -> Option<RawLlmRole> {
+    match (flat, nested) {
+        (None, None) => None,
+        (Some(role), None) | (None, Some(role)) => Some(role),
+        (Some(flat), Some(nested)) => Some(RawLlmRole {
+            kind: nested.kind.or(flat.kind),
+            model: nested.model.or(flat.model),
+            template: nested.template.or(flat.template),
+            base_url: nested.base_url.or(flat.base_url),
+        }),
+    }
+}
+
+fn optional_name<T>(
+    raw: Option<String>,
+    field: &'static str,
+    construct: impl FnOnce(String) -> T,
+) -> Result<Option<T>, ConfigError> {
+    raw.map(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            Err(ConfigError::EmptyName(field))
+        } else {
+            Ok(construct(trimmed.to_string()))
+        }
+    })
+    .transpose()
+}
+
+fn role_model(
+    env: Option<&String>,
+    role: Option<&RawLlmRole>,
+    shared: Option<&ModelName>,
+    field: &'static str,
+) -> Result<Option<ModelName>, ConfigError> {
+    optional_name(
+        env.cloned()
+            .or_else(|| role.and_then(|value| value.model.clone())),
+        field,
+        ModelName,
+    )
+    .map(|value| value.or_else(|| shared.cloned()))
+}
+
+fn role_template(
+    env: Option<&String>,
+    role: Option<&RawLlmRole>,
+    default: &str,
+    field: &'static str,
+) -> Result<TemplateName, ConfigError> {
+    optional_name(
+        env.cloned()
+            .or_else(|| role.and_then(|value| value.template.clone())),
+        field,
+        TemplateName,
+    )
+    .map(|value| value.unwrap_or_else(|| TemplateName(default.to_string())))
+}
+
+fn positive_setting(
+    env: Option<&String>,
+    raw: Option<usize>,
+    default: usize,
+    field: &'static str,
+) -> Result<usize, ConfigError> {
+    let value = match env {
+        Some(value) => value
+            .parse::<usize>()
+            .map_err(|_| ConfigError::InvalidPositiveInteger(field))?,
+        None => raw.unwrap_or(default),
+    };
+    if value == 0 {
+        Err(ConfigError::InvalidPositiveInteger(field))
+    } else {
+        Ok(value)
+    }
+}
+
+fn positive_u64_setting(
+    env: Option<&String>,
+    raw: Option<u64>,
+    default: u64,
+    field: &'static str,
+) -> Result<u64, ConfigError> {
+    let value = match env {
+        Some(value) => value
+            .parse::<u64>()
+            .map_err(|_| ConfigError::InvalidPositiveInteger(field))?,
+        None => raw.unwrap_or(default),
+    };
+    if value == 0 {
+        Err(ConfigError::InvalidPositiveInteger(field))
+    } else {
+        Ok(value)
+    }
+}
+
+fn reject_obsolete(
+    raw: &RawEnrichment,
+    env_vars: &HashMap<String, String>,
+) -> Result<(), ConfigError> {
+    let mut settings = Vec::new();
+    for key in ["OLLAMA_URL", "ATLAS_BASE_URL"] {
+        if env_vars.contains_key(key) {
+            settings.push(key.to_string());
+        }
+    }
+    if raw.kind.is_some() {
+        settings.push("kind".to_string());
+    }
+    if raw.base_url.is_some() {
+        settings.push("base_url".to_string());
+    }
+    for (name, role) in [
+        ("file_llm", raw.file_llm.as_ref()),
+        ("directory_llm", raw.directory_llm.as_ref()),
+    ] {
+        if role.is_some_and(|value| value.kind.is_some()) {
+            settings.push(format!("{name}.kind"));
+        }
+        if role.is_some_and(|value| value.base_url.is_some()) {
+            settings.push(format!("{name}.base_url"));
+        }
+    }
+    settings.sort();
+    settings.dedup();
+    if settings.is_empty() {
+        Ok(())
+    } else {
+        Err(ConfigError::ObsoleteOllama(settings.join(", ")))
     }
 }
 
@@ -238,7 +491,7 @@ fn merge_raw_config(flat: RawConfig, nested: Option<RawConfig>) -> RawConfig {
 pub struct IgnoreMatcher(GlobSet);
 
 impl IgnoreMatcher {
-    pub fn is_match(&self, path: &std::path::Path) -> bool {
+    pub fn is_match(&self, path: &Path) -> bool {
         self.0.is_match(path)
     }
 }
@@ -251,45 +504,6 @@ pub fn build_ignore_matcher(patterns: &[String]) -> Result<IgnoreMatcher, globse
     builder.build().map(IgnoreMatcher)
 }
 
-fn non_empty(s: &str) -> Option<&str> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed)
-    }
-}
-
-fn role_has_kind(raw: Option<&RawLlmRole>) -> bool {
-    raw.is_some_and(|role| role.kind.is_some())
-}
-
-fn build_role_config(
-    raw: Option<&RawLlmRole>,
-    default_model: &str,
-    default_template: &str,
-    env_model: Option<&str>,
-) -> LlmRoleConfig {
-    let model = env_model
-        .and_then(non_empty)
-        .map(str::to_string)
-        .or_else(|| {
-            raw.and_then(|r| r.model.as_deref())
-                .and_then(non_empty)
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| default_model.to_string());
-    let template = raw
-        .and_then(|r| r.template.as_deref())
-        .and_then(non_empty)
-        .map(str::to_string)
-        .unwrap_or_else(|| default_template.to_string());
-    LlmRoleConfig {
-        model: ModelName(model),
-        template,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,286 +513,214 @@ mod tests {
     }
 
     #[test]
-    fn default_config_when_no_toml_and_no_env_vars() {
-        let cfg = parse_config(None, &empty_env()).unwrap();
-
+    fn structural_defaults_do_not_select_a_paid_runner() {
+        let config = parse_config(None, &empty_env()).unwrap();
         assert_eq!(
-            cfg.primer_path,
+            config.primer_path,
             PrimerPath(PathBuf::from(DEFAULT_PRIMER_PATH))
         );
-        assert_eq!(cfg.db_path, DbPath(PathBuf::from(DEFAULT_DB_PATH)));
-        assert_eq!(cfg.max_file_tokens, DEFAULT_MAX_FILE_TOKENS);
-        assert!(cfg.skip_patterns.is_empty());
-        assert_eq!(cfg.api, "chatgpt");
-        assert!(cfg.base_url.is_none());
-        assert_eq!(cfg.file_llm.model.as_str(), "gpt-5.6-luna");
-        assert_eq!(cfg.file_llm.template, "atlas-file");
-        assert_eq!(cfg.directory_llm.model.as_str(), "gpt-5.6-luna");
-        assert_eq!(cfg.directory_llm.template, "atlas-dir");
+        assert_eq!(config.db_path, DbPath(PathBuf::from(DEFAULT_DB_PATH)));
+        assert_eq!(config.max_file_tokens, DEFAULT_MAX_FILE_TOKENS);
+        assert!(config.skip_patterns.is_empty());
+        assert_eq!(
+            parse_enrichment_config(None, &empty_env()).unwrap(),
+            EnrichmentConfig::Disabled
+        );
     }
 
     #[test]
-    fn toml_values_override_defaults() {
+    fn structural_config_ignores_obsolete_runner_environment() {
+        let mut env = HashMap::new();
+        env.insert(
+            "OLLAMA_URL".to_string(),
+            "http://localhost:11434".to_string(),
+        );
+        assert!(parse_config(None, &env).is_ok());
+    }
+
+    #[test]
+    fn nested_toml_and_environment_follow_documented_precedence() {
         let toml = r#"
+            [atlas]
             primer_path = "custom/primer.md"
-            db_path = "custom/db.sqlite"
+            db_path = "custom/index.db"
             max_file_tokens = 5000
-            skip_patterns = ["*.log", "vendor/"]
-            api = "openai"
-            base_url = "http://custom:1234"
+            skip_patterns = ["*.log"]
+            api = "ollama"
+            model = "shared"
+            concurrency = 2
+            timeout_secs = 60
+            max_attempts = 2
 
-            [file_llm]
-            model = "custom-file"
-            template = "custom-file-tpl"
+            [atlas.file_llm]
+            model = "file-toml"
+            template = "file-template"
 
-            [directory_llm]
-            model = "custom-dir"
-            template = "custom-dir-tpl"
+            [atlas.directory_llm]
+            template = "dir-template"
         "#;
-
-        let cfg = parse_config(Some(toml), &empty_env()).unwrap();
-
+        let mut env = HashMap::new();
+        env.insert("ATLAS_FILE_MODEL".to_string(), "file-env".to_string());
+        env.insert("ATLAS_CONCURRENCY".to_string(), "4".to_string());
+        let structural = parse_config(Some(toml), &env).unwrap();
         assert_eq!(
-            cfg.primer_path,
+            structural.primer_path,
             PrimerPath(PathBuf::from("custom/primer.md"))
         );
-        assert_eq!(cfg.db_path, DbPath(PathBuf::from("custom/db.sqlite")));
-        assert_eq!(cfg.max_file_tokens, 5000);
-        assert_eq!(cfg.skip_patterns, vec!["*.log", "vendor/"]);
-        assert_eq!(cfg.api, "openai");
-        assert_eq!(
-            cfg.base_url.as_ref().unwrap().as_str(),
-            "http://custom:1234"
-        );
-        assert_eq!(cfg.file_llm.model.as_str(), "custom-file");
-        assert_eq!(cfg.file_llm.template, "custom-file-tpl");
-        assert_eq!(cfg.directory_llm.model.as_str(), "custom-dir");
-        assert_eq!(cfg.directory_llm.template, "custom-dir-tpl");
+        assert_eq!(structural.db_path, DbPath(PathBuf::from("custom/index.db")));
+        assert_eq!(structural.max_file_tokens, 5000);
+        assert_eq!(structural.skip_patterns, vec!["*.log"]);
+        let EnrichmentConfig::Enabled(runner) = parse_enrichment_config(Some(toml), &env).unwrap()
+        else {
+            panic!("expected enabled enrichment")
+        };
+        assert_eq!(runner.provider.as_str(), "ollama");
+        assert_eq!(runner.file.model.as_str(), "file-env");
+        assert_eq!(runner.directory.model.as_str(), "shared");
+        assert_eq!(runner.file.template.as_str(), "file-template");
+        assert_eq!(runner.directory.template.as_str(), "dir-template");
+        assert_eq!(runner.concurrency, 4);
+        assert_eq!(runner.timeout, Duration::from_secs(60));
+        assert_eq!(runner.max_attempts, 2);
     }
 
     #[test]
-    fn env_vars_override_toml_values() {
+    fn template_names_do_not_select_provider_or_model() {
         let toml = r#"
-            primer_path = "toml/primer.md"
-            db_path = "toml/db.sqlite"
-            max_file_tokens = 5000
-            api = "toml-api"
-            base_url = "http://toml:1234"
+            [atlas.file_llm]
+            template = "custom-file"
 
-            [file_llm]
-            model = "toml-model"
+            [atlas.directory_llm]
+            template = "custom-dir"
         "#;
-
-        let mut env = HashMap::new();
-        env.insert("ATLAS_PRIMER_PATH".into(), "env/primer.md".into());
-        env.insert("ATLAS_DB_PATH".into(), "env/db.sqlite".into());
-        env.insert("ATLAS_MAX_FILE_TOKENS".into(), "8000".into());
-        env.insert("ATLAS_FILE_MODEL".into(), "env-model".into());
-        env.insert("ATLAS_DIR_MODEL".into(), "env-dir-model".into());
-        env.insert("ATLAS_API".into(), "env-api".into());
-        env.insert("ATLAS_BASE_URL".into(), "http://env:5678".into());
-
-        let cfg = parse_config(Some(toml), &env).unwrap();
-
-        assert_eq!(cfg.primer_path, PrimerPath(PathBuf::from("env/primer.md")));
-        assert_eq!(cfg.db_path, DbPath(PathBuf::from("env/db.sqlite")));
-        assert_eq!(cfg.max_file_tokens, 8000);
-        assert_eq!(cfg.file_llm.model.as_str(), "env-model");
-        assert_eq!(cfg.directory_llm.model.as_str(), "env-dir-model");
-        assert_eq!(cfg.api, "env-api");
-        assert_eq!(cfg.base_url.as_ref().unwrap().as_str(), "http://env:5678");
-    }
-
-    #[test]
-    fn invalid_toml_produces_config_error() {
-        let result = parse_config(Some("{{{{not valid toml"), &empty_env());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            ConfigError::InvalidToml(_) => {}
-            other => panic!("expected InvalidToml, got: {other}"),
-        }
-    }
-
-    #[test]
-    fn missing_fields_use_defaults() {
-        let cfg = parse_config(Some(""), &empty_env()).unwrap();
-        assert_eq!(cfg.max_file_tokens, DEFAULT_MAX_FILE_TOKENS);
-        assert_eq!(cfg.api, DEFAULT_API);
-        assert!(cfg.base_url.is_none());
-        assert_eq!(cfg.file_llm.model.as_str(), DEFAULT_FILE_MODEL);
-        assert_eq!(cfg.directory_llm.model.as_str(), DEFAULT_DIR_MODEL);
-        assert_eq!(cfg.file_llm.template, DEFAULT_FILE_TEMPLATE);
-        assert_eq!(cfg.directory_llm.template, DEFAULT_DIR_TEMPLATE);
-    }
-
-    #[test]
-    fn ollama_url_is_obsolete() {
-        let mut env = HashMap::new();
-        env.insert("OLLAMA_URL".into(), "http://127.0.0.1:9".into());
-        let err = parse_config(None, &env).unwrap_err();
         assert_eq!(
-            err.to_string(),
-            "obsolete Atlas Ollama setting `OLLAMA_URL`. Use api, model, base_url, and template. kind and OLLAMA_URL are removed"
+            parse_enrichment_config(Some(toml), &empty_env()).unwrap(),
+            EnrichmentConfig::Disabled
         );
     }
 
     #[test]
-    fn file_llm_kind_is_obsolete() {
+    fn partial_runner_selection_is_rejected() {
+        let error =
+            parse_enrichment_config(Some("[atlas]\napi = \"ollama\""), &empty_env()).unwrap_err();
+        assert!(error.to_string().contains("model or file_llm.model"));
+        assert!(error.to_string().contains("model or directory_llm.model"));
+    }
+
+    #[test]
+    fn blank_explicit_names_are_rejected() {
+        let error = parse_enrichment_config(
+            Some("[atlas]\napi = \"   \"\nmodel = \"atlas\""),
+            &empty_env(),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "explicit api must not be empty");
+
+        let error =
+            parse_enrichment_config(Some("[atlas.file_llm]\ntemplate = \"   \""), &empty_env())
+                .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "explicit file_llm.template must not be empty"
+        );
+    }
+
+    #[test]
+    fn runner_limits_are_positive_and_attempts_are_bounded() {
+        for (field, value) in [
+            ("concurrency", "0"),
+            ("timeout_secs", "0"),
+            ("max_attempts", "0"),
+        ] {
+            let toml = format!("[atlas]\napi = \"ollama\"\nmodel = \"atlas\"\n{field} = {value}");
+            assert!(parse_enrichment_config(Some(&toml), &empty_env()).is_err());
+        }
+        let toml = "[atlas]\napi = \"ollama\"\nmodel = \"atlas\"\nmax_attempts = 11";
+        assert!(matches!(
+            parse_enrichment_config(Some(toml), &empty_env()),
+            Err(ConfigError::TooManyAttempts)
+        ));
+
+        assert!(parse_enrichment_config(Some("[atlas]\nconcurrency = 0"), &empty_env()).is_err());
+    }
+
+    #[test]
+    fn obsolete_ollama_settings_get_a_concrete_migration() {
         let toml = r#"
+            primer_path = "keep/me.md"
             [file_llm]
             kind = "ollama"
             model = "atlas"
+            base_url = "http://localhost:11434"
         "#;
-        let err = parse_config(Some(toml), &empty_env()).unwrap_err();
-        match err {
-            ConfigError::ObsoleteOllama(setting) => assert_eq!(setting, "kind"),
-            other => panic!("expected ObsoleteOllama, got: {other}"),
-        }
-    }
-
-    #[test]
-    fn directory_llm_kind_is_obsolete() {
-        let toml = r#"
-            [directory_llm]
-            kind = "ollama"
-        "#;
-        let err = parse_config(Some(toml), &empty_env()).unwrap_err();
-        match err {
-            ConfigError::ObsoleteOllama(setting) => assert_eq!(setting, "kind"),
-            other => panic!("expected ObsoleteOllama, got: {other}"),
-        }
-    }
-
-    #[test]
-    fn primer_path_resolves_relative() {
-        let p = PrimerPath(PathBuf::from("relative/primer.md"));
+        let error = parse_enrichment_config(Some(toml), &empty_env()).unwrap_err();
+        let text = error.to_string();
+        assert!(text.contains("file_llm.kind"));
+        assert!(text.contains("file_llm.base_url"));
+        assert!(text.contains("Keep unrelated .mcptools/config.toml fields"));
+        assert!(text.contains("api = \"ollama\""));
         assert_eq!(
-            p.resolve(Path::new("/my/repo")),
-            PathBuf::from("/my/repo/relative/primer.md")
+            parse_config(Some(toml), &empty_env()).unwrap().primer_path,
+            PrimerPath(PathBuf::from("keep/me.md"))
         );
     }
 
     #[test]
-    fn primer_path_resolves_absolute_unchanged() {
-        let p = PrimerPath(PathBuf::from("/absolute/primer.md"));
-        assert_eq!(
-            p.resolve(Path::new("/my/repo")),
-            PathBuf::from("/absolute/primer.md")
-        );
+    fn cli_concurrency_overrides_config_and_rejects_zero() {
+        assert_eq!(resolve_concurrency(None, 3).unwrap(), 3);
+        assert_eq!(resolve_concurrency(Some(5), 3).unwrap(), 5);
+        assert!(resolve_concurrency(Some(0), 3).is_err());
     }
 
     #[test]
-    fn db_path_resolves_relative() {
-        let p = DbPath(PathBuf::from("relative/db.sqlite"));
-        assert_eq!(
-            p.resolve(Path::new("/my/repo")),
-            PathBuf::from("/my/repo/relative/db.sqlite")
-        );
+    fn plan_shows_resolved_runner_templates_and_scope() {
+        let EnrichmentConfig::Enabled(runner) = parse_enrichment_config(
+            Some("[atlas]\napi = \"ollama\"\nmodel = \"atlas\""),
+            &empty_env(),
+        )
+        .unwrap() else {
+            panic!("expected enabled enrichment")
+        };
+        let plan = format_enrichment_plan(&runner, 2, 7, 3);
+        assert!(plan.contains("provider: ollama"));
+        assert!(plan.contains("model=atlas, template=atlas-file, scope=7"));
+        assert!(plan.contains("model=atlas, template=atlas-dir, scope=3"));
+        assert!(plan.contains("concurrency: 2"));
+        assert!(plan.contains("timeout: 120s"));
+        assert!(plan.contains("max attempts: 1"));
     }
 
     #[test]
-    fn db_path_resolves_absolute_unchanged() {
-        let p = DbPath(PathBuf::from("/absolute/db.sqlite"));
-        assert_eq!(
-            p.resolve(Path::new("/my/repo")),
-            PathBuf::from("/absolute/db.sqlite")
-        );
-    }
-
-    #[test]
-    fn invalid_max_file_tokens_env_var_produces_error() {
+    fn invalid_max_file_tokens_environment_is_rejected() {
         let mut env = HashMap::new();
-        env.insert("ATLAS_MAX_FILE_TOKENS".into(), "not-a-number".into());
-        let result = parse_config(None, &env);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            ConfigError::InvalidMaxFileTokens(val) => assert_eq!(val, "not-a-number"),
-            other => panic!("expected InvalidMaxFileTokens, got: {other}"),
-        }
+        env.insert("ATLAS_MAX_FILE_TOKENS".to_string(), "invalid".to_string());
+        assert!(matches!(
+            parse_config(None, &env),
+            Err(ConfigError::InvalidMaxFileTokens(_))
+        ));
     }
 
     #[test]
-    fn partial_toml_fills_remaining_with_defaults() {
-        let toml = r#"
-            max_file_tokens = 2000
-        "#;
-        let cfg = parse_config(Some(toml), &empty_env()).unwrap();
-        assert_eq!(cfg.max_file_tokens, 2000);
+    fn paths_resolve_relative_to_repository_root() {
+        let config = parse_config(None, &empty_env()).unwrap();
         assert_eq!(
-            cfg.primer_path,
-            PrimerPath(PathBuf::from(DEFAULT_PRIMER_PATH))
+            config.primer_path.resolve(Path::new("/repo")),
+            PathBuf::from("/repo/.mcptools/atlas/primer.md")
         );
-        assert_eq!(cfg.api, DEFAULT_API);
-        assert!(cfg.base_url.is_none());
-        assert_eq!(cfg.file_llm.model.as_str(), DEFAULT_FILE_MODEL);
-        assert_eq!(cfg.directory_llm.model.as_str(), DEFAULT_DIR_MODEL);
+        assert_eq!(
+            config.db_path.resolve(Path::new("/repo")),
+            PathBuf::from("/repo/.mcptools/atlas/index.db")
+        );
     }
 
     #[test]
-    fn empty_model_env_var_falls_back_to_default() {
-        let mut env = HashMap::new();
-        env.insert("ATLAS_FILE_MODEL".into(), "".into());
-        env.insert("ATLAS_DIR_MODEL".into(), "   ".into());
-        let cfg = parse_config(None, &env).unwrap();
-        assert_eq!(cfg.file_llm.model.as_str(), DEFAULT_FILE_MODEL);
-        assert_eq!(cfg.directory_llm.model.as_str(), DEFAULT_DIR_MODEL);
-    }
-
-    #[test]
-    fn empty_model_in_toml_falls_back_to_default() {
-        let toml = r#"
-            [file_llm]
-            model = ""
-
-            [directory_llm]
-            model = "  "
-        "#;
-        let cfg = parse_config(Some(toml), &empty_env()).unwrap();
-        assert_eq!(cfg.file_llm.model.as_str(), DEFAULT_FILE_MODEL);
-        assert_eq!(cfg.directory_llm.model.as_str(), DEFAULT_DIR_MODEL);
-    }
-
-    #[test]
-    fn empty_base_url_env_var_falls_back_to_unset() {
-        let mut env = HashMap::new();
-        env.insert("ATLAS_BASE_URL".into(), "".into());
-        let cfg = parse_config(None, &env).unwrap();
-        assert!(cfg.base_url.is_none());
-    }
-
-    #[test]
-    fn empty_base_url_in_toml_falls_back_to_unset() {
-        let toml = r#"
-            base_url = ""
-        "#;
-        let cfg = parse_config(Some(toml), &empty_env()).unwrap();
-        assert!(cfg.base_url.is_none());
-    }
-
-    #[test]
-    fn ignore_matcher_extension_patterns() {
-        let patterns = vec!["*.md".to_string(), "*.json".to_string()];
-        let matcher = build_ignore_matcher(&patterns).unwrap();
+    fn ignore_matcher_handles_patterns_and_empty_sets() {
+        let matcher = build_ignore_matcher(&["*.md".to_string(), "vendor/**".to_string()]).unwrap();
         assert!(matcher.is_match(Path::new("README.md")));
-        assert!(matcher.is_match(Path::new("src/config.json")));
-        assert!(!matcher.is_match(Path::new("src/main.rs")));
-        assert!(!matcher.is_match(Path::new("lib.py")));
-    }
-
-    #[test]
-    fn ignore_matcher_directory_glob() {
-        let patterns = vec!["packages/mom/**".to_string()];
-        let matcher = build_ignore_matcher(&patterns).unwrap();
-        assert!(matcher.is_match(Path::new("packages/mom/index.js")));
-        assert!(matcher.is_match(Path::new("packages/mom/src/lib.rs")));
-        assert!(!matcher.is_match(Path::new("packages/dad/index.js")));
-        assert!(!matcher.is_match(Path::new("src/main.rs")));
-    }
-
-    #[test]
-    fn ignore_matcher_empty_patterns_match_nothing() {
-        let matcher = build_ignore_matcher(&[]).unwrap();
-        assert!(!matcher.is_match(Path::new("anything.rs")));
-        assert!(!matcher.is_match(Path::new("some/path/file.txt")));
+        assert!(matcher.is_match(Path::new("vendor/src/lib.rs")));
+        assert!(!matcher.is_match(Path::new("src/lib.rs")));
+        assert!(!build_ignore_matcher(&[])
+            .unwrap()
+            .is_match(Path::new("README.md")));
     }
 }

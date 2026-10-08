@@ -55,10 +55,15 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | `ATLAS_DB_PATH` | `.mcptools/atlas/index.db` | Database location |
 | `ATLAS_PRIMER_PATH` | `.mcptools/atlas/primer.md` | Primer file location |
 | `ATLAS_MAX_FILE_TOKENS` | `10000` | Max tokens per file for LLM |
-| `ATLAS_API` | `chatgpt` | llm-stream API |
-| `ATLAS_BASE_URL` | unset | Optional llm-stream base URL |
-| `ATLAS_FILE_MODEL` | `gpt-5.6-luna` | Model for file descriptions |
-| `ATLAS_DIR_MODEL` | `gpt-5.6-luna` | Model for directory descriptions |
+| `ATLAS_API` | unset | Explicit llm-stream provider |
+| `ATLAS_MODEL` | unset | Shared model for file and directory descriptions |
+| `ATLAS_FILE_MODEL` | shared model | File model override |
+| `ATLAS_DIR_MODEL` | shared model | Directory model override |
+| `ATLAS_FILE_TEMPLATE` | `atlas-file` | File template name |
+| `ATLAS_DIR_TEMPLATE` | `atlas-dir` | Directory template name |
+| `ATLAS_CONCURRENCY` | `1` | Parallel file enrichment workers |
+| `ATLAS_TIMEOUT_SECS` | `120` | Timeout for each llm-stream attempt |
+| `ATLAS_MAX_ATTEMPTS` | `1` | Attempts per enrichment, maximum `10` |
 
 **Jev**
 
@@ -102,7 +107,8 @@ For detailed usage of each feature, see the context files:
 ### Atlas
 
 ```bash
-mcptools atlas init                   # Create primer (mental model) and run initial index
+mcptools atlas init                   # Prepare repository and run initial index
+mcptools atlas init --with-primer     # Create primer via editor before indexing
 mcptools atlas index                  # Build full index (symbols + descriptions, bottom-up)
 mcptools atlas index --parallel 4     # Parallel LLM workers for file descriptions
 mcptools atlas index --incremental    # Skip files/dirs that already have descriptions

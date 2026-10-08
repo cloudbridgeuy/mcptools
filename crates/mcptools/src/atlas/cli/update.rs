@@ -2,15 +2,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::atlas::config::load_config;
+use crate::atlas::config::{load_config, load_enrichment_config};
 use crate::atlas::db::Database;
 use crate::atlas::fs::walk_repo;
 use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use mcptools_core::atlas::{
-    affected_directories, compute_change_set, content_hash, format_dry_run_update, BaseUrl,
-    DirectoryEntry, FileEntry,
+    affected_directories, compute_change_set, content_hash, format_dry_run_update,
+    format_enrichment_plan, resolve_concurrency, DirectoryEntry, EnrichmentConfig, FileEntry,
 };
 
 use super::index::{
@@ -21,9 +21,8 @@ use super::index::{
 
 #[derive(Debug, clap::Parser)]
 pub struct UpdateOptions {
-    /// Number of parallel LLM workers for file descriptions
-    #[clap(long, default_value = "1")]
-    pub parallel: usize,
+    #[clap(long, help = "Number of parallel LLM workers for file descriptions")]
+    pub parallel: Option<usize>,
 
     /// Show what would change without applying
     #[clap(long)]
@@ -170,7 +169,6 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
         symbol_count
     );
 
-    // Phase 4: Re-describe changed files via LLM
     let primer_path = config.primer_path.resolve(&root);
     let primer = match std::fs::read_to_string(&primer_path) {
         Ok(p) => p,
@@ -182,30 +180,14 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
         }
     };
 
-    let file_provider = Arc::new(crate::atlas::llm::LlmStreamProvider::new(
-        &config.api,
-        config.file_llm.model.as_str(),
-        config.base_url.as_ref().map(BaseUrl::as_str),
-    ));
-    let dir_provider = crate::atlas::llm::LlmStreamProvider::new(
-        &config.api,
-        config.directory_llm.model.as_str(),
-        config.base_url.as_ref().map(BaseUrl::as_str),
-    );
-
-    let parallel = opts.parallel.max(1);
-
-    // Compute affected directories from all changed/deleted file paths.
     let affected_dirs = affected_directories(&all_changed_paths);
 
-    // Group changed files by parent directory.
     let mut files_by_dir: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
     for path in &changed_paths {
         let parent = path.parent().unwrap_or(Path::new("")).to_path_buf();
         files_by_dir.entry(parent).or_default().push(path.clone());
     }
 
-    // Ensure root directory entry exists if we have root-level files.
     if files_by_dir.contains_key(Path::new("")) {
         db.insert_directory(&DirectoryEntry {
             path: PathBuf::new(),
@@ -215,14 +197,34 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
         })?;
     }
 
-    // Get all directories bottom-up, filtered to only affected ones.
     let affected_set: std::collections::HashSet<PathBuf> = affected_dirs.into_iter().collect();
     let directories: Vec<PathBuf> = collect_directories_bottom_up(&db)?
         .into_iter()
         .filter(|p| affected_set.contains(p))
         .collect();
 
-    // Progress tracking across file and directory descriptions.
+    let runner = match load_enrichment_config(&root)? {
+        EnrichmentConfig::Disabled => {
+            crate::prelude::eprintln!(
+                "structural-only, enrichment pending: set Atlas api and model explicitly"
+            );
+            db.set_metadata("last_update", &epoch_now())?;
+            print_elapsed(start);
+            return Ok(());
+        }
+        EnrichmentConfig::Enabled(runner) => runner,
+    };
+    let parallel = resolve_concurrency(opts.parallel, runner.concurrency)?;
+    crate::prelude::eprintln!(
+        "{}",
+        format_enrichment_plan(&runner, parallel, changed_paths.len(), directories.len(),)
+    );
+    let file_provider = Arc::new(crate::atlas::llm::LlmStreamProvider::new(
+        &runner,
+        &runner.file.model,
+    ));
+    let dir_provider = crate::atlas::llm::LlmStreamProvider::new(&runner, &runner.directory.model);
+
     let total_files = changed_paths.len() as u64;
     let total_dirs = directories.len() as u64;
     let progress = progress_bar(total_files + total_dirs, "Updating descriptions...");
@@ -230,8 +232,9 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
     let templates_dir = mcptools_core::llm_stream::resolve_paths()?
         .config_dir
         .join("templates");
-    let file_template = mcptools_core::atlas::load(&templates_dir, &config.file_llm.template)?;
-    let dir_template = mcptools_core::atlas::load(&templates_dir, &config.directory_llm.template)?;
+    let file_template = mcptools_core::atlas::load(&templates_dir, runner.file.template.as_str())?;
+    let dir_template =
+        mcptools_core::atlas::load(&templates_dir, runner.directory.template.as_str())?;
     record_template_identity(&db, &[&file_template, &dir_template])?;
     let mut file_desc_count = 0u32;
     let mut file_fail_count = 0u32;
@@ -239,7 +242,6 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
     let mut dir_fail_count = 0u32;
 
     for dir_path in &directories {
-        // Step A: Describe changed files in this directory.
         if let Some(file_paths) = files_by_dir.get(dir_path) {
             let (success, failed) = generate_descriptions(
                 &db,
@@ -257,7 +259,6 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
             file_fail_count += failed;
         }
 
-        // Step B: Re-describe this directory.
         match describe_directory(&db, &dir_provider, &primer, &dir_template, dir_path).await {
             Ok(true) => {
                 dir_desc_count += 1;
