@@ -22,11 +22,11 @@ pub enum Commands {
     Tree(cli::tree::TreeOptions),
     /// Show file summary and symbols
     Peek(cli::peek::PeekOptions),
-    /// Create project primer (mental model) and run initial index
+    #[command(about = "Prepare repository and build the structural index")]
     Init(cli::init::InitOptions),
     /// Incremental update (changed files only)
     Update(cli::update::UpdateOptions),
-    /// Force full re-index
+    #[command(about = "Refresh the full structural index, retaining cached descriptions")]
     Sync(cli::sync::SyncOptions),
     /// Show index status and statistics
     Status(cli::status::StatusOptions),

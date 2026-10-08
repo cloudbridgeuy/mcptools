@@ -2,16 +2,12 @@ use crate::atlas::cli::index::IndexOptions;
 use crate::prelude::*;
 
 #[derive(Debug, clap::Parser)]
-pub struct SyncOptions {
-    #[clap(long, help = "Number of parallel LLM workers for file descriptions")]
-    pub parallel: Option<usize>,
-}
+pub struct SyncOptions {}
 
-pub async fn run(opts: SyncOptions, global: crate::Global) -> Result<()> {
-    crate::prelude::eprintln!("Re-indexing from scratch...");
+pub async fn run(_opts: SyncOptions, global: crate::Global) -> Result<()> {
+    crate::prelude::eprintln!("Refreshing structural index...");
     super::index::run(
         IndexOptions {
-            parallel: opts.parallel,
             incremental: false,
             dry_run: false,
             stdin: false,

@@ -1,37 +1,22 @@
-use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::atlas::config::{load_config, load_enrichment_config};
+use crate::atlas::config::load_config;
 use crate::atlas::db::Database;
 use crate::atlas::fs::walk_repo;
-use crate::atlas::llm::{failure_report, LlmStreamProvider};
 use crate::atlas::parser::parse_and_extract;
 use crate::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
-use mcptools_core::atlas::{
-    content_hash, format_dry_run_index, format_enrichment_plan, format_symbol, render,
-    render_system, resolve_concurrency, truncate_to_tokens, DirectoryEntry, DryRunEntry,
-    EnrichmentConfig, FileEntry, IndexTier, LoadedTemplate, Symbol,
-};
+use mcptools_core::atlas::{content_hash, format_dry_run_index, DryRunEntry, FileEntry, IndexTier};
 
 #[derive(Debug, clap::Parser)]
 pub struct IndexOptions {
-    #[clap(long, help = "Number of parallel LLM workers for file descriptions")]
-    pub parallel: Option<usize>,
-
-    /// Skip files and directories that already have descriptions
-    #[clap(long)]
+    #[clap(long, help = "Skip unchanged files")]
     pub incremental: bool,
-
-    /// Show what would be indexed without doing it
-    #[clap(long)]
+    #[clap(long, help = "Show what would be indexed without doing it")]
     pub dry_run: bool,
-
-    /// Read file paths from stdin (one per line) instead of walking the repo
-    #[clap(long)]
+    #[clap(long, help = "Read file paths from stdin instead of walking the repo")]
     pub stdin: bool,
 }
 
@@ -39,57 +24,40 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     let start = std::time::Instant::now();
     let root = find_git_root()?;
     let config = load_config(&root)?;
+    let primer_path = config.primer_path.resolve(&root);
     let db_path = config.db_path.resolve(&root);
+    if crate::atlas::fs::same_path(&db_path, &primer_path) {
+        return Err(eyre!(
+            "Atlas database and optional primer must use different paths"
+        ));
+    }
     ensure_parent_dir(&db_path)?;
     let db = Database::open(&db_path)?;
-
     let ignore = mcptools_core::atlas::build_ignore_matcher(&config.skip_patterns)
         .map_err(|e| eyre!("invalid skip pattern: {e}"))?;
-
-    // Resolve file source: stdin paths or repo walk.
     let file_source: Box<dyn Iterator<Item = Result<(PathBuf, Vec<u8>)>>> = if opts.stdin {
-        Box::new(read_paths_from_stdin(&root))
+        Box::new(read_paths_from_stdin(&root, &primer_path))
     } else {
-        Box::new(walk_repo(&root, &ignore))
+        Box::new(walk_repo(&root, &ignore, &primer_path))
     };
 
     if opts.dry_run {
-        let described_files: HashSet<PathBuf> = if opts.incremental {
-            let all_files: HashSet<PathBuf> = db.file_hashes()?.into_keys().collect();
-            let needing: HashSet<PathBuf> = db.files_needing_descriptions()?.into_iter().collect();
-            all_files.difference(&needing).cloned().collect()
-        } else {
-            HashSet::new()
-        };
-
+        let existing_hashes = db.file_hashes()?;
         let mut entries = Vec::new();
         for result in file_source {
-            let (path, _bytes) = result?;
+            let (path, bytes) = result?;
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            let tier = IndexTier::from_extension(ext);
-            let has_description = described_files.contains(&path);
             entries.push(DryRunEntry {
+                tier: IndexTier::from_extension(ext),
+                unchanged: existing_hashes.get(&path) == Some(&content_hash(&bytes)),
                 path,
-                tier,
-                has_description,
             });
         }
-
-        crate::prelude::println!("{}", format_dry_run_index(&entries, opts.incremental));
+        crate::prelude::println!("{}", format_dry_run_index(&entries, true));
         return Ok(());
     }
 
-    let existing_hashes = if opts.stdin {
-        // --stdin replaces the walk; don't clear or check hashes
-        HashMap::new()
-    } else if opts.incremental {
-        db.file_hashes()?
-    } else {
-        db.clear_all()?;
-        HashMap::new()
-    };
-
-    // Phase 1: Tree-sitter scan
+    let existing_hashes = db.file_hashes()?;
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -98,27 +66,20 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
     );
     spinner.set_message("Scanning files...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(80));
-
     let mut file_count = 0u32;
     let mut symbol_count = 0u32;
     let mut skipped_count = 0u32;
     let indexed_at = epoch_now();
-
-    let mut indexed_paths: Vec<PathBuf> = Vec::new();
+    let mut indexed_paths = HashSet::new();
 
     for result in file_source {
         let (path, bytes) = result?;
         let hash = content_hash(&bytes);
-
-        // In incremental mode, skip files whose content hasn't changed.
-        if let Some(existing_hash) = existing_hashes.get(&path) {
-            if *existing_hash == hash {
-                indexed_paths.push(path);
-                skipped_count += 1;
-                continue;
-            }
+        indexed_paths.insert(path.clone());
+        if existing_hashes.get(&path) == Some(&hash) {
+            skipped_count += 1;
+            continue;
         }
-
         db.insert_file(&FileEntry {
             path: path.clone(),
             content_hash: hash,
@@ -127,437 +88,37 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
             long_description: None,
             indexed_at: indexed_at.clone(),
         })?;
-
+        db.delete_symbols_for(&path)?;
         if let Some(symbols) = parse_and_extract(&path, &bytes) {
             symbol_count += symbols.len() as u32;
             db.insert_symbols(&symbols)?;
         }
-        indexed_paths.push(path.clone());
         file_count += 1;
         spinner.set_message(f!(
             "Scanning files... {file_count} files, {symbol_count} symbols"
         ));
     }
 
-    let dir_count = db.all_directories()?.len() as u32;
-    let skip_msg = if skipped_count > 0 {
-        f!(", {skipped_count} unchanged")
-    } else {
-        String::new()
-    };
+    if !opts.stdin {
+        for path in existing_hashes
+            .keys()
+            .filter(|p| !indexed_paths.contains(*p))
+        {
+            db.delete_symbols_for(path)?;
+            db.delete_file(path)?;
+        }
+    }
+    db.prune_empty_directories()?;
+    let dir_count = db.all_directories()?.len();
     spinner.finish_with_message(f!(
-        "Scanned {file_count} files, {dir_count} directories, {symbol_count} symbols{skip_msg}"
+        "Scanned {file_count} files, {dir_count} directories, {symbol_count} symbols, {skipped_count} unchanged"
     ));
     db.set_metadata("last_full_sync", &epoch_now())?;
-
-    let primer_path = config.primer_path.resolve(&root);
-    let primer = match std::fs::read_to_string(&primer_path) {
-        Ok(p) => p,
-        Err(_) => {
-            crate::prelude::eprintln!("structural-only, enrichment pending");
-            print_elapsed(start);
-            return Ok(());
-        }
-    };
-
-    let files_to_describe: Vec<PathBuf> = if opts.incremental {
-        let needed: std::collections::HashSet<PathBuf> =
-            db.files_needing_descriptions()?.into_iter().collect();
-        indexed_paths
-            .into_iter()
-            .filter(|p| needed.contains(p))
-            .collect()
-    } else {
-        indexed_paths
-    };
-
-    let mut files_by_dir: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
-    for path in &files_to_describe {
-        let parent = path.parent().unwrap_or(Path::new("")).to_path_buf();
-        files_by_dir.entry(parent).or_default().push(path.clone());
-    }
-
-    if files_by_dir.contains_key(Path::new("")) {
-        db.insert_directory(&DirectoryEntry {
-            path: PathBuf::new(),
-            short_description: None,
-            long_description: None,
-            indexed_at: epoch_now(),
-        })?;
-    }
-
-    let directories: Vec<PathBuf> = if opts.incremental {
-        let needed: std::collections::HashSet<PathBuf> =
-            db.directories_needing_descriptions()?.into_iter().collect();
-        collect_directories_bottom_up(&db)?
-            .into_iter()
-            .filter(|p| needed.contains(p))
-            .collect()
-    } else {
-        collect_directories_bottom_up(&db)?
-    };
-    let runner = match load_enrichment_config(&root)? {
-        EnrichmentConfig::Disabled => {
-            crate::prelude::eprintln!(
-                "structural-only, enrichment pending: set Atlas api and model explicitly"
-            );
-            print_elapsed(start);
-            return Ok(());
-        }
-        EnrichmentConfig::Enabled(runner) => runner,
-    };
-    let parallel = resolve_concurrency(opts.parallel, runner.concurrency)?;
-    crate::prelude::eprintln!(
-        "{}",
-        format_enrichment_plan(
-            &runner,
-            parallel,
-            files_to_describe.len(),
-            directories.len(),
-        )
-    );
-    let file_provider = Arc::new(LlmStreamProvider::new(&runner, &runner.file.model));
-    let dir_provider = LlmStreamProvider::new(&runner, &runner.directory.model);
-    let templates_dir = mcptools_core::llm_stream::resolve_paths()?
-        .config_dir
-        .join("templates");
-    let file_template = mcptools_core::atlas::load(&templates_dir, runner.file.template.as_str())?;
-    let dir_template =
-        mcptools_core::atlas::load(&templates_dir, runner.directory.template.as_str())?;
-    record_template_identity(&db, &[&file_template, &dir_template])?;
-
-    let total_files = files_to_describe.len() as u64;
-    let total_dirs = directories.len() as u64;
-    let progress = progress_bar(
-        total_files + total_dirs,
-        "Generating descriptions (bottom-up)...",
-    );
-
-    let mut file_desc_count = 0u32;
-    let mut file_fail_count = 0u32;
-    let mut dir_desc_count = 0u32;
-    let mut dir_fail_count = 0u32;
-
-    for dir_path in &directories {
-        if let Some(file_paths) = files_by_dir.get(dir_path) {
-            let (success, failed) = generate_descriptions(
-                &db,
-                &root,
-                &config,
-                &primer,
-                &file_template,
-                Arc::clone(&file_provider),
-                file_paths,
-                parallel,
-                &progress,
-            )
-            .await?;
-            file_desc_count += success;
-            file_fail_count += failed;
-        }
-
-        match describe_directory(&db, &dir_provider, &primer, &dir_template, dir_path).await {
-            Ok(true) => {
-                dir_desc_count += 1;
-                progress.set_message(truncate_for_display(
-                    &dir_path.display().to_string(),
-                    msg_width(),
-                ));
-            }
-            Ok(false) => dir_fail_count += 1,
-            Err(e) => return Err(e),
-        }
-        progress.inc(1);
-    }
-
-    let file_msg = finish_message(file_desc_count, file_fail_count, "file descriptions");
-    let dir_msg = finish_message(dir_desc_count, dir_fail_count, "directory descriptions");
-    progress.finish_with_message(f!("{file_msg}, {dir_msg}"));
-
-    db.set_metadata(
-        "primer_hash",
-        &mcptools_core::atlas::content_hash(primer.as_bytes()).hex(),
-    )?;
-
+    crate::prelude::eprintln!("structural-only, enrichment pending");
     print_elapsed(start);
-
     Ok(())
 }
 
-/// Collect directory paths bottom-up (leaf directories first).
-pub(crate) fn collect_directories_bottom_up(db: &Database) -> Result<Vec<PathBuf>> {
-    let dirs = db.all_directories()?;
-    let mut paths: Vec<PathBuf> = dirs.into_iter().map(|d| d.path).collect();
-    paths.sort_by_key(|p| Reverse(p.components().count()));
-    Ok(paths)
-}
-
-pub(crate) fn record_template_identity(db: &Database, templates: &[&LoadedTemplate]) -> Result<()> {
-    for template in templates {
-        let key = format!("template:{}:hash", template.template.name);
-        db.set_metadata(&key, &content_hash(template.raw.as_bytes()).hex())?;
-    }
-    Ok(())
-}
-
-fn location_value(tree_path: &[(PathBuf, Option<&str>)]) -> String {
-    if tree_path.is_empty() {
-        return "(no path context available)".to_string();
-    }
-    tree_path
-        .iter()
-        .map(|(dir, desc)| match desc {
-            Some(d) => format!("- {} — {}", dir.display(), d),
-            None => format!("- {}", dir.display()),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn symbols_value(symbols: &[Symbol]) -> String {
-    if symbols.is_empty() {
-        return "(no symbols extracted)".to_string();
-    }
-    symbols
-        .iter()
-        .map(|sym| format_symbol(sym).trim_end_matches('\n').to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn children_value(children: &[(PathBuf, bool, Option<&str>)]) -> String {
-    if children.is_empty() {
-        return "(empty directory)".to_string();
-    }
-    children
-        .iter()
-        .map(|(name, is_dir, desc)| {
-            let kind = if *is_dir { "dir" } else { "file" };
-            match desc {
-                Some(d) => format!("- [{}] {} — {}", kind, name.display(), d),
-                None => format!("- [{}] {}", kind, name.display()),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn content_value(content: &str, max_tokens: usize) -> String {
-    let truncated = truncate_to_tokens(content, max_tokens);
-    if truncated.len() < content.len() {
-        format!("{truncated}\n... (truncated)")
-    } else {
-        truncated.to_string()
-    }
-}
-
-/// Result of a single LLM description attempt.
-enum DescResult {
-    Ok {
-        path: PathBuf,
-        short: String,
-        long: String,
-    },
-    Err {
-        path: PathBuf,
-        message: String,
-    },
-}
-
-/// Describe a single directory via LLM. Returns `Ok(true)` on success, `Ok(false)` on
-/// a recoverable failure (parse error or LLM error), and `Err` for DB errors.
-pub(crate) async fn describe_directory(
-    db: &Database,
-    provider: &LlmStreamProvider,
-    primer: &str,
-    template: &LoadedTemplate,
-    dir_path: &Path,
-) -> Result<bool> {
-    let children = db.directory_children(dir_path)?;
-    let aggregated_symbols = db.aggregated_symbols_for(dir_path)?;
-
-    let children_tuples: Vec<(PathBuf, bool, Option<&str>)> = children
-        .iter()
-        .map(|c| (c.path.clone(), c.is_dir, c.short_description.as_deref()))
-        .collect();
-
-    let vars = serde_json::json!({
-        "primer": primer,
-        "dir_path": dir_path.display().to_string(),
-        "children": children_value(&children_tuples),
-        "symbols": symbols_value(&aggregated_symbols),
-    });
-    let system = render_system(template, &vars)?;
-    let prompt = render(template, &vars)?;
-
-    let response = match provider.generate(&system, &prompt).await {
-        Ok(r) => r,
-        Err(e) => {
-            crate::prelude::eprintln!(
-                "warning: LLM call failed for directory {}: {}",
-                dir_path.display(),
-                failure_report(&e)
-            );
-            db.update_directory_description(dir_path, "[description failed]", "")?;
-            return Ok(false);
-        }
-    };
-
-    match mcptools_core::atlas::parse_description(&response) {
-        Ok(desc) => {
-            db.update_directory_description(dir_path, &desc.short, &desc.long)?;
-            Ok(true)
-        }
-        Err(e) => {
-            crate::prelude::eprintln!(
-                "warning: failed to parse directory description for {}: {e}",
-                dir_path.display()
-            );
-            db.update_directory_description(dir_path, "[description failed]", "")?;
-            Ok(false)
-        }
-    }
-}
-
-/// Fan-out/fan-in: pre-build prompts (sequential, needs DB), dispatch LLM calls
-/// to N workers via a channel, collect results on a writer that updates the DB
-/// and progress bar.
-///
-/// Returns `(success_count, fail_count)`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn generate_descriptions(
-    db: &Database,
-    root: &Path,
-    config: &mcptools_core::atlas::AtlasConfig,
-    primer: &str,
-    template: &LoadedTemplate,
-    provider: Arc<LlmStreamProvider>,
-    indexed_paths: &[PathBuf],
-    parallel: usize,
-    progress: &ProgressBar,
-) -> Result<(u32, u32)> {
-    use tokio::sync::mpsc;
-
-    if indexed_paths.is_empty() {
-        return Ok((0, 0));
-    }
-
-    // Pre-build all prompts sequentially (needs DB for tree_path and symbols).
-    let mut work_items: Vec<(PathBuf, String, String)> = Vec::with_capacity(indexed_paths.len());
-
-    for file_path in indexed_paths {
-        let tree_path = db.tree_path_to(file_path)?;
-        let symbols = db.symbols_for(file_path)?;
-        let content = std::fs::read_to_string(root.join(file_path)).unwrap_or_default();
-
-        let tree_path_refs: Vec<(PathBuf, Option<&str>)> = tree_path
-            .iter()
-            .map(|(p, d)| (p.clone(), d.as_deref()))
-            .collect();
-
-        let vars = serde_json::json!({
-            "primer": primer,
-            "location": location_value(&tree_path_refs),
-            "symbols": symbols_value(&symbols),
-            "content": content_value(&content, config.max_file_tokens),
-        });
-        let system = render_system(template, &vars)?;
-        let prompt = render(template, &vars)?;
-
-        work_items.push((file_path.clone(), system, prompt));
-    }
-
-    // Fan-out: feed work items to N workers via a channel.
-    let (work_tx, work_rx) = async_channel::bounded::<(PathBuf, String, String)>(parallel * 2);
-    // Fan-in: workers send results back to the writer.
-    let (result_tx, mut result_rx) = mpsc::channel::<DescResult>(parallel * 2);
-
-    // Spawn N worker tasks.
-    let mut worker_handles = Vec::with_capacity(parallel);
-
-    for _ in 0..parallel {
-        let rx = work_rx.clone();
-        let tx = result_tx.clone();
-        let prov = Arc::clone(&provider);
-
-        worker_handles.push(tokio::spawn(async move {
-            while let Ok((path, system, prompt)) = rx.recv().await {
-                let result = match prov.generate(&system, &prompt).await {
-                    Ok(response) => match mcptools_core::atlas::parse_description(&response) {
-                        Ok(desc) => DescResult::Ok {
-                            path,
-                            short: desc.short,
-                            long: desc.long,
-                        },
-                        Err(e) => DescResult::Err {
-                            path,
-                            message: e.to_string(),
-                        },
-                    },
-                    Err(e) => DescResult::Err {
-                        path,
-                        message: failure_report(&e),
-                    },
-                };
-                if tx.send(result).await.is_err() {
-                    break;
-                }
-            }
-        }));
-    }
-    // Drop sender so workers see channel close after all items are consumed.
-    drop(result_tx);
-
-    // Feed work items into the work channel.
-    let feed_handle = tokio::spawn(async move {
-        for item in work_items {
-            if work_tx.send(item).await.is_err() {
-                break;
-            }
-        }
-        // work_tx dropped here, closing the channel so workers finish.
-    });
-
-    // Writer: consume results, update DB and progress bar.
-    let mut desc_count = 0u32;
-    let mut fail_count = 0u32;
-
-    while let Some(result) = result_rx.recv().await {
-        match result {
-            DescResult::Ok { path, short, long } => {
-                db.update_file_description(&path, &short, &long)?;
-                desc_count += 1;
-                progress.set_message(truncate_for_display(
-                    &path.display().to_string(),
-                    msg_width(),
-                ));
-            }
-            DescResult::Err { path, message } => {
-                db.update_file_description(&path, "[description failed]", "")?;
-                progress.suspend(|| {
-                    crate::prelude::eprintln!(
-                        "warning: description failed for {}: {message}",
-                        path.display()
-                    );
-                });
-                fail_count += 1;
-            }
-        }
-        progress.inc(1);
-    }
-
-    // Wait for all tasks to complete.
-    feed_handle
-        .await
-        .map_err(|e| eyre!("feed task panicked: {e}"))?;
-    for handle in worker_handles {
-        handle.await.map_err(|e| eyre!("worker panicked: {e}"))?;
-    }
-
-    Ok((desc_count, fail_count))
-}
-
-/// Walk up from the current directory looking for a `.git` directory.
 pub(crate) fn find_git_root() -> Result<PathBuf> {
     let mut dir = std::env::current_dir().wrap_err("getting current directory")?;
     loop {
@@ -570,7 +131,6 @@ pub(crate) fn find_git_root() -> Result<PathBuf> {
     }
 }
 
-/// Create parent directories if they don't already exist.
 pub(crate) fn ensure_parent_dir(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -579,21 +139,6 @@ pub(crate) fn ensure_parent_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Create a progress bar with the standard cyan bar style.
-pub(crate) fn progress_bar(total: u64, initial_message: &str) -> ProgressBar {
-    let pb = ProgressBar::new(total);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.cyan} [{bar:30.cyan/dim}] {pos}/{len} {elapsed} elapsed, ~{eta} remaining  {msg}")
-            .unwrap()
-            .progress_chars("━╸─"),
-    );
-    pb.set_message(initial_message.to_string());
-    pb.enable_steady_tick(std::time::Duration::from_millis(80));
-    pb
-}
-
-/// Print "Completed in X" to stderr using the elapsed time from `start`.
 pub(crate) fn print_elapsed(start: std::time::Instant) {
     crate::prelude::eprintln!(
         "Completed in {}",
@@ -601,43 +146,11 @@ pub(crate) fn print_elapsed(start: std::time::Instant) {
     );
 }
 
-/// Build a finish message like "5 descriptions generated" or "5 descriptions generated, 2 failed".
-pub(crate) fn finish_message(success: u32, failed: u32, label: &str) -> String {
-    if failed > 0 {
-        f!("{success} {label} generated, {failed} failed")
-    } else {
-        f!("{success} {label} generated")
-    }
-}
-
-/// Truncate a display string to fit within the terminal width, leaving room
-/// for progress bar chrome. Replaces the middle with "…" when too long.
-pub(crate) fn truncate_for_display(s: &str, max_width: usize) -> String {
-    if s.len() <= max_width || max_width < 4 {
-        return s.to_string();
-    }
-    // Keep the last portion (filename is more useful than deep prefix).
-    let keep = max_width - 1; // 1 char for "…"
-    f!("…{}", &s[s.len() - keep..])
-}
-
-/// Get available width for the progress bar message, accounting for chrome.
-pub(crate) fn msg_width() -> usize {
-    let term_width = terminal_size::terminal_size()
-        .map(|(w, _)| w.0 as usize)
-        .unwrap_or(80);
-    // Chrome: "⠋ [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━] 999/999 3m 42s elapsed, ~12m 5s remaining  " ≈ 80 chars
-    term_width.saturating_sub(80)
-}
-
-/// Read file paths from stdin (one per line) and yield `(relative_path, bytes)`.
-///
-/// Line parsing (porcelain detection, comments, renames) is delegated to
-/// [`mcptools_core::atlas::parse_stdin_line`]. This function handles only I/O:
-/// reading lines and reading file bytes.
-fn read_paths_from_stdin(root: &Path) -> impl Iterator<Item = Result<(PathBuf, Vec<u8>)>> + '_ {
+fn read_paths_from_stdin<'a>(
+    root: &'a Path,
+    primer_path: &'a Path,
+) -> impl Iterator<Item = Result<(PathBuf, Vec<u8>)>> + 'a {
     use std::io::BufRead;
-
     std::io::stdin()
         .lock()
         .lines()
@@ -646,79 +159,23 @@ fn read_paths_from_stdin(root: &Path) -> impl Iterator<Item = Result<(PathBuf, V
                 Ok(l) => l,
                 Err(e) => return Some(Err(eyre!("reading stdin: {e}"))),
             };
-
-            let path_str = mcptools_core::atlas::parse_stdin_line(&line)?;
-            let relative = PathBuf::from(path_str);
+            let relative = PathBuf::from(mcptools_core::atlas::parse_stdin_line(&line)?);
             let abs_path = root.join(&relative);
-
-            if !abs_path.is_file() {
+            if crate::atlas::fs::same_path(&abs_path, primer_path) || !abs_path.is_file() {
                 return None;
             }
-
-            let bytes = match std::fs::read(&abs_path) {
-                Ok(b) => b,
-                Err(e) => {
-                    return Some(Err(eyre!("reading file: {}: {e}", abs_path.display())));
-                }
-            };
-
-            Some(Ok((relative, bytes)))
+            Some(
+                std::fs::read(&abs_path)
+                    .map(|bytes| (relative, bytes))
+                    .map_err(|e| eyre!("reading file: {}: {e}", abs_path.display())),
+            )
         })
 }
 
-/// Produce an epoch-seconds timestamp from `SystemTime::now()`.
 pub(crate) fn epoch_now() -> String {
-    let duration = SystemTime::now()
+    SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
-    // Simple epoch-seconds representation; good enough for ordering.
-    format!("{secs}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use mcptools_core::atlas::Template;
-
-    fn loaded_template(name: &str, raw: &str) -> LoadedTemplate {
-        LoadedTemplate {
-            template: Template {
-                name: name.to_string(),
-                description: None,
-                system: None,
-                template: "body".to_string(),
-                default_vars: serde_json::json!({}),
-            },
-            raw: raw.to_string(),
-        }
-    }
-
-    #[test]
-    fn template_identity_records_raw_hash_per_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = Database::open(&dir.path().join("atlas.db")).unwrap();
-        let raw = "name = \"atlas-file\"\ntemplate = \"body\"\n";
-        let file = loaded_template("atlas-file", raw);
-        let dir_t = loaded_template("atlas-dir", "name = \"atlas-dir\"\n");
-
-        record_template_identity(&db, &[&file, &dir_t]).unwrap();
-
-        assert_eq!(
-            db.get_metadata("template:atlas-file:hash")
-                .unwrap()
-                .as_deref(),
-            Some(content_hash(raw.as_bytes()).hex().as_str())
-        );
-        assert_eq!(
-            db.get_metadata("template:atlas-dir:hash")
-                .unwrap()
-                .as_deref(),
-            Some(
-                content_hash("name = \"atlas-dir\"\n".as_bytes())
-                    .hex()
-                    .as_str()
-            )
-        );
-    }
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
 }

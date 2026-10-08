@@ -121,13 +121,9 @@ mod tests {
         include_str!("../../../mcptools/src/atlas/templates/atlas-file.toml");
     const ATLAS_DIR_TOML: &str =
         include_str!("../../../mcptools/src/atlas/templates/atlas-dir.toml");
-    const ATLAS_PRIMER_TOML: &str =
-        include_str!("../../../mcptools/src/atlas/templates/atlas-primer.toml");
-
-    const INSTALLED: [(&str, &str); 3] = [
+    const INSTALLED: [(&str, &str); 2] = [
         ("atlas-file", ATLAS_FILE_TOML),
         ("atlas-dir", ATLAS_DIR_TOML),
-        ("atlas-primer", ATLAS_PRIMER_TOML),
     ];
 
     fn write_template(dir: &Path, name: &str, body: &str) {
@@ -158,12 +154,6 @@ mod tests {
                     "dir_path": "src/atlas/",
                     "children": "templates/ \"quoted\" {{ inner }}",
                     "symbols": "list, describe, {{ inner_two }}"
-                }),
-            ),
-            (
-                "atlas-primer",
-                serde_json::json!({
-                    "raw_primer": "raw context with \"quotes\", 🦀 and {{ braces }}"
                 }),
             ),
         ]
@@ -220,10 +210,6 @@ mod tests {
         assert!(render(&dir_t, &serde_json::json!({}))
             .unwrap()
             .contains("# Directory:"));
-        let primer = load(dir.path(), "atlas-primer").unwrap();
-        assert!(render(&primer, &serde_json::json!({}))
-            .unwrap()
-            .contains("concise mental model"));
     }
 
     #[test]
@@ -238,8 +224,6 @@ mod tests {
         let dir_system = render_system(&dir_t, &serde_json::json!({})).unwrap();
         assert!(dir_system.contains("SHORT: Database access layer and query builders"));
         assert!(dir_system.contains("LONG: Contains the SQLite connection wrapper"));
-        let primer = load(dir.path(), "atlas-primer").unwrap();
-        assert_eq!(render_system(&primer, &serde_json::json!({})).unwrap(), "");
     }
 
     #[test]

@@ -88,32 +88,24 @@ pub struct SetupFlags {
     pub no_templates: bool,
 }
 
-/// Everything the planner needs to know about the repository.
 #[derive(Debug, Clone)]
 pub struct RepoFacts {
     pub hook_state: HookState,
-    /// Raw hook file content, `None` when the file does not exist.
     pub hook_content: Option<String>,
-    /// Content of `.claude/skills/atlas-navigation/SKILL.md`, if it exists.
     pub skill_content: Option<String>,
-    /// Content of the project `CLAUDE.md`, if it exists.
     pub claude_md_content: Option<String>,
     pub file_template_content: Option<String>,
     pub dir_template_content: Option<String>,
-    pub primer_template_content: Option<String>,
 }
 
-/// Templates embedded in the binary, passed in by the shell.
 #[derive(Debug, Clone, Copy)]
 pub struct Templates<'a> {
     pub skill: &'a str,
     pub claude_md_snippet: &'a str,
     pub atlas_file: &'a str,
     pub atlas_dir: &'a str,
-    pub atlas_primer: &'a str,
 }
 
-/// Which setup step an action belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupStep {
     Hooks,
@@ -121,7 +113,6 @@ pub enum SetupStep {
     ClaudeMd,
     Templates,
     TemplateDir,
-    TemplatePrimer,
 }
 
 impl SetupStep {
@@ -132,7 +123,6 @@ impl SetupStep {
             SetupStep::ClaudeMd => "CLAUDE.md section",
             SetupStep::Templates => "llm-stream template atlas-file",
             SetupStep::TemplateDir => "llm-stream template atlas-dir",
-            SetupStep::TemplatePrimer => "llm-stream template atlas-primer",
         }
     }
 }
@@ -379,12 +369,6 @@ pub fn plan_setup(
             facts.dir_template_content.as_deref(),
             "atlas-dir.toml",
         ),
-        (
-            SetupStep::TemplatePrimer,
-            templates.atlas_primer,
-            facts.primer_template_content.as_deref(),
-            "atlas-primer.toml",
-        ),
     ];
     let mut actions = vec![hook_action, skill_action, claude_md_action];
     for (step, current, existing, filename) in template_specs {
@@ -621,7 +605,6 @@ mod tests {
             claude_md_snippet: "SNIPPET v1",
             atlas_file: "name = \"atlas-file\"\ntemplate = \"FILE TPL v1\"\n",
             atlas_dir: "name = \"atlas-dir\"\ntemplate = \"DIR TPL v1\"\n",
-            atlas_primer: "name = \"atlas-primer\"\ntemplate = \"PRIMER TPL v1\"\n",
         }
     }
 
@@ -637,7 +620,6 @@ mod tests {
             claude_md_content: None,
             file_template_content: None,
             dir_template_content: None,
-            primer_template_content: None,
         }
     }
 
@@ -778,7 +760,6 @@ mod tests {
             claude_md_content: None,
             file_template_content: None,
             dir_template_content: None,
-            primer_template_content: None,
         };
         let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
@@ -798,7 +779,6 @@ mod tests {
             claude_md_content: None,
             file_template_content: None,
             dir_template_content: None,
-            primer_template_content: None,
         };
         let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
@@ -818,7 +798,6 @@ mod tests {
             claude_md_content: None,
             file_template_content: None,
             dir_template_content: None,
-            primer_template_content: None,
         };
         let actions = plan_setup(&f, &SetupFlags::default(), &no_templates(), templates_dir());
         assert_eq!(
@@ -838,7 +817,6 @@ mod tests {
             claude_md_content: None,
             file_template_content: None,
             dir_template_content: None,
-            primer_template_content: None,
         };
         let flags = SetupFlags {
             no_hooks: true,
@@ -892,7 +870,6 @@ mod tests {
                 claude_md_content: None,
                 file_template_content: None,
                 dir_template_content: None,
-                primer_template_content: None,
             },
             &SetupFlags::default(),
             &no_templates(),
@@ -1186,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_writes_all_three_templates_when_absent() {
+    fn plan_writes_both_templates_when_absent() {
         let actions = plan_setup(
             &facts(None),
             &SetupFlags::default(),
@@ -1204,16 +1181,12 @@ mod tests {
                     path: PathBuf::from("/cfg/templates/atlas-dir.toml"),
                     content: no_templates().atlas_dir.to_string()
                 },
-                SetupAction::WriteTemplate {
-                    path: PathBuf::from("/cfg/templates/atlas-primer.toml"),
-                    content: no_templates().atlas_primer.to_string()
-                },
             ]
         );
     }
 
     #[test]
-    fn plan_skips_all_three_templates_on_flag() {
+    fn plan_skips_both_templates_on_flag() {
         let flags = SetupFlags {
             no_templates: true,
             ..Default::default()
@@ -1228,10 +1201,6 @@ mod tests {
                 },
                 SetupAction::Skip {
                     step: SetupStep::TemplateDir,
-                    reason: SkipReason::Flag
-                },
-                SetupAction::Skip {
-                    step: SetupStep::TemplatePrimer,
                     reason: SkipReason::Flag
                 },
             ]
@@ -1249,7 +1218,6 @@ mod tests {
         let out = format_setup_summary(&actions);
         assert!(out.contains("llm-stream template atlas-file: installed"));
         assert!(out.contains("llm-stream template atlas-dir: installed"));
-        assert!(out.contains("llm-stream template atlas-primer: installed"));
     }
 
     #[test]

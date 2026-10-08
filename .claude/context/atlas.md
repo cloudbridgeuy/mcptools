@@ -1,6 +1,6 @@
 # Atlas — Codebase Navigator for AI Agents
 
-Atlas scans a repository, extracts symbols using tree-sitter, and stores them in a local SQLite index. Agents use the index to quickly understand codebase structure without reading every file. V2 adds LLM-generated file descriptions and a project primer workflow.
+Atlas scans a repository, extracts symbols using tree-sitter, and stores them in a local SQLite index. Agents use the index to understand codebase structure without reading every file. Structural commands never call a model or edit operator context.
 
 ## V1 Scope
 
@@ -9,12 +9,11 @@ Atlas scans a repository, extracts symbols using tree-sitter, and stores them in
 - **Peek**: File summary with symbol signatures and line ranges
 - **Languages**: Rust, TypeScript/TSX, JavaScript/JSX, Python, Go
 
-## V2 Scope (Implemented)
+## Optional Context and Descriptions
 
-- **Project primer**: `atlas init --with-primer` creates a mental model document via the configured editor; `atlas init` always prepares the repository and runs the initial index
-- **LLM file descriptions**: `atlas index` generates one-line descriptions for indexed files through explicitly selected llm-stream provider/model settings and the `atlas-file` template
-- **LLM directory descriptions**: Directory summaries generated from child descriptions via llm-stream (`atlas-dir` template)
-- **Single bottom-up pass**: Directories are processed deepest-first; for each directory, files are described first, then the directory itself, so parents always see their children's descriptions
+- **Project primer**: Optional operator-authored text. No command creates, reformats, or rewrites it.
+- **Cached descriptions**: Structural refresh preserves existing file/directory descriptions and enrichment metadata. Descriptions can be stale after source changes; full provenance tracking is deferred to GUZ-29.
+- **Model execution**: Removed from structural commands. An explicit enrichment command is future work (GUZ-32), not available now.
 - **Config file**: `.mcptools/config.toml` for per-project paths, templates, provider/model overrides, concurrency, timeout, attempt limits, and token limits
 - **Environment variables**: Override config via `ATLAS_*` env vars
 
@@ -22,10 +21,8 @@ Atlas scans a repository, extracts symbols using tree-sitter, and stores them in
 
 ```bash
 mcptools atlas init                   # Prepare repository and run index
-mcptools atlas init --with-primer     # Create primer via $EDITOR before indexing
-mcptools atlas index                  # Build index with bottom-up LLM descriptions
-mcptools atlas index --parallel 4     # Parallel LLM workers for file descriptions
-mcptools atlas index --incremental    # Skip files/dirs that already have descriptions
+mcptools atlas index                  # Refresh structural index, retain cached descriptions
+mcptools atlas index --incremental    # Skip unchanged files
 mcptools atlas tree [path]            # Directory tree with descriptions (optional: filter by path)
 mcptools atlas tree --depth 2         # Limit depth
 mcptools atlas tree --json            # JSON output
@@ -38,39 +35,40 @@ mcptools atlas status --json          # JSON output
 mcptools atlas index --dry-run        # Show what would be indexed (by tier)
 mcptools atlas update --dry-run       # Show what would change (adds/mods/deletes)
 git status --porcelain | mcptools atlas index --stdin   # Index only the listed paths
-mcptools atlas setup                  # Install hook + atlas-navigation skill + CLAUDE.md section + llm-stream templates (atlas-file/dir/primer)
+mcptools atlas setup                  # Install hook + guidance + llm-stream templates (atlas-file/dir)
 mcptools atlas setup --dry-run        # Preview setup actions without applying them
 mcptools atlas setup --no-hooks       # Skip git hook installation
 mcptools atlas setup --no-skills      # Skip installing .claude/skills/atlas-navigation/SKILL.md
 mcptools atlas setup --no-claude-md   # Skip the CLAUDE.md atlas section
-mcptools atlas setup --no-templates   # Skip installing llm-stream templates (atlas-file/dir/primer)
+mcptools atlas setup --no-templates   # Skip installing llm-stream templates (atlas-file/dir)
 ```
 
-The `index` and `update` commands display ETA and elapsed time during LLM description phases, and print total elapsed time on completion.
+The `index` and `update` commands report structural work and elapsed time. Removed flags `--with-primer` and `--parallel` are rejected by the CLI.
 
 ### `atlas init` Workflow
 
-1. With `--with-primer`, opens `$VISUAL` / `$EDITOR` with a primer template and saves the nonempty result to `.mcptools/atlas/primer.md` (configurable).
-2. Without `--with-primer`, leaves the primer unchanged.
-3. Adds `index.db` to `.gitignore` if not already present.
-4. Runs the full index automatically.
+1. Adds `index.db` to `.gitignore` if not already present, unless `.gitignore` is the configured primer.
+2. Runs structural indexing. No editor, primer read, or model request occurs.
 
-### Bottom-Up Enrichment (`atlas index`)
+### Optional Operator Primer
 
-After the tree-sitter scan, `atlas index` performs a single bottom-up pass over all directories (deepest first). For each directory:
+Default path: `.mcptools/atlas/primer.md`. Set `[atlas].primer_path` in `.mcptools/config.toml` or `ATLAS_PRIMER_PATH` for a custom path. Relative paths resolve from the repository root; absolute paths are supported.
 
-1. **File descriptions**: Describes the files in that directory via llm-stream. The role uses the shared model unless `file_llm.model` overrides it, and defaults only its template to `atlas-file`. File calls use the configured concurrency or `--parallel N` override.
-2. **Directory description**: Describes the directory itself via llm-stream. The role uses the shared model unless `directory_llm.model` overrides it, and defaults only its template to `atlas-dir`.
+If useful, manually author a short file, for example:
 
-Because directories are processed deepest-first, parent directories always see their children's descriptions. Atlas selects no provider or model by default. With no explicit selection, indexing completes its structural work and reports enrichment pending. Before enabled enrichment, Atlas prints the resolved provider, models, templates, scope, concurrency, timeout, and attempt limit. Provider credentials and endpoints remain in llm-stream or its environment.
+```markdown
+# Project context
+This CLI exposes repository navigation to coding agents.
+Pure logic lives in crates/core; I/O lives in crates/mcptools.
+```
 
-Descriptions are expected in `SHORT:` / `LONG:` form. When a model ignores that format, the response is still accepted: the first line (truncated to 80 characters) becomes the short description and the remaining text becomes the long one. Only an empty response is an error.
+`init`, `index`, `update`, and `sync` leave exact primer bytes untouched, even if the file is absent or is not UTF-8. The configured primer is excluded from structural indexing. Primer-only changes do not rebuild structural records or update the stored enrichment `primer_hash`. Enrichment templates still accept optional primer text; future enrichment must include it in input identity.
 
 ### `atlas index --stdin` — Index an Explicit Path List
 
 `atlas index --stdin` reads file paths from standard input, one per line, instead of walking the repository. Each line may be a plain path (`src/foo.ts`) or `git status --porcelain` output (`M  src/foo.ts`, `?? new.ts`, `R  old.ts -> new.ts` — the new path wins). Blank lines and `#` comments are ignored, as are paths that don't resolve to a file.
 
-Only the listed files are indexed: the existing index is neither cleared nor hash-checked, so `--stdin` adds to or refreshes the index rather than rebuilding it. `skip_patterns` are not applied — the caller decides what to feed in.
+Only the listed files are indexed; unchanged hashes are reused. Other records are retained. `skip_patterns` are not applied, but the configured primer is excluded.
 
 ### `atlas peek` for Files and Directories
 
@@ -78,21 +76,19 @@ Only the listed files are indexed: the existing index is neither cleared nor has
 
 ### `atlas update` — Incremental Update
 
-`atlas update` performs a hash-based change detection pass. It compares content hashes of files on disk against the stored hashes in the index. Only files whose content has changed are re-indexed (symbols re-extracted, LLM descriptions regenerated). Parent directories affected by changed files are also re-described to keep the bottom-up summaries consistent.
+`atlas update` compares source hashes against the index. It extracts symbols for added/modified files and removes deleted files. It retains descriptions and never calls a model.
 
-### `atlas sync` — Force Full Re-Index
+### `atlas sync` — Full Structural Scan
 
-`atlas sync` clears the existing index and performs a complete rebuild from scratch. This is equivalent to clearing the database and then running `atlas index`. Use this when the index is corrupt, after major refactors, or when you want a guaranteed-fresh index.
+`atlas sync` runs the full structural scan with `atlas index`. Unchanged records and cached descriptions are retained, not cleared. Deleted files and their symbols are removed.
 
 ### Setup
 
-`mcptools atlas setup` installs a `post-commit` git hook that runs `mcptools atlas update` in the background after each commit, plus agent-facing guidance: a `.claude/skills/atlas-navigation/SKILL.md` file, a marker-delimited section in the project `CLAUDE.md`, and three llm-stream prompt templates (`atlas-file.toml`, `atlas-dir.toml`, `atlas-primer.toml`) into `templates/` under the llm-stream config dir (`LLM_STREAM_CONFIG_DIR`, else `~/.config/llm-stream`).
+`mcptools atlas setup` installs a `post-commit` git hook that runs structural `mcptools atlas update` in the background, plus agent-facing guidance and two llm-stream prompt templates (`atlas-file.toml`, `atlas-dir.toml`) under the llm-stream config directory (`LLM_STREAM_CONFIG_DIR`, else `~/.config/llm-stream`). It does not install a primer-generation template or remove old operator files.
 
 - The hook is a marker-delimited block (`# >>> mcptools atlas >>>` ... `# <<< mcptools atlas <<<`) appended to `.git/hooks/post-commit` (or the path from `core.hooksPath`). If no hook file exists, one is created with a shebang; if one exists without the marker, the block is appended, preserving existing content.
 - The skill and CLAUDE.md section come from templates embedded in the binary via `include_str!` — no network access needed. The CLAUDE.md section uses its own marker pair (`<!-- >>> mcptools atlas >>> -->` ... `<!-- <<< mcptools atlas <<< -->`); if the file doesn't exist, it's created; if it exists without the marker, the section is appended after a blank line.
-- The three templates start with a `<!-- atlas-template v1 -->` comment for future version detection. Detection currently compares only with the shipped version.
-- Re-running `atlas setup` is idempotent: if a step's marker/content is already installed, that step is skipped and reported as "already installed" — each template reports per file as `llm-stream template atlas-file/dir/primer: already installed` (or `installed` / `skipped by flag`).
-- If an installed skill file, CLAUDE.md section, or llm-stream template differs from the shipped template (the user edited it), setup leaves it untouched, reports "user-edited, left unchanged" (templates per file as `llm-stream template atlas-file/dir/primer: user-edited, left unchanged`), and prints a `warning: ... was edited by hand; not overwritten` line — it never overwrites user edits.
+- Re-running setup skips installed content. User-edited guidance and templates remain unchanged, with a warning. Each template reports its own status.
 - `--dry-run` prints the plan without touching the filesystem.
 - `--no-hooks` skips hook installation; `--no-skills` skips the skill file; `--no-claude-md` skips the CLAUDE.md section; `--no-templates` skips the llm-stream templates. Each step is independently skippable.
 - Setup never touches a hook it doesn't own. It detects: a symlinked `post-commit` hook, a non-UTF8 hook file, or a repo managed by a third-party hook manager (`.husky/` dir, `lefthook.yml`/`lefthook.yaml`, `.pre-commit-config.yaml`). In these cases the hook is left untouched and manual instructions for wiring in `mcptools atlas update` are printed instead (both in `--dry-run` and normal runs) — this never blocks the skill/CLAUDE.md steps.
@@ -122,11 +118,11 @@ template = "atlas-dir"
 
 Structural fields are optional. Enrichment stays disabled until both `api` and a model are explicit. Set one shared `model`, or set both role models. Template names are independent from provider/model selection.
 
-Precedence is `--parallel` for concurrency, then environment variables, nested `[atlas]` values, flat top-level values, and defaults. Fields may be written flat, including top-level `[file_llm]` and `[directory_llm]`. Nested `[atlas]` values win field by field.
+Precedence is environment variables, nested `[atlas]` values, flat top-level values, and defaults. Fields may be written flat, including top-level `[file_llm]` and `[directory_llm]`. Nested `[atlas]` values win field by field.
 
 `concurrency`, `timeout_secs`, and `max_attempts` must be positive integers. `max_attempts` cannot exceed `10`. Explicit provider, model, and template names cannot be blank. Retries apply only to temporary rate-limit, connection, timeout, HTTP 408, HTTP 429, and HTTP 5xx failures.
 
-Structural `tree`, `peek`, `status`, dry-run, and scan work do not require llm-stream, authentication, or a selected model. Atlas loads strict enrichment settings only after structural work and primer discovery.
+All structural and query commands work without llm-stream, authentication, or a selected model. They do not load strict enrichment settings, even when provider/model configuration is present.
 
 Legacy `kind`, `base_url`, `OLLAMA_URL`, and `ATLAS_BASE_URL` settings are rejected before enrichment with a migration message. Keep unrelated `.mcptools/config.toml` fields, remove those settings, set `api = "ollama"` with a shared or per-role model, and configure the Ollama endpoint in llm-stream. Atlas never rewrites the config file.
 
@@ -200,15 +196,15 @@ Generate uses llm-stream with explicit provider/model selection. `[atlas.file_ll
 |------|---------|
 | `config.rs` | Loads structural and strict enrichment config separately from `.mcptools/config.toml` plus environment overrides |
 | `db.rs` | SQLite storage: `Database::open`, insert/query symbols and files |
-| `fs.rs` | `walk_repo(root)` — gitignore-aware file walker, skips `.git/`, `node_modules/`, `target/`, binary files |
+| `fs.rs` | Gitignore-aware file walker excluding the configured primer; optional primer reads with distinct read/encoding errors |
 | `llm.rs` | `LlmStreamProvider::generate`, `request`, `failure_report` — run llm-stream in machine mode and map failures |
 | `parser.rs` | `parse_and_extract(path, source)` — tree-sitter grammar registry and extraction bridge |
-| `cli/init.rs` | `atlas init` handler: primer creation via editor, gitignore setup, and initial index |
-| `cli/index.rs` | `atlas index` handler: full repo scan, progress reporting, LLM descriptions |
+| `cli/init.rs` | `atlas init` handler: gitignore setup and initial structural index |
+| `cli/index.rs` | `atlas index` handler: structural scan, hash reuse, progress reporting |
 | `cli/tree.rs` | `atlas tree` handler: path filtering, depth, JSON output |
 | `cli/peek.rs` | `atlas peek` handler: file or directory lookup, symbol display |
 | `cli/update.rs` | `atlas update` handler: incremental update via hash-based change detection |
-| `cli/sync.rs` | `atlas sync` handler: clear index and force full re-index |
+| `cli/sync.rs` | `atlas sync` handler: full structural scan without clearing semantic data |
 | `cli/status.rs` | `atlas status` handler: index health display |
 | `data.rs` | Shared data functions: `atlas_tree_data`, `atlas_peek_data`, `atlas_status_data` (used by CLI + MCP) |
 
@@ -232,11 +228,11 @@ All tools return JSON. They call the same shared data functions as the CLI comma
 
 ### Primer Resource
 
-The project primer is exposed as an MCP resource at `atlas://primer`. Clients can read it via `resources/list` and `resources/read` for automatic injection at session start.
+Optional operator-authored context is exposed at `atlas://primer`. Missing text returns a clear optional-absence error, not an init instruction. Other read failures and invalid UTF-8 return distinct errors. Valid text retains all Unicode and whitespace.
 
 ### Agent Navigation Workflow
 
-1. Read primer (MCP resource) — understand project purpose and architecture
+1. Read optional primer (MCP resource) if present — understand purpose and architecture
 2. `atlas_tree_view` at root — pick a direction
 3. `atlas_tree_view` with path — drill into directories of interest
 4. `atlas_peek` with file path — get summary + symbols before reading

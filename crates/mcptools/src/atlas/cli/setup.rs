@@ -13,7 +13,6 @@ const SKILL_TEMPLATE: &str = include_str!("../templates/SKILL.md");
 const CLAUDE_MD_SNIPPET: &str = include_str!("../templates/claude-md-snippet.md");
 const ATLAS_FILE_TEMPLATE: &str = include_str!("../templates/atlas-file.toml");
 const ATLAS_DIR_TEMPLATE: &str = include_str!("../templates/atlas-dir.toml");
-const ATLAS_PRIMER_TEMPLATE: &str = include_str!("../templates/atlas-primer.toml");
 const SKILL_REL_PATH: &str = ".claude/skills/atlas-navigation/SKILL.md";
 
 #[derive(Debug, clap::Args)]
@@ -68,7 +67,6 @@ pub async fn run(opts: SetupOptions, _global: crate::Global) -> Result<()> {
     let templates_dir = resolve_paths()?.config_dir.join("templates");
     let file_template_path = templates_dir.join("atlas-file.toml");
     let dir_template_path = templates_dir.join("atlas-dir.toml");
-    let primer_template_path = templates_dir.join("atlas-primer.toml");
 
     let facts = RepoFacts {
         hook_state: parse_hook_state(is_symlink, &managers, hook_bytes.as_deref()),
@@ -77,7 +75,6 @@ pub async fn run(opts: SetupOptions, _global: crate::Global) -> Result<()> {
         claude_md_content: read_optional(&claude_md_path)?,
         file_template_content: read_optional(&file_template_path)?,
         dir_template_content: read_optional(&dir_template_path)?,
-        primer_template_content: read_optional(&primer_template_path)?,
     };
     let flags = SetupFlags {
         no_hooks: opts.no_hooks,
@@ -90,7 +87,6 @@ pub async fn run(opts: SetupOptions, _global: crate::Global) -> Result<()> {
         claude_md_snippet: CLAUDE_MD_SNIPPET,
         atlas_file: ATLAS_FILE_TEMPLATE,
         atlas_dir: ATLAS_DIR_TEMPLATE,
-        atlas_primer: ATLAS_PRIMER_TEMPLATE,
     };
     let actions = plan_setup(&facts, &flags, &templates, &templates_dir);
 

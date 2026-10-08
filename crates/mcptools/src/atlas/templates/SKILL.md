@@ -13,11 +13,12 @@ command instead of many file reads.
 
 ## Workflow
 
-1. **Read the primer first.** `.mcptools/atlas/primer.md` holds the repo's
-   mental model: architecture, conventions, key paths. Read it once per
-   session before exploring.
+1. **Read optional operator context if present.** `.mcptools/atlas/primer.md` holds the repo's
+   mental model: architecture, conventions, key paths. The path can be changed
+   with `primer_path` in `.mcptools/config.toml` or `ATLAS_PRIMER_PATH`.
+   If absent, continue without it. Never create or rewrite it automatically.
 2. **Prefer `tree` over `ls`/`find`.** `mcptools atlas tree [path]` shows the
-   annotated directory tree — every entry carries a one-line description.
+   directory tree with symbols and any cached descriptions.
 3. **Prefer `peek` over reading whole files.** `mcptools atlas peek <path>`
    shows a file's summary plus its symbols (functions, types, methods), or a
    directory's summary. Only Read the full file when you need exact code.

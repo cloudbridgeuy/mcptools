@@ -3,6 +3,6 @@
 ## Atlas
 
 This repository is indexed by atlas. Agents: follow the `atlas-navigation`
-skill (`.claude/skills/atlas-navigation/SKILL.md`) — primer first, then
+skill (`.claude/skills/atlas-navigation/SKILL.md`) — optional operator context, then
 `mcptools atlas tree` / `peek` / `status`; run `mcptools atlas update` if the
 index is stale.

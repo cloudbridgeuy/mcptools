@@ -53,7 +53,7 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ATLAS_DB_PATH` | `.mcptools/atlas/index.db` | Database location |
-| `ATLAS_PRIMER_PATH` | `.mcptools/atlas/primer.md` | Primer file location |
+| `ATLAS_PRIMER_PATH` | `.mcptools/atlas/primer.md` | Optional operator-authored context; never rewritten |
 | `ATLAS_MAX_FILE_TOKENS` | `10000` | Max tokens per file for LLM |
 | `ATLAS_API` | unset | Explicit llm-stream provider |
 | `ATLAS_MODEL` | unset | Shared model for file and directory descriptions |
@@ -108,10 +108,8 @@ For detailed usage of each feature, see the context files:
 
 ```bash
 mcptools atlas init                   # Prepare repository and run initial index
-mcptools atlas init --with-primer     # Create primer via editor before indexing
-mcptools atlas index                  # Build full index (symbols + descriptions, bottom-up)
-mcptools atlas index --parallel 4     # Parallel LLM workers for file descriptions
-mcptools atlas index --incremental    # Skip files/dirs that already have descriptions
+mcptools atlas index                  # Refresh structural index; no model calls
+mcptools atlas index --incremental    # Skip unchanged files
 mcptools atlas tree [path]            # Show annotated directory tree (--json)
 mcptools atlas peek <path>            # Show file or directory summary + symbols (--json)
 mcptools atlas update                 # Incremental update (changed files only)
@@ -120,7 +118,7 @@ mcptools atlas status                 # Index health (--json)
 mcptools atlas index --dry-run        # Show what would be indexed
 mcptools atlas update --dry-run       # Show what would change
 git status --porcelain | mcptools atlas index --stdin  # Index only the listed paths
-mcptools atlas setup                  # Install post-commit hook + atlas-navigation skill + CLAUDE.md section + llm-stream templates (atlas-file/dir/primer)
+mcptools atlas setup                  # Install post-commit hook + guidance + llm-stream templates (atlas-file/dir)
 mcptools atlas setup --no-skills --no-claude-md --no-templates  # Hook only, skip agent-guidance scaffolding
 ```
 

@@ -83,12 +83,17 @@ impl Database {
         Ok(Self { conn })
     }
 
-    /// Insert or replace a file entry and ensure its parent directories exist.
     pub fn insert_file(&self, entry: &FileEntry) -> Result<()> {
         self.conn
             .execute(
-                "INSERT OR REPLACE INTO files (path, content_hash, tree_sitter_hash, short_description, long_description, indexed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO files (path, content_hash, tree_sitter_hash, short_description, long_description, indexed_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(path) DO UPDATE SET
+                 content_hash = excluded.content_hash,
+                 tree_sitter_hash = excluded.tree_sitter_hash,
+                 short_description = COALESCE(excluded.short_description, files.short_description),
+                 long_description = COALESCE(excluded.long_description, files.long_description),
+                 indexed_at = excluded.indexed_at",
                 params![
                     entry.path.to_string_lossy().as_ref(),
                     entry.content_hash.hex(),
@@ -100,7 +105,6 @@ impl Database {
             )
             .wrap_err("inserting file")?;
 
-        // Ensure parent directories exist so tree_entries works.
         let mut current = entry.path.as_path();
         while let Some(parent) = current.parent() {
             if parent.as_os_str().is_empty() {
@@ -595,7 +599,19 @@ impl Database {
         Ok(paths)
     }
 
-    /// Delete a file entry from the files table.
+    pub fn prune_empty_directories(&self) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM directories WHERE NOT EXISTS (
+                SELECT 1 FROM files WHERE directories.path = ''
+                OR substr(files.path, 1, length(directories.path) + 1) = directories.path || '/'
+            )",
+                [],
+            )
+            .wrap_err("pruning empty directories")?;
+        Ok(())
+    }
+
     pub fn delete_file(&self, path: &Path) -> Result<()> {
         self.conn
             .execute(

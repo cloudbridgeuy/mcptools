@@ -176,19 +176,13 @@ pub fn format_elapsed(duration: Duration) -> String {
     }
 }
 
-/// A file entry for dry-run display.
 #[derive(Debug, Clone)]
 pub struct DryRunEntry {
     pub path: PathBuf,
     pub tier: IndexTier,
-    pub has_description: bool,
+    pub unchanged: bool,
 }
 
-/// Format dry-run output for the index command.
-///
-/// Groups entries by tier (Full, Light, Skip), sorts each group
-/// alphabetically by path, and produces a human-readable summary.
-/// In incremental mode, annotates files that already have descriptions.
 pub fn format_dry_run_index(entries: &[DryRunEntry], incremental: bool) -> String {
     if entries.is_empty() {
         return "No files found.".to_string();
@@ -219,8 +213,8 @@ pub fn format_dry_run_index(entries: &[DryRunEntry], incremental: bool) -> Strin
         let _ = writeln!(out, "{label}");
         for entry in entries {
             let path = entry.path.display();
-            if incremental && entry.has_description {
-                let _ = writeln!(out, "  {path}  (has description, would skip)");
+            if incremental && entry.unchanged {
+                let _ = writeln!(out, "  {path}  (unchanged, would skip)");
             } else {
                 let _ = writeln!(out, "  {path}");
             }
@@ -228,10 +222,10 @@ pub fn format_dry_run_index(entries: &[DryRunEntry], incremental: bool) -> Strin
     }
 
     if !full.is_empty() {
-        write_group(&mut out, "Full (tree-sitter + LLM):", &full, incremental);
+        write_group(&mut out, "Full (tree-sitter symbols):", &full, incremental);
     }
     if !light.is_empty() {
-        write_group(&mut out, "Light (LLM only):", &light, incremental);
+        write_group(&mut out, "Light (file records only):", &light, incremental);
     }
     if !skipped.is_empty() {
         write_group(&mut out, "Skipped:", &skipped, incremental);
@@ -239,15 +233,15 @@ pub fn format_dry_run_index(entries: &[DryRunEntry], incremental: bool) -> Strin
 
     let _ = writeln!(out);
     if incremental {
-        let full_described = full.iter().filter(|e| e.has_description).count();
-        let light_described = light.iter().filter(|e| e.has_description).count();
+        let full_unchanged = full.iter().filter(|e| e.unchanged).count();
+        let light_unchanged = light.iter().filter(|e| e.unchanged).count();
         let _ = write!(
             out,
-            "Total: {} full ({} already described), {} light ({} already described), {} skipped",
+            "Total: {} full ({} unchanged), {} light ({} unchanged), {} skipped",
             full.len(),
-            full_described,
+            full_unchanged,
             light.len(),
-            light_described,
+            light_unchanged,
             skipped.len(),
         );
     } else {
@@ -1003,13 +997,11 @@ src/
         assert_eq!(format_elapsed(d), "1m 0s");
     }
 
-    // ---- format_dry_run_index tests ----
-
-    fn make_dry_run_entry(path: &str, tier: IndexTier, has_description: bool) -> DryRunEntry {
+    fn make_dry_run_entry(path: &str, tier: IndexTier, unchanged: bool) -> DryRunEntry {
         DryRunEntry {
             path: PathBuf::from(path),
             tier,
-            has_description,
+            unchanged,
         }
     }
 
@@ -1029,10 +1021,10 @@ src/
         ];
 
         let result = format_dry_run_index(&entries, false);
-        assert!(result.contains("Full (tree-sitter + LLM):"));
+        assert!(result.contains("Full (tree-sitter symbols):"));
         assert!(result.contains("  src/lib.rs"));
         assert!(result.contains("  src/main.rs"));
-        assert!(result.contains("Light (LLM only):"));
+        assert!(result.contains("Light (file records only):"));
         assert!(result.contains("  Cargo.toml"));
         assert!(result.contains("Skipped:"));
         assert!(result.contains("  logo.png"));
@@ -1048,7 +1040,7 @@ src/
         ];
 
         let result = format_dry_run_index(&entries, false);
-        let full_section = result.split("Full (tree-sitter + LLM):").nth(1).unwrap();
+        let full_section = result.split("Full (tree-sitter symbols):").nth(1).unwrap();
         let lines: Vec<&str> = full_section
             .lines()
             .filter(|l| l.starts_with("  src/"))
@@ -1057,7 +1049,7 @@ src/
     }
 
     #[test]
-    fn dry_run_incremental_annotates_described_files() {
+    fn dry_run_incremental_annotates_unchanged_files() {
         let entries = vec![
             make_dry_run_entry("src/main.rs", IndexTier::Full, true),
             make_dry_run_entry("src/lib.rs", IndexTier::Full, false),
@@ -1065,12 +1057,10 @@ src/
         ];
 
         let result = format_dry_run_index(&entries, true);
-        assert!(result.contains("  src/main.rs  (has description, would skip)"));
+        assert!(result.contains("  src/main.rs  (unchanged, would skip)"));
         assert!(result.contains("  src/lib.rs\n"));
-        assert!(result.contains("  README.md  (has description, would skip)"));
-        assert!(result.contains(
-            "Total: 2 full (1 already described), 1 light (1 already described), 0 skipped"
-        ));
+        assert!(result.contains("  README.md  (unchanged, would skip)"));
+        assert!(result.contains("Total: 2 full (1 unchanged), 1 light (1 unchanged), 0 skipped"));
     }
 
     #[test]
@@ -1078,7 +1068,7 @@ src/
         let entries = vec![make_dry_run_entry("src/main.rs", IndexTier::Full, false)];
 
         let result = format_dry_run_index(&entries, false);
-        assert!(result.contains("Full (tree-sitter + LLM):"));
+        assert!(result.contains("Full (tree-sitter symbols):"));
         assert!(!result.contains("Light"));
         assert!(!result.contains("Skipped"));
         assert!(result.contains("Total: 1 full, 0 light, 0 skipped"));
