@@ -237,9 +237,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn read_only_set_has_fifty_names_and_no_writes() {
+    async fn read_only_set_has_fifty_one_names_and_no_writes() {
         let read = bound_names(&registered_tools(), &[ToolKind::Read]);
-        assert_eq!(read.len(), 50);
+        assert_eq!(read.len(), 51);
         assert!(read.contains(&"lane_list".to_string()));
         assert!(read.contains(&"lane_cleanup_plan".to_string()));
         assert!(!read.contains(&"lane_create".to_string()));
@@ -248,6 +248,7 @@ mod tests {
         assert!(read.contains(&"linear_issue_graph".to_string()));
         assert!(read.contains(&"linear_project_status_list".to_string()));
         assert!(read.contains(&"linear_initiative_list".to_string()));
+        assert!(read.contains(&"linear_initiative_get".to_string()));
         assert!(read.contains(&"linear_project_milestone_list".to_string()));
         assert!(read.contains(&"linear_project_update_list".to_string()));
         assert!(!read.contains(&"jira_create".to_string()));
@@ -260,7 +261,7 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 77);
+        assert_eq!(all.len(), 78);
         assert!(!read.contains(&"linear_project_milestone_update".to_string()));
         assert!(all.contains(&"linear_project_milestone_update".to_string()));
         assert!(all.contains(&"linear_project_create".to_string()));

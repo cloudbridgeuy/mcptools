@@ -227,6 +227,22 @@ pub struct InitiativeListArgs {
     pub query: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InitiativeGetArgs {
+    #[schemars(description = "Required initiative UUID; names and identifiers are not accepted")]
+    pub id: String,
+}
+
+impl InitiativeGetArgs {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !mcptools_core::linear::is_uuid(&self.id) {
+            return Err("id must be an initiative UUID");
+        }
+        Ok(())
+    }
+}
+
 impl InitiativeListArgs {
     pub fn validate(&self) -> Result<(), &'static str> {
         ProjectStatusListArgs {

@@ -1,0 +1,11 @@
+{
+  "id": "12345678-1234-1234-1234-123456789abc",
+  "name": "Workspace roadmap",
+  "description": "  Brief description\n",
+  "content": "# Roadmap\n\n  Verbatim Markdown\n",
+  "status": "Active",
+  "targetDate": "2026-12-31",
+  "owner": {"id": "22345678-1234-1234-1234-123456789abc", "name": "Ada", "email": "ada@example.com"},
+  "url": "https://linear.app/example/initiative/roadmap/overview",
+  "projects": [{"id": "32345678-1234-1234-1234-123456789abc", "name": "Delivery"}]
+}

@@ -11,6 +11,52 @@ use mcptools_core::linear::{transform_project_statuses, ProjectStatusListOutput}
 pub const TEAMS_QUERY: &str = "query ($first: Int!, $after: String) { teams(first: $first, after: $after) { nodes { id key name } pageInfo { hasNextPage endCursor } } }";
 pub const INITIATIVES_QUERY: &str = "query ($first: Int!, $after: String, $filter: InitiativeFilter) { initiatives(first: $first, after: $after, filter: $filter, orderBy: createdAt) { nodes { id name description status targetDate owner { id name email } url } pageInfo { hasNextPage endCursor } } }";
 
+pub const INITIATIVE_GET_QUERY: &str = "query ($id: String!, $first: Int!, $after: String) { initiative(id: $id) { id name description content status targetDate owner { id name email } url projects(first: $first, after: $after, includeArchived: true, includeSubInitiatives: false, orderBy: createdAt) { nodes { id name } pageInfo { hasNextPage endCursor } } } }";
+
+pub async fn initiatives_get_data(
+    client: &reqwest::Client,
+    args: crate::linear::args::InitiativeGetArgs,
+) -> Result<mcptools_core::linear::InitiativeGetOutput> {
+    initiatives_get_data_with_url(client, LINEAR_API_URL, args).await
+}
+
+async fn initiatives_get_data_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    args: crate::linear::args::InitiativeGetArgs,
+) -> Result<mcptools_core::linear::InitiativeGetOutput> {
+    args.validate().map_err(|error| eyre!(error))?;
+    let mut cursor = None::<String>;
+    let mut seen = std::collections::HashSet::new();
+    let mut projects = Vec::new();
+    for _ in 0..1000 {
+        let data = execute_with_url(
+            client,
+            url,
+            INITIATIVE_GET_QUERY,
+            serde_json::json!({"id": args.id, "first": 250, "after": cursor}),
+        )
+        .await?;
+        let (mut output, page_info) = mcptools_core::linear::transform_initiative(data, &args.id)
+            .map_err(|error| eyre!(error))?;
+        projects.append(&mut output.projects);
+        if !page_info.has_next {
+            output.projects = projects;
+            return Ok(output);
+        }
+        let next = page_info
+            .end_cursor
+            .ok_or_else(|| eyre!("Initiative project pagination cursor missing"))?;
+        if !seen.insert(next.clone()) {
+            return Err(eyre!(
+                "Initiative project pagination cursor did not progress"
+            ));
+        }
+        cursor = Some(next);
+    }
+    Err(eyre!("Initiative project pagination exceeded 1000 pages"))
+}
+
 pub async fn initiatives_list_data(
     client: &reqwest::Client,
     args: crate::linear::args::InitiativeListArgs,
@@ -716,6 +762,309 @@ pub async fn cycles_list_data(client: &reqwest::Client, team: &str) -> Result<Pa
 mod tests {
     use super::*;
     use crate::linear::config::LinearConfig;
+
+    #[tokio::test]
+    async fn initiative_get_pages_preserve_markdown_nulls_and_all_projects() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_get.json"
+        ))
+        .unwrap();
+        for empty in [false, true] {
+            let server = MockServer::start().await;
+            let pages = if empty { 1 } else { 2 };
+            for page in 0..pages {
+                let mut initiative = sample.clone();
+                for field in ["description", "targetDate", "owner"] {
+                    initiative[field] = serde_json::Value::Null;
+                }
+                let mut nodes = if empty {
+                    serde_json::json!([])
+                } else {
+                    sample["projects"].clone()
+                };
+                if page == 1 {
+                    nodes[0]["id"] = serde_json::json!("42345678-1234-1234-1234-123456789abc");
+                    nodes[0]["name"] = serde_json::json!("Second project");
+                }
+                initiative["projects"] = serde_json::json!({"nodes": nodes, "pageInfo": {"hasNextPage": page + 1 < pages, "endCursor": "next"}});
+                Mock::given(method("POST"))
+                    .and(body_json(serde_json::json!({"query": INITIATIVE_GET_QUERY, "variables": {"id": sample["id"], "first": 250, "after": if page == 0 { serde_json::Value::Null } else { serde_json::json!("next") }}})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiative": initiative}})))
+                    .expect(1).mount(&server).await;
+            }
+            let args = serde_json::from_value(serde_json::json!({"id": sample["id"]})).unwrap();
+            let output =
+                initiatives_get_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                    .await
+                    .unwrap();
+            assert_eq!(output.content.as_deref(), sample["content"].as_str());
+            assert_eq!(output.projects.len(), if empty { 0 } else { 2 });
+            if !empty {
+                assert_eq!(output.projects[0].name, "Delivery");
+                assert_eq!(output.projects[1].name, "Second project");
+            }
+            assert_eq!(output.initiative.name, sample["name"]);
+            let value = serde_json::to_value(output).unwrap();
+            for field in ["description", "targetDate", "owner"] {
+                assert!(value[field].is_null());
+            }
+            assert!(INITIATIVE_GET_QUERY
+                .contains("includeArchived: true, includeSubInitiatives: false"));
+        }
+    }
+
+    #[test]
+    fn initiative_get_transform_rejects_missing_and_malformed_fields() {
+        let mut initiative: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_get.json"
+        ))
+        .unwrap();
+        let id = initiative["id"].as_str().unwrap().to_string();
+        initiative["projects"] = serde_json::json!({"nodes": initiative["projects"], "pageInfo": {"hasNextPage": false, "endCursor": null}});
+        let valid = serde_json::json!({"initiative": initiative});
+        for (path, value) in [
+            ("/initiative/id", serde_json::json!("bad")),
+            (
+                "/initiative/id",
+                serde_json::json!("22345678-1234-1234-1234-123456789abc"),
+            ),
+            ("/initiative/name", serde_json::json!(" ")),
+            ("/initiative/status", serde_json::json!("unknown")),
+            ("/initiative/description", serde_json::json!(1)),
+            ("/initiative/content", serde_json::json!(1)),
+            ("/initiative/targetDate", serde_json::json!("2026-02-30")),
+            (
+                "/initiative/owner",
+                serde_json::json!({"id": "bad", "name": "Ada", "email": "ada@example.com"}),
+            ),
+            ("/initiative/url", serde_json::json!("bad")),
+            ("/initiative/projects", serde_json::Value::Null),
+            ("/initiative/projects/nodes", serde_json::Value::Null),
+            ("/initiative/projects/nodes/0/id", serde_json::json!("bad")),
+            ("/initiative/projects/nodes/0/name", serde_json::json!(" ")),
+            ("/initiative/projects/nodes/0/name", serde_json::json!(1)),
+            ("/initiative/owner/email", serde_json::Value::Null),
+            (
+                "/initiative/projects/pageInfo/hasNextPage",
+                serde_json::Value::Null,
+            ),
+            (
+                "/initiative/projects/pageInfo/endCursor",
+                serde_json::json!("bad\n"),
+            ),
+            (
+                "/initiative/projects/pageInfo/endCursor",
+                serde_json::json!(" "),
+            ),
+            (
+                "/initiative/projects/pageInfo/endCursor",
+                serde_json::json!(1),
+            ),
+        ] {
+            let mut data = valid.clone();
+            *data.pointer_mut(path).unwrap() = value;
+            assert!(
+                mcptools_core::linear::transform_initiative(data, &id).is_err(),
+                "{path}"
+            );
+        }
+        for field in [
+            "id",
+            "name",
+            "status",
+            "description",
+            "content",
+            "targetDate",
+            "owner",
+            "url",
+            "projects",
+        ] {
+            let mut data = valid.clone();
+            data["initiative"].as_object_mut().unwrap().remove(field);
+            assert!(
+                mcptools_core::linear::transform_initiative(data, &id).is_err(),
+                "{field}"
+            );
+        }
+        let mut data = valid.clone();
+        data["initiative"]["projects"]["pageInfo"]
+            .as_object_mut()
+            .unwrap()
+            .remove("endCursor");
+        assert!(mcptools_core::linear::transform_initiative(data, &id).is_err());
+        assert!(
+            mcptools_core::linear::transform_initiative(serde_json::json!({}), &id)
+                .unwrap_err()
+                .contains("Malformed")
+        );
+        assert!(mcptools_core::linear::transform_initiative(
+            serde_json::json!({"initiative": null}),
+            &id
+        )
+        .unwrap_err()
+        .contains("not found"));
+        let mut data = valid;
+        data["initiative"]["content"] = serde_json::Value::Null;
+        assert!(mcptools_core::linear::transform_initiative(data, &id)
+            .unwrap()
+            .0
+            .content
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn initiative_get_errors_and_bad_inputs_fail_without_partial_output() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let mut initiative: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_get.json"
+        ))
+        .unwrap();
+        let id = initiative["id"].clone();
+        initiative["projects"] = serde_json::json!({"nodes": initiative["projects"], "pageInfo": {"hasNextPage": true, "endCursor": null}});
+        for (status, body, message) in [
+            (
+                403,
+                serde_json::json!({"errors": [{"message": "Forbidden"}]}),
+                "403",
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"initiative": initiative}, "errors": [{"message": "Permission denied"}]}),
+                "Permission denied",
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"initiative": null}}),
+                "not found",
+            ),
+            (200, serde_json::json!({"data": {}}), "Malformed"),
+            (
+                200,
+                serde_json::json!({"data": {"initiative": initiative}}),
+                "cursor missing",
+            ),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(status).set_body_json(body))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let args = serde_json::from_value(serde_json::json!({"id": id})).unwrap();
+            let error = initiatives_get_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{error}");
+        }
+        let server = MockServer::start().await;
+        for id in ["", " ", "bad", "12345678-1234-1234-1234-123456789abz"] {
+            let args = serde_json::from_value(serde_json::json!({"id": id})).unwrap();
+            assert!(
+                initiatives_get_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("UUID")
+            );
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+        initiative["projects"]["pageInfo"]["endCursor"] = serde_json::json!("same");
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data": {"initiative": initiative}})),
+            )
+            .expect(2)
+            .mount(&server)
+            .await;
+        let args = serde_json::from_value(serde_json::json!({"id": id})).unwrap();
+        assert!(
+            initiatives_get_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("did not progress")
+        );
+    }
+
+    #[tokio::test]
+    async fn initiative_get_later_page_errors_do_not_return_partial_projects() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let mut initiative: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_get.json"
+        ))
+        .unwrap();
+        let id = initiative["id"].clone();
+        initiative["projects"] = serde_json::json!({"nodes": initiative["projects"], "pageInfo": {"hasNextPage": true, "endCursor": "next"}});
+        for (status, body, message) in [
+            (403, serde_json::json!({}), "403"),
+            (
+                200,
+                serde_json::json!({"data": {"initiative": initiative}, "errors": [{"message": "Permission denied"}]}),
+                "Permission denied",
+            ),
+            (200, serde_json::json!({"data": {}}), "Malformed"),
+            (
+                200,
+                serde_json::json!({"data": {"initiative": null}}),
+                "not found",
+            ),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": INITIATIVE_GET_QUERY, "variables": {"id": id, "first": 250, "after": null}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiative": initiative}})))
+                .expect(1).mount(&server).await;
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": INITIATIVE_GET_QUERY, "variables": {"id": id, "first": 250, "after": "next"}})))
+                .respond_with(ResponseTemplate::new(status).set_body_json(body))
+                .expect(1).mount(&server).await;
+            let args = serde_json::from_value(serde_json::json!({"id": id})).unwrap();
+            let error = initiatives_get_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn initiative_get_nested_projects_have_a_hard_page_cap() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+        let mut initiative: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_get.json"
+        ))
+        .unwrap();
+        let id = initiative["id"].clone();
+        initiative["projects"] =
+            serde_json::json!({"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": null}});
+        for terminal in [false, true] {
+            let server = MockServer::start().await;
+            let initiative = initiative.clone();
+            Mock::given(method("POST")).respond_with(move |request: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+                let page = body["variables"]["after"].as_str().map(|value| value.parse::<usize>().unwrap()).unwrap_or(0) + 1;
+                let mut initiative = initiative.clone();
+                initiative["projects"]["pageInfo"] = serde_json::json!({"hasNextPage": !terminal || page < 1000, "endCursor": page.to_string()});
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiative": initiative}}))
+            }).expect(1000).mount(&server).await;
+            let args = serde_json::from_value(serde_json::json!({"id": id})).unwrap();
+            let result =
+                initiatives_get_data_with_url(&reqwest::Client::new(), &server.uri(), args).await;
+            if terminal {
+                assert!(result.unwrap().projects.is_empty());
+            } else {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("exceeded 1000 pages"));
+            }
+        }
+    }
 
     #[tokio::test]
     async fn initiative_pages_preserve_fields_filters_and_final_page_info() {

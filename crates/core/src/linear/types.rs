@@ -489,6 +489,64 @@ pub struct InitiativeListOutput {
     pub page_info: PageInfo,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InitiativeGetOutput {
+    #[serde(flatten)]
+    pub initiative: Initiative,
+    pub content: Option<String>,
+    pub projects: Vec<Project>,
+}
+
+pub fn transform_initiative(
+    data: serde_json::Value,
+    expected_id: &str,
+) -> Result<(InitiativeGetOutput, PageInfo), String> {
+    let raw = data
+        .get("initiative")
+        .ok_or("Malformed initiative response: missing initiative")?;
+    if raw.is_null() {
+        return Err(format!("Initiative not found: {expected_id}"));
+    }
+    let initiative: Initiative = serde_json::from_value(raw.clone())
+        .map_err(|error| format!("Malformed initiative: {error}"))?;
+    validate_initiative(raw, &initiative)?;
+    if !initiative.id.eq_ignore_ascii_case(expected_id) {
+        return Err("Mismatched initiative identity".into());
+    }
+    let content = serde_json::from_value(
+        raw.get("content")
+            .ok_or("Malformed initiative: missing content")?
+            .clone(),
+    )
+    .map_err(|error| format!("Malformed initiative content: {error}"))?;
+    let connection = &raw["projects"];
+    if connection["pageInfo"].get("endCursor").is_none() {
+        return Err("Malformed initiative project pageInfo: missing endCursor".into());
+    }
+    let page: RawPaged<Project> = serde_json::from_value(connection.clone())
+        .map_err(|error| format!("Malformed initiative project connection: {error}"))?;
+    if page
+        .page_info
+        .end_cursor
+        .as_deref()
+        .is_some_and(|cursor| cursor.trim().is_empty() || cursor.chars().any(char::is_control))
+        || page
+            .nodes
+            .iter()
+            .any(|project| !super::resolve::is_uuid(&project.id) || project.name.trim().is_empty())
+    {
+        return Err("Malformed initiative projects or pagination cursor".into());
+    }
+    Ok((
+        InitiativeGetOutput {
+            initiative,
+            content,
+            projects: page.nodes,
+        },
+        page.page_info,
+    ))
+}
+
 pub fn transform_initiatives(data: serde_json::Value) -> Result<InitiativeListOutput, String> {
     let connection = &data["initiatives"];
     if connection["pageInfo"].get("endCursor").is_none() {
@@ -508,31 +566,35 @@ pub fn transform_initiatives(data: serde_json::Value) -> Result<InitiativeListOu
         .as_array()
         .ok_or("Malformed initiative nodes")?;
     for (raw, node) in raw_nodes.iter().zip(&page.nodes) {
-        if ["description", "targetDate", "owner"]
-            .iter()
-            .any(|field| raw.get(field).is_none())
-            || !super::resolve::is_uuid(&node.id)
-            || node.name.trim().is_empty()
-            || node
-                .target_date
-                .as_deref()
-                .is_some_and(|date| !valid_milestone_date(date))
-            || node.owner.as_ref().is_some_and(|owner| {
-                !super::resolve::is_uuid(&owner.id)
-                    || owner.name.trim().is_empty()
-                    || raw["owner"]["email"].as_str().is_none()
-            })
-            || !reqwest::Url::parse(&node.url).is_ok_and(|url| {
-                matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
-            })
-        {
-            return Err("Malformed initiative fields or owner identity".into());
-        }
+        validate_initiative(raw, node)?;
     }
     Ok(InitiativeListOutput {
         nodes: page.nodes,
         page_info: page.page_info,
     })
+}
+
+fn validate_initiative(raw: &serde_json::Value, node: &Initiative) -> Result<(), String> {
+    if ["description", "targetDate", "owner"]
+        .iter()
+        .any(|field| raw.get(field).is_none())
+        || !super::resolve::is_uuid(&node.id)
+        || node.name.trim().is_empty()
+        || node
+            .target_date
+            .as_deref()
+            .is_some_and(|date| !valid_milestone_date(date))
+        || node.owner.as_ref().is_some_and(|owner| {
+            !super::resolve::is_uuid(&owner.id)
+                || owner.name.trim().is_empty()
+                || raw["owner"]["email"].as_str().is_none()
+        })
+        || !reqwest::Url::parse(&node.url)
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+    {
+        return Err("Malformed initiative fields or owner identity".into());
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
