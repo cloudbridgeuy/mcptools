@@ -242,6 +242,8 @@ pub struct DocumentGetArgs {
     pub id: String,
 }
 
+pub use mcptools_core::linear::DocumentCreateArgs;
+
 impl DocumentGetArgs {
     pub fn validate(&self) -> Result<(), &'static str> {
         if !mcptools_core::linear::is_uuid(&self.id) {

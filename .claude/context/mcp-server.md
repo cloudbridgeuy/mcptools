@@ -103,6 +103,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `linear_initiative_list` | List workspace initiatives with case-sensitive name query; nullable description, targetDate and owner; limit 1–250, cursor, all (1000 pages maximum); MCP-only Read |
 | `linear_initiative_get` | Get initiative by required UUID; nullable metadata and Markdown content; every directly linked project including archived projects; 250 projects/page, 1000-page cap, no silent truncation; MCP-only Read |
 | `linear_document_get` | Get document by required UUID; title, nullable verbatim Markdown, timestamps, URL, nullable owner and project; MCP-only Read |
+| `linear_document_create` | Create a document attached to an existing project UUID or name with team; nonblank title, optional verbatim Markdown; complete document and project identity; MCP-only Write, requires `allowWrites` in discovery/code mode |
 | `linear_initiative_project_add` | Link existing initiative UUID to existing project UUID or name with team; returns association id and initiative/project identities; duplicate links and hierarchy conflicts fail without mutation retry; MCP-only Write (`allowWrites` required) |
 | `linear_project_milestone_list` | List milestones scoped to project UUID or name with team; nullable description/date; limit 1–250, cursor, all; Read |
 | `linear_project_milestone_create` | Create a milestone in project UUID or name with team; name required, verbatim Markdown description, YYYY-MM-DD targetDate, finite sortOrder; absent/null optionals omitted; Write |

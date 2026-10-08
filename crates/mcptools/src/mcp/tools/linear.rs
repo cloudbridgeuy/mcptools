@@ -387,6 +387,26 @@ pub async fn handle_linear_initiative_get(
     super::to_dual_result(output)
 }
 
+pub async fn handle_linear_document_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::DocumentCreateArgs = parse_args(arguments)?;
+    mcptools_core::linear::document_create_input(&args).map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_document_create: project={}", args.project);
+    }
+    let client = linear_client()?;
+    let output = crate::linear::discover::document_create_data(&client, &args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_document_get(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -1219,6 +1239,105 @@ mod tests {
             incomplete.as_object_mut().unwrap().remove(field);
             assert!(!validator.is_valid(&incomplete));
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn document_create_contract_dispatch_and_write_gates() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for input in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"title": "Plan"}),
+            serde_json::json!({"project": id, "title": null}),
+            serde_json::json!({"project": id, "title": 1}),
+            serde_json::json!({"project": id, "title": " "}),
+            serde_json::json!({"project": id, "title": "Plan", "team": 1}),
+            serde_json::json!({"project": id, "title": "Plan", "content": []}),
+            serde_json::json!({"project": id, "title": "Plan", "extra": 1}),
+        ] {
+            assert_eq!(
+                handle_linear_document_create(Some(input), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+        }
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_document_create", "arguments": {"project": id}})), &global, flags).await.unwrap_err();
+            assert_eq!(direct.code, -32602);
+            for allow in [false, true] {
+                let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_document_create", "input": {"project": id}, "allowWrites": allow}})), &global, flags).await;
+                if allow {
+                    assert_eq!(call.unwrap_err().code, -32602);
+                } else {
+                    let denied = call.unwrap();
+                    assert_eq!(denied["isError"], true);
+                    assert!(denied["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("allowWrites"));
+                }
+                let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_document_create({{project: '{id}'}})"), "allowWrites": allow}})), &global, flags).await.unwrap();
+                assert!(result["structuredContent"]["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(if allow {
+                        "Invalid arguments:"
+                    } else {
+                        "allowWrites"
+                    }));
+            }
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_document_create")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Write);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_document_create",
+            "project: string",
+            "title: string",
+            "content?: string",
+            "team?: string",
+        ] {
+            assert!(declaration.contains(field), "{field}: {declaration}");
+        }
+        let validator = jsonschema::draft202012::new(&tool.input_schema).unwrap();
+        assert!(validator.is_valid(&serde_json::json!({"project": id, "title": "Plan"})));
+        assert!(validator.is_valid(&serde_json::json!({"project": "Delivery", "title": "Plan", "team": "GUZ", "content": "    code\n"})));
+        let mut sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/contract_samples/linear_document_create.json"
+        ))
+        .unwrap();
+        let output_validator = jsonschema::draft202012::new(&tool.output_schema).unwrap();
+        sample["content"] = serde_json::Value::Null;
+        assert!(output_validator.is_valid(&sample));
+        let output: mcptools_core::linear::DocumentCreateOutput =
+            serde_json::from_value(sample.clone()).unwrap();
+        assert_eq!(serde_json::to_value(output).unwrap(), sample);
+        sample["project"] = serde_json::Value::Null;
+        assert!(!output_validator.is_valid(&sample));
     }
 
     #[tokio::test(flavor = "multi_thread")]

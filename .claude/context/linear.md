@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-31 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+32 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -115,6 +115,7 @@ linear_team_list, linear_team_get
 linear_initiative_list (workspace initiatives; optional name query; limit/cursor/all)
 linear_initiative_get (required initiative UUID; Markdown content and all directly linked projects)
 linear_document_get (required document UUID; Markdown content and nullable owner/project)
+linear_document_create (existing project UUID or name with team, nonblank title; optional Markdown content)
 linear_project_list, linear_project_get
 linear_project_status_list
 linear_project_milestone_list
@@ -171,6 +172,8 @@ Output is `{nodes, pageInfo}`; empty results include `nodes: []`. Each node has 
 `linear_initiative_project_add({initiative: "initiative-UUID", project: "project-UUID"})` links an existing project to an existing initiative; it creates neither entity. Required `initiative` is a UUID; required `project` is a UUID or project name with `team` (UUID, key, or name). Both entities resolve before `initiativeToProjectCreate`; missing or ambiguous selectors fail before mutation. Invalid inputs and unknown fields reject before HTTP. Returns association `id`, `initiative: {id, name}`, and `project: {id, name}` with strict mutation success and matching identities. HTTP/GraphQL errors, duplicate links and hierarchy conflicts fail without mutation retry or claimed success. MCP-only Write; `call_tool` and `execute` require `allowWrites: true`. No CLI command added.
 
 ### Project documents (MCP only)
+
+`linear_document_create({project: "project-UUID", title: "Delivery plan", content: "# Plan\n"})` creates a document attached to an existing project via `documentCreate(input: DocumentCreateInput)`. Project names require `team` (UUID, key, or name); UUIDs do not. Nonblank title and valid selectors are checked before HTTP; missing or ambiguous projects fail before mutation. Title is trimmed; Markdown content is preserved exactly, including indentation and empty strings. Omitted or null content is omitted from the mutation. Returns `id`, `title`, nullable `content`, `url`, `createdAt`, `updatedAt`, and non-null `project: {id, name}`. Mutation success, complete selected output, and matching project identity are checked. HTTP/GraphQL/permission errors fail without partial success or automatic mutation retry. MCP-only Write; discovery `call_tool` and code-mode `execute` require `allowWrites: true`. No initiative/issue/cycle associations, rich-text JSON, attachments, or CLI command. No live API writes used for verification.
 
 `linear_document_get({id: "document-UUID"})` queries `document(id)` and returns `id`, `title`, nullable verbatim Markdown `content`, `url`, `createdAt`, `updatedAt`, nullable `owner: {id, name, email}`, and nullable `project: {id, name}`. Documents outside projects return explicit `project: null`; null content and owner also remain explicit. Empty titles are valid and preserved. Required `id` must be an exact UUID; slugs, blank or malformed IDs, missing/null/wrong-typed inputs, and unknown fields reject before HTTP. Missing documents, mismatched IDs, malformed selected fields, and HTTP/GraphQL/permission errors fail without partial output. No document listing, attachments, export/file generation, or CLI command. MCP-only Read in direct, discovery and code mode; no `allowWrites` needed. Schema verified 2026-10-08 from the public Linear SDK schema: `Query.document(id: String!): Document!`; nullable `Document.content`, `owner`, and `project`; non-null selected identity, title, URL, and timestamps. No authenticated live API call.
 

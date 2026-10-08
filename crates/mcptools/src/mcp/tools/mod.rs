@@ -667,6 +667,14 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             kind: ToolKind::Write,
+            output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentCreateOutput>(),
+            name: "linear_document_create".to_string(),
+            summary: "Create a Markdown document attached to an existing Linear project",
+            description: "Create a document attached to an existing project UUID, or project name with team context. Requires a nonblank title; optional Markdown content preserves exact whitespace and is omitted when absent or null. Returns id, title, nullable content, url, createdAt, updatedAt and project {id, name}. Missing or ambiguous projects fail before mutation; mutation success and complete output are checked. MCP-only Write; requires LINEAR_API_KEY and allowWrites in call_tool and execute.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::DocumentCreateArgs>(),
+        },
+        Tool {
+            kind: ToolKind::Write,
             output_schema: schema::output_schema_for::<mcptools_core::linear::InitiativeProjectAddOutput>(),
             name: "linear_initiative_project_add".to_string(),
             summary: "Link an existing Linear project to an existing initiative",
@@ -1020,6 +1028,9 @@ pub async fn handle_tools_call(
             linear::handle_linear_initiative_get(params.arguments, global).await
         }
         "linear_document_get" => linear::handle_linear_document_get(params.arguments, global).await,
+        "linear_document_create" => {
+            linear::handle_linear_document_create(params.arguments, global).await
+        }
         "linear_initiative_project_add" => {
             linear::handle_linear_initiative_project_add(params.arguments, global).await
         }
@@ -1112,7 +1123,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 79);
+        assert_eq!(catalog.len(), 80);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1178,7 +1189,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 82);
+        assert_eq!(super::registered_tools().len(), 83);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1255,7 +1266,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 82);
+        assert_eq!(names(serve_flags(false)).len(), 83);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1328,6 +1339,7 @@ mod catalog_tests {
             "bitbucket_pr_comment_add",
             "bitbucket_pr_update",
             "linear_project_create",
+            "linear_document_create",
             "linear_project_milestone_create",
             "linear_project_milestone_update",
             "linear_project_update",
@@ -1346,7 +1358,7 @@ mod catalog_tests {
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 82);
+        assert_eq!(tools.len(), 83);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1365,7 +1377,7 @@ mod catalog_tests {
             .filter(|t| t["annotations"] == readonly)
             .count();
         assert_eq!(read_count, 52);
-        assert_eq!(read_count, 82 - mutable_names.len());
+        assert_eq!(read_count, 83 - mutable_names.len());
     }
 
     #[test]
@@ -1384,6 +1396,7 @@ mod catalog_tests {
             "bitbucket_pr_comment_add",
             "bitbucket_pr_update",
             "linear_project_create",
+            "linear_document_create",
             "linear_project_milestone_create",
             "linear_project_milestone_update",
             "linear_project_update",
@@ -1463,7 +1476,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 82);
+        assert_eq!(union.len(), 83);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

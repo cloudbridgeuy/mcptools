@@ -578,6 +578,74 @@ pub struct DocumentGetOutput {
     pub project: Option<Project>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentCreateArgs {
+    #[schemars(description = "Project UUID or project name; names require team")]
+    pub project: String,
+    #[schemars(description = "Document title; must not be blank")]
+    pub title: String,
+    #[schemars(description = "Team UUID, key, or name for project name resolution")]
+    pub team: Option<String>,
+    #[schemars(description = "Markdown content; exact whitespace preserved")]
+    pub content: Option<String>,
+}
+
+pub fn document_create_input(args: &DocumentCreateArgs) -> Result<serde_json::Value, String> {
+    validate_project_create_selector(&args.project, args.team.as_deref())?;
+    if args.title.trim().is_empty() {
+        return Err("Document title must not be blank".into());
+    }
+    let mut input = serde_json::json!({"title": args.title.trim()});
+    if let Some(content) = &args.content {
+        input["content"] = serde_json::json!(content);
+    }
+    Ok(input)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentCreateOutput {
+    pub id: String,
+    pub title: String,
+    pub content: Option<String>,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub project: Project,
+}
+
+pub fn transform_document_create(
+    data: serde_json::Value,
+    expected_project: &Project,
+) -> Result<DocumentCreateOutput, String> {
+    let payload = &data["documentCreate"];
+    if payload["success"].as_bool() != Some(true) {
+        return Err("Linear documentCreate failed: success was not true".into());
+    }
+    let raw = &payload["document"];
+    if raw.get("content").is_none() {
+        return Err("Malformed created document: missing content".into());
+    }
+    let document: DocumentCreateOutput = serde_json::from_value(raw.clone())
+        .map_err(|error| format!("Malformed created document: {error}"))?;
+    if !super::is_uuid(&document.id)
+        || document.title.trim().is_empty()
+        || !document
+            .project
+            .id
+            .eq_ignore_ascii_case(&expected_project.id)
+        || document.project.name != expected_project.name
+        || chrono::DateTime::parse_from_rfc3339(&document.created_at).is_err()
+        || chrono::DateTime::parse_from_rfc3339(&document.updated_at).is_err()
+        || !reqwest::Url::parse(&document.url)
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+    {
+        return Err("Malformed document fields or mismatched project identity".into());
+    }
+    Ok(document)
+}
+
 pub fn transform_document(
     data: serde_json::Value,
     expected_id: &str,
