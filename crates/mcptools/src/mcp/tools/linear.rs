@@ -347,6 +347,26 @@ pub async fn handle_linear_initiative_list(
     super::to_dual_result(output)
 }
 
+pub async fn handle_linear_initiative_project_add(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::InitiativeProjectAddArgs = parse_args(arguments)?;
+    args.validate().map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_initiative_project_add");
+    }
+    let client = linear_client()?;
+    let output = crate::linear::discover::initiative_project_add_data(&client, &args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_initiative_get(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -909,6 +929,97 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn initiative_project_add_contract_dispatch_and_write_gates() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let id = "12345678-1234-1234-1234-123456789abc";
+        for input in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"initiative": "bad", "project": id}),
+            serde_json::json!({"initiative": id, "project": "Example"}),
+            serde_json::json!({"initiative": id, "project": id, "team": " "}),
+            serde_json::json!({"initiative": id, "project": id, "extra": true}),
+            serde_json::json!({"initiative": id, "project": "12345678-1234-1234-1234-123456789xyz", "team": "GUZ"}),
+        ] {
+            assert_eq!(
+                handle_linear_initiative_project_add(Some(input), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+        }
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            assert_eq!(super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_initiative_project_add", "arguments": {}})), &global, flags).await.unwrap_err().code, -32602);
+            for allow in [false, true] {
+                let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_initiative_project_add", "input": {}, "allowWrites": allow}})), &global, flags).await;
+                if allow {
+                    assert_eq!(call.unwrap_err().code, -32602);
+                } else {
+                    let denied = call.unwrap();
+                    assert_eq!(denied["isError"], true);
+                    assert!(denied["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("allowWrites"));
+                }
+                let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": "return await linear_initiative_project_add({})", "allowWrites": allow}})), &global, flags).await.unwrap();
+                assert!(result["structuredContent"]["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(if allow {
+                        "Invalid arguments:"
+                    } else {
+                        "allowWrites"
+                    }));
+            }
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_initiative_project_add")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Write);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_initiative_project_add",
+            "initiative: string",
+            "project: string",
+            "team?: string",
+        ] {
+            assert!(declaration.contains(field), "{declaration}");
+        }
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/contract_samples/linear_initiative_project_add.json"
+        ))
+        .unwrap();
+        let validator = jsonschema::draft202012::new(&tool.output_schema).unwrap();
+        assert!(validator.is_valid(&sample));
+        for field in ["id", "initiative", "project"] {
+            let mut incomplete = sample.clone();
+            incomplete.as_object_mut().unwrap().remove(field);
+            assert!(!validator.is_valid(&incomplete));
+        }
+    }
+
+    #[tokio::test]
     async fn project_update_create_contract_dispatch_and_write_gates() {
         let global = crate::Global {
             verbose: false,

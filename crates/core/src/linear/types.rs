@@ -21,6 +21,74 @@ pub struct Project {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InitiativeProjectAddArgs {
+    #[schemars(description = "Required existing initiative UUID")]
+    pub initiative: String,
+    #[schemars(description = "Existing project UUID or name; names require team")]
+    pub project: String,
+    #[schemars(description = "Team UUID, key, or name for project name resolution")]
+    pub team: Option<String>,
+}
+
+impl InitiativeProjectAddArgs {
+    pub fn validate(&self) -> Result<(), String> {
+        if !super::resolve::is_uuid(&self.initiative) {
+            return Err("initiative must be an initiative UUID".into());
+        }
+        validate_project_create_selector(&self.project, self.team.as_deref())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InitiativeIdentity {
+    pub id: String,
+    pub name: String,
+}
+
+pub fn transform_initiative_identity(
+    data: serde_json::Value,
+    expected_id: &str,
+) -> Result<InitiativeIdentity, String> {
+    let initiative: InitiativeIdentity = serde_json::from_value(data["initiative"].clone())
+        .map_err(|error| format!("Initiative not found or malformed: {error}"))?;
+    if !initiative.id.eq_ignore_ascii_case(expected_id) || initiative.name.trim().is_empty() {
+        return Err("Malformed or mismatched initiative identity".into());
+    }
+    Ok(initiative)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InitiativeProjectAddOutput {
+    pub id: String,
+    pub initiative: InitiativeIdentity,
+    pub project: Project,
+}
+
+pub fn transform_initiative_project_add(
+    data: serde_json::Value,
+    initiative: &InitiativeIdentity,
+    project: &Project,
+) -> Result<InitiativeProjectAddOutput, String> {
+    let payload = &data["initiativeToProjectCreate"];
+    if payload["success"].as_bool() != Some(true) {
+        return Err("Linear initiativeToProjectCreate failed: success was not true".into());
+    }
+    let link: InitiativeProjectAddOutput =
+        serde_json::from_value(payload["initiativeToProject"].clone())
+            .map_err(|error| format!("Malformed initiative-project association: {error}"))?;
+    if !super::resolve::is_uuid(&link.id)
+        || !link.initiative.id.eq_ignore_ascii_case(&initiative.id)
+        || link.initiative.name.trim().is_empty()
+        || !link.project.id.eq_ignore_ascii_case(&project.id)
+        || link.project.name.trim().is_empty()
+    {
+        return Err("Malformed association or mismatched initiative/project identity".into());
+    }
+    Ok(link)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ProjectUpdateHealth {

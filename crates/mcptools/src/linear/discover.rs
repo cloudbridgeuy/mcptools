@@ -20,6 +20,48 @@ pub async fn initiatives_get_data(
     initiatives_get_data_with_url(client, LINEAR_API_URL, args).await
 }
 
+pub const INITIATIVE_IDENTITY_QUERY: &str =
+    "query ($id: String!) { initiative(id: $id) { id name } }";
+pub const INITIATIVE_PROJECT_ADD_MUTATION: &str = "mutation ($input: InitiativeToProjectCreateInput!) { initiativeToProjectCreate(input: $input) { success initiativeToProject { id initiative { id name } project { id name } } } }";
+
+pub async fn initiative_project_add_data(
+    client: &reqwest::Client,
+    args: &crate::linear::args::InitiativeProjectAddArgs,
+) -> Result<mcptools_core::linear::InitiativeProjectAddOutput> {
+    initiative_project_add_data_with_url(client, LINEAR_API_URL, args).await
+}
+
+async fn initiative_project_add_data_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    args: &crate::linear::args::InitiativeProjectAddArgs,
+) -> Result<mcptools_core::linear::InitiativeProjectAddOutput> {
+    args.validate().map_err(|error| eyre!(error))?;
+    let project =
+        resolve_project_with_url(client, url, &args.project, args.team.as_deref()).await?;
+    if !mcptools_core::linear::is_uuid(&project.id) {
+        return Err(eyre!("Malformed project identity"));
+    }
+    let data = execute_with_url(
+        client,
+        url,
+        INITIATIVE_IDENTITY_QUERY,
+        serde_json::json!({"id": args.initiative}),
+    )
+    .await?;
+    let initiative = mcptools_core::linear::transform_initiative_identity(data, &args.initiative)
+        .map_err(|error| eyre!(error))?;
+    let data = execute_with_url(
+        client,
+        url,
+        INITIATIVE_PROJECT_ADD_MUTATION,
+        serde_json::json!({"input": {"initiativeId": initiative.id, "projectId": project.id}}),
+    )
+    .await?;
+    mcptools_core::linear::transform_initiative_project_add(data, &initiative, &project)
+        .map_err(|error| eyre!(error))
+}
+
 async fn initiatives_get_data_with_url(
     client: &reqwest::Client,
     url: &str,
@@ -2980,6 +3022,173 @@ mod tests {
             )
             .await
             .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn initiative_project_add_checks_entities_mutation_and_failures() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_project_add.json"
+        ))
+        .unwrap();
+        let args: crate::linear::args::InitiativeProjectAddArgs = serde_json::from_value(serde_json::json!({"initiative": sample["initiative"]["id"], "project": sample["project"]["id"]})).unwrap();
+        let success = serde_json::json!({"data": {"initiativeToProjectCreate": {"success": true, "initiativeToProject": sample}}});
+        let mut cases = vec![(200, success.clone())];
+        for message in [
+            "Project already associated with initiative",
+            "Forbidden",
+            "GraphQL failure",
+        ] {
+            cases.push((200, serde_json::json!({"errors": [{"message": message}]})));
+        }
+        cases.push((
+            500,
+            serde_json::json!({"errors": [{"message": "HTTP failure"}]}),
+        ));
+        cases.push((
+            429,
+            serde_json::json!({"errors": [{"message": "Rate limited"}]}),
+        ));
+        for pointer in [
+            "/data/initiativeToProjectCreate/success",
+            "/data/initiativeToProjectCreate/initiativeToProject/id",
+            "/data/initiativeToProjectCreate/initiativeToProject/initiative",
+            "/data/initiativeToProjectCreate/initiativeToProject/project",
+        ] {
+            let mut malformed = success.clone();
+            *malformed.pointer_mut(pointer).unwrap() = serde_json::Value::Null;
+            cases.push((200, malformed));
+        }
+        let mut failed = success.clone();
+        failed["data"]["initiativeToProjectCreate"]["success"] = serde_json::json!(false);
+        cases.push((200, failed));
+        let mut mismatched = success.clone();
+        mismatched["data"]["initiativeToProjectCreate"]["initiativeToProject"]["project"]["id"] =
+            sample["initiative"]["id"].clone();
+        cases.push((200, mismatched));
+        for (index, (status, response)) in cases.into_iter().enumerate() {
+            let server = MockServer::start().await;
+            for (query, variables, data) in [
+                (
+                    PROJECT_GET_QUERY,
+                    serde_json::json!({"id": args.project}),
+                    serde_json::json!({"project": sample["project"]}),
+                ),
+                (
+                    INITIATIVE_IDENTITY_QUERY,
+                    serde_json::json!({"id": args.initiative}),
+                    serde_json::json!({"initiative": sample["initiative"]}),
+                ),
+            ] {
+                Mock::given(method("POST"))
+                    .and(body_json(
+                        serde_json::json!({"query": query, "variables": variables}),
+                    ))
+                    .respond_with(
+                        ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": data})),
+                    )
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+            }
+            Mock::given(method("POST")).and(body_json(serde_json::json!({"query": INITIATIVE_PROJECT_ADD_MUTATION, "variables": {"input": {"initiativeId": args.initiative, "projectId": args.project}}}))).respond_with(ResponseTemplate::new(status).set_body_json(response)).expect(1).mount(&server).await;
+            let result =
+                initiative_project_add_data_with_url(&reqwest::Client::new(), &server.uri(), &args)
+                    .await;
+            if index == 0 {
+                let dual = crate::mcp::tools::to_dual_result(result.unwrap()).unwrap();
+                assert_eq!(dual["structuredContent"], sample);
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(
+                        dual["content"][0]["text"].as_str().unwrap()
+                    )
+                    .unwrap(),
+                    sample
+                );
+            } else {
+                assert!(result.is_err(), "case {index}");
+                if index == 1 {
+                    assert!(result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("already associated"));
+                }
+            }
+        }
+        for entity in ["project", "initiative"] {
+            for response in [
+                serde_json::json!({"data": {entity: null}}),
+                serde_json::json!({"errors": [{"message": "Forbidden"}]}),
+            ] {
+                let server = MockServer::start().await;
+                if entity == "initiative" {
+                    Mock::given(body_json(serde_json::json!({"query": PROJECT_GET_QUERY, "variables": {"id": args.project}}))).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"project": sample["project"]}}))).expect(1).mount(&server).await;
+                }
+                let (query, id) = if entity == "project" {
+                    (PROJECT_GET_QUERY, &args.project)
+                } else {
+                    (INITIATIVE_IDENTITY_QUERY, &args.initiative)
+                };
+                Mock::given(body_json(
+                    serde_json::json!({"query": query, "variables": {"id": id}}),
+                ))
+                .respond_with(ResponseTemplate::new(200).set_body_json(response))
+                .expect(1)
+                .mount(&server)
+                .await;
+                assert!(initiative_project_add_data_with_url(
+                    &reqwest::Client::new(),
+                    &server.uri(),
+                    &args
+                )
+                .await
+                .is_err());
+                assert_eq!(
+                    server.received_requests().await.unwrap().len(),
+                    if entity == "project" { 1 } else { 2 }
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn initiative_project_add_resolves_project_names_before_mutation() {
+        use wiremock::matchers::body_json;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_project_add.json"
+        ))
+        .unwrap();
+        let team_id = "12345678-1234-1234-1234-123456789bbb";
+        for count in [0, 1, 2] {
+            let server = MockServer::start().await;
+            Mock::given(body_json(serde_json::json!({"query": TEAMS_QUERY, "variables": {"first": 50, "after": null}}))).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"teams": {"nodes": [{"id": team_id, "key": "GUZ", "name": "Team"}], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}))).expect(1).mount(&server).await;
+            let mut projects = Vec::new();
+            if count > 0 {
+                projects.push(sample["project"].clone());
+            }
+            if count > 1 {
+                projects.push(serde_json::json!({"id": team_id, "name": "Example"}));
+            }
+            Mock::given(body_json(serde_json::json!({"query": TEAM_PROJECTS_QUERY, "variables": {"id": team_id, "first": 50, "after": null}}))).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"team": {"id": team_id, "projects": {"nodes": projects, "pageInfo": {"hasNextPage": false, "endCursor": null}}}}}))).expect(1).mount(&server).await;
+            if count == 1 {
+                Mock::given(body_json(serde_json::json!({"query": INITIATIVE_IDENTITY_QUERY, "variables": {"id": sample["initiative"]["id"]}}))).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiative": sample["initiative"]}}))).expect(1).mount(&server).await;
+                Mock::given(body_json(serde_json::json!({"query": INITIATIVE_PROJECT_ADD_MUTATION, "variables": {"input": {"initiativeId": sample["initiative"]["id"], "projectId": sample["project"]["id"]}}}))).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiativeToProjectCreate": {"success": true, "initiativeToProject": sample}}}))).expect(1).mount(&server).await;
+            }
+            let args = serde_json::from_value(serde_json::json!({"initiative": sample["initiative"]["id"], "project": " Example ", "team": "GUZ"})).unwrap();
+            let result =
+                initiative_project_add_data_with_url(&reqwest::Client::new(), &server.uri(), &args)
+                    .await;
+            if count == 1 {
+                assert_eq!(serde_json::to_value(result.unwrap()).unwrap(), sample);
+            } else {
+                assert!(result.is_err());
+                assert_eq!(server.received_requests().await.unwrap().len(), 2);
+            }
         }
     }
 

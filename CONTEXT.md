@@ -51,7 +51,7 @@ The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **D
 
 #### Scenario: Default list
 - **WHEN** the server starts with neither mode flag nor either mode env var
-- **THEN** `tools/list` returns all 80 registered tools
+- **THEN** `tools/list` returns all 81 registered tools
 
 #### Scenario: Unlisted tool call
 - **WHEN** a client in **Discovery mode** sends `tools/call` with the name of a tool that `tools/list` did not return
@@ -184,7 +184,11 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 - **WHEN** `tools/call` invokes `execute` without `code`
 - **THEN** the server returns a JSON-RPC error with code `-32602`
 
+### Requirement: Linear initiative project linkage
+`linear_initiative_project_add` is an MCP-only Write. It requires an existing initiative UUID and an existing project UUID, or project name with team context. Both entities resolve before `initiativeToProjectCreate`. Output includes association id and initiative/project identities. Duplicate or hierarchy conflicts remain API errors; no mutation retry or entity creation. `call_tool` and `execute` require `allowWrites`.
+
 ### Requirement: Linear chart rendering
+
 `linear chart` takes **Issue identifier**s, a `--project` selector, or both (project names need `--team`), fetches the transitive closure of sub-issues, parents, `blocked_by` blockers, and forward `blocks` targets (cap `--limit`, default 300 issues, stderr warning when the cap stops expansion), drops canceled issues, and classifies the rest as complete, in progress, frontier (no incomplete blocker), or fog (at least one incomplete blocker). `--exclude-completed` hides completed issues and drops their blocker edges so dependents render as frontier. It writes a full-viewport dark-themed HTML Mermaid page — one subgraph per parent issue, state legend — to `<temp dir>/mcptools-linear-chart-<project-or-first-id>.html` unless `--out` overrides it, prints the output path and a stats line, and opens the page in the default browser unless `--no-open`. `--serve` instead starts a foreground loopback server (default `--port 0` assigns a random open port, `PORT` env also read) that serves an interactive page plus JSON APIs: `GET /api/chart` refreshes the closure, `GET /api/issues/:id` returns full details, `GET /api/states?team=` lists workflow states, `POST /api/issues/:id/state` transitions state. The page has a Refresh button plus `r` keybinding, click-drag pans and scrollwheel zooms the diagram, ticket clicks open a detail modal with markdown-rendered description and comments, and a state select that auto-posts a transition then refreshes the diagram only. `--out` conflicts with `--serve`.
 
 #### Scenario: Closure and classification

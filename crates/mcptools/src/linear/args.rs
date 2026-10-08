@@ -1,3 +1,4 @@
+pub use mcptools_core::linear::InitiativeProjectAddArgs;
 pub use mcptools_core::linear::ProjectMilestoneUpdateArgs;
 pub use mcptools_core::linear::ProjectUpdateArgs;
 pub use mcptools_core::linear::ProjectUpdateCreateArgs;
