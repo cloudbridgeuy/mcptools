@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-26 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+27 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -146,6 +146,8 @@ Explicit clears: `clearDescription` and `clearContent` set empty strings; `clear
 Output returns `id`, `name`, `url`, non-null `description`, nullable `content`, `status: {id, name, type}`, nullable `lead: {id, name, email}`, nullable `startDate` and `targetDate`, and numeric `priority`. HTTP/GraphQL errors (including partial data), unsuccessful mutations, and missing/malformed selected response fields fail; no false success. This is a Write tool: `call_tool` and `execute` require `allowWrites: true`. No CLI update command is added.
 
 ### Project milestones (MCP only)
+
+`linear_project_milestone_update({id: "milestone-UUID", name: "Release"})` partially edits name, verbatim description (including empty/blank strings), valid YYYY-MM-DD targetDate, or finite sortOrder. Omission leaves fields unchanged. `clearDescription` and `clearTargetDate` set null; set/clear conflicts and no-op requests fail before HTTP. Explicit null inputs, unknown fields, blank names and non-UUID ids fail. No project reassignment. Returns the complete milestone with strict success, complete typed properties and case-insensitive matching milestone UUID; project names may change concurrently. MCP-only Write; `call_tool` and `execute` require `allowWrites: true`.
 
 `linear_project_milestone_list({project: "project-UUID"})` reads one project's milestones. Project names require `team` (UUID, key, or name); resolution scans all team and project pages and rejects missing or ambiguous matches. Unknown fields, null inputs, blank selectors/cursors, malformed UUID-shaped selectors, and invalid limits reject before HTTP. `limit` defaults to 25, range 1–250; `cursor` starts at that page; `all` defaults to false and traverses remaining pages.
 

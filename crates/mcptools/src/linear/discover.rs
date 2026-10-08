@@ -126,6 +126,33 @@ pub const PROJECT_MILESTONES_QUERY: &str = "query ($id: String!, $first: Int!, $
 
 pub const PROJECT_MILESTONE_CREATE_MUTATION: &str = "mutation ($input: ProjectMilestoneCreateInput!) { projectMilestoneCreate(input: $input) { success projectMilestone { id name description targetDate status sortOrder project { id name } } } }";
 
+pub const PROJECT_MILESTONE_UPDATE_MUTATION: &str = "mutation ($id: String!, $input: ProjectMilestoneUpdateInput!) { projectMilestoneUpdate(id: $id, input: $input) { success projectMilestone { id name description targetDate status sortOrder project { id name } } } }";
+
+pub async fn project_milestones_update_data(
+    client: &reqwest::Client,
+    args: &crate::linear::args::ProjectMilestoneUpdateArgs,
+) -> Result<mcptools_core::linear::ProjectMilestone> {
+    project_milestones_update_data_with_url(client, LINEAR_API_URL, args).await
+}
+
+async fn project_milestones_update_data_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    args: &crate::linear::args::ProjectMilestoneUpdateArgs,
+) -> Result<mcptools_core::linear::ProjectMilestone> {
+    let input = mcptools_core::linear::project_milestone_update_input(args)
+        .map_err(|error| eyre!(error))?;
+    let data = execute_with_url(
+        client,
+        url,
+        PROJECT_MILESTONE_UPDATE_MUTATION,
+        serde_json::json!({"id": args.id.trim(), "input": input}),
+    )
+    .await?;
+    mcptools_core::linear::transform_project_milestone_update(data, &args.id)
+        .map_err(|error| eyre!(error))
+}
+
 pub async fn project_milestones_create_data(
     client: &reqwest::Client,
     args: &crate::linear::args::ProjectMilestoneCreateArgs,
@@ -2073,6 +2100,206 @@ mod tests {
                 .respond_with(ResponseTemplate::new(200).set_body_json(response))
                 .expect(1).mount(&server).await;
             assert!(project_milestones_create_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args
+            )
+            .await
+            .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn milestone_update_partial_clears_and_failed_responses() {
+        use mcptools_core::linear::{project_milestone_update_input, ProjectMilestoneUpdateArgs};
+        use wiremock::{
+            matchers::{body_json, method},
+            Mock, MockServer, ResponseTemplate,
+        };
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_project_milestone_update.json"
+        ))
+        .unwrap();
+        let id = sample["id"].as_str().unwrap();
+        let mut renamed = sample.clone();
+        renamed["name"] = serde_json::json!("Concurrent milestone rename");
+        renamed["project"]["name"] = serde_json::json!("Concurrent project rename");
+        renamed["description"] = serde_json::Value::Null;
+        renamed["targetDate"] = serde_json::Value::Null;
+        assert_eq!(serde_json::to_value(mcptools_core::linear::transform_project_milestone_update(
+            serde_json::json!({"projectMilestoneUpdate": {"success": true, "projectMilestone": renamed}}), &id.to_uppercase()
+        ).unwrap()).unwrap(), renamed);
+        for (fields, expected) in [
+            (
+                serde_json::json!({"name": " New "}),
+                serde_json::json!({"name": "New"}),
+            ),
+            (
+                serde_json::json!({"description": "    code\n"}),
+                serde_json::json!({"description": "    code\n"}),
+            ),
+            (
+                serde_json::json!({"description": ""}),
+                serde_json::json!({"description": ""}),
+            ),
+            (
+                serde_json::json!({"description": " \n"}),
+                serde_json::json!({"description": " \n"}),
+            ),
+            (
+                serde_json::json!({"targetDate": "2028-02-29"}),
+                serde_json::json!({"targetDate": "2028-02-29"}),
+            ),
+            (
+                serde_json::json!({"sortOrder": 0}),
+                serde_json::json!({"sortOrder": 0.0}),
+            ),
+            (
+                serde_json::json!({"clearDescription": true}),
+                serde_json::json!({"description": null}),
+            ),
+            (
+                serde_json::json!({"clearTargetDate": true}),
+                serde_json::json!({"targetDate": null}),
+            ),
+            (
+                serde_json::json!({"name": "New", "description": " x ", "targetDate": "2028-02-29", "sortOrder": -1.5}),
+                serde_json::json!({"name": "New", "description": " x ", "targetDate": "2028-02-29", "sortOrder": -1.5}),
+            ),
+            (
+                serde_json::json!({"clearDescription": true, "clearTargetDate": true}),
+                serde_json::json!({"description": null, "targetDate": null}),
+            ),
+        ] {
+            let server = MockServer::start().await;
+            let mut raw = fields;
+            raw["id"] = serde_json::json!(id.to_uppercase());
+            let args: ProjectMilestoneUpdateArgs = serde_json::from_value(raw).unwrap();
+            assert_eq!(project_milestone_update_input(&args).unwrap(), expected);
+            Mock::given(method("POST")).and(body_json(serde_json::json!({"query": PROJECT_MILESTONE_UPDATE_MUTATION, "variables": {"id": id.to_uppercase(), "input": expected}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"projectMilestoneUpdate": {"success": true, "projectMilestone": sample}}}))).expect(1).mount(&server).await;
+            let output = project_milestones_update_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args,
+            )
+            .await
+            .unwrap();
+            assert_eq!(serde_json::to_value(output).unwrap(), sample);
+        }
+        let server = MockServer::start().await;
+        for fields in [
+            serde_json::json!({}),
+            serde_json::json!({"name": " "}),
+            serde_json::json!({"id": "", "name": "New"}),
+            serde_json::json!({"id": "bad", "name": "New"}),
+            serde_json::json!({"description": "", "clearDescription": true}),
+            serde_json::json!({"targetDate": "2028-02-29", "clearTargetDate": true}),
+            serde_json::json!({"targetDate": "2026-04-31"}),
+            serde_json::json!({"clearDescription": false}),
+        ] {
+            let mut raw = serde_json::json!({"id": id});
+            raw.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let args = serde_json::from_value(raw).unwrap();
+            assert!(project_milestones_update_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args
+            )
+            .await
+            .is_err());
+        }
+        let mut args: ProjectMilestoneUpdateArgs =
+            serde_json::from_value(serde_json::json!({"id": id, "name": "New"})).unwrap();
+        for number in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            args.sort_order = Some(number);
+            assert!(project_milestones_update_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args
+            )
+            .await
+            .is_err());
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+        args.sort_order = None;
+        let valid = serde_json::json!({"data": {"projectMilestoneUpdate": {"success": true, "projectMilestone": sample}}});
+        let mut failures = vec![
+            serde_json::json!({"errors": [{"message": "failed"}], "data": valid["data"]}),
+            serde_json::json!({}),
+            serde_json::Value::Null,
+            serde_json::json!({"data": null}),
+            serde_json::json!({"data": []}),
+            serde_json::json!({"data": {}}),
+        ];
+        for payload in [
+            serde_json::Value::Null,
+            serde_json::json!({"success": false, "projectMilestone": sample}),
+            serde_json::json!({"success": "true", "projectMilestone": sample}),
+            serde_json::json!({"projectMilestone": sample}),
+            serde_json::json!({"success": true}),
+            serde_json::json!({"success": true, "projectMilestone": null}),
+        ] {
+            failures.push(serde_json::json!({"data": {"projectMilestoneUpdate": payload}}));
+        }
+        for field in sample.as_object().unwrap().keys() {
+            let mut missing = valid.clone();
+            missing["data"]["projectMilestoneUpdate"]["projectMilestone"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            failures.push(missing);
+        }
+        for (field, value) in [
+            (
+                "id",
+                serde_json::json!("12345678-1234-1234-1234-123456789abc"),
+            ),
+            ("name", serde_json::json!(" ")),
+            (
+                "project",
+                serde_json::json!({"id": "bad", "name": "Project"}),
+            ),
+            ("project", serde_json::json!({"id": id, "name": " "})),
+            ("project", serde_json::json!({"id": id})),
+            ("status", serde_json::json!("bad")),
+            ("description", serde_json::json!(1)),
+            ("targetDate", serde_json::json!("2026-02-29")),
+            ("sortOrder", serde_json::Value::Null),
+        ] {
+            let mut invalid = valid.clone();
+            invalid["data"]["projectMilestoneUpdate"]["projectMilestone"][field] = value;
+            failures.push(invalid);
+        }
+        for response in failures {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(response))
+                .expect(1)
+                .mount(&server)
+                .await;
+            assert!(project_milestones_update_data_with_url(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &args
+            )
+            .await
+            .is_err());
+        }
+        for response in [
+            ResponseTemplate::new(500),
+            ResponseTemplate::new(429),
+            ResponseTemplate::new(200).set_body_string("{invalid-json"),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(response)
+                .expect(1)
+                .mount(&server)
+                .await;
+            assert!(project_milestones_update_data_with_url(
                 &reqwest::Client::new(),
                 &server.uri(),
                 &args

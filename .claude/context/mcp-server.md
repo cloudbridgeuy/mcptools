@@ -102,6 +102,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `linear_project_status_list` | List workspace project statuses; limit 1–250, cursor, all |
 | `linear_project_milestone_list` | List milestones scoped to project UUID or name with team; nullable description/date; limit 1–250, cursor, all; Read |
 | `linear_project_milestone_create` | Create a milestone in project UUID or name with team; name required, verbatim Markdown description, YYYY-MM-DD targetDate, finite sortOrder; absent/null optionals omitted; Write |
+| `linear_project_milestone_update` | Partial milestone UUID update: name, verbatim description, targetDate, sortOrder; omission unchanged, explicit clearDescription/clearTargetDate set null; no project reassignment; Write |
 | `linear_project_create` | Create a project in one team with optional description and Markdown content |
 | `linear_project_update` | Partially update project properties by UUID or name with team; explicit clear flags; Write (`allowWrites` required in discovery/Code Mode) |
 | `linear_project_update_create` | Create a progress report, not a property edit; project UUID or name with team, nonblank verbatim Markdown body, optional onTrack/atRisk/offTrack health; MCP-only Write (`allowWrites` required) |
@@ -244,7 +245,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
-either discovery or code mode, hosts load all 77 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 78 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

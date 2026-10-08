@@ -259,7 +259,9 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 75);
+        assert_eq!(all.len(), 76);
+        assert!(!read.contains(&"linear_project_milestone_update".to_string()));
+        assert!(all.contains(&"linear_project_milestone_update".to_string()));
         assert!(all.contains(&"linear_project_create".to_string()));
         assert!(all.contains(&"linear_project_update".to_string()));
         assert!(all.contains(&"linear_project_update_create".to_string()));

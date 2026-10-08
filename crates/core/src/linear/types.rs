@@ -223,6 +223,114 @@ pub fn project_milestone_create_input(
     Ok(input)
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectMilestoneUpdateArgs {
+    #[schemars(description = "Milestone UUID")]
+    pub id: String,
+    #[serde(default, deserialize_with = "milestone_update_supplied")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "milestone_update_supplied")]
+    #[schemars(description = "Markdown description; exact whitespace preserved")]
+    pub description: Option<String>,
+    #[serde(default, deserialize_with = "milestone_update_supplied")]
+    #[schemars(description = "Valid calendar date YYYY-MM-DD")]
+    pub target_date: Option<String>,
+    #[serde(default, deserialize_with = "milestone_update_supplied")]
+    #[schemars(description = "Finite milestone sort order")]
+    pub sort_order: Option<f64>,
+    #[serde(default)]
+    #[schemars(description = "Set description to null; conflicts with description")]
+    pub clear_description: bool,
+    #[serde(default)]
+    #[schemars(description = "Set targetDate to null; conflicts with targetDate")]
+    pub clear_target_date: bool,
+}
+
+fn milestone_update_supplied<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+pub fn project_milestone_update_input(
+    args: &ProjectMilestoneUpdateArgs,
+) -> Result<serde_json::Value, String> {
+    if !super::is_uuid(args.id.trim()) {
+        return Err("Milestone id must be a UUID".into());
+    }
+    if args
+        .name
+        .as_ref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
+        return Err("Milestone name must not be blank".into());
+    }
+    if args
+        .target_date
+        .as_deref()
+        .is_some_and(|value| !valid_milestone_date(value))
+    {
+        return Err("targetDate must be a valid YYYY-MM-DD calendar date".into());
+    }
+    if args.sort_order.is_some_and(|value| !value.is_finite()) {
+        return Err("sortOrder must be finite".into());
+    }
+    let mut input = serde_json::json!({});
+    for (field, value, clear) in [
+        ("name", &args.name, false),
+        ("description", &args.description, args.clear_description),
+        ("targetDate", &args.target_date, args.clear_target_date),
+    ] {
+        if clear && value.is_some() {
+            return Err(format!("{field} cannot be set and cleared together"));
+        }
+        if let Some(value) = value {
+            input[field] = serde_json::json!(if field == "name" {
+                value.trim()
+            } else {
+                value.as_str()
+            });
+        } else if clear {
+            input[field] = serde_json::Value::Null;
+        }
+    }
+    if let Some(value) = args.sort_order {
+        input["sortOrder"] = serde_json::json!(value);
+    }
+    if input.as_object().is_none_or(|fields| fields.is_empty()) {
+        return Err("Milestone update needs at least one changed property".into());
+    }
+    Ok(input)
+}
+
+pub fn transform_project_milestone_update(
+    data: serde_json::Value,
+    expected_id: &str,
+) -> Result<ProjectMilestone, String> {
+    let payload = &data["projectMilestoneUpdate"];
+    if payload["success"].as_bool() != Some(true) {
+        return Err("Linear projectMilestoneUpdate failed: success was not true".into());
+    }
+    let milestone: ProjectMilestone =
+        serde_json::from_value(payload["projectMilestone"].clone())
+            .map_err(|error| format!("Malformed updated milestone: {error}"))?;
+    if !super::is_uuid(&milestone.id)
+        || !milestone.id.eq_ignore_ascii_case(expected_id.trim())
+        || milestone.name.trim().is_empty()
+        || !super::is_uuid(&milestone.project.id)
+        || milestone.project.name.trim().is_empty()
+        || !milestone.sort_order.is_finite()
+        || milestone
+            .target_date
+            .as_deref()
+            .is_some_and(|value| !valid_milestone_date(value))
+    {
+        return Err("Malformed milestone or mismatched milestone identity".into());
+    }
+    Ok(milestone)
+}
+
 fn validate_project_create_selector(project: &str, team: Option<&str>) -> Result<(), String> {
     use super::resolve::{is_uuid, parse_project_selector, ProjectSelector};
     let selector = parse_project_selector(project).ok_or("Missing project selector")?;

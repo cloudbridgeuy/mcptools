@@ -118,6 +118,7 @@ fn mcp_contract_pilot() {
             "linear_project_list",
             "linear_project_milestone_create",
             "linear_project_milestone_list",
+            "linear_project_milestone_update",
             "linear_project_status_list",
             "linear_project_update",
             "linear_project_update_create",

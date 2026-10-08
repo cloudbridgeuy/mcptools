@@ -1,5 +1,7 @@
 # Local mcptools fit and adjacent MCP aggregators
 
+Research snapshot: October 7, 2026. Checkout inventory and gap findings below describe that snapshot, not the current registry.
+
 ## What mcptools already provides
 
 ### Takeaway

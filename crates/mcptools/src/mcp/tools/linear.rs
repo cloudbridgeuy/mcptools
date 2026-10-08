@@ -440,6 +440,26 @@ pub async fn handle_linear_project_milestone_create(
     super::to_dual_result(created)
 }
 
+pub async fn handle_linear_project_milestone_update(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::ProjectMilestoneUpdateArgs = parse_args(arguments)?;
+    mcptools_core::linear::project_milestone_update_input(&args).map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_project_milestone_update: id={}", args.id);
+    }
+    let client = linear_client()?;
+    let updated = crate::linear::discover::project_milestones_update_data(&client, &args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(updated)
+}
+
 pub async fn handle_linear_project_update(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -899,6 +919,186 @@ mod tests {
         let milestone: mcptools_core::linear::ProjectMilestone =
             serde_json::from_value(sample.clone()).unwrap();
         assert_eq!(serde_json::to_value(milestone).unwrap(), sample);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn milestone_update_contract_dispatch_and_write_gates() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let id = "22345678-1234-1234-1234-123456789abc";
+        for input in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"id": id}),
+            serde_json::json!({"id": "", "name": "New"}),
+            serde_json::json!({"id": "not-uuid", "name": "New"}),
+            serde_json::json!({"id": id, "name": " "}),
+            serde_json::json!({"id": id, "name": null}),
+            serde_json::json!({"id": id, "description": null}),
+            serde_json::json!({"id": id, "targetDate": null}),
+            serde_json::json!({"id": id, "sortOrder": null}),
+            serde_json::json!({"id": id, "sortOrder": "1"}),
+            serde_json::json!({"id": id, "targetDate": "2026-02-29"}),
+            serde_json::json!({"id": id, "targetDate": "2100-02-29"}),
+            serde_json::json!({"id": id, "clearDescription": false, "clearTargetDate": false}),
+            serde_json::json!({"id": id, "clearDescription": null}),
+            serde_json::json!({"id": id, "clearTargetDate": "true"}),
+            serde_json::json!({"id": id, "description": "", "clearDescription": true}),
+            serde_json::json!({"id": id, "targetDate": "2028-02-29", "clearTargetDate": true}),
+            serde_json::json!({"id": id, "name": "New", "projectId": id}),
+        ] {
+            assert_eq!(
+                handle_linear_project_milestone_update(Some(input.clone()), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+            let flags = super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            };
+            let call = super::super::handle_tools_call(
+                Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_milestone_update", "input": input, "allowWrites": true}})),
+                &global,
+                flags,
+            ).await.unwrap_err();
+            assert_eq!(call.code, -32602);
+            let execute = super::super::handle_tools_call(
+                Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_milestone_update({input})"), "allowWrites": true}})),
+                &global,
+                flags,
+            ).await.unwrap();
+            assert_eq!(execute["isError"], true);
+            assert!(execute["structuredContent"]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("Invalid arguments:"));
+        }
+        for flags in [
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: true,
+                code_mode: false,
+            },
+            super::super::ServeFlags {
+                discovery: false,
+                code_mode: true,
+            },
+        ] {
+            assert_eq!(super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_milestone_update", "arguments": {"id": id}})), &global, flags).await.unwrap_err().code, -32602);
+            for allow in [false, true] {
+                let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_milestone_update", "input": {"id": id}, "allowWrites": allow}})), &global, flags).await;
+                if allow {
+                    assert_eq!(call.unwrap_err().code, -32602);
+                } else {
+                    assert!(call.unwrap()["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("allowWrites"));
+                }
+                let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_milestone_update({{id: '{id}'}})"), "allowWrites": allow}})), &global, flags).await.unwrap();
+                assert!(result["structuredContent"]["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(if allow {
+                        "Invalid arguments:"
+                    } else {
+                        "allowWrites"
+                    }));
+            }
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_project_milestone_update")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Write);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_project_milestone_update",
+            "id: string",
+            "name?: string",
+            "description?: string",
+            "targetDate?: string",
+            "sortOrder?: number",
+            "clearDescription?: boolean",
+            "clearTargetDate?: boolean",
+        ] {
+            assert!(declaration.contains(field), "{field}: {declaration}");
+        }
+        let validator = jsonschema::draft202012::new(&tool.input_schema).unwrap();
+        assert!(validator.is_valid(&serde_json::json!({"id": id, "description": ""})));
+        assert!(!validator.is_valid(&serde_json::json!({"id": id, "description": null})));
+        assert!(!validator.is_valid(&serde_json::json!({"name": "New"})));
+        assert!(!validator.is_valid(&serde_json::json!({"id": id, "name": "New", "projectId": id})));
+        let flags = super::super::ServeFlags {
+            discovery: true,
+            code_mode: true,
+        };
+        let discovered = super::super::handle_tools_call(
+            Some(serde_json::json!({"name": "find_tools", "arguments": {"domain": "linear"}})),
+            &global,
+            flags,
+        )
+        .await
+        .unwrap();
+        let found = discovered["structuredContent"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == tool.name)
+            .unwrap();
+        assert_eq!(found["declaration"], declaration);
+        let denied = super::super::handle_tools_call(
+            Some(serde_json::json!({"name": "call_tool", "arguments": {"name": tool.name, "input": {"id": id, "name": "New"}}})),
+            &global,
+            flags,
+        ).await.unwrap();
+        assert_eq!(denied["isError"], true);
+        assert!(denied["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("allowWrites"));
+        let denied = super::super::handle_tools_call(
+            Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_milestone_update({{id: '{id}', name: 'New'}})")}})),
+            &global,
+            flags,
+        ).await.unwrap();
+        assert_eq!(denied["isError"], true);
+        assert!(denied["structuredContent"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("allowWrites"));
+        for number in ["NaN", "Infinity", "-Infinity"] {
+            let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await linear_project_milestone_update({{id: '{id}', name: 'New', sortOrder: {number}}})"), "allowWrites": true}})), &global, super::super::ServeFlags { discovery: false, code_mode: true }).await.unwrap();
+            assert_eq!(
+                result["structuredContent"]["error"]["message"],
+                "Tool arguments must not contain non-finite numbers"
+            );
+        }
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/contract_samples/linear_project_milestone_update.json"
+        ))
+        .unwrap();
+        assert!(jsonschema::draft202012::new(&tool.output_schema)
+            .unwrap()
+            .is_valid(&sample));
+        let milestone: mcptools_core::linear::ProjectMilestone =
+            serde_json::from_value(sample.clone()).unwrap();
+        let dual = super::super::to_dual_result(milestone).unwrap();
+        assert_eq!(dual["structuredContent"], sample);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(dual["content"][0]["text"].as_str().unwrap())
+                .unwrap(),
+            sample
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
