@@ -105,13 +105,14 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-27 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+28 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
 linear_auth_status, linear_issue_get, linear_issue_list, linear_issue_graph
 linear_comment_list, linear_relation_list
 linear_team_list, linear_team_get
+linear_initiative_list (workspace initiatives; optional name query; limit/cursor/all)
 linear_project_list, linear_project_get
 linear_project_status_list
 linear_project_milestone_list
@@ -154,6 +155,14 @@ Output returns `id`, `name`, `url`, non-null `description`, nullable `content`, 
 Output is `{project: {id, name}, nodes, pageInfo}`. Nodes contain usable milestone UUID `id`, `name`, nullable `description` and `targetDate` (explicit nulls), `status` (`done`, `next`, `overdue`, `unstarted`), numeric `sortOrder`, and `project: {id, name}`. Markdown whitespace and API order remain unchanged. Existing empty projects return empty nodes; missing projects fail. Each returned project and milestone project identity must match the requested UUID; malformed payloads or pagination cursors fail without partial success. All-page output carries the final pageInfo, including endCursor. Read-only in direct calls, discovery and code mode; no `allowWrites` required. No CLI command added.
 
 `linear_project_milestone_create({project: "project-UUID", name: "Release"})` is an MCP-only Write tool. Project names require `team` and use the same all-page selector resolution. Optional `description` preserves Markdown and whitespace verbatim, including empty and whitespace-only strings; `targetDate` must be a valid YYYY-MM-DD calendar date; `sortOrder` must be finite. Absent or null optional inputs are omitted, with no invented defaults. Blank names or selectors, unknown fields and malformed types reject before HTTP. Returns milestone id, name, nullable description/targetDate, status, sortOrder and project identity. Requires strict mutation success and complete well-typed output; GraphQL errors fail even with partial data. `call_tool` and `execute` require `allowWrites: true`; no CLI command is added.
+
+### Workspace initiatives (MCP only)
+
+`linear_initiative_list({query: "Roadmap", limit: 25})` lists workspace initiatives, not team projects. Omit arguments for the first page. Optional `query` is a case-sensitive name substring, sent as `InitiativeFilter.name.contains`; no client-side filtering. No team selector or CLI command. Unknown fields, explicit null inputs, blank query/cursor, control characters in cursors, malformed types and limits outside 1–250 reject before HTTP. `limit` defaults to 25; `all` defaults to false. `cursor` starts after that cursor; `all: true` reads remaining pages, with a 1000-page cap. Pages with `hasNextPage: true` require a new cursor, including single-page reads. Terminal pages do not need cursor progress.
+
+Output is `{nodes, pageInfo}`; empty results include `nodes: []`. Each node has initiative UUID `id`, `name`, nullable `description`, `status` (`Proposed`, `Planned`, `Active`, `Completed`, `Canceled`), nullable `targetDate`, nullable `owner: {id, name, email}`, and API `url`. Null optional output fields remain explicit. UUIDs are suitable for future initiative detail and project-association tools. No large `content`, documents or nested projects are selected. Text and API order remain unchanged; the query requests `orderBy: createdAt`, without claiming sort direction. All-page output carries final pageInfo. HTTP/GraphQL/permission errors and malformed output fail without partial success. Read-only direct calls, discovery `call_tool`, and code-mode `execute` need no `allowWrites`.
+
+Schema basis verified 2026-10-08: [Linear SDK GraphQL schema](https://github.com/linear/linear/blob/master/packages/sdk/src/schema.graphql), `Query.initiatives(filter: InitiativeFilter, first, after, orderBy)`, `InitiativeFilter.name: StringComparator`, `StringComparator.contains`, and the selected `Initiative`/`User` fields. This is schema verification, not an authenticated live API test. Archived resources remain excluded by API default.
 
 ### Workspace project statuses
 

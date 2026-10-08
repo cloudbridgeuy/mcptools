@@ -207,6 +207,54 @@ fn deserialize_supplied_string<'de, D: Deserializer<'de>>(
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct InitiativeListArgs {
+    #[serde(default = "project_status_default_limit")]
+    #[schemars(
+        range(min = 1, max = 250),
+        description = "Items per page, 1–250 (default: 25)"
+    )]
+    pub limit: u32,
+    #[serde(default, deserialize_with = "deserialize_supplied_string")]
+    #[schemars(description = "Page cursor; must not be blank")]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    #[schemars(description = "Fetch remaining pages, at most 1000 (default: false)")]
+    pub all: bool,
+    #[serde(default, deserialize_with = "deserialize_supplied_string")]
+    #[schemars(
+        description = "Case-sensitive initiative name substring; uses InitiativeFilter.name.contains"
+    )]
+    pub query: Option<String>,
+}
+
+impl InitiativeListArgs {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        ProjectStatusListArgs {
+            limit: self.limit,
+            cursor: self.cursor.clone(),
+            all: self.all,
+        }
+        .validate()?;
+        if self
+            .cursor
+            .as_deref()
+            .is_some_and(|cursor| cursor.chars().any(char::is_control))
+        {
+            return Err("cursor must not contain control characters");
+        }
+        if self
+            .query
+            .as_deref()
+            .is_some_and(|query| query.trim().is_empty())
+        {
+            return Err("query must not be blank");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectStatusListArgs {
     #[serde(default = "project_status_default_limit")]
     #[schemars(

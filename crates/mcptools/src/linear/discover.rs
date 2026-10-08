@@ -9,6 +9,65 @@ use mcptools_core::linear::{
 use mcptools_core::linear::{transform_project_statuses, ProjectStatusListOutput};
 
 pub const TEAMS_QUERY: &str = "query ($first: Int!, $after: String) { teams(first: $first, after: $after) { nodes { id key name } pageInfo { hasNextPage endCursor } } }";
+pub const INITIATIVES_QUERY: &str = "query ($first: Int!, $after: String, $filter: InitiativeFilter) { initiatives(first: $first, after: $after, filter: $filter, orderBy: createdAt) { nodes { id name description status targetDate owner { id name email } url } pageInfo { hasNextPage endCursor } } }";
+
+pub async fn initiatives_list_data(
+    client: &reqwest::Client,
+    args: crate::linear::args::InitiativeListArgs,
+) -> Result<mcptools_core::linear::InitiativeListOutput> {
+    initiatives_list_data_with_url(client, LINEAR_API_URL, args).await
+}
+
+async fn initiatives_list_data_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    args: crate::linear::args::InitiativeListArgs,
+) -> Result<mcptools_core::linear::InitiativeListOutput> {
+    args.validate().map_err(|error| eyre!(error))?;
+    let filter = args
+        .query
+        .map(|query| serde_json::json!({"name": {"contains": query}}));
+    let mut cursor = args.cursor;
+    let mut seen = std::collections::HashSet::new();
+    if let Some(cursor) = &cursor {
+        seen.insert(cursor.clone());
+    }
+    let mut nodes = Vec::new();
+    for _ in 0..1000 {
+        let data = execute_with_url(
+            client,
+            url,
+            INITIATIVES_QUERY,
+            serde_json::json!({"first": args.limit, "after": cursor, "filter": filter}),
+        )
+        .await?;
+        let page =
+            mcptools_core::linear::transform_initiatives(data).map_err(|error| eyre!(error))?;
+        if page.page_info.has_next && page.page_info.end_cursor.is_none() {
+            return Err(eyre!("Initiative pagination cursor missing"));
+        }
+        if let Some(next) = page
+            .page_info
+            .end_cursor
+            .as_ref()
+            .filter(|_| page.page_info.has_next)
+        {
+            if !seen.insert(next.clone()) {
+                return Err(eyre!("Initiative pagination cursor did not progress"));
+            }
+        }
+        nodes.extend(page.nodes);
+        if !args.all || !page.page_info.has_next {
+            return Ok(mcptools_core::linear::InitiativeListOutput {
+                nodes,
+                page_info: page.page_info,
+            });
+        }
+        cursor = page.page_info.end_cursor;
+    }
+    Err(eyre!("Initiative pagination exceeded 1000 pages"))
+}
+
 pub const TEAM_PROJECTS_QUERY: &str = "query ($id: String!, $first: Int!, $after: String) { team(id: $id) { id key name projects(first: $first, after: $after) { nodes { id name } pageInfo { hasNextPage endCursor } } } }";
 pub const PROJECT_CREATE_MUTATION: &str = "mutation ($input: ProjectCreateInput!) { projectCreate(input: $input) { success project { id name } } }";
 pub const PROJECT_GET_QUERY: &str = "query ($id: String!) { project(id: $id) { id name } }";
@@ -657,6 +716,272 @@ pub async fn cycles_list_data(client: &reqwest::Client, team: &str) -> Result<Pa
 mod tests {
     use super::*;
     use crate::linear::config::LinearConfig;
+
+    #[tokio::test]
+    async fn initiative_pages_preserve_fields_filters_and_final_page_info() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_list.json"
+        ))
+        .unwrap();
+        for (all, count, query) in [
+            (false, 0, None),
+            (false, 1, Some("Roadmap")),
+            (true, 2, Some("Roadmap")),
+        ] {
+            let server = MockServer::start().await;
+            let mut expected = Vec::new();
+            for index in 0..count.max(1) {
+                let mut node = sample["nodes"][0].clone();
+                if index == 1 {
+                    node["owner"] = serde_json::Value::Null;
+                    node["targetDate"] = serde_json::Value::Null;
+                    node["description"] = serde_json::Value::Null;
+                }
+                let nodes = if count == 0 { vec![] } else { vec![node] };
+                expected.extend(nodes.clone());
+                let after = if index == 0 { "start" } else { "next" };
+                let has_next = index == 0 && count != 0;
+                let cursor = if has_next { Some("next") } else { None };
+                Mock::given(method("POST"))
+                    .and(body_json(serde_json::json!({"query": INITIATIVES_QUERY, "variables": {
+                        "first": 1, "after": after, "filter": query.map(|query| serde_json::json!({"name": {"contains": query}}))
+                    }})))
+                    .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiatives": {
+                        "nodes": nodes, "pageInfo": {"hasNextPage": has_next, "endCursor": cursor}
+                    }}})))
+                    .expect(1).mount(&server).await;
+            }
+            let mut input = serde_json::json!({"all": all, "limit": 1, "cursor": "start"});
+            if let Some(query) = query {
+                input["query"] = serde_json::json!(query);
+            }
+            let args = serde_json::from_value(input).unwrap();
+            let output =
+                initiatives_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                    .await
+                    .unwrap();
+            let json = serde_json::to_value(&output).unwrap();
+            assert_eq!(json["nodes"], serde_json::json!(expected));
+            assert_eq!(json["pageInfo"]["hasNextPage"], count == 1);
+            let result = crate::mcp::tools::to_dual_result(output).unwrap();
+            let text: serde_json::Value =
+                serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(text, result["structuredContent"]);
+            assert_eq!(text, json);
+        }
+        assert!(!INITIATIVES_QUERY.contains("content"));
+        assert!(!INITIATIVES_QUERY.contains("projects"));
+        assert!(!INITIATIVES_QUERY.contains("team"));
+    }
+
+    #[test]
+    fn initiative_transform_rejects_malformed_selected_fields() {
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_list.json"
+        ))
+        .unwrap();
+        let valid = serde_json::json!({"initiatives": sample});
+        for status in ["Proposed", "Planned", "Active", "Completed", "Canceled"] {
+            let mut data = valid.clone();
+            data["initiatives"]["nodes"][0]["status"] = serde_json::json!(status);
+            assert!(mcptools_core::linear::transform_initiatives(data).is_ok());
+        }
+        for (path, value) in [
+            ("/initiatives/nodes/0/id", serde_json::json!("not-uuid")),
+            ("/initiatives/nodes/0/name", serde_json::json!(" ")),
+            ("/initiatives/nodes/0/status", serde_json::json!("Unknown")),
+            (
+                "/initiatives/nodes/0/targetDate",
+                serde_json::json!("2026-02-30"),
+            ),
+            ("/initiatives/nodes/0/owner/id", serde_json::json!("bad")),
+            ("/initiatives/nodes/0/owner/name", serde_json::json!("")),
+            ("/initiatives/nodes/0/owner/email", serde_json::json!(null)),
+            (
+                "/initiatives/nodes/0/url",
+                serde_json::json!("file:///etc/passwd"),
+            ),
+            ("/initiatives/pageInfo/hasNextPage", serde_json::json!(null)),
+            ("/initiatives/pageInfo/endCursor", serde_json::json!("\n")),
+        ] {
+            let mut data = valid.clone();
+            *data.pointer_mut(path).unwrap() = value;
+            assert!(
+                mcptools_core::linear::transform_initiatives(data).is_err(),
+                "{path}"
+            );
+        }
+        for field in [
+            "id",
+            "name",
+            "description",
+            "status",
+            "targetDate",
+            "owner",
+            "url",
+        ] {
+            let mut data = valid.clone();
+            data["initiatives"]["nodes"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(
+                mcptools_core::linear::transform_initiatives(data).is_err(),
+                "{field}"
+            );
+        }
+        let mut data = valid;
+        data["initiatives"]["nodes"][0]["owner"]
+            .as_object_mut()
+            .unwrap()
+            .remove("email");
+        assert!(mcptools_core::linear::transform_initiatives(data.clone()).is_err());
+        data["initiatives"]["pageInfo"]
+            .as_object_mut()
+            .unwrap()
+            .remove("endCursor");
+        assert!(mcptools_core::linear::transform_initiatives(data).is_err());
+    }
+
+    #[tokio::test]
+    async fn initiative_errors_and_cursor_progress_fail_without_partial_output() {
+        use wiremock::matchers::{body_json, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        for (status, response, expected) in [
+            (
+                403,
+                serde_json::json!({"errors": [{"message": "Permission denied"}]}),
+                "403",
+            ),
+            (
+                400,
+                serde_json::json!({"errors": [{"message": "Invalid query"}]}),
+                "400",
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"initiatives": {"nodes": []}}, "errors": [{"message": "Permission denied"}]}),
+                "Permission denied",
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": null}}}}),
+                "cursor missing",
+            ),
+            (
+                200,
+                serde_json::json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "start"}}}}),
+                "did not progress",
+            ),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(status).set_body_json(response))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let args = serde_json::from_value(serde_json::json!({"cursor": "start"})).unwrap();
+            let error =
+                initiatives_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                    .await
+                    .unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+        let server = MockServer::start().await;
+        for (after, next) in [(None, "one"), (Some("one"), "two"), (Some("two"), "one")] {
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": INITIATIVES_QUERY, "variables": {"first": 25, "after": after, "filter": null}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": next}}}})))
+                .expect(1).mount(&server).await;
+        }
+        let args = serde_json::from_value(serde_json::json!({"all": true})).unwrap();
+        let error = initiatives_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("did not progress"));
+        let server = MockServer::start().await;
+        let sample: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/contract_samples/linear_initiative_list.json"
+        ))
+        .unwrap();
+        for (after, response) in [
+            (
+                None,
+                serde_json::json!({"data": {"initiatives": {"nodes": sample["nodes"], "pageInfo": {"hasNextPage": true, "endCursor": "next"}}}}),
+            ),
+            (
+                Some("next"),
+                serde_json::json!({"errors": [{"message": "Permission denied on later page"}]}),
+            ),
+        ] {
+            Mock::given(method("POST"))
+                .and(body_json(serde_json::json!({"query": INITIATIVES_QUERY, "variables": {"first": 25, "after": after, "filter": null}})))
+                .respond_with(ResponseTemplate::new(200).set_body_json(response))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        let args = serde_json::from_value(serde_json::json!({"all": true})).unwrap();
+        let error = initiatives_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Permission denied on later page"));
+    }
+
+    #[tokio::test]
+    async fn initiative_terminal_empty_page_accepts_the_input_cursor() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        for all in [false, true] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": "start"}}}})))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let args =
+                serde_json::from_value(serde_json::json!({"cursor": "start", "all": all})).unwrap();
+            let output =
+                initiatives_list_data_with_url(&reqwest::Client::new(), &server.uri(), args)
+                    .await
+                    .unwrap();
+            assert!(output.nodes.is_empty());
+            assert!(!output.page_info.has_next);
+            assert_eq!(output.page_info.end_cursor.as_deref(), Some("start"));
+        }
+    }
+
+    #[tokio::test]
+    async fn initiative_all_pages_has_a_hard_page_cap() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+        for terminal in [false, true] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST")).respond_with(move |request: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+                let page = body["variables"]["after"].as_str().map(|value| value.parse::<usize>().unwrap()).unwrap_or(0) + 1;
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": !terminal || page < 1000, "endCursor": page.to_string()}}}}))
+            }).expect(1000).mount(&server).await;
+            let args = serde_json::from_value(serde_json::json!({"all": true})).unwrap();
+            let result =
+                initiatives_list_data_with_url(&reqwest::Client::new(), &server.uri(), args).await;
+            if terminal {
+                assert_eq!(
+                    result.unwrap().page_info.end_cursor.as_deref(),
+                    Some("1000")
+                );
+            } else {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("exceeded 1000 pages"));
+            }
+        }
+    }
 
     #[tokio::test]
     async fn progress_report_rename_after_lookup_preserves_response_names() {

@@ -107,6 +107,7 @@ fn mcp_contract_pilot() {
             "linear_comment_create",
             "linear_comment_list",
             "linear_cycle_list",
+            "linear_initiative_list",
             "linear_issue_create",
             "linear_issue_get",
             "linear_issue_graph",

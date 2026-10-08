@@ -326,6 +326,27 @@ pub async fn handle_linear_project_get(
     super::to_dual_result(item)
 }
 
+pub async fn handle_linear_initiative_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::InitiativeListArgs =
+        parse_args(Some(arguments.unwrap_or_else(|| serde_json::json!({}))))?;
+    args.validate().map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_initiative_list");
+    }
+    let client = linear_client()?;
+    let output = crate::linear::discover::initiatives_list_data(&client, args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_project_status_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -717,6 +738,80 @@ pub async fn handle_linear_cycle_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn initiative_inputs_discovery_and_code_mode_are_read_only() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for input in [
+            serde_json::json!({"limit": 0}),
+            serde_json::json!({"limit": 251}),
+            serde_json::json!({"limit": -1}),
+            serde_json::json!({"limit": 1.5}),
+            serde_json::json!({"limit": null}),
+            serde_json::json!({"cursor": " "}),
+            serde_json::json!({"cursor": "bad\n"}),
+            serde_json::json!({"cursor": null}),
+            serde_json::json!({"query": " "}),
+            serde_json::json!({"query": null}),
+            serde_json::json!({"query": 1}),
+            serde_json::json!({"all": null}),
+            serde_json::json!({"team": "GUZ"}),
+            serde_json::json!({"unknown": true}),
+        ] {
+            assert_eq!(
+                handle_linear_initiative_list(Some(input), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+        }
+        let args: crate::linear::args::InitiativeListArgs =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(args.limit, 25);
+        assert!(!args.all);
+        assert!(args.validate().is_ok());
+        for (discovery, code_mode) in [(false, false), (true, false), (false, true)] {
+            let flags = super::super::ServeFlags {
+                discovery,
+                code_mode,
+            };
+            for request in [
+                serde_json::json!({"name": "linear_initiative_list", "arguments": {"limit": 0}}),
+                serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_initiative_list", "input": {"limit": 0}}}),
+            ] {
+                let error = super::super::handle_tools_call(Some(request), &global, flags)
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code, -32602);
+                assert!(error.message.starts_with("Invalid arguments:"));
+            }
+            let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": "return await linear_initiative_list({limit: 0})"}})), &global, flags).await.unwrap();
+            assert!(result["structuredContent"]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid arguments:"));
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_initiative_list")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Read);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_initiative_list(input: LinearInitiativeListInput): Promise<LinearInitiativeListOutput>",
+            "limit?: number", "cursor?: string", "all?: boolean", "query?: string", "targetDate?: string | null", "owner?: LinearInitiativeListUser | null", "pageInfo:",
+            "\"Active\"", "\"Proposed\"", "url: string", "id: string",
+        ] { assert!(declaration.contains(field), "{field}: {declaration}"); }
+        assert_eq!(tool.input_schema["additionalProperties"], false);
+        assert_eq!(tool.input_schema["properties"]["limit"]["default"], 25);
+        assert!(tool.input_schema["properties"].get("team").is_none());
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn project_update_create_contract_dispatch_and_write_gates() {
