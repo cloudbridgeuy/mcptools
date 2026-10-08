@@ -105,7 +105,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-30 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+31 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -114,6 +114,7 @@ linear_comment_list, linear_relation_list
 linear_team_list, linear_team_get
 linear_initiative_list (workspace initiatives; optional name query; limit/cursor/all)
 linear_initiative_get (required initiative UUID; Markdown content and all directly linked projects)
+linear_document_get (required document UUID; Markdown content and nullable owner/project)
 linear_project_list, linear_project_get
 linear_project_status_list
 linear_project_milestone_list
@@ -123,6 +124,7 @@ linear_user_list, linear_state_list, linear_label_list, linear_cycle_list
 # Writes
 linear_initiative_project_add (needs initiative UUID, project UUID or name with team; links existing entities only)
 linear_project_milestone_create (needs project, name; names require team; accepts Markdown description, targetDate, sortOrder)
+linear_project_milestone_update (needs milestone UUID; partial update with explicit clear flags)
 linear_project_create (needs team, name; accepts description and Markdown content)
 linear_project_update (project UUID, or name with team; partial property updates and explicit clear flags)
 linear_project_update_create (needs project, nonblank Markdown body; names require team; optional health)
@@ -167,6 +169,10 @@ Output is `{nodes, pageInfo}`; empty results include `nodes: []`. Each node has 
 `linear_initiative_get({id: "initiative-UUID"})` queries `initiative(id)` and returns one initiative with the same metadata plus nullable verbatim Markdown `content` and `projects: [{id, name}]`. Required `id` must be an exact UUID; blank, malformed, missing or null IDs, wrong types and unknown fields reject before HTTP. Missing initiatives fail, distinct from an existing initiative with `projects: []`. Nullable selected fields must be present and remain explicit nulls. Malformed fields, mismatched UUIDs and HTTP/GraphQL errors fail without partial output. Projects include archived directly linked projects (`includeArchived: true`, `includeSubInitiatives: false`), preserve API createdAt order, and always traverse pages of 250 with missing/repeated/invalid cursor checks and a 1000-page cap. Overflow fails instead of truncating. Terminal pages need no cursor progress. No team selector, documents, association mutations or CLI command. MCP-only Read in direct, discovery and code mode; no `allowWrites` needed. Schema verified 2026-10-08 from the public Linear SDK schema: `Query.initiative(id: String!)`, nullable `Initiative.content`, and `Initiative.projects(first, after, includeArchived, includeSubInitiatives, orderBy)`. No authenticated live API call.
 
 `linear_initiative_project_add({initiative: "initiative-UUID", project: "project-UUID"})` links an existing project to an existing initiative; it creates neither entity. Required `initiative` is a UUID; required `project` is a UUID or project name with `team` (UUID, key, or name). Both entities resolve before `initiativeToProjectCreate`; missing or ambiguous selectors fail before mutation. Invalid inputs and unknown fields reject before HTTP. Returns association `id`, `initiative: {id, name}`, and `project: {id, name}` with strict mutation success and matching identities. HTTP/GraphQL errors, duplicate links and hierarchy conflicts fail without mutation retry or claimed success. MCP-only Write; `call_tool` and `execute` require `allowWrites: true`. No CLI command added.
+
+### Project documents (MCP only)
+
+`linear_document_get({id: "document-UUID"})` queries `document(id)` and returns `id`, `title`, nullable verbatim Markdown `content`, `url`, `createdAt`, `updatedAt`, nullable `owner: {id, name, email}`, and nullable `project: {id, name}`. Documents outside projects return explicit `project: null`; null content and owner also remain explicit. Empty titles are valid and preserved. Required `id` must be an exact UUID; slugs, blank or malformed IDs, missing/null/wrong-typed inputs, and unknown fields reject before HTTP. Missing documents, mismatched IDs, malformed selected fields, and HTTP/GraphQL/permission errors fail without partial output. No document listing, attachments, export/file generation, or CLI command. MCP-only Read in direct, discovery and code mode; no `allowWrites` needed. Schema verified 2026-10-08 from the public Linear SDK schema: `Query.document(id: String!): Document!`; nullable `Document.content`, `owner`, and `project`; non-null selected identity, title, URL, and timestamps. No authenticated live API call.
 
 Schema basis verified 2026-10-08: [Linear SDK GraphQL schema](https://github.com/linear/linear/blob/master/packages/sdk/src/schema.graphql), `Query.initiatives(filter: InitiativeFilter, first, after, orderBy)`, `InitiativeFilter.name: StringComparator`, `StringComparator.contains`, and the selected `Initiative`/`User` fields. This is schema verification, not an authenticated live API test. Initiative listing excludes archived resources by API default.
 

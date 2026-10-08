@@ -387,6 +387,26 @@ pub async fn handle_linear_initiative_get(
     super::to_dual_result(output)
 }
 
+pub async fn handle_linear_document_get(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::DocumentGetArgs = parse_args(arguments)?;
+    args.validate().map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_document_get: id={}", args.id);
+    }
+    let client = linear_client()?;
+    let output = crate::linear::discover::document_get_data(&client, args)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_project_status_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -778,6 +798,84 @@ pub async fn handle_linear_cycle_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn document_get_inputs_dispatch_and_read_contract() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for input in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"id": null}),
+            serde_json::json!({"id": 1}),
+            serde_json::json!({"id": ""}),
+            serde_json::json!({"id": " "}),
+            serde_json::json!({"id": "document-slug"}),
+            serde_json::json!({"id": "12345678-1234-1234-1234-123456789abz"}),
+            serde_json::json!({"id": "12345678-1234-1234-1234-123456789abc", "project": "Delivery"}),
+        ] {
+            assert_eq!(
+                handle_linear_document_get(Some(input), &global)
+                    .await
+                    .unwrap_err()
+                    .code,
+                -32602
+            );
+        }
+        assert_eq!(
+            handle_linear_document_get(None, &global)
+                .await
+                .unwrap_err()
+                .code,
+            -32602
+        );
+        for (discovery, code_mode) in [(false, false), (true, false), (false, true)] {
+            let flags = super::super::ServeFlags {
+                discovery,
+                code_mode,
+            };
+            for request in [
+                serde_json::json!({"name": "linear_document_get", "arguments": {"id": "bad"}}),
+                serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_document_get", "input": {"id": "bad"}}}),
+            ] {
+                let error = super::super::handle_tools_call(Some(request), &global, flags)
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code, -32602);
+                assert!(error.message.starts_with("Invalid arguments:"));
+            }
+            let result = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": "return await linear_document_get({id: 'bad'})"}})), &global, flags).await.unwrap();
+            assert!(result["structuredContent"]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Invalid arguments:"));
+        }
+        let tool = super::super::registered_tools()
+            .into_iter()
+            .find(|tool| tool.name == "linear_document_get")
+            .unwrap();
+        assert_eq!(tool.kind, super::super::ToolKind::Read);
+        assert_eq!(tool.input_schema["required"], serde_json::json!(["id"]));
+        assert_eq!(tool.input_schema["additionalProperties"], false);
+        let declaration = super::super::declaration(&tool);
+        for field in [
+            "declare function linear_document_get(",
+            "id: string",
+            "title: string",
+            "content?: string | null",
+            "createdAt: string",
+            "updatedAt: string",
+            "owner?: LinearDocumentGetUser | null",
+            "project?: LinearDocumentGetProject | null",
+            "url: string",
+        ] {
+            assert!(declaration.contains(field), "{field}: {declaration}");
+        }
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn initiative_get_inputs_dispatch_and_read_contract() {

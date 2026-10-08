@@ -235,6 +235,22 @@ pub struct InitiativeGetArgs {
     pub id: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DocumentGetArgs {
+    #[schemars(description = "Required document UUID; slugs are not accepted")]
+    pub id: String,
+}
+
+impl DocumentGetArgs {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !mcptools_core::linear::is_uuid(&self.id) {
+            return Err("id must be a document UUID");
+        }
+        Ok(())
+    }
+}
+
 impl InitiativeGetArgs {
     pub fn validate(&self) -> Result<(), &'static str> {
         if !mcptools_core::linear::is_uuid(&self.id) {

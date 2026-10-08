@@ -565,6 +565,57 @@ pub struct InitiativeGetOutput {
     pub projects: Vec<Project>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentGetOutput {
+    pub id: String,
+    pub title: String,
+    pub content: Option<String>,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub owner: Option<User>,
+    pub project: Option<Project>,
+}
+
+pub fn transform_document(
+    data: serde_json::Value,
+    expected_id: &str,
+) -> Result<DocumentGetOutput, String> {
+    let raw = data
+        .get("document")
+        .ok_or("Malformed document response: missing document")?;
+    if raw.is_null() {
+        return Err(format!("Document not found: {expected_id}"));
+    }
+    if ["content", "owner", "project"]
+        .iter()
+        .any(|field| raw.get(field).is_none())
+    {
+        return Err("Malformed document response: missing nullable field".into());
+    }
+    let document: DocumentGetOutput = serde_json::from_value(raw.clone())
+        .map_err(|error| format!("Malformed document: {error}"))?;
+    if !super::resolve::is_uuid(&document.id)
+        || !document.id.eq_ignore_ascii_case(expected_id)
+        || chrono::DateTime::parse_from_rfc3339(&document.created_at).is_err()
+        || chrono::DateTime::parse_from_rfc3339(&document.updated_at).is_err()
+        || !reqwest::Url::parse(&document.url)
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        || document.owner.as_ref().is_some_and(|owner| {
+            !super::resolve::is_uuid(&owner.id)
+                || owner.name.trim().is_empty()
+                || raw["owner"]["email"].as_str().is_none()
+        })
+        || document.project.as_ref().is_some_and(|project| {
+            !super::resolve::is_uuid(&project.id) || project.name.trim().is_empty()
+        })
+    {
+        return Err("Malformed document fields or mismatched identity".into());
+    }
+    Ok(document)
+}
+
 pub fn transform_initiative(
     data: serde_json::Value,
     expected_id: &str,
