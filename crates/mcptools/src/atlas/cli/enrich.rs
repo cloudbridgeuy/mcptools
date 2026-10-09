@@ -147,6 +147,7 @@ async fn run_inner(opts: &EnrichOptions) -> Result<EnrichResult> {
     let file_template = load(&templates_dir, runner.file.template.as_str())?;
     let directory_template = load(&templates_dir, runner.directory.template.as_str())?;
     let db = Database::open_read_only(&db_path)?;
+    db.verify_repository(&root)?;
     let all_files = db.all_file_paths()?;
     let all_directories: Vec<PathBuf> = db
         .all_directories()?
@@ -209,7 +210,7 @@ async fn run_inner(opts: &EnrichOptions) -> Result<EnrichResult> {
     let mut retries = crate::atlas::data::retry_statuses(&db, &root)?;
     if !opts.dry_run {
         drop(db);
-        let db = Database::open_existing(&db_path).map_err(|_| ExecutionFailure)?;
+        let db = Database::open_repository(&db_path, &root, true).map_err(|_| ExecutionFailure)?;
         let execution = execute(&db, &root, &scope, &plan, &runner, concurrency, opts)
             .await
             .map_err(|_| ExecutionFailure)?;

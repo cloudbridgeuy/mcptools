@@ -1,4 +1,5 @@
 {
   "format": "text",
-  "text": "clean"
+  "text": "clean",
+  "freshness": "structural=ready; semantic=current"
 }

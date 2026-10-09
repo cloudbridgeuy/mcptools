@@ -1,4 +1,5 @@
 {
   "format": "text",
-  "text": "src/\n  main.rs"
+  "text": "src/\n  main.rs",
+  "freshness": "structural=ready; semantic=cached_unverified missing=2; model-free, no automatic refresh"
 }

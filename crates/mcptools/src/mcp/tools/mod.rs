@@ -528,7 +528,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<atlas::AtlasTextOutput>(),
             name: "atlas_tree_view".to_string(),
-            description: "Browse an annotated directory tree of the codebase. Each entry includes a short description of what the file or directory contains. Use this to navigate unfamiliar codebases — start at the root, then drill into directories of interest.".to_string(),
+            description: "Browse the indexed directory tree, with optional cached descriptions. Model-free: reports bounded working-tree freshness without automatic refresh. Semantic context is cached and unverified; use source reads for current code. Start at the root, then drill into directories.".to_string(),
             input_schema: schema::input_schema_for::<atlas::AtlasTreeViewArgs>(),
             summary: "Browse the annotated directory tree of the codebase",
             kind: ToolKind::Read,
@@ -536,7 +536,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<atlas::AtlasTextOutput>(),
             name: "atlas_peek".to_string(),
-            description: "Get a detailed summary of a file or directory. For files: long description, extracted symbols with signatures. For directories: long description, children with descriptions, aggregated symbols. Use this after tree_view to understand a specific file before reading it.".to_string(),
+            description: "Inspect indexed symbols and optional cached descriptions of one file or directory. Model-free: reports bounded working-tree freshness without automatic refresh. Semantic context is cached and unverified; read source for current code.".to_string(),
             input_schema: schema::input_schema_for::<atlas::AtlasPeekArgs>(),
             summary: "Summarize one file or directory of the codebase with its symbols",
             kind: ToolKind::Read,

@@ -16,21 +16,70 @@ pub struct Database {
 }
 
 impl Database {
+    pub fn open_repository(path: &Path, root: &Path, create: bool) -> Result<Self> {
+        if !create {
+            let db = Self::open_read_only(path)?;
+            db.verify_repository(root)?;
+            return Ok(db);
+        }
+        Self::initialize(
+            Connection::open(path)?,
+            Some(&crate::atlas::fs::repository_identity(root)?),
+        )
+    }
+
+    pub fn verify_repository(&self, root: &Path) -> Result<()> {
+        if self.get_metadata("worktree_identity")?.as_deref()
+            != Some(&crate::atlas::fs::repository_identity(root)?)
+        {
+            eyre::bail!("Atlas index identity mismatch or unbound legacy index; use a separate database for this worktree and run `mcptools atlas index`");
+        }
+        Ok(())
+    }
+
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)
             .wrap_err_with(|| format!("opening database: {}", path.display()))?;
-        Self::initialize(conn)
+        Self::initialize(conn, None)
     }
 
     pub fn open_existing(path: &Path) -> Result<Self> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
             .wrap_err_with(|| format!("opening existing Atlas index: {}", path.display()))?;
-        Self::initialize(conn)
+        Self::initialize(conn, None)
     }
 
-    fn initialize(conn: Connection) -> Result<Self> {
+    fn initialize(conn: Connection, identity: Option<&str>) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        let tx = conn.unchecked_transaction()?;
+        let tx =
+            rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)?;
+        let has_metadata: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'metadata')",
+            [],
+            |row| row.get(0),
+        )?;
+        if identity.is_some() && !has_metadata {
+            let has_tables: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table')",
+                [],
+                |row| row.get(0),
+            )?;
+            if has_tables {
+                eyre::bail!("Atlas index identity mismatch or unbound legacy index; use a separate database for this worktree and run `mcptools atlas index`");
+            }
+        }
+        if let Some(identity) = identity.filter(|_| has_metadata) {
+            let saved: Option<String> = tx
+                .query_row(
+                    "SELECT value FROM metadata WHERE key = 'worktree_identity'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if saved.as_deref() != Some(identity) {
+                eyre::bail!("Atlas index identity mismatch or unbound legacy index; use a separate database for this worktree and run `mcptools atlas index`");
+            }
+        }
 
         tx.execute_batch(
             "
@@ -67,6 +116,12 @@ impl Database {
             ",
         )
         .wrap_err("creating schema")?;
+        if let Some(identity) = identity.filter(|_| !has_metadata) {
+            tx.execute(
+                "INSERT INTO metadata(key, value) VALUES ('worktree_identity', ?1)",
+                params![identity],
+            )?;
+        }
 
         let dir_count: i64 = tx
             .query_row("SELECT COUNT(*) FROM directories", [], |row| row.get(0))
@@ -159,10 +214,11 @@ impl Database {
 
         let file_path = symbols[0].file_path.to_string_lossy().to_string();
 
-        let tx = self
-            .conn
-            .unchecked_transaction()
-            .wrap_err("begin transaction")?;
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .wrap_err("begin transaction")?;
 
         tx.execute(
             "DELETE FROM symbols WHERE file_path = ?1",
@@ -572,6 +628,20 @@ impl Database {
         self.count_query("SELECT COUNT(*) FROM files", "counting files")
     }
 
+    pub fn semantic_summary(&self) -> Result<String> {
+        let mut stmt = self.conn.prepare("SELECT COALESCE(e.state, 'missing'), COUNT(*) FROM (SELECT 'files' AS kind, path FROM files UNION ALL SELECT 'directories', path FROM directories) t LEFT JOIN enrichment e ON e.kind = t.kind AND e.path = t.path GROUP BY COALESCE(e.state, 'missing') ORDER BY 1")?;
+        let states = stmt
+            .query_map([], |row| {
+                Ok(format!(
+                    "{}={}",
+                    row.get::<_, String>(0)?,
+                    row.get::<_, usize>(1)?
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(states.join(" "))
+    }
+
     pub fn count_directories(&self) -> Result<usize> {
         self.count_query("SELECT COUNT(*) FROM directories", "counting directories")
     }
@@ -667,5 +737,75 @@ impl<T> OptionalExt<T> for std::result::Result<T, rusqlite::Error> {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn query_open_never_migrates_and_reads_during_a_reserved_write_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        let path = dir.path().join("index.db");
+        let db = Database::open_repository(&path, dir.path(), true).unwrap();
+        let tx = rusqlite::Transaction::new_unchecked(
+            &db.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .unwrap();
+        let reader = Database::open_repository(&path, dir.path(), false).unwrap();
+        assert_eq!(reader.count_files().unwrap(), 0);
+        assert!(reader.set_metadata("unexpected", "write").is_err());
+        drop(reader);
+        tx.rollback().unwrap();
+        db.conn
+            .execute("DELETE FROM metadata WHERE key = 'enrichment_schema'", [])
+            .unwrap();
+        drop(db);
+        let before = std::fs::read(&path).unwrap();
+        assert!(Database::open_repository(&path, dir.path(), false).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn competing_repository_bootstraps_bind_only_one_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let roots: Vec<_> = ["first", "second"]
+            .into_iter()
+            .map(|name| {
+                let root = dir.path().join(name);
+                std::fs::create_dir_all(root.join(".git")).unwrap();
+                root
+            })
+            .collect();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let workers: Vec<_> = roots
+            .iter()
+            .map(|root| {
+                let root = root.clone();
+                let path = path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    Database::open_repository(&path, &root, true).is_ok()
+                })
+            })
+            .collect();
+        assert_eq!(
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap())
+                .filter(|accepted| *accepted)
+                .count(),
+            1
+        );
+        let accepted = roots
+            .iter()
+            .filter(|root| Database::open_repository(&path, root, false).is_ok())
+            .count();
+        assert_eq!(accepted, 1);
     }
 }

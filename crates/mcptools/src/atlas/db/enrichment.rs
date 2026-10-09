@@ -135,7 +135,7 @@ impl Database {
         target: &EnrichmentTarget,
         identity: &InputIdentity,
     ) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)?;
         let exists: bool = tx.query_row(
             &format!(
                 "SELECT EXISTS(SELECT 1 FROM {} WHERE path = ?1)",
@@ -210,7 +210,7 @@ impl Database {
         if rechecked_identity != &claim.identity {
             return Ok(false);
         }
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)?;
         let updated = tx.execute(
             "UPDATE enrichment SET state = 'current', saved_identity = desired_identity, token = NULL, lease_until = NULL, error = NULL
              WHERE kind = ?1 AND path = ?2 AND desired_identity = ?3 AND token = ?4 AND state = 'in_flight' AND lease_until > ?5",
@@ -254,7 +254,7 @@ impl Database {
 
     pub fn recover_enrichment(&self, now: i64) -> Result<usize> {
         validate_time(now)?;
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)?;
         tx.execute("UPDATE enrichment_retry SET attempts = MAX(0, attempts - 1) WHERE EXISTS (
             SELECT 1 FROM enrichment e WHERE e.kind = enrichment_retry.kind AND e.path = enrichment_retry.path
                 AND e.desired_identity = enrichment_retry.identity AND e.state = 'in_flight' AND e.lease_until <= ?1)", params![now])?;
@@ -267,18 +267,22 @@ impl Database {
     }
 
     pub fn invalidate_enrichment(&self, targets: &[EnrichmentTarget]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)?;
         for target in targets {
-            invalidate_target(&tx, target)?;
+            invalidate_target(&tx, target, false)?;
         }
         tx.commit()?;
         Ok(())
     }
 
     pub fn refresh_enrichment(&self, targets: &[EnrichmentTarget]) -> Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = Transaction::new_unchecked(&self.conn, rusqlite::TransactionBehavior::Immediate)?;
         for target in targets {
-            invalidate_target(&tx, target)?;
+            let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM enrichment WHERE kind = ?1 AND path = ?2 AND state = 'in_flight')", params![target.kind.table(), target.path.to_string_lossy().as_ref()], |row| row.get(0))?;
+            if active {
+                continue;
+            }
+            invalidate_target(&tx, target, true)?;
             tx.execute(
                 "DELETE FROM enrichment_retry WHERE kind = ?1 AND path = ?2",
                 params![target.kind.table(), target.path.to_string_lossy().as_ref()],
@@ -293,11 +297,15 @@ impl Database {
     }
 }
 
-fn invalidate_target(tx: &Transaction<'_>, target: &EnrichmentTarget) -> Result<()> {
+fn invalidate_target(
+    tx: &Transaction<'_>,
+    target: &EnrichmentTarget,
+    preserve_active: bool,
+) -> Result<()> {
     tx.execute(
-        &format!("{INVALIDATE} WHERE (kind = ?1 AND path = ?2) OR
-            (kind = 'directories' AND (path = '' OR substr(?2, 1, length(path) + 1) = path || '/'))"),
-        params![target.kind.table(), target.path.to_string_lossy().as_ref()],
+        &format!("{INVALIDATE} WHERE ((kind = ?1 AND path = ?2) OR
+            (kind = 'directories' AND (path = '' OR substr(?2, 1, length(path) + 1) = path || '/'))) AND (?3 = 0 OR state != 'in_flight')"),
+        params![target.kind.table(), target.path.to_string_lossy().as_ref(), preserve_active],
     )?;
     Ok(())
 }
@@ -632,5 +640,52 @@ mod tests {
             db.enrichment_state(&file_target).unwrap(),
             EnrichmentState::Current(changed)
         );
+    }
+
+    #[test]
+    fn concurrent_claims_refresh_and_queries_preserve_live_work_and_reject_stale_results() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.db");
+        let db = Database::open(&path).unwrap();
+        file(&db, "src/a.rs", b"old");
+        let target = target("src/a.rs", EntryKind::File);
+        let identity = input(b"old").identity().unwrap();
+        db.set_enrichment_input(&target, &identity).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let path = path.clone();
+                let target = target.clone();
+                let identity = identity.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let db = Database::open(&path).unwrap();
+                    barrier.wait();
+                    db.set_enrichment_input(&target, &identity).unwrap();
+                    let claim = db.claim_enrichment(&target, &identity, 1, 100).unwrap();
+                    db.refresh_enrichment(std::slice::from_ref(&target))
+                        .unwrap();
+                    assert!(db.peek_file(&target.path).unwrap().is_some());
+                    claim
+                })
+            })
+            .collect();
+        let claims: Vec<_> = workers
+            .into_iter()
+            .filter_map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(claims.len(), 1);
+        assert!(db.semantic_summary().unwrap().contains("in_flight=1"));
+        file(&db, "src/a.rs", b"new");
+        let description = ValidatedDescription::parse("SHORT: Old\nLONG: Old result").unwrap();
+        assert!(!db
+            .commit_enrichment(&claims[0], &identity, &description, 2)
+            .unwrap());
+        assert!(db
+            .peek_file(&target.path)
+            .unwrap()
+            .unwrap()
+            .short_description
+            .is_none());
     }
 }

@@ -10,22 +10,24 @@ use crate::atlas::db::Database;
 
 #[derive(Debug, clap::Parser)]
 pub struct TreeOptions {
-    /// Path to show (default: repo root)
+    #[clap(help = "Path to show (default: repo root)")]
     path: Option<PathBuf>,
 
-    /// Maximum depth to display
-    #[clap(long, default_value = "100")]
+    #[clap(long, default_value = "100", help = "Maximum depth to display")]
     depth: u32,
 
-    /// Output as JSON
-    #[clap(long)]
+    #[clap(long, help = "Output as JSON")]
     json: bool,
 }
 
 pub async fn run(opts: TreeOptions, _global: crate::Global) -> Result<()> {
     let root = index::find_git_root()?;
     let config = load_config(&root)?;
-    let db = Database::open(&config.db_path.resolve(&root))?;
+    let db = Database::open_repository(&config.db_path.resolve(&root), &root, false)?;
+    crate::prelude::eprintln!(
+        "{}",
+        crate::atlas::data::query_freshness(&db, &config, &root)?
+    );
     let path = opts.path.unwrap_or_default();
     let entries = atlas_tree_data(&db, Some(&path), Some(opts.depth))?;
     let output = format_tree(&entries, opts.json);

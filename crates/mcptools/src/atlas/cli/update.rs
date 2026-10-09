@@ -31,7 +31,7 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
         ));
     }
     ensure_parent_dir(&db_path)?;
-    let db = Database::open(&db_path)?;
+    let db = Database::open_repository(&db_path, &root, true)?;
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
@@ -45,7 +45,7 @@ pub async fn run(opts: UpdateOptions, _global: crate::Global) -> Result<()> {
         .map_err(|e| eyre!("invalid skip pattern: {e}"))?;
     let mut current_hashes = HashMap::new();
     let mut file_bytes: HashMap<PathBuf, Vec<u8>> = HashMap::new();
-    for result in walk_repo(&root, &ignore, &primer_path) {
+    for result in walk_repo(&root, &ignore, &primer_path, &db_path) {
         let (path, bytes) = result?;
         current_hashes.insert(path.clone(), content_hash(&bytes));
         file_bytes.insert(path, bytes);

@@ -2,6 +2,36 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+const GIT_LOCAL_ENV_VARS: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+fn clear_git_environment(command: &mut Command) {
+    for variable in GIT_LOCAL_ENV_VARS {
+        command.env_remove(variable);
+    }
+}
+
+fn fixture_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    clear_git_environment(&mut command);
+    command
+}
+
 fn binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_mcptools"))
 }
@@ -10,14 +40,16 @@ fn seed_fixture() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".git")).unwrap();
     std::fs::create_dir_all(dir.path().join(".mcptools/atlas")).unwrap();
+    let output = atlas_at(dir.path(), &["index"], None);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let db_path = dir.path().join(".mcptools/atlas/index.db");
     let conn = rusqlite::Connection::open(&db_path).unwrap();
     conn.execute_batch(
-        "CREATE TABLE files (path TEXT PRIMARY KEY, content_hash TEXT NOT NULL, tree_sitter_hash TEXT, short_description TEXT, long_description TEXT, indexed_at TEXT NOT NULL);
-         CREATE TABLE directories (path TEXT PRIMARY KEY, short_description TEXT, long_description TEXT, indexed_at TEXT);
-         CREATE TABLE symbols (id INTEGER PRIMARY KEY AUTOINCREMENT, file_path TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, signature TEXT, visibility TEXT NOT NULL, start_line INTEGER NOT NULL, end_line INTEGER NOT NULL);
-         CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         INSERT INTO files (path, content_hash, short_description, long_description, indexed_at) VALUES ('src/main.rs', 'abc', 'Entry point', 'Long entry point description', '2026-01-01');
+        "INSERT INTO files (path, content_hash, short_description, long_description, indexed_at) VALUES ('src/main.rs', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'Entry point', 'Long entry point description', '2026-01-01');
          INSERT INTO directories (path, short_description, indexed_at) VALUES ('src', 'Sources', '2026-01-01');",
     )
     .unwrap();
@@ -30,9 +62,12 @@ fn request(id: u64, method: &str, params: serde_json::Value) -> serde_json::Valu
 }
 
 fn run_fixture(root: &Path) -> Vec<serde_json::Value> {
-    let mut child = Command::new(binary())
+    let mut child = fixture_command(binary())
         .args(["mcp", "stdio"])
         .current_dir(root)
+        .env("HOME", root.join(".mcptools"))
+        .env_remove("XDG_CONFIG_HOME")
+        .env("LLM_STREAM_CONFIG_DIR", root.join(".mcptools/llm-stream"))
         .env_remove("ATLAS_DB_PATH")
         .env_remove("ATLAS_PRIMER_PATH")
         .env_remove("ATLAS_MAX_FILE_TOKENS")
@@ -155,6 +190,12 @@ fn mcp_contract_atlas() {
         );
         let text = structured.get("text").and_then(|v| v.as_str()).unwrap();
         assert!(!text.is_empty(), "empty text for {format}");
+        if format != "status" {
+            assert!(structured["freshness"]
+                .as_str()
+                .unwrap()
+                .contains("semantic=cached_unverified"));
+        }
     }
     let primer = dir.path().join(".mcptools/atlas/primer.md");
     let text = " \nCafé 世界 🦀\n\t  ";
@@ -220,7 +261,7 @@ fn structural_commands_preserve_optional_primer_and_cached_descriptions_without_
             .unwrap();
             std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
             let run = |command: &str| {
-                let output = Command::new(binary())
+                let output = fixture_command(binary())
                     .arg("atlas")
                     .args(command.split_whitespace())
                     .current_dir(root)
@@ -401,7 +442,7 @@ fn structural_commands_reject_database_primer_path_aliases() {
             std::fs::write(&primer, bytes).unwrap();
         }
         for command in ["init", "index", "update", "sync"] {
-            let output = Command::new(binary())
+            let output = fixture_command(binary())
                 .args(["atlas", command])
                 .current_dir(root)
                 .env_remove("ATLAS_PRIMER_PATH")
@@ -419,4 +460,349 @@ fn structural_commands_reject_database_primer_path_aliases() {
             }
         }
     }
+}
+
+fn atlas_at(root: &Path, args: &[&str], db: Option<&Path>) -> std::process::Output {
+    let mut command = fixture_command(binary());
+    command
+        .args(["atlas"])
+        .args(args)
+        .current_dir(root)
+        .env("HOME", root.join(".mcptools"))
+        .env_remove("XDG_CONFIG_HOME")
+        .env("LLM_STREAM_CONFIG_DIR", root.join(".mcptools/llm-stream"))
+        .env_remove("ATLAS_DB_PATH")
+        .env_remove("ATLAS_PRIMER_PATH")
+        .env("ATLAS_API", "fake")
+        .env("ATLAS_MODEL", "fake")
+        .env("LLM_STREAM_BIN", root.join(".mcptools/nonexistent-runner"));
+    if let Some(db) = db {
+        command.env("ATLAS_DB_PATH", db);
+    }
+    command.output().unwrap()
+}
+
+fn git_at(root: &Path, args: &[&str]) {
+    let path = std::env::join_paths(std::iter::once(root.join(".mcptools/hook-bin")).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))
+    .unwrap();
+    let output = fixture_command("git")
+        .args(args)
+        .current_dir(root)
+        .env("PATH", path)
+        .env("HOME", root.join(".mcptools"))
+        .env_remove("XDG_CONFIG_HOME")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("ATLAS_DB_PATH")
+        .env_remove("ATLAS_PRIMER_PATH")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn working_tree_freshness_is_model_free_bounded_and_worktree_isolated() {
+    let repo = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    git_at(root, &["init", "-q"]);
+    git_at(root, &["config", "user.email", "test@example.invalid"]);
+    git_at(root, &["config", "user.name", "Atlas test"]);
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("src/main.rs"), "pub fn old() {}\n").unwrap();
+    std::fs::write(root.join(".gitignore"), ".mcptools/\n").unwrap();
+    git_at(root, &["add", "."]);
+    git_at(root, &["commit", "-qm", "initial", "--no-verify"]);
+    let run = |args: &[&str]| {
+        let out = atlas_at(root, args, None);
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out
+    };
+    run(&["index"]);
+    let state = |expected: &str| {
+        let out = run(&["tree", "--json"]);
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(expected),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(serde_json::from_slice::<serde_json::Value>(&out.stdout)
+            .unwrap()
+            .is_array());
+        let out = run(&["peek", "src/main.rs", "--json"]);
+        assert!(String::from_utf8_lossy(&out.stderr).contains(expected));
+    };
+    state("structural=ready");
+    let global_config = root.join(".mcptools/.gitconfig");
+    std::fs::write(&global_config, "[core]\nexcludesFile = /unchecked\n").unwrap();
+    state("structural=unknown");
+    std::fs::remove_file(global_config).unwrap();
+    let primer = root.join(".mcptools/atlas/primer.md");
+    std::fs::write(&primer, vec![b'a'; 16 * 1024 * 1024 + 1]).unwrap();
+    state("structural=ready");
+    std::fs::remove_file(primer).unwrap();
+    let path = root.join("src/main.rs");
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::fs::write(&path, "pub fn new() {}\n").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    state("structural=stale");
+    run(&["update"]);
+    assert!(
+        String::from_utf8_lossy(&run(&["peek", "src/main.rs", "--json"]).stdout).contains("new")
+    );
+    state("structural=ready");
+    std::fs::write(root.join("src/add.rs"), "pub fn added() {}\n").unwrap();
+    state("structural=stale");
+    run(&["index"]);
+    std::fs::rename(root.join("src/add.rs"), root.join("src/renamed.rs")).unwrap();
+    state("structural=stale");
+    run(&["update"]);
+    std::fs::remove_file(root.join("src/renamed.rs")).unwrap();
+    state("structural=stale");
+    run(&["update"]);
+    std::fs::write(root.join("src/ignored.rs"), "pub fn ignored() {}\n").unwrap();
+    run(&["index"]);
+    std::fs::write(root.join(".gitignore"), ".mcptools/\nsrc/ignored.rs\n").unwrap();
+    state("structural=stale");
+    run(&["update"]);
+    let db_path = root.join(".mcptools/atlas/index.db");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    let count: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE path = 'src/ignored.rs'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+    conn.execute_batch("INSERT INTO enrichment(kind,path,desired_identity,state,token,lease_until) VALUES ('files','src/main.rs','pending','in_flight','claim',9999999999);").unwrap();
+    let out = run(&["peek", "src/main.rs", "--json"]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains("in_flight=1"));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("new"));
+    std::fs::write(root.join("src/large.txt"), vec![b'a'; 16 * 1024 * 1024 + 1]).unwrap();
+    state("structural=unknown");
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE path = 'src/main.rs'",
+            [],
+            |row| row.get::<_, usize>(0)
+        )
+        .unwrap(),
+        1
+    );
+    std::fs::remove_file(root.join("src/large.txt")).unwrap();
+    #[cfg(unix)]
+    {
+        let external = tempfile::tempdir().unwrap();
+        std::fs::write(
+            external.path().join("exclude"),
+            vec![b'#'; 16 * 1024 * 1024 + 1],
+        )
+        .unwrap();
+        let info = root.join(".git/info");
+        let saved = root.join(".git/info-saved");
+        std::fs::rename(&info, &saved).unwrap();
+        std::os::unix::fs::symlink(external.path(), &info).unwrap();
+        state("structural=unknown");
+        std::fs::remove_file(&info).unwrap();
+        std::fs::rename(saved, info).unwrap();
+    }
+    std::fs::create_dir(root.join("ignored")).unwrap();
+    std::fs::write(
+        root.join("ignored/.gitignore"),
+        vec![b'#'; 16 * 1024 * 1024 + 1],
+    )
+    .unwrap();
+    state("structural=unknown");
+    std::fs::write(root.join("ignored/.gitignore"), "*\n").unwrap();
+    for index in 0..10_001 {
+        std::fs::write(root.join(format!("ignored/{index}.txt")), []).unwrap();
+    }
+    state("structural=unknown");
+    std::fs::remove_dir_all(root.join("ignored")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(&path, "pub fn committed() {}\n").unwrap();
+        state("structural=stale");
+        run(&["setup", "--no-skills", "--no-claude-md", "--no-templates"]);
+        let hook = std::fs::read_to_string(root.join(".git/hooks/post-commit")).unwrap();
+        assert!(hook.contains(&mcptools_core::atlas::hook_block()));
+        let fifo = root.join(".mcptools/hook-completed");
+        assert!(Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        let (send, receive) = std::sync::mpsc::channel();
+        let notification = fifo.clone();
+        let reader = std::thread::spawn(move || {
+            let file = std::fs::File::open(notification).unwrap();
+            let mut line = String::new();
+            BufReader::new(file).read_line(&mut line).unwrap();
+            send.send(line).unwrap();
+        });
+        let bin_dir = root.join(".mcptools/hook-bin");
+        std::fs::create_dir(&bin_dir).unwrap();
+        let wrapper = bin_dir.join("mcptools");
+        std::fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\n'{}' \"$@\"\nstatus=$?\nprintf '%s\\n' \"$status\" > '{}'\nexit \"$status\"\n",
+                binary().display(), fifo.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git_at(root, &["add", "."]);
+        git_at(root, &["commit", "-qm", "dirty changes", "--no-verify"]);
+        assert_eq!(
+            receive
+                .recv_timeout(std::time::Duration::from_secs(15))
+                .unwrap(),
+            "0\n"
+        );
+        reader.join().unwrap();
+        std::fs::remove_file(fifo).unwrap();
+        assert!(
+            String::from_utf8_lossy(&run(&["peek", "src/main.rs", "--json"]).stdout)
+                .contains("committed")
+        );
+    }
+    state("structural=ready");
+    run(&["sync"]);
+    state("structural=ready");
+    let nested = atlas_at(&root.join("src"), &["tree"], None);
+    assert!(nested.status.success());
+    assert!(String::from_utf8_lossy(&nested.stderr).contains("structural=ready"));
+    let lane_parent = tempfile::tempdir().unwrap();
+    let lane = lane_parent.path().join("lane");
+    git_at(
+        root,
+        &["worktree", "add", "-qb", "lane", lane.to_str().unwrap()],
+    );
+    assert!(lane.join(".git").is_file());
+    assert!(atlas_at(&lane, &["index"], None).status.success());
+    assert!(atlas_at(&lane.join("src"), &["tree"], None)
+        .status
+        .success());
+    for args in [
+        &["tree"][..],
+        &["index"][..],
+        &["update"][..],
+        &["status", "--json"][..],
+    ] {
+        let out = atlas_at(&lane, args, Some(&db_path));
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("identity mismatch"));
+    }
+    let other = tempfile::tempdir().unwrap();
+    git_at(other.path(), &["init", "-q"]);
+    assert!(!atlas_at(other.path(), &["index"], Some(&db_path))
+        .status
+        .success());
+    let custom = root.join("custom.db");
+    assert!(atlas_at(root, &["index"], Some(&custom)).status.success());
+    let out = atlas_at(root, &["tree"], Some(&custom));
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("structural=ready"));
+    let mut child = fixture_command(binary())
+        .args(["atlas", "index", "--stdin"])
+        .current_dir(root)
+        .env("ATLAS_DB_PATH", &custom)
+        .env_remove("ATLAS_PRIMER_PATH")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"custom.db\n")
+            .unwrap();
+    }
+    assert!(child.wait_with_output().unwrap().status.success());
+    let custom_conn = rusqlite::Connection::open(&custom).unwrap();
+    let indexed_database: usize = custom_conn
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE path = 'custom.db'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(indexed_database, 0);
+    custom_conn
+        .execute("DELETE FROM metadata WHERE key = 'worktree_identity'", [])
+        .unwrap();
+    let before = std::fs::read(&custom).unwrap();
+    for args in [&["tree"][..], &["index"][..]] {
+        let out = atlas_at(root, args, Some(&custom));
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("unbound legacy index"));
+        assert_eq!(std::fs::read(&custom).unwrap(), before);
+    }
+}
+
+#[test]
+fn fixture_commands_clear_every_repository_local_git_variable() {
+    let repo = tempfile::tempdir().unwrap();
+    let mut command = fixture_command("git");
+    for variable in GIT_LOCAL_ENV_VARS {
+        command.env(variable, "invalid-parent-repository");
+    }
+    command
+        .env("GIT_DIR", ".git")
+        .env("GIT_INDEX_FILE", ".git/index");
+    clear_git_environment(&mut command);
+    for variable in GIT_LOCAL_ENV_VARS {
+        assert!(command
+            .get_envs()
+            .any(|(key, value)| key == *variable && value.is_none()));
+    }
+    let output = command
+        .args(["init", "-q"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(repo.path().join(".git").is_dir());
+    let output = fixture_command("git")
+        .args(["rev-parse", "--local-env-vars"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for variable in String::from_utf8(output.stdout).unwrap().lines() {
+        assert!(
+            GIT_LOCAL_ENV_VARS.contains(&variable),
+            "unsanitized Git variable: {variable}"
+        );
+    }
+    git_at(repo.path(), &["status", "--porcelain"]);
 }

@@ -49,6 +49,10 @@ mcptools atlas setup --no-templates   # Skip installing llm-stream templates (at
 
 The `index` and `update` commands report structural work and elapsed time. Removed flags `--with-primer` and `--parallel` are rejected by the CLI.
 
+Tree and peek keep their CLI stdout format and report freshness on stderr. MCP outputs add an optional `freshness` string. A raw, non-symlink-following preflight counts the whole checkout, including ignored entries and Git metadata, before constructing the ignore-aware walker. The limits are 10,000 entries and 16 MiB of regular-file metadata sizes; configured database, primer, and sidecar bytes are excluded. The following hash walk retains entry, byte, and deadline checks. Both passes share a 250 ms deadline checked between filesystem operations and after reads. Synchronous filesystem operations can overrun that deadline. External ignore sources (global configuration/ignore files or ancestor ignore/Git markers), symlink/special-file ignore sources, and Git-directory reference files conservatively report `unknown` before ignore processing. This includes linked worktrees; their indexed results remain usable and explicit structural refresh remains available. Ordinary symlinks are counted but not followed. Incomplete scans never infer deletions or refresh automatically. Semantic summaries are cached and unverified; read source for current content. `ready` is a best-effort snapshot, not an atomic view of concurrent edits. Explicit `index` or `update` refreshes compare bytes, including same-size edits with preserved timestamps.
+
+Databases bind to the canonical checkout root and Git directory. Linked worktrees have separate default databases; configured databases must not be shared. Moved checkouts and unbound legacy indexes fail closed: choose a new database path and run `mcptools atlas index`. Query opens are read-only and do not migrate old schemas. Schema creation and ownership binding use one immediate transaction.
+
 ### `atlas enrich` — Scoped Execution and Read-Only Planning
 
 `atlas enrich` selects every indexed file and directory. A file path selects only that file; a directory path selects only that indexed subtree. Paths are normalized against the current directory, must remain inside the repository, and must not traverse symlinks. Missing, ignored, reserved, stale-index, and non-normalized records fail before a plan is published.
@@ -88,7 +92,7 @@ Pure logic lives in crates/core; I/O lives in crates/mcptools.
 
 `atlas index --stdin` reads file paths from standard input, one per line, instead of walking the repository. Each line may be a plain path (`src/foo.ts`) or `git status --porcelain` output (`M  src/foo.ts`, `?? new.ts`, `R  old.ts -> new.ts` — the new path wins). Blank lines and `#` comments are ignored, as are paths that don't resolve to a file.
 
-Only the listed files are indexed; unchanged hashes are reused. Other records are retained. `skip_patterns` are not applied, but the configured primer is excluded.
+Only the listed files are indexed; unchanged hashes are reused. Other records are retained. `skip_patterns` are not applied, but the configured primer, database, and database sidecars are excluded.
 
 ### `atlas peek` for Files and Directories
 
@@ -144,7 +148,7 @@ Precedence is environment variables, nested `[atlas]` values, flat top-level val
 
 All structural and query commands work without llm-stream, authentication, or a selected model. Status inspects strict enrichment settings without calling a runner; invalid enrichment settings do not prevent structural status. Other structural/query commands do not load strict enrichment settings.
 
-The [versioned status and enrichment contract](../../docs/atlas-redesign/status-contract.md) defines freshness, counts, safe identities, telemetry, JSON documents, and process exits. Status does not create an absent index; it returns `atlas init` guidance. Status can migrate an existing legacy index, as before.
+The [versioned status and enrichment contract](../../docs/atlas-redesign/status-contract.md) defines freshness, counts, safe identities, telemetry, JSON documents, and process exits. Status does not create or migrate an index; an absent index returns `atlas init` guidance, and a legacy index requires `mcptools atlas index`.
 
 Legacy `kind`, `base_url`, `OLLAMA_URL`, and `ATLAS_BASE_URL` settings are rejected before enrichment with a migration message. Keep unrelated `.mcptools/config.toml` fields, remove those settings, set `api = "ollama"` with a shared or per-role model, and configure the Ollama endpoint in llm-stream. Atlas never rewrites the config file.
 

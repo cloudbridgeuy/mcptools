@@ -1,4 +1,5 @@
 {
   "format": "text",
-  "text": "fn main() {}"
+  "text": "fn main() {}",
+  "freshness": "structural=stale; semantic=cached_unverified stale=1; model-free, no automatic refresh"
 }

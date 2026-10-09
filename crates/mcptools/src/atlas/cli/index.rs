@@ -32,13 +32,13 @@ pub async fn run(opts: IndexOptions, _global: crate::Global) -> Result<()> {
         ));
     }
     ensure_parent_dir(&db_path)?;
-    let db = Database::open(&db_path)?;
+    let db = Database::open_repository(&db_path, &root, true)?;
     let ignore = mcptools_core::atlas::build_ignore_matcher(&config.skip_patterns)
         .map_err(|e| eyre!("invalid skip pattern: {e}"))?;
     let file_source: Box<dyn Iterator<Item = Result<(PathBuf, Vec<u8>)>>> = if opts.stdin {
-        Box::new(read_paths_from_stdin(&root, &primer_path))
+        Box::new(read_paths_from_stdin(&root, &primer_path, &db_path))
     } else {
-        Box::new(walk_repo(&root, &ignore, &primer_path))
+        Box::new(walk_repo(&root, &ignore, &primer_path, &db_path))
     };
 
     if opts.dry_run {
@@ -149,6 +149,7 @@ pub(crate) fn print_elapsed(start: std::time::Instant) {
 fn read_paths_from_stdin<'a>(
     root: &'a Path,
     primer_path: &'a Path,
+    db_path: &'a Path,
 ) -> impl Iterator<Item = Result<(PathBuf, Vec<u8>)>> + 'a {
     use std::io::BufRead;
     std::io::stdin()
@@ -161,7 +162,9 @@ fn read_paths_from_stdin<'a>(
             };
             let relative = PathBuf::from(mcptools_core::atlas::parse_stdin_line(&line)?);
             let abs_path = root.join(&relative);
-            if crate::atlas::fs::same_path(&abs_path, primer_path) || !abs_path.is_file() {
+            if crate::atlas::fs::reserved_index_path(&abs_path, primer_path, db_path)
+                || !abs_path.is_file()
+            {
                 return None;
             }
             Some(

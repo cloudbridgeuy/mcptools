@@ -79,6 +79,8 @@ impl Fixture {
             .arg("atlas")
             .args(args)
             .current_dir(self.root.path())
+            .env("HOME", self.root.path().join(".mcptools"))
+            .env_remove("XDG_CONFIG_HOME")
             .env("LLM_STREAM_BIN", &self.runner)
             .env("LLM_STREAM_CONFIG_DIR", &self.config_dir)
             .env("ATLAS_TEST_CALLS", &self.calls)

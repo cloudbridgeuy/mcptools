@@ -10,18 +10,21 @@ use crate::atlas::db::{Database, PeekResult};
 
 #[derive(Debug, clap::Parser)]
 pub struct PeekOptions {
-    /// File or directory path to peek
+    #[clap(help = "File or directory path to peek")]
     path: PathBuf,
 
-    /// Output as JSON
-    #[clap(long)]
+    #[clap(long, help = "Output as JSON")]
     json: bool,
 }
 
 pub async fn run(opts: PeekOptions, _global: crate::Global) -> Result<()> {
     let root = index::find_git_root()?;
     let config = load_config(&root)?;
-    let db = Database::open(&config.db_path.resolve(&root))?;
+    let db = Database::open_repository(&config.db_path.resolve(&root), &root, false)?;
+    crate::prelude::eprintln!(
+        "{}",
+        crate::atlas::data::query_freshness(&db, &config, &root)?
+    );
     let result = atlas_peek_data(&db, &opts.path)?;
     let output = match result {
         PeekResult::File(peek) => format_peek(&peek, opts.json),

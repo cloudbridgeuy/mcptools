@@ -7,6 +7,8 @@ use super::JsonRpcError;
 pub struct AtlasTextOutput {
     pub format: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freshness: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -28,7 +30,9 @@ pub async fn handle_atlas_tree_view(
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: AtlasTreeViewArgs = parse_args(arguments)?;
-    let (_root, _config, db) = open_atlas()?;
+    let (root, config, db) = open_atlas()?;
+    let freshness =
+        crate::atlas::data::query_freshness(&db, &config, &root).map_err(to_internal_error)?;
 
     let path = args.path.map(std::path::PathBuf::from);
     let entries = crate::atlas::data::atlas_tree_data(&db, path.as_deref(), args.depth)
@@ -38,6 +42,7 @@ pub async fn handle_atlas_tree_view(
     super::to_dual_result(AtlasTextOutput {
         format: "tree".to_string(),
         text: output,
+        freshness: Some(freshness),
     })
 }
 
@@ -46,7 +51,9 @@ pub async fn handle_atlas_peek(
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: AtlasPeekArgs = parse_args(arguments)?;
-    let (_root, _config, db) = open_atlas()?;
+    let (root, config, db) = open_atlas()?;
+    let freshness =
+        crate::atlas::data::query_freshness(&db, &config, &root).map_err(to_internal_error)?;
 
     let peek_result = crate::atlas::data::atlas_peek_data(&db, std::path::Path::new(&args.path))
         .map_err(to_internal_error)?;
@@ -61,6 +68,7 @@ pub async fn handle_atlas_peek(
     super::to_dual_result(AtlasTextOutput {
         format: "peek".to_string(),
         text: output,
+        freshness: Some(freshness),
     })
 }
 
@@ -76,6 +84,14 @@ pub async fn handle_atlas_status(
     super::to_dual_result(AtlasTextOutput {
         format: "status".to_string(),
         text: output,
+        freshness: Some(format!(
+            "structural={}; semantic={}",
+            serde_json::to_value(status.structural)
+                .map_err(|error| to_internal_error(error.into()))?
+                .as_str()
+                .unwrap_or("unknown"),
+            status.enrichment_state
+        )),
     })
 }
 
@@ -107,13 +123,13 @@ fn open_atlas() -> Result<
         message: format!("Atlas config error: {e}"),
         data: None,
     })?;
-    let db = crate::atlas::db::Database::open(&config.db_path.resolve(&root)).map_err(|e| {
-        JsonRpcError {
+    let db =
+        crate::atlas::db::Database::open_repository(&config.db_path.resolve(&root), &root, false)
+            .map_err(|e| JsonRpcError {
             code: -32603,
             message: format!("Atlas database error: {e}"),
             data: None,
-        }
-    })?;
+        })?;
     Ok((root, config, db))
 }
 

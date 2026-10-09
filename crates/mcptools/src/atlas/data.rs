@@ -8,6 +8,30 @@ use mcptools_core::atlas::{
 
 use crate::atlas::db::{Database, PeekResult};
 
+pub fn query_freshness(db: &Database, config: &AtlasConfig, root: &Path) -> Result<String> {
+    let ignore = build_ignore_matcher(&config.skip_patterns)
+        .map_err(|error| color_eyre::eyre::eyre!(error))?;
+    let primer = config.primer_path.resolve(root);
+    let path = config.db_path.resolve(root);
+    let snapshot = crate::atlas::fs::walk_repo_bounded(root, &ignore, &primer, &path)
+        .map(|entry| entry.map(|(path, bytes)| (path, content_hash(&bytes))))
+        .collect::<Result<std::collections::HashMap<_, _>>>();
+    let structural = if db.get_metadata("last_full_sync")?.is_none()
+        && db.get_metadata("last_update")?.is_none()
+    {
+        StructuralState::NotYetSynced
+    } else {
+        match snapshot {
+            Ok(current) if compute_change_set(&db.file_hashes()?, &current).is_empty() => {
+                StructuralState::Ready
+            }
+            Ok(_) => StructuralState::Stale,
+            Err(_) => StructuralState::Unknown,
+        }
+    };
+    Ok(format!("structural={}; semantic=cached_unverified {}; model-free, no automatic refresh; run `mcptools atlas index` to refresh; use source reads for current content", serde_json::to_value(structural)?.as_str().unwrap_or("unknown"), db.semantic_summary()?))
+}
+
 pub fn atlas_tree_data(
     db: &Database,
     path: Option<&Path>,
@@ -35,12 +59,18 @@ pub fn atlas_status_data(db: &Database, config: &AtlasConfig, root: &Path) -> Re
     let ignore = build_ignore_matcher(&config.skip_patterns)
         .map_err(|error| StatusConfigurationFailure(error.to_string()))?;
     let synced = last_sync.is_some() || db.get_metadata("last_update")?.is_some();
-    let changes = if synced {
+    let snapshot = if synced {
         let primer_path = config.primer_path.resolve(root);
-        let current_hashes = crate::atlas::fs::walk_repo(root, &ignore, &primer_path)
+        let db_path = config.db_path.resolve(root);
+        crate::atlas::fs::walk_repo_bounded(root, &ignore, &primer_path, &db_path)
             .map(|entry| entry.map(|(path, bytes)| (path, content_hash(&bytes))))
-            .collect::<Result<std::collections::HashMap<_, _>>>()?;
-        compute_change_set(&db.file_hashes()?, &current_hashes)
+            .collect::<Result<std::collections::HashMap<_, _>>>()
+            .ok()
+    } else {
+        None
+    };
+    let changes = if let Some(current_hashes) = &snapshot {
+        compute_change_set(&db.file_hashes()?, current_hashes)
     } else {
         mcptools_core::atlas::ChangeSet {
             added: Vec::new(),
@@ -56,6 +86,8 @@ pub fn atlas_status_data(db: &Database, config: &AtlasConfig, root: &Path) -> Re
         .collect();
     let structural = if !synced {
         StructuralState::NotYetSynced
+    } else if snapshot.is_none() {
+        StructuralState::Unknown
     } else if changes.is_empty() {
         StructuralState::Ready
     } else {
@@ -84,6 +116,9 @@ pub fn atlas_status_data(db: &Database, config: &AtlasConfig, root: &Path) -> Re
             EnrichmentState::Failed(_) => enrichment.failed += 1,
             EnrichmentState::Deferred(_) => enrichment.deferred += 1,
             EnrichmentState::InFlight { .. } => enrichment.in_flight += 1,
+            EnrichmentState::Current(_) if structural == StructuralState::Unknown => {
+                enrichment.unknown += 1
+            }
             EnrichmentState::Current(_)
                 if changed_paths.contains(&target.path)
                     || (target.kind == crate::atlas::enrichment::EntryKind::Directory
@@ -125,12 +160,10 @@ pub fn atlas_status_data(db: &Database, config: &AtlasConfig, root: &Path) -> Re
         primer_present,
         structural,
         guidance: match structural {
-            StructuralState::Stale | StructuralState::NotYetSynced => {
+            StructuralState::Stale | StructuralState::NotYetSynced | StructuralState::Unknown => {
                 Some("Run `mcptools atlas index` to refresh the structural index".into())
             }
-            StructuralState::Ready | StructuralState::Uninitialized | StructuralState::Unknown => {
-                None
-            }
+            StructuralState::Ready | StructuralState::Uninitialized => None,
         },
         enrichment,
         enrichment_state,
@@ -192,7 +225,11 @@ pub fn repository_status(root: &Path) -> Result<IndexStatus> {
             ..IndexStatus::default()
         });
     }
-    atlas_status_data(&Database::open_existing(&path)?, &config, root)
+    atlas_status_data(
+        &Database::open_repository(&path, root, false)?,
+        &config,
+        root,
+    )
 }
 
 #[derive(Debug, thiserror::Error)]
