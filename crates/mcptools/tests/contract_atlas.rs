@@ -101,6 +101,26 @@ fn run_fixture(root: &Path) -> Vec<serde_json::Value> {
             "resources/read",
             serde_json::json!({"uri": "atlas://primer"}),
         ),
+        request(
+            7,
+            "tools/call",
+            serde_json::json!({"name": "atlas_query", "arguments": {"query": "provider", "kind": "symbols", "limit": 1, "context_chars": 10}}),
+        ),
+        request(
+            8,
+            "tools/call",
+            serde_json::json!({"name": "atlas_query", "arguments": {"query": "provider", "kind": "symbols", "limit": 1, "excerpts": true, "context_lines": 1}}),
+        ),
+        request(
+            9,
+            "tools/call",
+            serde_json::json!({"name": "atlas_query", "arguments": {"query": "provider", "limit": 0}}),
+        ),
+        request(
+            10,
+            "tools/call",
+            serde_json::json!({"name": "atlas_peek", "arguments": {"path": "../src", "limit": 1}}),
+        ),
     ];
     let mut stdin = child.stdin.take().unwrap();
     for req in &requests {
@@ -148,7 +168,12 @@ fn mcp_contract_atlas() {
         .filter(|t| t.get("outputSchema").is_some())
         .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
         .collect();
-    for name in ["atlas_tree_view", "atlas_peek", "atlas_status"] {
+    for name in [
+        "atlas_tree_view",
+        "atlas_query",
+        "atlas_peek",
+        "atlas_status",
+    ] {
         let tool = tools
             .iter()
             .find(|t| t.get("name").and_then(|v| v.as_str()) == Some(name))
@@ -217,6 +242,143 @@ fn mcp_contract_atlas() {
         .as_str()
         .unwrap()
         .contains("Cannot read primer"));
+}
+
+#[test]
+fn query_locates_provider_without_paths_and_bounds_current_source_context() {
+    let repo = tempfile::tempdir().unwrap();
+    let root = repo.path();
+    git_at(root, &["init", "-q"]);
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::create_dir_all(root.join("src_%")).unwrap();
+    std::fs::write(
+        root.join("src/provider_impl.rs"),
+        "pub fn provider() -> &'static str {\n    \"cached\"\n}\npub fn provider_extra() {}\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src_%/only.rs"), "pub fn other() {}\n").unwrap();
+    assert!(atlas_at(root, &["index"], None).status.success());
+    std::fs::write(
+        root.join("src/provider_impl.rs"),
+        "pub fn provider() -> &'static str {\n    \"current\"\n}\npub fn provider_extra() {}\n",
+    )
+    .unwrap();
+    let cli = atlas_at(
+        root,
+        &[
+            "query",
+            "provider",
+            "--kind",
+            "symbols",
+            "--limit",
+            "1",
+            "--context-chars",
+            "10",
+            "--json",
+        ],
+        None,
+    );
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let data: serde_json::Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(data["hits"][0]["path"], "src/provider_impl.rs");
+    assert_eq!(data["hits"][0]["symbol"]["name"], "provider");
+    assert_eq!(data["hits"][0]["score"], 103);
+    assert_eq!(data["hits"][0]["symbol"]["start_line"], 1);
+    assert_eq!(data["hits"][0]["symbol"]["end_line"], 3);
+    assert!(data["hits"][0]["short_description"].is_null());
+    assert!(data["hits"][0].get("excerpt").is_none());
+    assert_eq!(data["bounds"]["total"], 2);
+    assert_eq!(data["bounds"]["returned"], 1);
+    assert_eq!(data["bounds"]["truncated"], true);
+    assert_eq!(data["bounds"]["context_truncated"], true);
+    let responses = run_fixture(root);
+    let envelope = &result_of(&responses[6])["structuredContent"];
+    let text: serde_json::Value = serde_json::from_str(envelope["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text["hits"], data["hits"]);
+    assert_eq!(text["bounds"], data["bounds"]);
+    assert_eq!(envelope["bounds"], data["bounds"]);
+    let dual: serde_json::Value = serde_json::from_str(
+        result_of(&responses[6])["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(&dual, envelope);
+    let excerpt_data: serde_json::Value = serde_json::from_str(
+        result_of(&responses[7])["structuredContent"]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        excerpt_data["hits"][0]["excerpt"]["source"],
+        "current_worktree"
+    );
+    assert_eq!(excerpt_data["hits"][0]["excerpt"]["truncated"], true);
+    assert_eq!(excerpt_data["hits"][0]["excerpt"]["end_line"], 1);
+    assert_eq!(responses[8]["error"]["code"], -32602);
+    assert_eq!(responses[9]["error"]["code"], -32602);
+    let current = atlas_at(
+        root,
+        &[
+            "search",
+            "provider",
+            "--kind",
+            "symbols",
+            "--limit",
+            "1",
+            "--excerpts",
+            "--json",
+        ],
+        None,
+    );
+    let current: serde_json::Value = serde_json::from_slice(&current.stdout).unwrap();
+    assert!(current["hits"][0]["excerpt"]["text"]
+        .as_str()
+        .unwrap()
+        .contains("current"));
+    assert!(current["freshness"]
+        .as_str()
+        .unwrap()
+        .contains("structural=stale"));
+    let tree = atlas_at(
+        root,
+        &["tree", "./src_%/", "--depth", "1", "--limit", "1", "--json"],
+        None,
+    );
+    let tree: serde_json::Value = serde_json::from_slice(&tree.stdout).unwrap();
+    assert_eq!(tree.as_array().unwrap().len(), 1);
+    assert_eq!(tree[0]["path"], "src_%/only.rs");
+    let peek = atlas_at(root, &["peek", "src", "--limit", "1", "--json"], None);
+    let peek_data: serde_json::Value = serde_json::from_slice(&peek.stdout).unwrap();
+    assert_eq!(peek_data["symbols"].as_array().unwrap().len(), 1);
+    assert!(String::from_utf8_lossy(&peek.stderr).contains("\"truncated\":true"));
+    let no_matches = atlas_at(root, &["query", "missing_symbol", "--json"], None);
+    let no_matches: serde_json::Value = serde_json::from_slice(&no_matches.stdout).unwrap();
+    assert_eq!(no_matches["bounds"]["total"], 0);
+    assert_eq!(no_matches["bounds"]["truncated"], false);
+    std::fs::remove_file(root.join("src/provider_impl.rs")).unwrap();
+    let missing = atlas_at(
+        root,
+        &[
+            "query",
+            "provider",
+            "--kind",
+            "symbols",
+            "--limit",
+            "1",
+            "--excerpts",
+            "--json",
+        ],
+        None,
+    );
+    let missing: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
+    assert!(missing["hits"][0]["excerpt"]["error"].is_string());
+    assert_eq!(missing["hits"][0]["symbol"]["name"], "provider");
 }
 
 #[cfg(unix)]

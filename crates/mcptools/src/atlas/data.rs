@@ -3,10 +3,21 @@ use std::path::Path;
 use color_eyre::eyre::Result;
 use mcptools_core::atlas::{
     build_ignore_matcher, compute_change_set, content_hash, ActiveEnrichment, AtlasConfig,
-    EnrichmentConfig, EnrichmentCounts, IndexStatus, RoleIdentity, StructuralState, TreeEntry,
+    EnrichmentConfig, EnrichmentCounts, IndexStatus, RoleIdentity, StructuralState,
 };
 
-use crate::atlas::db::{Database, PeekResult};
+use crate::atlas::db::Database;
+
+pub fn open_navigation() -> Result<(std::path::PathBuf, AtlasConfig, Database)> {
+    let root = crate::atlas::cli::index::find_git_root()?;
+    let config = crate::atlas::config::load_config(&root)?;
+    let path = config.db_path.resolve(&root);
+    if !path.is_file() {
+        color_eyre::eyre::bail!("Atlas is uninitialized; run `mcptools atlas init`");
+    }
+    let db = Database::open_repository(&path, &root, false)?;
+    Ok((root, config, db))
+}
 
 pub fn query_freshness(db: &Database, config: &AtlasConfig, root: &Path) -> Result<String> {
     let ignore = build_ignore_matcher(&config.skip_patterns)
@@ -30,20 +41,6 @@ pub fn query_freshness(db: &Database, config: &AtlasConfig, root: &Path) -> Resu
         }
     };
     Ok(format!("structural={}; semantic=cached_unverified {}; model-free, no automatic refresh; run `mcptools atlas index` to refresh; use source reads for current content", serde_json::to_value(structural)?.as_str().unwrap_or("unknown"), db.semantic_summary()?))
-}
-
-pub fn atlas_tree_data(
-    db: &Database,
-    path: Option<&Path>,
-    depth: Option<u32>,
-) -> Result<Vec<TreeEntry>> {
-    let path = path.unwrap_or(Path::new(""));
-    let depth = depth.unwrap_or(1);
-    db.tree_entries(path, depth)
-}
-
-pub fn atlas_peek_data(db: &Database, path: &Path) -> Result<PeekResult> {
-    db.peek_file_or_dir(path)
 }
 
 pub fn atlas_status_data(db: &Database, config: &AtlasConfig, root: &Path) -> Result<IndexStatus> {

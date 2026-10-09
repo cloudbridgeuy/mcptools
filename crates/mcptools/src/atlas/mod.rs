@@ -6,6 +6,7 @@ pub mod enrichment;
 pub mod fs;
 pub mod llm;
 pub mod parser;
+pub mod query;
 pub mod retry;
 
 use crate::prelude::*;
@@ -26,6 +27,11 @@ pub enum Commands {
     Tree(cli::tree::TreeOptions),
     #[command(about = "Show file summary and symbols")]
     Peek(cli::peek::PeekOptions),
+    #[command(
+        about = "Find ranked indexed files and symbols without knowing their paths",
+        alias = "search"
+    )]
+    Query(cli::query::QueryOptions),
     #[command(about = "Prepare repository and build the structural index")]
     Init(cli::init::InitOptions),
     #[command(about = "Incremental update (changed files only)")]
@@ -44,6 +50,7 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
         Commands::Index(opts) => cli::index::run(opts, global).await,
         Commands::Tree(opts) => cli::tree::run(opts, global).await,
         Commands::Peek(opts) => cli::peek::run(opts, global).await,
+        Commands::Query(opts) => cli::query::run(opts, global).await,
         Commands::Init(opts) => cli::init::run(opts, global).await,
         Commands::Update(opts) => cli::update::run(opts, global).await,
         Commands::Sync(opts) => cli::sync::run(opts, global).await,

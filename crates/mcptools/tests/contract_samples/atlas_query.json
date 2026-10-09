@@ -1,0 +1,13 @@
+{
+  "format": "query",
+  "text": "{\"query\":\"provider\",\"kind\":\"symbols\",\"hits\":[],\"bounds\":{\"limit\":100,\"total\":0,\"returned\":0,\"truncated\":false,\"context_chars\":8192,\"context_truncated\":false},\"context_lines\":0,\"freshness\":\"structural=ready; semantic=cached_unverified; model-free\"}",
+  "freshness": "structural=ready; semantic=cached_unverified; model-free",
+  "bounds": {
+    "limit": 100,
+    "total": 0,
+    "returned": 0,
+    "truncated": false,
+    "context_chars": 8192,
+    "context_truncated": false
+  }
+}

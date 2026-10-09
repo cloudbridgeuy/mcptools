@@ -28,6 +28,9 @@ mcptools atlas tree --depth 2         # Limit depth
 mcptools atlas tree --json            # JSON output
 mcptools atlas peek <path>            # File or directory summary with symbols/children
 mcptools atlas peek <path> --json     # JSON output
+mcptools atlas query <query>          # Locate ranked files/symbols; alias: search
+mcptools atlas query <query> --kind symbols --limit 10 --json
+mcptools atlas search <query> --excerpts --context-lines 20 --context-chars 8192
 mcptools atlas update                 # Incremental update (changed files only)
 mcptools atlas sync                   # Force full re-index
 mcptools atlas status                 # Index health summary
@@ -48,6 +51,8 @@ mcptools atlas setup --no-templates   # Skip installing llm-stream templates (at
 ```
 
 The `index` and `update` commands report structural work and elapsed time. Removed flags `--with-primer` and `--parallel` are rejected by the CLI.
+
+Use `query` (alias `search`) when the path is unknown. It matches case-insensitive literal text in indexed names, paths, signatures, and cached descriptions. `--kind` selects `all`, `files`, or `symbols`; `--excerpts` reads bounded current-source excerpts. `--context-lines` applies only with `--excerpts`.
 
 Tree and peek keep their CLI stdout format and report freshness on stderr. MCP outputs add an optional `freshness` string. A raw, non-symlink-following preflight counts the whole checkout, including ignored entries and Git metadata, before constructing the ignore-aware walker. The limits are 10,000 entries and 16 MiB of regular-file metadata sizes; configured database, primer, and sidecar bytes are excluded. The following hash walk retains entry, byte, and deadline checks. Both passes share a 250 ms deadline checked between filesystem operations and after reads. Synchronous filesystem operations can overrun that deadline. External ignore sources (global configuration/ignore files or ancestor ignore/Git markers), symlink/special-file ignore sources, and Git-directory reference files conservatively report `unknown` before ignore processing. This includes linked worktrees; their indexed results remain usable and explicit structural refresh remains available. Ordinary symlinks are counted but not followed. Incomplete scans never infer deletions or refresh automatically. Semantic summaries are cached and unverified; read source for current content. `ready` is a best-effort snapshot, not an atomic view of concurrent edits. Explicit `index` or `update` refreshes compare bytes, including same-size edits with preserved timestamps.
 
@@ -237,7 +242,8 @@ Enrichment uses llm-stream with explicit provider/model selection. `[atlas.file_
 | `cli/update.rs` | `atlas update` handler: incremental update via hash-based change detection |
 | `cli/sync.rs` | `atlas sync` handler: full structural scan without clearing semantic data |
 | `cli/status.rs` | `atlas status` handler: index health display |
-| `data.rs` | Shared data functions: `atlas_tree_data`, `atlas_peek_data`, `atlas_status_data` (used by CLI + MCP) |
+| `data.rs` | Shared repository opening, query freshness, and `atlas_status_data` |
+| `query.rs` | Shared ranked query and bounded tree/peek data for CLI + MCP |
 
 ## SQLite Schema
 
@@ -282,14 +288,15 @@ Report `AttemptReport::format` or its fields: attempts, reason, next-attempt tim
 
 ## MCP Tools (V5)
 
-Atlas exposes three MCP tools and one MCP resource for AI agent access.
+Atlas exposes four MCP tools and one MCP resource for AI agent access.
 
 ### Tools
 
 | Tool | Description | Input |
 |------|-------------|-------|
-| `atlas_tree_view` | Browse annotated directory tree | `path` (optional), `depth` (optional, default 1) |
-| `atlas_peek` | Get file/directory summary + symbols | `path` (required) |
+| `atlas_tree_view` | Browse annotated directory tree | `path` (optional), `depth` (0-100, default 100), `limit` (1-1000, default 100), `context_chars` (0-32768, default 8192) |
+| `atlas_query` | Locate ranked files/symbols without a known path | `query` (required), `kind` (all/files/symbols), `limit`, `context_chars`, optional `excerpts` and `context_lines` (0-200, default 20) |
+| `atlas_peek` | Get file/directory summary + symbols | `path` (required), `limit` (1-1000, default 100), `context_chars` (0-32768, default 8192) |
 | `atlas_status` | Check index health | (none) |
 
 All tools return JSON. They call the same shared data functions as the CLI commands.
@@ -302,7 +309,7 @@ Optional operator-authored context is exposed at `atlas://primer`. Missing text 
 
 1. Read optional primer (MCP resource) if present — understand purpose and architecture
 2. `atlas_tree_view` at root — pick a direction
-3. `atlas_tree_view` with path — drill into directories of interest
+3. `atlas_query` (CLI: `mcptools atlas query <query>` or `search`) when the path is unknown; otherwise `atlas_tree_view` with path — drill into directories of interest
 4. `atlas_peek` with file path — get summary + symbols before reading
 5. Use grep/read to pull the actual code
 

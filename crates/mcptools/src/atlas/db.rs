@@ -262,13 +262,13 @@ impl Database {
                 .conn
                 .prepare(
                     "SELECT path, short_description FROM described_directories
-                     WHERE path LIKE ?1
+                     WHERE ?1 = '' OR substr(path, 1, length(?1) + 1) = ?1 || '/'
                      ORDER BY path",
                 )
                 .wrap_err("preparing directory query")?;
 
             let rows = stmt
-                .query_map(params![like_pattern(&prefix)], |row| {
+                .query_map(params![prefix], |row| {
                     let p: String = row.get(0)?;
                     let desc: Option<String> = row.get(1)?;
                     Ok((p, desc))
@@ -303,13 +303,13 @@ impl Database {
                 .conn
                 .prepare(
                     "SELECT path, short_description FROM described_files
-                     WHERE path LIKE ?1
+                     WHERE ?1 = '' OR substr(path, 1, length(?1) + 1) = ?1 || '/'
                      ORDER BY path",
                 )
                 .wrap_err("preparing file query")?;
 
             let rows = stmt
-                .query_map(params![like_pattern(&prefix)], |row| {
+                .query_map(params![prefix], |row| {
                     let p: String = row.get(0)?;
                     let desc: Option<String> = row.get(1)?;
                     Ok((p, desc))
@@ -403,7 +403,7 @@ impl Database {
             .conn
             .prepare(
                 "SELECT name, kind, signature, visibility, start_line, end_line
-                 FROM symbols WHERE file_path = ?1 ORDER BY start_line",
+                 FROM symbols WHERE file_path = ?1 ORDER BY start_line, end_line, name, kind, signature, visibility",
             )
             .wrap_err("preparing symbol query")?;
 
@@ -556,11 +556,11 @@ impl Database {
 
         let mut file_stmt = self
             .conn
-            .prepare("SELECT path FROM files WHERE path LIKE ?1 ORDER BY path")
+            .prepare("SELECT path FROM files WHERE ?1 = '' OR substr(path, 1, length(?1) + 1) = ?1 || '/' ORDER BY path")
             .wrap_err("preparing aggregated symbols file query")?;
 
         let file_paths: Vec<PathBuf> = file_stmt
-            .query_map(params![like_pattern(&dir_str)], |row| {
+            .query_map(params![dir_str], |row| {
                 let p: String = row.get(0)?;
                 Ok(p)
             })
@@ -705,14 +705,6 @@ impl Database {
 pub enum PeekResult {
     File(PeekView),
     Directory(DirectoryPeekView),
-}
-
-fn like_pattern(prefix: &str) -> String {
-    if prefix.is_empty() {
-        "%".to_string()
-    } else {
-        format!("{prefix}/%")
-    }
 }
 
 fn relative_depth(base: &str, child: &str) -> u32 {

@@ -89,7 +89,7 @@ For detailed usage of each feature, see the context files:
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
-- **[Atlas](.claude/context/atlas.md)** - Codebase navigation for AI agents; symbol index, tree view, peek, status; MCP tools + primer resource
+- **[Atlas](.claude/context/atlas.md)** - Codebase navigation for AI agents; symbol index, tree view, query/search, peek, status; MCP tools + primer resource
 - **[Images](.claude/context/images.md)** - ChatGPT Images 2.5 generation, editing, variations; subscription or API key
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
@@ -112,6 +112,7 @@ mcptools atlas index                  # Refresh structural index; no model calls
 mcptools atlas index --incremental    # Skip unchanged files
 mcptools atlas tree [path]            # Show annotated directory tree (--json)
 mcptools atlas peek <path>            # Show file or directory summary + symbols (--json)
+mcptools atlas query <query>          # Locate files/symbols when the path is unknown; alias: search (--json)
 mcptools atlas update                 # Incremental update (changed files only)
 mcptools atlas sync                   # Force full re-index
 mcptools atlas status                 # Index health (--json)

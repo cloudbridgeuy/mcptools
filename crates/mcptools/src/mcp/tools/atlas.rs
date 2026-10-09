@@ -11,15 +11,90 @@ pub struct AtlasTextOutput {
     pub freshness: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AtlasBoundedOutput {
+    #[serde(flatten)]
+    pub view: AtlasTextOutput,
+    pub bounds: crate::atlas::query::Bounds,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AtlasPeekOutput {
+    #[serde(flatten)]
+    pub view: AtlasBoundedOutput,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children_bounds: Option<crate::atlas::query::Bounds>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct AtlasTreeViewArgs {
     pub path: Option<String>,
     pub depth: Option<u32>,
+    pub limit: Option<usize>,
+    pub context_chars: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct AtlasPeekArgs {
     pub path: String,
+    pub limit: Option<usize>,
+    pub context_chars: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AtlasQueryArgs {
+    pub query: String,
+    pub kind: Option<crate::atlas::query::QueryKind>,
+    pub limit: Option<usize>,
+    pub excerpts: Option<bool>,
+    pub context_lines: Option<usize>,
+    pub context_chars: Option<usize>,
+}
+
+pub async fn handle_atlas_query(
+    arguments: Option<serde_json::Value>,
+    _global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: AtlasQueryArgs = parse_args(arguments)?;
+    let limit = args.limit.unwrap_or(crate::atlas::query::DEFAULT_LIMIT);
+    let context_lines = args
+        .context_lines
+        .unwrap_or(crate::atlas::query::DEFAULT_CONTEXT_LINES);
+    let context_chars = args
+        .context_chars
+        .unwrap_or(crate::atlas::query::DEFAULT_CONTEXT_CHARS);
+    crate::atlas::query::validate_query(&args.query, limit, context_lines)
+        .map_err(to_argument_error)?;
+    crate::atlas::query::validate_context(context_chars).map_err(to_argument_error)?;
+    let (root, config, db) = open_atlas()?;
+    let freshness =
+        crate::atlas::data::query_freshness(&db, &config, &root).map_err(to_internal_error)?;
+    let result = crate::atlas::query::query_data(
+        &db,
+        &root,
+        crate::atlas::query::QueryRequest {
+            query: &args.query,
+            kind: args.kind.unwrap_or_default(),
+            limit,
+            context_lines: if args.excerpts.unwrap_or(false) {
+                context_lines
+            } else {
+                0
+            },
+            context_chars,
+        },
+        freshness.clone(),
+    )
+    .map_err(to_internal_error)?;
+    super::to_dual_result(AtlasBoundedOutput {
+        view: AtlasTextOutput {
+            format: "query".into(),
+            text: serde_json::to_string(&result)
+                .map_err(|error| to_internal_error(error.into()))?,
+            freshness: Some(freshness),
+        },
+        bounds: result.bounds,
+    })
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -30,19 +105,28 @@ pub async fn handle_atlas_tree_view(
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: AtlasTreeViewArgs = parse_args(arguments)?;
+    let path = args.path.map(std::path::PathBuf::from).unwrap_or_default();
+    let depth = args.depth.unwrap_or(100);
+    let limit = args.limit.unwrap_or(crate::atlas::query::DEFAULT_LIMIT);
+    let context_chars = args
+        .context_chars
+        .unwrap_or(crate::atlas::query::DEFAULT_CONTEXT_CHARS);
+    crate::atlas::query::validate_tree(&path, depth, limit, context_chars)
+        .map_err(to_argument_error)?;
     let (root, config, db) = open_atlas()?;
     let freshness =
         crate::atlas::data::query_freshness(&db, &config, &root).map_err(to_internal_error)?;
-
-    let path = args.path.map(std::path::PathBuf::from);
-    let entries = crate::atlas::data::atlas_tree_data(&db, path.as_deref(), args.depth)
+    let (entries, bounds) = crate::atlas::query::tree_data(&db, &path, depth, limit, context_chars)
         .map_err(to_internal_error)?;
 
     let output = mcptools_core::atlas::format_tree(&entries, true);
-    super::to_dual_result(AtlasTextOutput {
-        format: "tree".to_string(),
-        text: output,
-        freshness: Some(freshness),
+    super::to_dual_result(AtlasBoundedOutput {
+        view: AtlasTextOutput {
+            format: "tree".to_string(),
+            text: output,
+            freshness: Some(freshness),
+        },
+        bounds,
     })
 }
 
@@ -51,12 +135,20 @@ pub async fn handle_atlas_peek(
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: AtlasPeekArgs = parse_args(arguments)?;
+    let limit = args.limit.unwrap_or(crate::atlas::query::DEFAULT_LIMIT);
+    crate::atlas::query::validate_limit(limit).map_err(to_argument_error)?;
+    let context_chars = args
+        .context_chars
+        .unwrap_or(crate::atlas::query::DEFAULT_CONTEXT_CHARS);
+    crate::atlas::query::validate_context(context_chars).map_err(to_argument_error)?;
+    let path = crate::atlas::query::normalize_path(std::path::Path::new(&args.path))
+        .map_err(to_argument_error)?;
     let (root, config, db) = open_atlas()?;
     let freshness =
         crate::atlas::data::query_freshness(&db, &config, &root).map_err(to_internal_error)?;
-
-    let peek_result = crate::atlas::data::atlas_peek_data(&db, std::path::Path::new(&args.path))
-        .map_err(to_internal_error)?;
+    let (peek_result, bounds, children_bounds) =
+        crate::atlas::query::peek_data(&db, &path, limit, context_chars)
+            .map_err(to_internal_error)?;
 
     let output = match peek_result {
         crate::atlas::db::PeekResult::File(peek) => mcptools_core::atlas::format_peek(&peek, true),
@@ -65,10 +157,16 @@ pub async fn handle_atlas_peek(
         }
     };
 
-    super::to_dual_result(AtlasTextOutput {
-        format: "peek".to_string(),
-        text: output,
-        freshness: Some(freshness),
+    super::to_dual_result(AtlasPeekOutput {
+        view: AtlasBoundedOutput {
+            view: AtlasTextOutput {
+                format: "peek".to_string(),
+                text: output,
+                freshness: Some(freshness),
+            },
+            bounds,
+        },
+        children_bounds,
     })
 }
 
@@ -113,24 +211,15 @@ fn open_atlas() -> Result<
     ),
     JsonRpcError,
 > {
-    let root = crate::atlas::cli::index::find_git_root().map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Atlas error: {e}"),
+    crate::atlas::data::open_navigation().map_err(to_internal_error)
+}
+
+fn to_argument_error(e: color_eyre::eyre::Report) -> JsonRpcError {
+    JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {e}"),
         data: None,
-    })?;
-    let config = crate::atlas::config::load_config(&root).map_err(|e| JsonRpcError {
-        code: -32603,
-        message: format!("Atlas config error: {e}"),
-        data: None,
-    })?;
-    let db =
-        crate::atlas::db::Database::open_repository(&config.db_path.resolve(&root), &root, false)
-            .map_err(|e| JsonRpcError {
-            code: -32603,
-            message: format!("Atlas database error: {e}"),
-            data: None,
-        })?;
-    Ok((root, config, db))
+    }
 }
 
 fn to_internal_error(e: color_eyre::eyre::Report) -> JsonRpcError {

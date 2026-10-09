@@ -1,5 +1,7 @@
 {
   "format": "text",
   "text": "fn main() {}",
-  "freshness": "structural=stale; semantic=cached_unverified stale=1; model-free, no automatic refresh"
+  "freshness": "structural=stale; semantic=cached_unverified stale=1; model-free, no automatic refresh",
+  "bounds": {"limit": 100, "total": 1, "returned": 1, "truncated": false, "context_chars": 8192, "context_truncated": false},
+  "children_bounds": {"limit": 100, "total": 1, "returned": 1, "truncated": false, "context_chars": 8192, "context_truncated": false}
 }

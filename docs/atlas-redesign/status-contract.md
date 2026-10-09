@@ -119,3 +119,71 @@ ordinary tree/peek views. Status also checks current input compatibility; this
 read does not change the durable state or rebuild the structural index.
 Readiness is independent from enrichment: structural navigation can be ready
 while enrichment is partial, deferred, or failed.
+
+## Navigation query and bounds (GUZ-38)
+
+`atlas query TEXT` (`search` alias) and MCP `atlas_query` use the same model-free
+index read. `kind` is `all` (default), `files`, or `symbols`. Nonblank text up to
+1024 bytes is trimmed and matched as a case-insensitive literal substring. Files
+match paths or available short descriptions; symbols match names or signatures.
+Scores: symbol name 101-103, path 61-63, signature 31-33, description 11-13;
+exact, prefix and substring matches receive +3, +2 and +1 respectively. Sort by
+descending score, then path, then symbol line span/name/kind/signature/visibility.
+There is one hit per file or symbol, with `matched_on` explaining its score. A file and a
+symbol in that file can both match. Structural-only indexes work: descriptions
+are nullable, symbol signatures and spans come from the structural index.
+
+All three navigation tools accept `limit` (default 100, range 1-1000). Bounds
+contain `limit`, `total`, `returned`, `truncated`, `context_chars`, and
+`context_truncated`. `context_chars` / `--context-chars` defaults to 8192 (range
+0-32768): a total character budget for returned descriptions and signatures,
+allocated in result order. Peek allocates descriptions before signatures;
+directory children have their own equal budget. Null context stays null;
+truncated strings stay strings. This budget does not change matching/ranking or
+drop symbol locations. `context_truncated` reports shortened context fields,
+independently of the result-count `truncated` flag. Query totals count matching
+hits before truncation. Tree totals count entries inside the requested depth
+before the result limit. Tree depth defaults to 100 in CLI and MCP (range 0-100);
+0 is empty and 1 contains immediate children. Paths are repository-relative;
+`.` and trailing separators normalize, absolute paths and `..` are rejected.
+Literal `%`, `_`, and backslash in directory names are not SQL wildcards. Tree
+order is path order. Peek symbol order is file path then start/end line, name,
+kind, signature, visibility; directory peek aggregates immediate child files
+only. Peek applies the limit independently to symbols and immediate children.
+
+Query excerpts are absent by default. `--excerpts` / `excerpts: true` reads
+current working-tree source only for returned hits. `context_lines` defaults to
+20 (range 0-200); 0 disables reads. A zero `context_chars` also disables reads.
+Each hit has at most `context_chars` excerpt characters (8192 by default);
+each source read is capped at 1 MiB. Symbol excerpts start at the indexed line
+and stop at its indexed end or the line limit; file excerpts start at line 1.
+`source: current_worktree`, excerpt line spans, `truncated` and nullable `error`
+identify this non-atomic source read. Missing/oversized/non-UTF-8/out-of-repository
+or symlinked sources produce an excerpt error, not a lost structural hit. Stale
+index ranges are navigation hints, not proof that a symbol still occupies them.
+Bounds limit returned output, not database scan work: query scans indexed files
+and symbols, without new search dependencies. No source bodies are indexed.
+
+CLI query `--json` equals the JSON inside MCP query `text`, including `freshness`
+and `bounds`. CLI tree/peek preserve their existing JSON shapes on stdout; shared
+bounds are JSON on stderr (`bounds=...`), alongside freshness. MCP preserves
+`{format,text,freshness}` with additive `bounds` and optional `children_bounds`.
+MCP `content[0].text` already contains a JSON-serialized envelope; supported
+`structuredContent` mirrors it exactly. Parse the envelope, then `text` for view
+JSON. There was no missing-JSON defect. Optional descriptions retain their
+existing durable-state filtering and cached/unverified freshness semantics.
+
+Tool choice: query locates unknown paths, tree shows layout, peek inspects a
+known path, status checks readiness/enrichment. An absent index never creates a
+database and reports `mcptools atlas init`. Binding/schema errors retain
+actionable `atlas index` guidance. Invalid MCP inputs use -32602; index/I/O
+failures use -32603. Stale or absent matches need an explicit `atlas index`
+refresh or grep/source reads. Exact source-body searches use grep; verify current
+code before edits. None of these tools launches a model or refreshes implicitly.
+
+The offline provider-location contract indexes a small Rust provider file with
+no descriptions and no available runner. A name-only query finds its exact
+symbol above the prefix match, preserves signatures/spans, agrees across CLI
+and MCP, and returns current-source excerpts only on request. It also checks
+result/context truncation, missing source, empty matches, literal directory
+prefixes, invalid limits/paths, and peek bounds.

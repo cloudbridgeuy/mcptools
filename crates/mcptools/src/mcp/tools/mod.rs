@@ -526,17 +526,25 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Spend,
         },
         Tool {
-            output_schema: schema::output_schema_for::<atlas::AtlasTextOutput>(),
+            output_schema: schema::output_schema_for::<atlas::AtlasBoundedOutput>(),
+            name: "atlas_query".to_string(),
+            description: "Locate indexed files and symbols without knowing a path. Case-insensitive literal matching ranks symbol names, paths, signatures, then optional cached descriptions; no model calls. kind=all/files/symbols, limit=100 (1-1000). context_chars=8192 (0-32768) bounds total descriptions/signatures and each excerpt. Set excerpts=true to read current source with context_lines=20 (0-200); zero context disables reads. Returns locations, line spans, signatures, bounds and freshness. Use tree for layout, peek for a known path, status for readiness. Missing index: run mcptools atlas init. Stale/no matches: refresh with atlas index or use grep/source reads; not full-text source search. text contains JSON, mirrored in structuredContent.".to_string(),
+            input_schema: schema::input_schema_for::<atlas::AtlasQueryArgs>(),
+            summary: "Find ranked indexed files and symbols without a known path",
+            kind: ToolKind::Read,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<atlas::AtlasBoundedOutput>(),
             name: "atlas_tree_view".to_string(),
-            description: "Browse the indexed directory tree, with optional cached descriptions. Model-free: reports bounded working-tree freshness without automatic refresh. Semantic context is cached and unverified; use source reads for current code. Start at the root, then drill into directories.".to_string(),
+            description: "Browse indexed layout with optional cached descriptions. Repository-relative path (default root), depth=100 (0-100; 0 returns no entries), limit=100 (1-1000), context_chars=8192 (0-32768 total description characters); deterministic path order and truncation bounds. Model-free, no automatic refresh; freshness is a bounded working-tree snapshot, descriptions cached/unverified. Use query when the path is unknown, peek for symbols at a known path, status for readiness. Missing index: mcptools atlas init; stale/missing entries: atlas index or source reads. text is JSON.".to_string(),
             input_schema: schema::input_schema_for::<atlas::AtlasTreeViewArgs>(),
             summary: "Browse the annotated directory tree of the codebase",
             kind: ToolKind::Read,
         },
         Tool {
-            output_schema: schema::output_schema_for::<atlas::AtlasTextOutput>(),
+            output_schema: schema::output_schema_for::<atlas::AtlasPeekOutput>(),
             name: "atlas_peek".to_string(),
-            description: "Inspect indexed symbols and optional cached descriptions of one file or directory. Model-free: reports bounded working-tree freshness without automatic refresh. Semantic context is cached and unverified; read source for current code.".to_string(),
+            description: "Inspect indexed symbols and optional cached descriptions at a known repository-relative path. limit=100 (1-1000) bounds symbols and directory children separately. context_chars=8192 (0-32768) bounds descriptions/signatures, with a separate equal child-description budget and truncation metadata. Directory symbols come from immediate child files, not recursive descendants. Model-free; cached descriptions unverified, no source excerpts. Use query to locate a path or request excerpts, tree for layout, status for readiness; fall back to source reads for exact/current code. Missing index: mcptools atlas init; stale results: atlas index. text is JSON.".to_string(),
             input_schema: schema::input_schema_for::<atlas::AtlasPeekArgs>(),
             summary: "Summarize one file or directory of the codebase with its symbols",
             kind: ToolKind::Read,
@@ -544,7 +552,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<atlas::AtlasTextOutput>(),
             name: "atlas_status".to_string(),
-            description: "Check the health of the Atlas codebase index. Shows when it was last updated, how many files are tracked, and whether descriptions are available.".to_string(),
+            description: "Check Atlas readiness, structural freshness and optional enrichment before navigation. No model calls. Absent index returns setup guidance: mcptools atlas init. Use tree for layout, query to locate unknown paths, peek for known paths; use source reads when the index is stale or unavailable. text is JSON.".to_string(),
             input_schema: schema::input_schema_for::<atlas::AtlasStatusArgs>(),
             summary: "Check the health of the Atlas codebase index",
             kind: ToolKind::Read,
@@ -1015,6 +1023,7 @@ pub async fn handle_tools_call(
         "pdf_image" => pdf::handle_pdf_image(params.arguments, global).await,
         "pdf_info" => pdf::handle_pdf_info(params.arguments, global).await,
         "atlas_tree_view" => atlas::handle_atlas_tree_view(params.arguments, global).await,
+        "atlas_query" => atlas::handle_atlas_query(params.arguments, global).await,
         "atlas_peek" => atlas::handle_atlas_peek(params.arguments, global).await,
         "atlas_status" => atlas::handle_atlas_status(params.arguments, global).await,
         "linear_auth_status" => linear::handle_linear_auth_status(params.arguments, global).await,
@@ -1134,7 +1143,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 81);
+        assert_eq!(catalog.len(), 82);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1200,7 +1209,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 84);
+        assert_eq!(super::registered_tools().len(), 85);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1277,7 +1286,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 84);
+        assert_eq!(names(serve_flags(false)).len(), 85);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1370,7 +1379,7 @@ mod catalog_tests {
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 84);
+        assert_eq!(tools.len(), 85);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1388,8 +1397,8 @@ mod catalog_tests {
             .iter()
             .filter(|t| t["annotations"] == readonly)
             .count();
-        assert_eq!(read_count, 52);
-        assert_eq!(read_count, 84 - mutable_names.len());
+        assert_eq!(read_count, 53);
+        assert_eq!(read_count, 85 - mutable_names.len());
     }
 
     #[test]
@@ -1461,6 +1470,7 @@ mod catalog_tests {
             "pdf_image",
             "pdf_info",
             "atlas_tree_view",
+            "atlas_query",
             "atlas_peek",
             "atlas_status",
             "linear_auth_status",
@@ -1489,7 +1499,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 84);
+        assert_eq!(union.len(), 85);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();
