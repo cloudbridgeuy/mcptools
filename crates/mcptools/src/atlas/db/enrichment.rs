@@ -13,6 +13,11 @@ const INVALIDATE: &str = "UPDATE enrichment SET
     desired_identity = NULL, token = NULL, lease_until = NULL, error = NULL";
 
 pub(super) fn migrate(conn: &Connection) -> Result<()> {
+    migrate_enrichment(conn)?;
+    super::retry::migrate(conn)
+}
+
+fn migrate_enrichment(conn: &Connection) -> Result<()> {
     let version: Option<String> = conn
         .query_row(
             "SELECT value FROM metadata WHERE key = 'enrichment_schema'",
@@ -212,6 +217,7 @@ impl Database {
             params![claim.target.kind.table(), claim.target.path.to_string_lossy().as_ref(), claim.identity.as_str(), claim.token, now],
         )?;
         if updated == 1 {
+            tx.execute("UPDATE enrichment_retry SET next_attempt_ms = 0, reason = '', exhausted = 0 WHERE kind = ?1 AND path = ?2 AND identity = ?3", params![claim.target.kind.table(), claim.target.path.to_string_lossy().as_ref(), claim.identity.as_str()])?;
             tx.execute(
                 &format!(
                     "UPDATE {} SET short_description = ?1, long_description = ?2 WHERE path = ?3",
@@ -267,6 +273,10 @@ impl Database {
         let tx = self.conn.unchecked_transaction()?;
         for target in targets {
             invalidate_target(&tx, target)?;
+            tx.execute(
+                "DELETE FROM enrichment_retry WHERE kind = ?1 AND path = ?2",
+                params![target.kind.table(), target.path.to_string_lossy().as_ref()],
+            )?;
             tx.execute(
                 "UPDATE enrichment SET saved_identity = NULL WHERE kind = ?1 AND path = ?2",
                 params![target.kind.table(), target.path.to_string_lossy().as_ref()],

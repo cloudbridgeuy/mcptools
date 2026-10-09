@@ -6,6 +6,7 @@ pub mod enrichment;
 pub mod fs;
 pub mod llm;
 pub mod parser;
+pub mod retry;
 
 use crate::prelude::*;
 

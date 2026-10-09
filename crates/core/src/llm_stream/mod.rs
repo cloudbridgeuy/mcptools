@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub mod envelope;
+pub mod retry;
 
 pub use envelope::{
     parse_envelope, ContractEnvelope, FailureCategory, MachineFailure, MachineSuccess,
@@ -57,6 +58,13 @@ pub struct ResolvedPaths {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ContractError {
+    #[error("{error}")]
+    WithRetryMetadata {
+        error: Box<ContractError>,
+        retryable: Option<bool>,
+        retry_after_raw: Option<String>,
+        retry_after_seconds: Option<u64>,
+    },
     #[error("llm-stream protocol violation: {0}")]
     Protocol(String),
     #[error("llm-stream is rate limited; retry after {retry_after_seconds:?} seconds")]
@@ -189,6 +197,17 @@ pub fn redact(text: &str, secrets: &[String]) -> String {
 impl ContractError {
     pub fn redacted(self, secrets: &[String]) -> Self {
         match self {
+            ContractError::WithRetryMetadata {
+                error,
+                retryable,
+                retry_after_raw,
+                retry_after_seconds,
+            } => Self::WithRetryMetadata {
+                error: Box::new(error.redacted(secrets)),
+                retryable,
+                retry_after_raw: retry_after_raw.map(|raw| redact(&raw, secrets)),
+                retry_after_seconds,
+            },
             ContractError::Protocol(message) => ContractError::Protocol(redact(&message, secrets)),
             ContractError::Connection(message) => {
                 ContractError::Connection(redact(&message, secrets))

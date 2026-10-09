@@ -94,7 +94,7 @@ impl ContractEnvelope {
 
 impl From<MachineFailure> for ContractError {
     fn from(failure: MachineFailure) -> Self {
-        match failure.category {
+        let error = match failure.category {
             FailureCategory::MalformedRequest => ContractError::Protocol(failure.message),
             FailureCategory::Auth => ContractError::AuthRequired,
             FailureCategory::RateLimited => ContractError::RateLimited {
@@ -106,6 +106,25 @@ impl From<MachineFailure> for ContractError {
             },
             FailureCategory::Connection => ContractError::Connection(failure.message),
             FailureCategory::ProviderFailed => ContractError::ProviderFailed(failure.message),
+        };
+        if matches!(
+            failure.category,
+            FailureCategory::RateLimited
+                | FailureCategory::ProviderHttp
+                | FailureCategory::Connection
+        ) && (failure.retry_after_raw.is_some()
+            || failure.retryable == Some(false)
+            || (failure.category != FailureCategory::RateLimited
+                && failure.retry_after_seconds.is_some()))
+        {
+            ContractError::WithRetryMetadata {
+                error: Box::new(error),
+                retryable: failure.retryable,
+                retry_after_raw: failure.retry_after_raw,
+                retry_after_seconds: failure.retry_after_seconds,
+            }
+        } else {
+            error
         }
     }
 }
@@ -152,8 +171,13 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             error,
-            ContractError::RateLimited {
-                retry_after_seconds: Some(120)
+            ContractError::WithRetryMetadata {
+                error: Box::new(ContractError::RateLimited {
+                    retry_after_seconds: Some(120)
+                }),
+                retryable: Some(true),
+                retry_after_raw: Some("120".into()),
+                retry_after_seconds: Some(120),
             }
         );
     }

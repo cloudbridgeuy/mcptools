@@ -19,7 +19,7 @@ use tokio::sync::oneshot;
 const VERSION_UNSET: i64 = 0;
 const TERMINATION_GRACE: Duration = Duration::from_secs(2);
 
-type CancelSignal = Pin<Box<dyn Future<Output = ()> + Send>>;
+pub(crate) type CancelSignal<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
 pub async fn run(req: LlmStreamRequest) -> Result<String, ContractError> {
     run_with_timeout(req, Duration::from_secs(LLM_STREAM_TIMEOUT_SECS)).await
@@ -50,11 +50,11 @@ pub async fn run_cancellable(
     .await
 }
 
-async fn run_with_paths(
+pub(crate) async fn run_with_paths(
     req: LlmStreamRequest,
     paths: ResolvedPaths,
     timeout: Duration,
-    cancel: CancelSignal,
+    cancel: CancelSignal<'_>,
 ) -> Result<String, ContractError> {
     let secrets = collect_secrets(&paths);
     run_attempt(req, &paths, timeout, cancel)
@@ -77,7 +77,10 @@ fn version_cache() -> &'static AtomicI64 {
 }
 
 #[cfg(test)]
-fn reset_version_cache() {
+pub(crate) static TEST_SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(test)]
+pub(crate) fn reset_version_cache() {
     version_cache().store(VERSION_UNSET, Ordering::Relaxed);
 }
 
@@ -96,6 +99,7 @@ async fn ensure_contract_version(paths: &ResolvedPaths) -> Result<(), ContractEr
 
 async fn query_contract_version(binary: &Path) -> Result<i64, ContractError> {
     let output = Command::new(binary)
+        .kill_on_drop(true)
         .arg("--contract-version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -116,9 +120,15 @@ async fn run_attempt(
     req: LlmStreamRequest,
     paths: &ResolvedPaths,
     timeout: Duration,
-    mut cancel: CancelSignal,
+    mut cancel: CancelSignal<'_>,
 ) -> Result<String, ContractError> {
-    ensure_contract_version(paths).await?;
+    let deadline = tokio::time::Instant::now() + timeout;
+    tokio::select! {
+        biased;
+        _ = &mut cancel => return Err(ContractError::Cancelled),
+        _ = tokio::time::sleep_until(deadline) => return Err(ContractError::TimedOut(timeout)),
+        result = ensure_contract_version(paths) => result?,
+    }
     let argv = machine_argv(&req);
     let mut command = Command::new(&paths.binary);
     command
@@ -139,9 +149,17 @@ async fn run_attempt(
             .stdin
             .take()
             .ok_or_else(|| ContractError::Local("llm-stream stdin pipe unavailable".to_string()))?;
-        pipe.write_all(stdin_text.as_bytes())
-            .await
-            .map_err(|e| ContractError::Local(e.to_string()))?;
+        let written = tokio::select! {
+            biased;
+            _ = &mut cancel => Err(ContractError::Cancelled),
+            _ = tokio::time::sleep_until(deadline) => Err(ContractError::TimedOut(timeout)),
+            result = pipe.write_all(stdin_text.as_bytes()) => result.map_err(|e| ContractError::Local(e.to_string())),
+        };
+        if let Err(error) = written {
+            drop(pipe);
+            terminate(&mut child).await;
+            return Err(error);
+        }
     }
     drop(child.stdin.take());
     let mut stdout_pipe = child
@@ -160,7 +178,7 @@ async fn run_attempt(
             terminate(&mut child).await;
             return Err(ContractError::Cancelled);
         }
-        _ = tokio::time::sleep(timeout) => {
+        _ = tokio::time::sleep_until(deadline) => {
             drop(stdout_pipe);
             drop(stderr_pipe);
             terminate(&mut child).await;
@@ -267,7 +285,7 @@ mod tests {
     use super::*;
     use std::process::Command as StdCommand;
 
-    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    use super::TEST_SERIAL as SERIAL;
 
     #[tokio::test]
     async fn timeout_kills_slow_child() {
@@ -469,12 +487,12 @@ mod stub_tests {
     use super::*;
     use std::path::PathBuf;
 
-    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    use super::TEST_SERIAL as SERIAL;
 
     const SUCCESS_ENVELOPE: &str =
         r#"{"contract_version":1,"answer":"hello","provider":"stub","model":"m","usage":null}"#;
 
-    fn no_cancel() -> CancelSignal {
+    fn no_cancel() -> CancelSignal<'static> {
         Box::pin(std::future::pending())
     }
 

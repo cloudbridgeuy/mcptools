@@ -9,6 +9,7 @@ use mcptools_core::atlas::{
 use rusqlite::{params, Connection, OpenFlags};
 
 mod enrichment;
+mod retry;
 
 pub struct Database {
     conn: Connection,

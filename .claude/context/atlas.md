@@ -53,7 +53,7 @@ The `index` and `update` commands report structural work and elapsed time. Remov
 
 Planning requires explicit provider/model configuration, an available llm-stream runner, and both selected templates. It reads the index through a read-only SQLite connection, renders inputs to calculate complete cache identities, and reports every target, cache state, estimated input tokens, model/template selection, and expected call count. Files sort lexically before directories; directories sort deepest first. Cache hits do not consume `--limit`. `--refresh` marks matching cache hits as work in the plan. Matching active leases remain visible and are not scheduled; a lease for changed input is stale work.
 
-The command currently requires `--dry-run`. It never calls a model, writes the index, installs templates, or edits the optional primer. GUZ-34 owns execution and resume behavior.
+The command currently requires `--dry-run`. It never calls a model, writes the index, installs templates, or edits the optional primer. GUZ-28 supplies per-item retry/defer/resume infrastructure; GUZ-34 owns queue and command orchestration.
 
 ### `atlas init` Workflow
 
@@ -130,7 +130,7 @@ Structural fields are optional. Enrichment stays disabled until both `api` and a
 
 Precedence is environment variables, nested `[atlas]` values, flat top-level values, and defaults. Fields may be written flat, including top-level `[file_llm]` and `[directory_llm]`. Nested `[atlas]` values win field by field.
 
-`concurrency`, `timeout_secs`, and `max_attempts` must be positive integers. `max_attempts` cannot exceed `10`. Explicit provider, model, and template names cannot be blank. Retries apply only to temporary rate-limit, connection, timeout, HTTP 408, HTTP 429, and HTTP 5xx failures.
+`concurrency`, `timeout_secs`, and `max_attempts` must be positive integers. `max_attempts` cannot exceed `10`. Explicit provider, model, and template names cannot be blank. Retries apply only to temporary rate-limit, connection, timeout, and HTTP 408, 429, 500, 502, 503, or 504 failures. Explicit non-retryable metadata overrides this list. Authentication, protocol/request errors, and known exhausted quota are permanent.
 
 All structural and query commands work without llm-stream, authentication, or a selected model. They do not load strict enrichment settings, even when provider/model configuration is present.
 
@@ -209,7 +209,9 @@ Generate uses llm-stream with explicit provider/model selection. `[atlas.file_ll
 | `db/enrichment.rs` | Transactional migration, input reconciliation, claims, conditional completion, recovery, invalidation, and refresh |
 | `enrichment.rs` | Pure deterministic input hashing, typed cache states, stable work planning, claims, and validated descriptions |
 | `fs.rs` | Gitignore-aware file walker excluding the configured primer; optional primer reads with distinct read/encoding errors |
-| `llm.rs` | `LlmStreamProvider::generate`, `request`, `failure_report` — run llm-stream in machine mode and map failures |
+| `llm.rs` | `LlmStreamProvider::attempt`, cancellable slot-free retry waiting, typed outcomes and retry reports |
+| `retry.rs` | Pure retry classification, jittered backoff, server deadlines, run-budget decisions and hashed rate scopes |
+| `db/retry.rs` | Durable attempt reservations, per-item eligibility, monotonic shared cooldowns and retry counts |
 | `parser.rs` | `parse_and_extract(path, source)` — tree-sitter grammar registry and extraction bridge |
 | `cli/init.rs` | `atlas init` handler: gitignore setup and initial structural index |
 | `cli/enrich.rs` | Read-only scoped enrichment preflight, input preparation, cache classification, budgeting, and plan output |
@@ -223,7 +225,7 @@ Generate uses llm-stream with explicit provider/model selection. `[atlas.file_ll
 
 ## SQLite Schema
 
-Five tables: `symbols`, `files`, `directories`, `metadata`, `enrichment`. Indexes on `symbols(file_path)` and `files(path)`. Database at `.mcptools/atlas/index.db` relative to git root.
+Seven tables: `symbols`, `files`, `directories`, `metadata`, `enrichment`, `enrichment_retry`, `enrichment_cooldown`. Indexes on `symbols(file_path)` and `files(path)`. Database at `.mcptools/atlas/index.db` relative to git root.
 
 `enrichment` is keyed by `(kind, path)`, where kind is `files` or `directories`. It stores the desired input digest, last successful input digest, state, random claim token, lease deadline, and failure/deferral reason. Description bytes stay in the structural tables. `described_files` and `described_directories` expose description bytes only for current results; tree, peek, directory-child input queries, and status use these views.
 
@@ -231,7 +233,7 @@ Five tables: `symbols`, `files`, `directories`, `metadata`, `enrichment`. Indexe
 
 ### Enrichment Persistence Contract (GUZ-29)
 
-GUZ-32 adds the read-only `atlas enrich --dry-run` planner. GUZ-34 owns claims, model calls, persistence, cancellation, and resume behavior.
+GUZ-32 adds the read-only `atlas enrich --dry-run` planner. GUZ-28 supplies the per-item runner and durable retry policy. GUZ-34 owns command queue integration, dependency ordering, input rechecks, response validation/commit, and exit status. CLI execution remains unavailable.
 
 `EnrichmentInput::identity` hashes versioned canonical JSON with SHA-256. The caller supplies full source bytes or a sorted map of the actual directory-child inputs used, effective template bytes, rendered system and user prompts, effective variables, optional context bytes, provider, model, optional immutable model revision, and all output-affecting settings. Map insertion order does not matter. Missing context differs from empty context. Child map values must encode every child attribute actually consumed, including summaries, source/provenance, or symbols when used; map keys must distinguish paths/kinds. Do not substitute timestamps, template names, or parent paths for actual inputs. Include endpoint/backend identity in settings when it can affect output; never include credentials.
 
@@ -240,7 +242,7 @@ States are `Missing`, `Current(identity)`, `Stale`, `Failed(reason)`, `Deferred(
 Caller sequence:
 
 1. Collect current inputs, derive their identity, and call `set_enrichment_input` for an indexed target. An unchanged identity preserves its state. A different identity cancels its claim and invalidates ancestors. A retained successful result can become current again only when its complete identity matches.
-2. Call `claim_enrichment(target, identity, now, lease_until)`. Only non-current work with matching desired identity can be claimed. Unexpired claims are exclusive across connections. Use nonnegative Unix seconds and a deadline after `now`; long-running callers must supply a sufficient lease.
+2. Low-level claims use `claim_enrichment(target, identity, now, lease_until)`. Only non-current work with matching desired identity can be claimed. Unexpired claims are exclusive across connections. Use nonnegative Unix seconds and a deadline after `now`; long-running callers must supply a sufficient lease. For model execution, use the GUZ-28 runner below instead of calling this claim API directly.
 3. Generate output outside the database. Recollect all inputs before completion. Pass the rechecked identity and `ValidatedDescription::parse` output to `commit_enrichment`. Success atomically saves descriptions and provenance only if the identity, claim token, and unexpired lease still match. A rejected completion returns `false`; it must not be reported as saved. Call `set_enrichment_input` with newly collected inputs to reconcile changed configuration/context.
 4. Use `finish_enrichment` for explicit failures or deferrals. It applies the same identity/token/lease guards. Use `recover_enrichment(now)` for expired abandoned claims; it preserves completed results and makes abandoned work retryable. Claiming an expired entry also replaces its token. Opening a database does not cancel another process's active claims.
 
@@ -249,6 +251,18 @@ Structural insert/content-change/delete triggers invalidate only affected ancest
 `invalidate_enrichment(targets)` cancels targeted claims and marks their results/ancestors for identity reconciliation, retaining reusable successful provenance. `refresh_enrichment(targets)` additionally discards targeted successful identities, so even identical inputs require regeneration. Both are transactional, targeted APIs. The planner's `--refresh` only previews this effect and does not call either API. For template/context/model/settings changes, callers recompute affected identities; structural/query commands deliberately do not load enrichment configuration or read templates/context to evaluate freshness.
 
 Remote model alias limit: without a supplied immutable model revision, cache reuse proves only that the configured alias and all other supplied inputs match. It cannot detect a provider changing what that alias points to. Supply a revision when available, or explicitly refresh the affected targets to force regeneration.
+
+### Retry Integration Contract (GUZ-28)
+
+Use one writable Atlas database and execution semaphore across workers. Create scopes with `LlmStreamProvider::rate_scope` from a stable account/profile identifier, not a model name. File/directory models sharing an account must share the scope. Only the SHA-256 scope digest is stored. Coordination covers workers sharing this database, not unrelated repository databases.
+
+Keep one absolute epoch-millisecond retry deadline for the whole run; do not renew it per attempt. `AttemptContext` accepts an injected current-time function. Use `jitter: None` for runtime randomness and `Some(value)` for deterministic tests. Database claim/commit leases still use Unix seconds.
+
+Set the desired input identity, then call `attempt` instead of directly claiming/generating. Each call reserves at most one durable attempt and checks cooldown before and after acquiring an execution slot. Valid Retry-After seconds and HTTP dates are never truncated; missing/invalid headers use capped exponential backoff with jitter. Attempts survive resume. Input changes or explicit refresh reset item retry state, not account cooldowns.
+
+For `Response`, validate the answer, recheck inputs, then commit its returned claim. `Reusable` needs no call. Requeue only the failed target for `Retry(Waiting)`; `wait_for_retry` is cancellable and owns no execution permit. Recheck eligibility after waiting because another worker can extend the cooldown. `Retry(Deferred)` keeps its next-attempt time for a later run with a new run deadline. `Failed` and `Retry(Exhausted)` must not retry automatically. `Busy`/`Superseded` must not overwrite another claim/input. `Cancelled` retains unfinished work for lease recovery/resume.
+
+Report `AttemptReport::format` or its fields: attempts, reason, next-attempt time, exhausted count and deferred count. No provider/model fallback occurs. Recheck the remaining budget after durable attempt reservation before starting the subprocess. Process cleanup can extend the wall-clock run budget by the existing two-second termination grace; synchronous database lock waits can add the existing five-second busy timeout per operation.
 
 ## MCP Tools (V5)
 
