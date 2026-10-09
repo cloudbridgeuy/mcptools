@@ -13,7 +13,7 @@ Atlas scans a repository, extracts symbols using tree-sitter, and stores them in
 
 - **Project primer**: Optional operator-authored text. No command creates, reformats, or rewrites it.
 - **Cached descriptions**: Structural refresh preserves reusable results. Source changes invalidate the affected file and ancestors; stale descriptions remain stored but are not displayed or counted as current.
-- **Model execution**: Removed from structural commands. `atlas enrich --dry-run` plans explicit work; execution is pending GUZ-34.
+- **Model execution**: Explicit, scoped, resumable `atlas enrich [path]`; structural commands never call models. Add `--dry-run` for a read-only plan.
 - **Config file**: `.mcptools/config.toml` for per-project paths, templates, provider/model overrides, concurrency, timeout, attempt limits, and token limits
 - **Environment variables**: Override config via `ATLAS_*` env vars
 
@@ -34,6 +34,7 @@ mcptools atlas status                 # Index health summary
 mcptools atlas status --json          # JSON output
 mcptools atlas index --dry-run        # Show what would be indexed (by tier)
 mcptools atlas update --dry-run       # Show what would change (adds/mods/deletes)
+mcptools atlas enrich [path]
 mcptools atlas enrich [path] --dry-run  # Plan exact scoped enrichment without side effects
 mcptools atlas enrich src --dry-run --limit 20 --refresh  # Bound work and bypass cache hits
 git status --porcelain | mcptools atlas index --stdin   # Index only the listed paths
@@ -47,13 +48,21 @@ mcptools atlas setup --no-templates   # Skip installing llm-stream templates (at
 
 The `index` and `update` commands report structural work and elapsed time. Removed flags `--with-primer` and `--parallel` are rejected by the CLI.
 
-### `atlas enrich --dry-run` — Scoped Enrichment Plan
+### `atlas enrich` — Scoped Execution and Read-Only Planning
 
-`atlas enrich --dry-run` selects every indexed file and directory. A file path selects only that file; a directory path selects only that indexed subtree. Paths are normalized against the current directory, must remain inside the repository, and must not traverse symlinks. Missing, ignored, reserved, stale-index, and non-normalized records fail before a plan is published.
+`atlas enrich` selects every indexed file and directory. A file path selects only that file; a directory path selects only that indexed subtree. Paths are normalized against the current directory, must remain inside the repository, and must not traverse symlinks. Missing, ignored, reserved, stale-index, and non-normalized records fail before a plan is published.
 
 Planning requires explicit provider/model configuration, an available llm-stream runner, and both selected templates. It reads the index through a read-only SQLite connection, renders inputs to calculate complete cache identities, and reports every target, cache state, estimated input tokens, model/template selection, and expected call count. Files sort lexically before directories; directories sort deepest first. Cache hits do not consume `--limit`. `--refresh` marks matching cache hits as work in the plan. Matching active leases remain visible and are not scheduled; a lease for changed input is stale work.
 
-The command currently requires `--dry-run`. It never calls a model, writes the index, installs templates, or edits the optional primer. GUZ-28 supplies per-item retry/defer/resume infrastructure; GUZ-34 owns queue and command orchestration.
+Without `--dry-run`, the command opens the writable index and executes pending work. `--concurrency N` bounds active requests; `--limit N` bounds selected work items per invocation, not retry attempts. Files finish before directories; directories run deepest first after selected children settle. Active child leases block parents. Only compatible successful child summaries become context; other children use `[missing current description]`. File context uses structural ancestor paths, not ancestor summaries.
+
+Responses require `SHORT:` followed by `LONG:` with nonempty content; malformed output and the short-description failure marker are rejected. Before committing success, Atlas rereads source bytes, templates, configuration, and optional primer, and rechecks path boundaries, ignore rules, and reserved files. Changed identities or invalid inputs reject late responses.
+
+Compatible successes are reused. Eligible unfinished work retries within durable attempt limits and shared cooldowns. `--refresh` regenerates the selected scope and resets its attempt state, without bypassing cooldowns. Exhausted or malformed responses require refresh. The run retry budget is `timeout_secs × max_attempts`; longer Retry-After waits persist for a later invocation.
+
+Exit `0` means all selected entries have compatible saved successes. Errors and partial runs exit `1`; partial output includes success/failure/deferred totals and a shell-quoted resume command. Ctrl-C stops dispatch, cancels active subprocesses, and retains completed work. Cancelled attempts do not consume the attempt budget; expired abandoned leases recover as retryable work.
+
+With `--dry-run`, planning remains read-only: no model calls, index writes, or template installation. Neither mode edits the optional primer.
 
 ### `atlas init` Workflow
 
@@ -159,13 +168,13 @@ Common patterns:
 | `ATLAS_DIR_MODEL` | shared model | Directory model override |
 | `ATLAS_FILE_TEMPLATE` | `atlas-file` | File template name |
 | `ATLAS_DIR_TEMPLATE` | `atlas-dir` | Directory template name |
-| `ATLAS_CONCURRENCY` | `1` | Parallel file enrichment workers |
+| `ATLAS_CONCURRENCY` | `1` | Maximum active enrichment requests |
 | `ATLAS_TIMEOUT_SECS` | `120` | Timeout for each attempt |
 | `ATLAS_MAX_ATTEMPTS` | `1` | Attempts per item, maximum `10` |
 
 ### LLM runner settings
 
-Generate uses llm-stream with explicit provider/model selection. `[atlas.file_llm]` and `[atlas.directory_llm]` can override the shared model and select templates. Atlas passes prompts, provider, and model to llm-stream; it does not own credentials or endpoint configuration.
+Enrichment uses llm-stream with explicit provider/model selection. `[atlas.file_llm]` and `[atlas.directory_llm]` can override the shared model and select templates. Atlas passes prompts, provider, and model to llm-stream; it does not own credentials or endpoint configuration.
 
 ## Supported Symbol Types by Language
 
@@ -183,7 +192,7 @@ Generate uses llm-stream with explicit provider/model selection. `[atlas.file_ll
 | Tier | Extensions | Description |
 |------|-----------|-------------|
 | **Full** | `rs`, `ts`, `tsx`, `js`, `jsx`, `py`, `go` | Tree-sitter symbol extraction |
-| **Light** | `md`, `txt`, `json`, `yaml`, `yml`, `toml`, `cfg`, `ini`, `xml`, `html`, `css`, `scss`, `sql`, `sh`, `bash`, `zsh` | Indexed as files only (V2: LLM descriptions) |
+| **Light** | `md`, `txt`, `json`, `yaml`, `yml`, `toml`, `cfg`, `ini`, `xml`, `html`, `css`, `scss`, `sql`, `sh`, `bash`, `zsh` | Indexed without symbols; explicit enrichment can add descriptions |
 | **Skip** | Everything else | Not indexed |
 
 ## Module Layout
@@ -214,7 +223,7 @@ Generate uses llm-stream with explicit provider/model selection. `[atlas.file_ll
 | `db/retry.rs` | Durable attempt reservations, per-item eligibility, monotonic shared cooldowns and retry counts |
 | `parser.rs` | `parse_and_extract(path, source)` — tree-sitter grammar registry and extraction bridge |
 | `cli/init.rs` | `atlas init` handler: gitignore setup and initial structural index |
-| `cli/enrich.rs` | Read-only scoped enrichment preflight, input preparation, cache classification, budgeting, and plan output |
+| `cli/enrich.rs` | Read-only preflight, bounded dependency-ordered execution, input rechecks, validated commits, cancellation, totals, and resume output |
 | `cli/index.rs` | `atlas index` handler: structural scan, hash reuse, progress reporting |
 | `cli/tree.rs` | `atlas tree` handler: path filtering, depth, JSON output |
 | `cli/peek.rs` | `atlas peek` handler: file or directory lookup, symbol display |
@@ -233,7 +242,7 @@ Seven tables: `symbols`, `files`, `directories`, `metadata`, `enrichment`, `enri
 
 ### Enrichment Persistence Contract (GUZ-29)
 
-GUZ-32 adds the read-only `atlas enrich --dry-run` planner. GUZ-28 supplies the per-item runner and durable retry policy. GUZ-34 owns command queue integration, dependency ordering, input rechecks, response validation/commit, and exit status. CLI execution remains unavailable.
+The read-only planner, per-item runner, and durable retry policy are integrated into executable `atlas enrich`. Command orchestration supplies dependency ordering, input rechecks, response validation/commit, cancellation, partial totals, and exit status.
 
 `EnrichmentInput::identity` hashes versioned canonical JSON with SHA-256. The caller supplies full source bytes or a sorted map of the actual directory-child inputs used, effective template bytes, rendered system and user prompts, effective variables, optional context bytes, provider, model, optional immutable model revision, and all output-affecting settings. Map insertion order does not matter. Missing context differs from empty context. Child map values must encode every child attribute actually consumed, including summaries, source/provenance, or symbols when used; map keys must distinguish paths/kinds. Do not substitute timestamps, template names, or parent paths for actual inputs. Include endpoint/backend identity in settings when it can affect output; never include credentials.
 
@@ -248,7 +257,7 @@ Caller sequence:
 
 Structural insert/content-change/delete triggers invalidate only affected ancestors (literal path ancestry, not SQL wildcard matching); deletions remove that target's provenance. Unchanged structural upserts retain current results and ignore description fields supplied through structural `FileEntry`. Changed directory summaries invalidate ancestors. Ignore changes and renames are represented by the structural walk's additions/deletions. `index --stdin` still retains unlisted paths; callers must explicitly delete removed paths when using a targeted path list.
 
-`invalidate_enrichment(targets)` cancels targeted claims and marks their results/ancestors for identity reconciliation, retaining reusable successful provenance. `refresh_enrichment(targets)` additionally discards targeted successful identities, so even identical inputs require regeneration. Both are transactional, targeted APIs. The planner's `--refresh` only previews this effect and does not call either API. For template/context/model/settings changes, callers recompute affected identities; structural/query commands deliberately do not load enrichment configuration or read templates/context to evaluate freshness.
+`invalidate_enrichment(targets)` cancels targeted claims and marks their results/ancestors for identity reconciliation, retaining reusable successful provenance. `refresh_enrichment(targets)` additionally discards targeted successful identities and retry state, so even identical inputs require regeneration. Both are transactional, targeted APIs. Execution with `--refresh` calls `refresh_enrichment` for the selected scope; `--dry-run --refresh` only previews the effect. Provider cooldowns remain intact. For template/context/model/settings changes, callers recompute affected identities; structural/query commands deliberately do not load enrichment configuration or read templates/context to evaluate freshness.
 
 Remote model alias limit: without a supplied immutable model revision, cache reuse proves only that the configured alias and all other supplied inputs match. It cannot detect a provider changing what that alias points to. Supply a revision when available, or explicitly refresh the affected targets to force regeneration.
 
@@ -260,7 +269,7 @@ Keep one absolute epoch-millisecond retry deadline for the whole run; do not ren
 
 Set the desired input identity, then call `attempt` instead of directly claiming/generating. Each call reserves at most one durable attempt and checks cooldown before and after acquiring an execution slot. Valid Retry-After seconds and HTTP dates are never truncated; missing/invalid headers use capped exponential backoff with jitter. Attempts survive resume. Input changes or explicit refresh reset item retry state, not account cooldowns.
 
-For `Response`, validate the answer, recheck inputs, then commit its returned claim. `Reusable` needs no call. Requeue only the failed target for `Retry(Waiting)`; `wait_for_retry` is cancellable and owns no execution permit. Recheck eligibility after waiting because another worker can extend the cooldown. `Retry(Deferred)` keeps its next-attempt time for a later run with a new run deadline. `Failed` and `Retry(Exhausted)` must not retry automatically. `Busy`/`Superseded` must not overwrite another claim/input. `Cancelled` retains unfinished work for lease recovery/resume.
+For `Response`, validate the answer, recheck inputs, then commit its returned claim. `Reusable` needs no call. Requeue only the failed target for `Retry(Waiting)`; `wait_for_retry` is cancellable and owns no execution permit. Recheck eligibility after waiting because another worker can extend the cooldown. `Retry(Deferred)` keeps its next-attempt time for a later run with a new run deadline. `Failed` and `Retry(Exhausted)` must not retry automatically. `Busy`/`Superseded` must not overwrite another claim/input. Cancellation during a subprocess persists deferred work and releases its attempt reservation; abandoned claims recover after lease expiry.
 
 Report `AttemptReport::format` or its fields: attempts, reason, next-attempt time, exhausted count and deferred count. No provider/model fallback occurs. Recheck the remaining budget after durable attempt reservation before starting the subprocess. Process cleanup can extend the wall-clock run budget by the existing two-second termination grace; synchronous database lock waits can add the existing five-second busy timeout per operation.
 
@@ -292,7 +301,7 @@ Optional operator-authored context is exposed at `atlas://primer`. Missing text 
 
 ## Planned Features
 
-- **V2**: Durable enrichment persistence and scoped dry-run planning implemented; execution pending GUZ-34
+- **V2**: Durable enrichment persistence, read-only planning, and resumable scoped execution implemented
 - **V3**: ~~MCP tool integration~~ Implemented (V5)
 - **V4**: ~~Incremental updates~~ Implemented
 - **V5**: ~~MCP tools + status + primer resource~~ Implemented

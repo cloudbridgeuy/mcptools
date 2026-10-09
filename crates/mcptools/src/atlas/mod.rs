@@ -18,7 +18,7 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
-    #[command(about = "Plan explicit semantic enrichment for an indexed scope")]
+    #[command(about = "Execute or preview resumable semantic enrichment for an indexed scope")]
     Enrich(cli::enrich::EnrichOptions),
     #[command(about = "Build the symbol index for the current repository")]
     Index(cli::index::IndexOptions),

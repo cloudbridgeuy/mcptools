@@ -236,6 +236,19 @@ pub enum DescriptionError {
 
 impl ValidatedDescription {
     pub fn parse(response: &str) -> Result<Self, DescriptionError> {
+        let mut lines = response.trim().lines();
+        if !lines
+            .next()
+            .is_some_and(|line| line.trim_start().starts_with("SHORT:"))
+        {
+            return Err(ParseDescriptionError::MissingShort.into());
+        }
+        if !lines
+            .find(|line| !line.trim().is_empty())
+            .is_some_and(|line| line.trim_start().starts_with("LONG:"))
+        {
+            return Err(ParseDescriptionError::MissingLong.into());
+        }
         let description = parse_description(response)?;
         if description.short == "[description failed]" {
             return Err(DescriptionError::FailureMarker);
@@ -306,6 +319,7 @@ pub(crate) mod tests {
         assert_ne!(a.identity().unwrap(), b.identity().unwrap());
         assert!(ValidatedDescription::parse("SHORT: [description failed]\nLONG: failure").is_err());
         assert!(ValidatedDescription::parse("SHORT: valid\nLONG:").is_err());
+        assert!(ValidatedDescription::parse("unstructured prose").is_err());
     }
 
     #[test]

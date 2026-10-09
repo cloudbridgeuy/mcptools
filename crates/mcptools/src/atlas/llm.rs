@@ -261,6 +261,7 @@ impl LlmStreamProvider {
                 let now = now_ms();
                 progress = if error == ContractError::Cancelled {
                     RetryProgress {
+                        attempts: progress.attempts.saturating_sub(1),
                         reason: error.to_string(),
                         next_attempt_ms: now,
                         ..progress
@@ -619,7 +620,7 @@ mod tests {
         );
         let report = report.unwrap();
         assert!(matches!(report.result, AttemptResult::Cancelled));
-        assert_eq!(report.progress.attempts, 1);
+        assert_eq!(report.progress.attempts, 0);
         assert_eq!(slots.available_permits(), 1);
         assert!(matches!(
             db.enrichment_state(&target).unwrap(),

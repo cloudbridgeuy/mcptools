@@ -1,6 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
 use std::path::{Component, Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use futures::{stream::FuturesUnordered, StreamExt};
+use tokio::sync::{oneshot, Semaphore};
 
 use mcptools_core::atlas::{
     estimate_tokens, format_symbol, load, render, render_system, resolve_concurrency,
@@ -10,9 +14,10 @@ use mcptools_core::atlas::{
 use crate::atlas::config::{load_config, load_enrichment_config};
 use crate::atlas::db::Database;
 use crate::atlas::enrichment::{
-    plan_enrichment, EnrichmentCandidate, EnrichmentInput, EnrichmentPlan, EnrichmentTarget,
-    EntryKind, SourceInput,
+    plan_enrichment, EnrichmentCandidate, EnrichmentInput, EnrichmentPlan, EnrichmentState,
+    EnrichmentTarget, EntryKind, SourceInput, UnsuccessfulWork, ValidatedDescription,
 };
+use crate::atlas::llm::{wait_for_retry, AttemptContext, AttemptResult, LlmStreamProvider};
 use crate::prelude::*;
 
 use super::index::find_git_root;
@@ -31,11 +36,6 @@ pub struct EnrichOptions {
 }
 
 pub async fn run(opts: EnrichOptions, _global: crate::Global) -> Result<()> {
-    if !opts.dry_run {
-        return Err(eyre!(
-            "Atlas enrichment execution is not available yet; use `mcptools atlas enrich --dry-run`"
-        ));
-    }
     let root = find_git_root()?;
     let structural = load_config(&root)?;
     let runner = match load_enrichment_config(&root)? {
@@ -53,7 +53,8 @@ pub async fn run(opts: EnrichOptions, _global: crate::Global) -> Result<()> {
     let templates_dir = paths.config_dir.join("templates");
     let file_template = load(&templates_dir, runner.file.template.as_str())?;
     let directory_template = load(&templates_dir, runner.directory.template.as_str())?;
-    let db = Database::open_read_only(&structural.db_path.resolve(&root))?;
+    let db_path = structural.db_path.resolve(&root);
+    let db = Database::open_read_only(&db_path)?;
     let all_files = db.all_file_paths()?;
     let all_directories: Vec<PathBuf> = db
         .all_directories()?
@@ -81,14 +82,10 @@ pub async fn run(opts: EnrichOptions, _global: crate::Global) -> Result<()> {
     };
     let mut candidates = Vec::with_capacity(scope.files.len() + scope.directories.len());
     for path in &scope.files {
-        candidates.push(file_candidate(&preparation, path, &file_template)?);
+        candidates.push(file_candidate(&preparation, path, &file_template)?.0);
     }
     for path in &scope.directories {
-        candidates.push(directory_candidate(
-            &preparation,
-            path,
-            &directory_template,
-        )?);
+        candidates.push(directory_candidate(&preparation, path, &directory_template)?.0);
     }
     let plan = plan_enrichment(candidates, opts.refresh, opts.limit.map(NonZeroUsize::get));
     crate::prelude::println!(
@@ -103,7 +100,287 @@ pub async fn run(opts: EnrichOptions, _global: crate::Global) -> Result<()> {
             opts.refresh,
         )
     );
+    if !opts.dry_run {
+        drop(db);
+        let db = Database::open(&db_path)?;
+        execute(&db, &root, &scope, &plan, &runner, concurrency, &opts).await?;
+    }
     Ok(())
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
+
+fn current_input(
+    db: &Database,
+    root: &Path,
+    target: &EnrichmentTarget,
+) -> Result<(EnrichmentCandidate, EnrichmentInput)> {
+    validate_indexed_path(root, &target.path, target.kind == EntryKind::Directory)?;
+    let structural = load_config(root)?;
+    let EnrichmentConfig::Enabled(runner) = load_enrichment_config(root)? else {
+        return Err(eyre!("Atlas enrichment configuration changed"));
+    };
+    let primer = crate::atlas::fs::read_optional_primer(&structural.primer_path.resolve(root))?;
+    let preparation = InputPreparation {
+        db,
+        root,
+        structural: &structural,
+        runner: &runner,
+        primer: primer.as_deref().unwrap_or(""),
+        context: primer.as_deref().map(str::as_bytes),
+    };
+    let role = match target.kind {
+        EntryKind::File => &runner.file,
+        EntryKind::Directory => &runner.directory,
+    };
+    let template = load(
+        &mcptools_core::llm_stream::resolve_paths()?
+            .config_dir
+            .join("templates"),
+        role.template.as_str(),
+    )?;
+    match target.kind {
+        EntryKind::File => file_candidate(&preparation, &target.path, &template),
+        EntryKind::Directory => directory_candidate(&preparation, &target.path, &template),
+    }
+}
+
+async fn execute(
+    db: &Database,
+    root: &Path,
+    scope: &Scope,
+    plan: &EnrichmentPlan,
+    runner: &RunnerConfig,
+    concurrency: usize,
+    opts: &EnrichOptions,
+) -> Result<()> {
+    db.recover_enrichment(now_ms() / 1000)?;
+    if opts.refresh {
+        db.refresh_enrichment(
+            &plan
+                .entries
+                .iter()
+                .map(|entry| entry.target.clone())
+                .collect::<Vec<_>>(),
+        )?;
+    }
+    for entry in &plan.entries {
+        if entry.target.kind == EntryKind::File {
+            let (candidate, _) = current_input(db, root, &entry.target)?;
+            db.set_enrichment_input(&entry.target, &candidate.identity)?;
+        }
+    }
+    let slots = Semaphore::new(concurrency);
+    let deadline = now_ms().saturating_add(
+        runner
+            .timeout
+            .as_millis()
+            .saturating_mul(runner.max_attempts as u128)
+            .min(i64::MAX as u128) as i64,
+    );
+    let mut remaining = opts.limit.map_or(usize::MAX, NonZeroUsize::get);
+    let mut cancelled = false;
+    let signal = tokio::signal::ctrl_c();
+    tokio::pin!(signal);
+    let mut entries = plan.entries.iter().peekable();
+    while let Some(first) = entries.peek() {
+        if cancelled {
+            break;
+        }
+        let kind = first.target.kind;
+        let depth = first.target.path.components().count();
+        let mut phase = Vec::new();
+        while entries.peek().is_some_and(|entry| {
+            entry.target.kind == kind
+                && (kind == EntryKind::File || entry.target.path.components().count() == depth)
+        }) {
+            phase.push(&entries.next().unwrap().target);
+        }
+        for chunk in phase.chunks(concurrency) {
+            if cancelled {
+                break;
+            }
+            let mut active = FuturesUnordered::new();
+            let mut cancels = Vec::new();
+            for target in chunk {
+                if target.kind == EntryKind::Directory
+                    && plan.entries.iter().any(|entry| {
+                        entry.target.path != target.path
+                            && entry.target.path.starts_with(&target.path)
+                            && matches!(
+                                db.enrichment_state(&entry.target),
+                                Ok(EnrichmentState::InFlight { .. })
+                            )
+                    })
+                {
+                    continue;
+                }
+                let (candidate, input) = match current_input(db, root, target) {
+                    Ok(work) => work,
+                    Err(error) => {
+                        db.invalidate_enrichment(std::slice::from_ref(target))?;
+                        crate::prelude::eprintln!("{}: deferred: {error}", target.path.display());
+                        continue;
+                    }
+                };
+                db.set_enrichment_input(target, &candidate.identity)?;
+                let work = plan_enrichment(vec![candidate], false, Some(remaining));
+                if !work.entries[0].scheduled {
+                    continue;
+                }
+                remaining -= 1;
+                let (tx, rx) = oneshot::channel();
+                cancels.push(tx);
+                active.push(execute_target(
+                    db,
+                    root,
+                    (target, input),
+                    runner,
+                    &slots,
+                    deadline,
+                    rx,
+                ));
+            }
+            while !active.is_empty() {
+                tokio::select! {
+                    biased;
+                    result = &mut signal, if !cancelled => {
+                        result.wrap_err("listening for enrichment cancellation")?;
+                        cancelled = true;
+                        for tx in cancels.drain(..) { let _ = tx.send(()); }
+                    }
+                    result = active.next() => {
+                        if let Some(Err(error)) = result { crate::prelude::eprintln!("enrichment error: {error}"); }
+                    }
+                }
+            }
+        }
+    }
+    let mut success = 0;
+    let mut failure = 0;
+    let mut deferred = 0;
+    for entry in &plan.entries {
+        let Ok((candidate, _)) = current_input(db, root, &entry.target) else {
+            deferred += 1;
+            continue;
+        };
+        match candidate.state {
+            EnrichmentState::Current(identity) if identity == candidate.identity => success += 1,
+            EnrichmentState::Failed(_) => failure += 1,
+            _ => deferred += 1,
+        }
+    }
+    let resume = format!(
+        "mcptools atlas enrich '{}' --concurrency {}{}",
+        root.join(&scope.label)
+            .display()
+            .to_string()
+            .replace('\'', "'\\''"),
+        concurrency,
+        opts.limit
+            .map(|limit| format!(" --limit {limit}"))
+            .unwrap_or_default()
+    );
+    crate::prelude::println!("Atlas enrichment {}: success={success}, failure={failure}, deferred={deferred}\nresume: {resume}", if cancelled || failure + deferred > 0 { "partial" } else { "complete" });
+    if cancelled || failure + deferred > 0 {
+        return Err(eyre!(
+            "Atlas enrichment incomplete; completed work saved; resume: {resume}"
+        ));
+    }
+    Ok(())
+}
+
+async fn execute_target(
+    db: &Database,
+    root: &Path,
+    work: (&EnrichmentTarget, EnrichmentInput),
+    runner: &RunnerConfig,
+    slots: &Semaphore,
+    deadline: i64,
+    mut cancel: oneshot::Receiver<()>,
+) -> Result<()> {
+    let (target, input) = work;
+    let role = match target.kind {
+        EntryKind::File => &runner.file,
+        EntryKind::Directory => &runner.directory,
+    };
+    let provider = LlmStreamProvider::new(runner, &role.model);
+    if input.provider != runner.provider.as_str() || input.model != role.model.as_str() {
+        return Err(eyre!(
+            "Atlas provider/model changed during execution; resume with the new configuration"
+        ));
+    }
+    let rate_scope = provider.rate_scope(
+        &mcptools_core::llm_stream::resolve_paths()?
+            .config_dir
+            .to_string_lossy(),
+    )?;
+    let identity = input.identity()?;
+    let context = AttemptContext {
+        db,
+        target,
+        identity: &identity,
+        scope: &rate_scope,
+        policy: provider.retry_policy(deadline),
+        slots,
+        now_ms: &now_ms,
+        jitter: None,
+    };
+    loop {
+        let report = provider
+            .attempt(&context, &input.system, &input.prompt, &mut cancel)
+            .await?;
+        crate::prelude::eprintln!("{}: {}", target.path.display(), report.format());
+        match report.result {
+            AttemptResult::Response { claim, answer } => {
+                match ValidatedDescription::parse(&answer) {
+                    Ok(description) => match current_input(db, root, target) {
+                        Ok((candidate, _)) => {
+                            if !db.commit_enrichment(
+                                &claim,
+                                &candidate.identity,
+                                &description,
+                                now_ms() / 1000,
+                            )? {
+                                db.finish_enrichment(
+                                    &claim,
+                                    &UnsuccessfulWork::Deferred(
+                                        "input changed during request".into(),
+                                    ),
+                                    now_ms() / 1000,
+                                )?;
+                            }
+                        }
+                        Err(error) => {
+                            db.finish_enrichment(
+                                &claim,
+                                &UnsuccessfulWork::Deferred(error.to_string()),
+                                now_ms() / 1000,
+                            )?;
+                        }
+                    },
+                    Err(error) => {
+                        let progress = crate::atlas::retry::RetryProgress {
+                            exhausted: true,
+                            reason: error.to_string(),
+                            ..report.progress
+                        };
+                        db.finish_retry(&claim, &progress, &rate_scope, false, now_ms())?;
+                    }
+                }
+                return Ok(());
+            }
+            AttemptResult::Retry(decision)
+                if wait_for_retry(&decision, now_ms(), &mut cancel).await => {}
+            _ => return Ok(()),
+        }
+    }
 }
 
 struct Scope {
@@ -350,7 +627,21 @@ fn file_candidate(
     preparation: &InputPreparation<'_>,
     path: &Path,
     template: &LoadedTemplate,
-) -> Result<EnrichmentCandidate> {
+) -> Result<(EnrichmentCandidate, EnrichmentInput)> {
+    let ignore = mcptools_core::atlas::build_ignore_matcher(&preparation.structural.skip_patterns)
+        .map_err(|error| eyre!("invalid skip pattern: {error}"))?;
+    validate_scope(
+        preparation.root,
+        &Scope {
+            label: display_scope(path),
+            files: vec![path.to_path_buf()],
+            directories: Vec::new(),
+            external_ancestors: Vec::new(),
+        },
+        &ignore,
+        &preparation.structural.primer_path.resolve(preparation.root),
+        &preparation.structural.db_path.resolve(preparation.root),
+    )?;
     let bytes = std::fs::read(preparation.root.join(path))
         .wrap_err_with(|| format!("reading enrichment source: {}", path.display()))?;
     let text = String::from_utf8_lossy(&bytes);
@@ -360,10 +651,7 @@ fn file_candidate(
     } else {
         tree_path
             .iter()
-            .map(|(directory, description)| match description {
-                Some(description) => format!("- {} — {description}", directory.display()),
-                None => format!("- {} — [missing current description]", directory.display()),
-            })
+            .map(|(directory, _)| format!("- {}", directory.display()))
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -403,7 +691,8 @@ fn directory_candidate(
     preparation: &InputPreparation<'_>,
     path: &Path,
     template: &LoadedTemplate,
-) -> Result<EnrichmentCandidate> {
+) -> Result<(EnrichmentCandidate, EnrichmentInput)> {
+    validate_indexed_path(preparation.root, path, true)?;
     let children = preparation.db.directory_children(path)?;
     let mut source = BTreeMap::new();
     let children_text = if children.is_empty() {
@@ -412,9 +701,22 @@ fn directory_candidate(
         let mut lines = Vec::with_capacity(children.len());
         for child in &children {
             let kind = if child.is_dir { "dir" } else { "file" };
+            let child_candidate = if child.is_dir {
+                directory_candidate(preparation, &child.path, template)
+            } else {
+                let file_template = load(
+                    &mcptools_core::llm_stream::resolve_paths()?
+                        .config_dir
+                        .join("templates"),
+                    preparation.runner.file.template.as_str(),
+                )?;
+                file_candidate(preparation, &child.path, &file_template)
+            };
+            let compatible = child_candidate.as_ref().is_ok_and(|(candidate, _)| matches!(&candidate.state, EnrichmentState::Current(identity) if identity == &candidate.identity));
             let description = child
                 .short_description
                 .as_deref()
+                .filter(|_| compatible)
                 .unwrap_or("[missing current description]");
             let symbols = if child.is_dir {
                 String::new()
@@ -423,7 +725,14 @@ fn directory_candidate(
             };
             source.insert(
                 format!("{kind}:{}", child.path.display()),
-                serde_json::to_vec(&(description, symbols))?,
+                serde_json::to_vec(&(
+                    description,
+                    symbols,
+                    child_candidate
+                        .as_ref()
+                        .ok()
+                        .map(|(candidate, _)| candidate.identity.as_str()),
+                ))?,
             );
             lines.push(format!(
                 "- [{kind}] {} — {description}",
@@ -460,7 +769,7 @@ fn directory_candidate(
 fn candidate(
     preparation: &InputPreparation<'_>,
     prepared: PreparedTarget<'_>,
-) -> Result<EnrichmentCandidate> {
+) -> Result<(EnrichmentCandidate, EnrichmentInput)> {
     let values = serde_json::to_value(&prepared.variables)?;
     let system = render_system(prepared.template, &values)?;
     let prompt = render(prepared.template, &values)?;
@@ -479,12 +788,15 @@ fn candidate(
     let context_tokens = estimate_tokens(&input.system) + estimate_tokens(&input.prompt);
     let identity = input.identity()?;
     let state = preparation.db.enrichment_state(&prepared.target)?;
-    Ok(EnrichmentCandidate {
-        target: prepared.target,
-        identity,
-        state,
-        context_tokens,
-    })
+    Ok((
+        EnrichmentCandidate {
+            target: prepared.target,
+            identity,
+            state,
+            context_tokens,
+        },
+        input,
+    ))
 }
 
 fn symbols_value(symbols: &[mcptools_core::atlas::Symbol]) -> String {

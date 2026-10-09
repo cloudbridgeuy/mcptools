@@ -61,7 +61,7 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | `ATLAS_DIR_MODEL` | shared model | Directory model override |
 | `ATLAS_FILE_TEMPLATE` | `atlas-file` | File template name |
 | `ATLAS_DIR_TEMPLATE` | `atlas-dir` | Directory template name |
-| `ATLAS_CONCURRENCY` | `1` | Parallel file enrichment workers |
+| `ATLAS_CONCURRENCY` | `1` | Maximum active enrichment requests |
 | `ATLAS_TIMEOUT_SECS` | `120` | Timeout for each llm-stream attempt |
 | `ATLAS_MAX_ATTEMPTS` | `1` | Attempts per enrichment, maximum `10` |
 
@@ -117,11 +117,14 @@ mcptools atlas sync                   # Force full re-index
 mcptools atlas status                 # Index health (--json)
 mcptools atlas index --dry-run        # Show what would be indexed
 mcptools atlas update --dry-run       # Show what would change
+mcptools atlas enrich [path]
 mcptools atlas enrich [path] --dry-run  # Plan scoped model work without side effects
 git status --porcelain | mcptools atlas index --stdin  # Index only the listed paths
 mcptools atlas setup                  # Install post-commit hook + guidance + llm-stream templates (atlas-file/dir)
 mcptools atlas setup --no-skills --no-claude-md --no-templates  # Hook only, skip agent-guidance scaffolding
 ```
+
+Enrichment executes resumable model work. Partial runs exit `1` and print success/failure/deferred totals plus a shell-quoted resume command. `--refresh` regenerates selected entries and resets their attempt state, not provider cooldowns. See the Atlas context for ordering and input validation.
 
 ### Jira
 

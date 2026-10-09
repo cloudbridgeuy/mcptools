@@ -254,10 +254,16 @@ impl Database {
 
     pub fn recover_enrichment(&self, now: i64) -> Result<usize> {
         validate_time(now)?;
-        Ok(self.conn.execute(
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("UPDATE enrichment_retry SET attempts = MAX(0, attempts - 1) WHERE EXISTS (
+            SELECT 1 FROM enrichment e WHERE e.kind = enrichment_retry.kind AND e.path = enrichment_retry.path
+                AND e.desired_identity = enrichment_retry.identity AND e.state = 'in_flight' AND e.lease_until <= ?1)", params![now])?;
+        let recovered = tx.execute(
             "UPDATE enrichment SET state = 'deferred', error = 'abandoned enrichment lease', token = NULL, lease_until = NULL
              WHERE state = 'in_flight' AND lease_until <= ?1", params![now],
-        )?)
+        )?;
+        tx.commit()?;
+        Ok(recovered)
     }
 
     pub fn invalidate_enrichment(&self, targets: &[EnrichmentTarget]) -> Result<()> {

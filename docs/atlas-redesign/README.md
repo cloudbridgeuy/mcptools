@@ -9,6 +9,20 @@ Prepared 2026-09-08 for the existing **MCPTools** Linear project.
 - Structural `init`, `index`, `update`, and `sync` require no primer, editor, or model.
 - The optional primer belongs to the operator. MCPTools does not rewrite it.
 - `enrich [path]` performs explicit, scoped model work with preview, saved progress, cache reuse, and clear partial failure.
+
+### Run and resume enrichment
+
+Run `mcptools atlas enrich [path] --dry-run` to inspect the scope, models, templates, and request estimate. Remove `--dry-run` to execute. No path selects the repository; a file selects only that file; a directory selects its indexed subtree. Use `--concurrency N` to bound active requests and `--limit N` to bound selected work items per invocation. Requests can retry within each item's configured attempt limit.
+
+Files run before directories. Directories run deepest first, after selected children settle. Only compatible successful child descriptions become context; missing, stale, or failed children have an explicit missing-description marker. File location context uses structural paths, not ancestor summaries, so parent generation cannot invalidate unchanged file inputs.
+
+Each complete response must contain `SHORT:` followed by `LONG:` with nonempty content. Atlas rejects malformed responses and failure markers. Before saving a success, Atlas reads the source, templates, configuration, and optional primer again, and checks path boundaries, ignore rules, and reserved files. A changed input rejects the response. Atlas never edits the primer.
+
+Exit code `0` means all selected entries have compatible saved successes. Exit code `1` means an error or partial enrichment, including cancellation, invocation limits, exhausted attempts, or deferred cooldowns. Partial output shows success/failure/deferred totals and an exact, shell-quoted resume command. Run that command after a cooldown; successful entries are not requested again. Exhausted or malformed responses require `--refresh` to reset attempts for the selected scope. Refresh does not bypass a provider cooldown.
+
+The total execution retry budget is `timeout_secs × max_attempts`. Valid Retry-After deadlines are never shortened to fit that budget. Longer waits are saved for a later invocation. Ctrl-C stops dispatch and cancels active subprocesses while retaining completed successes. Cancelled attempts do not consume the failure attempt budget; abandoned claims become retryable after their lease expires.
+
+Cache identity includes source bytes, effective templates/prompts/variables, optional primer, provider/model, and relevant settings. Directory identity includes the child identities and summaries actually used. Remote model-alias changes cannot be detected automatically; use `--refresh` when an alias changes without a revision.
 - `atlas-file` and `atlas-directory` are **llm-stream templates**, not presets. Provider/model selection is separate.
 - One dedicated llm-stream process runner replaces the direct Ollama calls in Atlas.
 - Atlas owns bounded retries and scheduling. llm-stream exposes reliable error metadata, including 429 and Retry-After when available.
