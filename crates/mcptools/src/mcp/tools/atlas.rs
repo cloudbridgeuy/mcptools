@@ -65,13 +65,12 @@ pub async fn handle_atlas_peek(
 }
 
 pub async fn handle_atlas_status(
-    _arguments: Option<serde_json::Value>,
+    arguments: Option<serde_json::Value>,
     _global: &crate::Global,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    let (root, config, db) = open_atlas()?;
-
-    let status =
-        crate::atlas::data::atlas_status_data(&db, &config, &root).map_err(to_internal_error)?;
+    let _: AtlasStatusArgs = parse_args(Some(arguments.unwrap_or_else(|| serde_json::json!({}))))?;
+    let root = crate::atlas::cli::index::find_git_root().map_err(to_internal_error)?;
+    let status = crate::atlas::data::repository_status(&root).map_err(to_internal_error)?;
 
     let output = mcptools_core::atlas::format_status(&status, true);
     super::to_dual_result(AtlasTextOutput {

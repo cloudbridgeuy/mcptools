@@ -35,6 +35,7 @@ mcptools atlas status --json          # JSON output
 mcptools atlas index --dry-run        # Show what would be indexed (by tier)
 mcptools atlas update --dry-run       # Show what would change (adds/mods/deletes)
 mcptools atlas enrich [path]
+mcptools atlas enrich [path] --json    # Versioned machine result; progress on stderr
 mcptools atlas enrich [path] --dry-run  # Plan exact scoped enrichment without side effects
 mcptools atlas enrich src --dry-run --limit 20 --refresh  # Bound work and bypass cache hits
 git status --porcelain | mcptools atlas index --stdin   # Index only the listed paths
@@ -141,7 +142,9 @@ Precedence is environment variables, nested `[atlas]` values, flat top-level val
 
 `concurrency`, `timeout_secs`, and `max_attempts` must be positive integers. `max_attempts` cannot exceed `10`. Explicit provider, model, and template names cannot be blank. Retries apply only to temporary rate-limit, connection, timeout, and HTTP 408, 429, 500, 502, 503, or 504 failures. Explicit non-retryable metadata overrides this list. Authentication, protocol/request errors, and known exhausted quota are permanent.
 
-All structural and query commands work without llm-stream, authentication, or a selected model. They do not load strict enrichment settings, even when provider/model configuration is present.
+All structural and query commands work without llm-stream, authentication, or a selected model. Status inspects strict enrichment settings without calling a runner; invalid enrichment settings do not prevent structural status. Other structural/query commands do not load strict enrichment settings.
+
+The [versioned status and enrichment contract](../../docs/atlas-redesign/status-contract.md) defines freshness, counts, safe identities, telemetry, JSON documents, and process exits. Status does not create an absent index; it returns `atlas init` guidance. Status can migrate an existing legacy index, as before.
 
 Legacy `kind`, `base_url`, `OLLAMA_URL`, and `ATLAS_BASE_URL` settings are rejected before enrichment with a migration message. Keep unrelated `.mcptools/config.toml` fields, remove those settings, set `api = "ollama"` with a shared or per-role model, and configure the Ollama endpoint in llm-stream. Atlas never rewrites the config file.
 

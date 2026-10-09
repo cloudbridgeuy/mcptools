@@ -43,7 +43,8 @@ impl InputIdentity {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EntryKind {
     File,
     Directory,
@@ -58,7 +59,7 @@ impl EntryKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EnrichmentTarget {
     pub kind: EntryKind,
     pub path: PathBuf,
@@ -98,7 +99,8 @@ pub struct EnrichmentCandidate {
     pub context_tokens: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PlanStatus {
     Reusable,
     Missing,
@@ -125,15 +127,16 @@ impl PlanStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct EnrichmentPlanEntry {
     pub target: EnrichmentTarget,
     pub status: PlanStatus,
+    #[serde(rename = "context_tokens_estimate")]
     pub context_tokens: usize,
     pub scheduled: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct EnrichmentPlan {
     pub entries: Vec<EnrichmentPlanEntry>,
 }

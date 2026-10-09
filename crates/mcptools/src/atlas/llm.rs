@@ -3,7 +3,7 @@ use crate::atlas::enrichment::{EnrichmentClaim, EnrichmentState, EnrichmentTarge
 use crate::atlas::retry::{
     after_failure, rate_limited, RateScope, RetryDecision, RetryPolicy, RetryProgress,
 };
-use crate::llm_stream::run_with_paths;
+use crate::llm_stream::run_envelope_with_paths;
 use crate::prelude::*;
 use mcptools_core::atlas::{ModelName, RunnerConfig};
 use mcptools_core::llm_stream::{resolve_paths, ContractError, LlmStreamRequest, ResolvedPaths};
@@ -51,6 +51,7 @@ pub struct AttemptReport {
     pub progress: RetryProgress,
     pub exhausted_count: usize,
     pub deferred_count: usize,
+    pub telemetry: Option<mcptools_core::atlas::RequestTelemetry>,
 }
 
 impl AttemptReport {
@@ -67,7 +68,14 @@ impl AttemptReport {
             AttemptResult::Busy => "busy",
             AttemptResult::Superseded => "superseded",
         };
-        format!("{status}: attempts={}, waiting reason={}, next attempt ms={}, exhausted={}, deferred={}", self.progress.attempts, self.progress.reason, self.progress.next_attempt_ms, self.exhausted_count, self.deferred_count)
+        format!(
+            "{status}: attempts={}, next attempt ms={}, exhausted={}, deferred={}, telemetry={}",
+            self.progress.attempts,
+            self.progress.next_attempt_ms,
+            self.exhausted_count,
+            self.deferred_count,
+            serde_json::to_string(&self.telemetry).unwrap_or_default()
+        )
     }
 }
 
@@ -182,6 +190,7 @@ impl LlmStreamProvider {
                 progress,
                 exhausted_count,
                 deferred_count,
+                telemetry: None,
             })
         };
         if cancel.try_recv() != Err(oneshot::error::TryRecvError::Empty) {
@@ -240,9 +249,10 @@ impl LlmStreamProvider {
         let timeout = timeout.min(Duration::from_millis(
             policy.deadline_ms.saturating_sub(now_ms()).max(0) as u64,
         ));
+        let started = std::time::Instant::now();
         let result = match paths {
             Ok(paths) => {
-                run_with_paths(
+                run_envelope_with_paths(
                     request(&self.provider, &self.model, system, prompt),
                     paths,
                     timeout,
@@ -254,9 +264,30 @@ impl LlmStreamProvider {
             }
             Err(error) => Err(error),
         };
+        let telemetry = mcptools_core::atlas::RequestTelemetry {
+            path: Some(target.path.to_string_lossy().into_owned()),
+            attempt: progress.attempts,
+            outcome: if result.is_ok() {
+                mcptools_core::atlas::RequestOutcome::Completed
+            } else {
+                mcptools_core::atlas::RequestOutcome::Failed
+            },
+            elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            input_bytes: system.len() + prompt.len(),
+            output_bytes: result.as_ref().ok().map(|success| success.answer.len()),
+            usage: result.as_ref().ok().and_then(|success| {
+                mcptools_core::atlas::ProviderUsage::from_value(success.usage.as_ref())
+            }),
+        };
         drop(permit);
-        match result {
-            Ok(answer) => report(AttemptResult::Response { claim, answer }, progress),
+        let mut result = match result {
+            Ok(success) => report(
+                AttemptResult::Response {
+                    claim,
+                    answer: success.answer,
+                },
+                progress,
+            ),
             Err(error) => {
                 let now = now_ms();
                 progress = if error == ContractError::Cancelled {
@@ -276,7 +307,12 @@ impl LlmStreamProvider {
                     )
                 };
                 if !db.finish_retry(&claim, &progress, scope, rate_limited(&error), now)? {
-                    return report(AttemptResult::Superseded, progress);
+                    let mut report = report(AttemptResult::Superseded, progress)?;
+                    report.telemetry = Some(mcptools_core::atlas::RequestTelemetry {
+                        outcome: mcptools_core::atlas::RequestOutcome::Superseded,
+                        ..telemetry
+                    });
+                    return Ok(report);
                 }
                 let result = if error == ContractError::Cancelled {
                     AttemptResult::Cancelled
@@ -287,7 +323,23 @@ impl LlmStreamProvider {
                 };
                 report(result, progress)
             }
-        }
+        }?;
+        let outcome = match &result.result {
+            AttemptResult::Response { .. } | AttemptResult::Reusable => {
+                mcptools_core::atlas::RequestOutcome::Completed
+            }
+            AttemptResult::Retry(_) | AttemptResult::Busy => {
+                mcptools_core::atlas::RequestOutcome::Deferred
+            }
+            AttemptResult::Failed(_) => mcptools_core::atlas::RequestOutcome::Failed,
+            AttemptResult::Cancelled => mcptools_core::atlas::RequestOutcome::Cancelled,
+            AttemptResult::Superseded => mcptools_core::atlas::RequestOutcome::Superseded,
+        };
+        result.telemetry = Some(mcptools_core::atlas::RequestTelemetry {
+            outcome,
+            ..telemetry
+        });
+        Ok(result)
     }
 }
 

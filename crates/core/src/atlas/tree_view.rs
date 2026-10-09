@@ -7,9 +7,18 @@ use serde::Serialize;
 
 use crate::atlas::types::{DirectoryPeekView, IndexTier, PeekView, Symbol, TreeEntry, Visibility};
 
-/// Index health information (read model).
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexStatus {
+    pub schema_version: u32,
+    pub outcome: super::StatusOutcome,
+    pub structural: super::StructuralState,
+    pub guidance: Option<String>,
+    pub enrichment: super::EnrichmentCounts,
+    pub enrichment_state: String,
+    pub active_enrichment: super::ActiveEnrichment,
+    pub retries: Vec<super::RetryStatus>,
+    pub last_execution: Option<super::ExecutionTelemetry>,
+    pub primer_present: bool,
     pub last_sync: Option<String>,
     pub total_files: usize,
     pub total_directories: usize,
@@ -17,7 +26,30 @@ pub struct IndexStatus {
     pub files_with_descriptions: usize,
     pub directories_with_descriptions: usize,
     pub primer_hash: Option<String>,
-    pub primer_excerpt: Option<String>,
+}
+
+impl Default for IndexStatus {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            outcome: super::StatusOutcome::Success,
+            structural: super::StructuralState::Uninitialized,
+            guidance: Some("Run `mcptools atlas init` to build the structural index".into()),
+            enrichment: super::EnrichmentCounts::default(),
+            enrichment_state: "partial".into(),
+            active_enrichment: super::ActiveEnrichment::Disabled,
+            retries: Vec::new(),
+            last_execution: None,
+            primer_present: false,
+            last_sync: None,
+            total_files: 0,
+            total_directories: 0,
+            total_symbols: 0,
+            files_with_descriptions: 0,
+            directories_with_descriptions: 0,
+            primer_hash: None,
+        }
+    }
 }
 
 /// Remove a single trailing newline, if present.
@@ -90,8 +122,6 @@ pub fn format_directory_peek(peek: &DirectoryPeekView, json: bool) -> String {
     }
 }
 
-/// Format index status for display.
-/// Returns human-readable text or JSON depending on the format flag.
 pub fn format_status(status: &IndexStatus, json: bool) -> String {
     if json {
         serde_json::to_string_pretty(status).unwrap_or_default()
@@ -127,15 +157,40 @@ fn format_status_human(status: &IndexStatus) -> String {
         format_number(status.total_symbols),
     );
 
-    let primer_display = match &status.primer_excerpt {
-        Some(excerpt) if excerpt.chars().count() > 50 => {
-            let prefix: String = excerpt.chars().take(50).collect();
-            format!("{prefix}...")
+    let _ = writeln!(
+        out,
+        "Primer:          {}",
+        if status.primer_present {
+            "present (optional)"
+        } else {
+            "absent (optional, informational)"
         }
-        Some(excerpt) => excerpt.clone(),
-        None => "(none)".to_string(),
-    };
-    let _ = writeln!(out, "Primer:          {primer_display}");
+    );
+    let _ = writeln!(out, "Structural:      {:?}", status.structural);
+    if let Some(guidance) = &status.guidance {
+        let _ = writeln!(out, "{guidance}");
+    }
+    let counts = &status.enrichment;
+    let _ = writeln!(out, "Enrichment:      {} (current={}, missing={}, stale={}, failed={}, deferred={}, in_flight={}, unknown={})", status.enrichment_state, counts.current, counts.missing, counts.stale, counts.failed, counts.deferred, counts.in_flight, counts.unknown);
+    let _ = writeln!(
+        out,
+        "Active:          {}",
+        serde_json::to_string(&status.active_enrichment).unwrap_or_default()
+    );
+    for retry in &status.retries {
+        let _ = writeln!(
+            out,
+            "Retry:           {} {} attempts={}, next eligible ms={}, exhausted={}",
+            retry.kind, retry.path, retry.attempts, retry.next_eligible_at_ms, retry.exhausted
+        );
+    }
+    if let Some(execution) = &status.last_execution {
+        let _ = writeln!(
+            out,
+            "Last execution:  {}",
+            serde_json::to_string(execution).unwrap_or_default()
+        );
+    }
 
     trim_trailing_newline(out)
 }
@@ -874,8 +929,6 @@ src/
         assert!(parents.is_empty());
     }
 
-    // ---- format_status tests ----
-
     fn make_full_status() -> IndexStatus {
         IndexStatus {
             last_sync: Some("2026-03-31T10:30:00Z".to_string()),
@@ -885,7 +938,8 @@ src/
             files_with_descriptions: 138,
             directories_with_descriptions: 23,
             primer_hash: Some("a1b2c3d4e5f6".to_string()),
-            primer_excerpt: Some("This codebase is a Rust CLI tool".to_string()),
+            primer_present: true,
+            ..IndexStatus::default()
         }
     }
 
@@ -900,7 +954,7 @@ src/
         assert!(result.contains("Files:           142 (138 with descriptions)"));
         assert!(result.contains("Directories:     23 (23 with descriptions)"));
         assert!(result.contains("Symbols:         1,247"));
-        assert!(result.contains("Primer:          This codebase is a Rust CLI tool"));
+        assert!(result.contains("Primer:          present (optional)"));
     }
 
     #[test]
@@ -915,7 +969,8 @@ src/
         assert_eq!(parsed["last_sync"], "2026-03-31T10:30:00Z");
         assert_eq!(parsed["files_with_descriptions"], 138);
         assert_eq!(parsed["directories_with_descriptions"], 23);
-        assert_eq!(parsed["primer_excerpt"], "This codebase is a Rust CLI tool");
+        assert!(parsed.get("primer_excerpt").is_none());
+        assert_eq!(parsed["schema_version"], 1);
     }
 
     #[test]
@@ -928,7 +983,7 @@ src/
             files_with_descriptions: 0,
             directories_with_descriptions: 0,
             primer_hash: None,
-            primer_excerpt: None,
+            ..IndexStatus::default()
         };
 
         let result = format_status(&status, false);
@@ -937,12 +992,12 @@ src/
         assert!(result.contains("Files:           0 (0 with descriptions)"));
         assert!(result.contains("Directories:     0 (0 with descriptions)"));
         assert!(result.contains("Symbols:         0"));
-        assert!(result.contains("Primer:          (none)"));
+        assert!(result.contains("absent (optional, informational)"));
+        assert!(result.contains("mcptools atlas init"));
     }
 
     #[test]
-    fn format_status_primer_excerpt_truncated() {
-        let long_excerpt = "A".repeat(80);
+    fn format_status_optional_primer_has_no_excerpt() {
         let status = IndexStatus {
             last_sync: Some("2026-03-31T10:30:00Z".to_string()),
             total_files: 10,
@@ -951,12 +1006,12 @@ src/
             files_with_descriptions: 8,
             directories_with_descriptions: 2,
             primer_hash: Some("abc123".to_string()),
-            primer_excerpt: Some(long_excerpt),
+            primer_present: true,
+            ..IndexStatus::default()
         };
 
         let result = format_status(&status, false);
-        let expected_truncated = format!("Primer:          {}...", "A".repeat(50));
-        assert!(result.contains(&expected_truncated));
+        assert!(result.contains("present (optional)"));
     }
 
     // ---- format_elapsed tests ----

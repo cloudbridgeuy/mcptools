@@ -4,6 +4,7 @@ pub mod hash;
 pub mod parse;
 pub mod prompts;
 pub mod setup;
+pub mod status;
 pub mod symbols;
 pub mod templates;
 pub mod tree_view;
@@ -26,6 +27,7 @@ pub use setup::{
     Templates, UntouchableReason, WarnReason, CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START,
     HOOK_MARKER_END, HOOK_MARKER_START,
 };
+pub use status::*;
 pub use symbols::extract_symbols;
 pub use templates::{
     load, render, render_system, validate, LoadedTemplate, Template, TemplateError,

@@ -81,3 +81,7 @@ No new vector store, embeddings pipeline, daemon, LSP dependency, full call grap
 A new automatic primer-writing feature is not included. If requested later, it must produce a separate suggestion without modifying operator text.
 
 This session prepares project work; it does not implement the product redesign or modify llm_stream.
+## Status contract
+
+See [versioned status and enrichment contract](status-contract.md) for JSON
+schemas, process exits, retry timestamps, and telemetry semantics.

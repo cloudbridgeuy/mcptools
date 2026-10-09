@@ -19,6 +19,16 @@ impl Database {
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)
             .wrap_err_with(|| format!("opening database: {}", path.display()))?;
+        Self::initialize(conn)
+    }
+
+    pub fn open_existing(path: &Path) -> Result<Self> {
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .wrap_err_with(|| format!("opening existing Atlas index: {}", path.display()))?;
+        Self::initialize(conn)
+    }
+
+    fn initialize(conn: Connection) -> Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let tx = conn.unchecked_transaction()?;
 

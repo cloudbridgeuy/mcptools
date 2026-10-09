@@ -28,6 +28,26 @@ pub(super) fn migrate(conn: &Connection) -> Result<()> {
 }
 
 impl Database {
+    pub fn retry_statuses(&self, cooldown: i64) -> Result<Vec<mcptools_core::atlas::RetryStatus>> {
+        let mut statement = self.conn.prepare("SELECT r.kind, r.path, r.attempts, r.next_attempt_ms, r.exhausted, e.state FROM enrichment_retry r JOIN enrichment e ON e.kind = r.kind AND e.path = r.path AND e.desired_identity = r.identity ORDER BY r.kind, r.path")?;
+        let rows = statement.query_map([], |row| {
+            let state: String = row.get(5)?;
+            let next: i64 = row.get(3)?;
+            Ok(mcptools_core::atlas::RetryStatus {
+                kind: row.get(0)?,
+                path: row.get(1)?,
+                attempts: row.get(2)?,
+                next_eligible_at_ms: if state == "deferred" {
+                    next.max(cooldown)
+                } else {
+                    next
+                },
+                exhausted: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn retry_progress(
         &self,
         target: &EnrichmentTarget,

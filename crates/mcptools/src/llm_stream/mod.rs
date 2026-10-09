@@ -56,6 +56,17 @@ pub(crate) async fn run_with_paths(
     timeout: Duration,
     cancel: CancelSignal<'_>,
 ) -> Result<String, ContractError> {
+    run_envelope_with_paths(req, paths, timeout, cancel)
+        .await
+        .map(|success| success.answer)
+}
+
+pub(crate) async fn run_envelope_with_paths(
+    req: LlmStreamRequest,
+    paths: ResolvedPaths,
+    timeout: Duration,
+    cancel: CancelSignal<'_>,
+) -> Result<mcptools_core::llm_stream::MachineSuccess, ContractError> {
     let secrets = collect_secrets(&paths);
     run_attempt(req, &paths, timeout, cancel)
         .await
@@ -121,7 +132,7 @@ async fn run_attempt(
     paths: &ResolvedPaths,
     timeout: Duration,
     mut cancel: CancelSignal<'_>,
-) -> Result<String, ContractError> {
+) -> Result<mcptools_core::llm_stream::MachineSuccess, ContractError> {
     let deadline = tokio::time::Instant::now() + timeout;
     tokio::select! {
         biased;
@@ -221,8 +232,7 @@ async fn run_attempt(
         return Err(ContractError::Protocol(message));
     }
     let envelope = parse_envelope(&stdout)?;
-    let success = envelope.into_result()?;
-    Ok(success.answer)
+    envelope.into_result()
 }
 
 async fn read_capped(

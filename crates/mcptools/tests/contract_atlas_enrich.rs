@@ -276,7 +276,13 @@ fn invalid_output_is_failed_not_cached_and_refresh_retries_it() {
     assert!(stdout(&failed).contains("success=0, failure=1, deferred=0"));
     assert!(stdout(&failed).contains("resume: mcptools atlas enrich '"));
     fixture.success();
-    assert!(!fixture.run(&["enrich", "src/main.rs"]).status.success());
+    let failed = fixture.run(&["enrich", "src/main.rs", "--json"]);
+    assert!(!failed.status.success());
+    let result: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
+    assert_eq!(result["outcome"], "partial");
+    assert_eq!(result["telemetry"]["failed"], 1);
+    assert_eq!(result["retries"][0]["attempts"], 1);
+    assert_eq!(result["retries"][0]["exhausted"], true);
     assert_eq!(fixture.call_count(), 1);
     assert!(fixture
         .run(&["enrich", "src/main.rs", "--refresh"])
@@ -335,14 +341,19 @@ fn incomplete_and_empty_responses_never_become_successes() {
 fn mixed_success_and_429_retains_success_and_defers_shared_scope() {
     let fixture = Fixture::new();
     fixture.stub("case \"$prompt\" in\n*'pub fn nested()'*) printf '%s\\n' '{\"contract_version\":1,\"category\":\"rate_limited\",\"retryable\":true,\"retry_after_seconds\":3600,\"message\":\"429\"}'; exit 1;;\nesac\nprintf '%s\\n' '{\"contract_version\":1,\"answer\":\"SHORT: Summary\\nLONG: Details\",\"provider\":\"fake\",\"model\":\"fake-model\"}'");
-    let partial = fixture.run(&["enrich"]);
+    let partial = fixture.run(&["enrich", "--json"]);
     assert_eq!(partial.status.code(), Some(1));
-    assert!(
-        stdout(&partial).contains("success=1, failure=0, deferred=3"),
-        "{}\n{}",
-        stdout(&partial),
-        String::from_utf8_lossy(&partial.stderr)
-    );
+    let result: serde_json::Value = serde_json::from_slice(&partial.stdout).unwrap();
+    assert_eq!(result["outcome"], "partial");
+    assert_eq!(result["telemetry"]["completed"], 1);
+    assert_eq!(result["telemetry"]["deferred"], 3);
+    assert_eq!(result["telemetry"]["completed_requests"], 1);
+    assert_eq!(result["telemetry"]["deferred_requests"], 1);
+    assert!(result["retries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|retry| retry["next_eligible_at_ms"].as_i64().unwrap() > 0));
     assert_eq!(fixture.call_count(), 2);
     assert!(!fixture.run(&["enrich"]).status.success());
     assert_eq!(fixture.call_count(), 2);
@@ -365,7 +376,7 @@ fn cancellation_saves_completed_work_and_resume_skips_it() {
     let fixture = Fixture::new();
     fixture.stub("case \"$prompt\" in *'pub fn nested()'*) touch .mcptools/started; sleep 30;; esac\nprintf '%s\\n' '{\"contract_version\":1,\"answer\":\"SHORT: Summary\\nLONG: Details\",\"provider\":\"fake\",\"model\":\"fake-model\"}'");
     let child = Command::new(binary())
-        .args(["atlas", "enrich"])
+        .args(["atlas", "enrich", "--json"])
         .current_dir(fixture.root.path())
         .env("LLM_STREAM_BIN", &fixture.runner)
         .env("LLM_STREAM_CONFIG_DIR", &fixture.config_dir)
@@ -386,7 +397,17 @@ fn cancellation_saves_completed_work_and_resume_skips_it() {
         .success());
     let partial = child.wait_with_output().unwrap();
     assert_eq!(partial.status.code(), Some(1));
-    assert!(stdout(&partial).contains("success=1, failure=0, deferred=3"));
+    let result: serde_json::Value = serde_json::from_slice(&partial.stdout).unwrap();
+    assert_eq!(result["outcome"], "cancelled");
+    assert_eq!(result["telemetry"]["completed"], 1);
+    assert_eq!(result["telemetry"]["deferred"], 3);
+    assert_eq!(result["telemetry"]["deferred_requests"], 0);
+    assert!(result["telemetry"]["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|request| request["outcome"] == "cancelled"));
+    assert!(result["resume"].as_str().unwrap().contains("atlas enrich"));
     fixture.success();
     let resumed = fixture.run(&["enrich"]);
     assert!(
@@ -447,4 +468,159 @@ fn live_child_lease_blocks_parent_and_abandoned_attempt_is_resumable() {
         String::from_utf8_lossy(&resumed.stderr)
     );
     assert_eq!(fixture.call_count(), 5);
+}
+
+#[test]
+fn json_status_and_enrichment_share_counts_telemetry_and_safe_identities() {
+    let fixture = Fixture::new();
+    fixture.stub("printf '%s\\n' '{\"contract_version\":1,\"answer\":\"SHORT: Summary\\nLONG: Details\",\"provider\":\"fake\",\"model\":\"fake-model\",\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"raw_prompt\":\"DO NOT EXPOSE\"}}'");
+    let dry = fixture.run(&["enrich", "--dry-run", "--json"]);
+    let dry: serde_json::Value = serde_json::from_slice(&dry.stdout).unwrap();
+    assert_eq!(dry["outcome"], "dry_run");
+    assert!(dry["plan"]["entries"][0]
+        .get("context_tokens_estimate")
+        .is_some());
+    assert_eq!(fixture.call_count(), 0);
+    let partial = fixture.run(&["enrich", "--limit", "1", "--json"]);
+    assert_eq!(partial.status.code(), Some(1));
+    let partial: serde_json::Value = serde_json::from_slice(&partial.stdout).unwrap();
+    assert_eq!(partial["outcome"], "partial");
+    assert_eq!(partial["telemetry"]["completed"], 1);
+    assert_eq!(partial["telemetry"]["deferred"], 3);
+    let success = fixture.run(&["enrich", "--json"]);
+    assert!(success.status.success());
+    let success: serde_json::Value = serde_json::from_slice(&success.stdout).unwrap();
+    assert_eq!(success["outcome"], "success");
+    assert_eq!(success["telemetry"]["cache_hits"], 1);
+    assert_eq!(success["telemetry"]["completed"], 4);
+    assert_eq!(success["telemetry"]["completed_requests"], 3);
+    let request = &success["telemetry"]["requests"][0];
+    assert_eq!(request["usage"]["input_tokens"], 11);
+    assert_eq!(request["usage"]["output_tokens"], 7);
+    assert!(request["input_bytes"].as_u64().unwrap() > 0);
+    assert!(request["output_bytes"].as_u64().unwrap() > 0);
+    assert!(!success.to_string().contains("DO NOT EXPOSE"));
+    let output = fixture.run(&["status", "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["schema_version"], 1);
+    assert_eq!(status["structural"], "ready");
+    assert_eq!(status["enrichment_state"], "current");
+    assert_eq!(status["enrichment"]["current"], 4);
+    assert_eq!(status["last_execution"], success["telemetry"]);
+    assert!(!status.to_string().contains("Operator context"));
+    assert!(status.get("primer_excerpt").is_none());
+    std::fs::write(
+        fixture.root.path().join(".mcptools/atlas/primer.md"),
+        "Changed prompt context",
+    )
+    .unwrap();
+    let output = fixture.run(&["status", "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["structural"], "ready");
+    assert_eq!(status["enrichment_state"], "stale");
+    assert_eq!(status["enrichment"]["stale"], 4);
+    std::fs::write(
+        fixture.root.path().join("src/main.rs"),
+        "pub fn changed() {}\n",
+    )
+    .unwrap();
+    let output = fixture.run(&["status", "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["structural"], "stale");
+}
+
+#[test]
+fn json_uninitialized_and_preflight_failure_are_actionable_without_creating_index() {
+    let fixture = Fixture::new();
+    std::fs::remove_file(fixture.db_path()).unwrap();
+    std::fs::remove_file(fixture.root.path().join(".mcptools/atlas/primer.md")).unwrap();
+    let output = fixture.run(&["status", "--json"]);
+    assert!(output.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["structural"], "uninitialized");
+    assert_eq!(status["primer_present"], false);
+    assert!(status["guidance"].as_str().unwrap().contains("atlas init"));
+    assert!(!fixture.db_path().exists());
+    let output = fixture.run(&["enrich", "--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["outcome"], "config_failure");
+    assert_eq!(result["plan"], serde_json::Value::Null);
+    assert!(!fixture.db_path().exists());
+    assert_eq!(fixture.call_count(), 0);
+}
+
+#[test]
+fn status_marks_current_ancestors_stale_for_added_and_newly_ignored_files() {
+    let fixture = Fixture::new();
+    fixture.success();
+    assert!(fixture.run(&["enrich"]).status.success());
+    std::fs::write(fixture.root.path().join("src/new.rs"), "pub fn new() {}\n").unwrap();
+    let output = fixture.run(&["status", "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["structural"], "stale");
+    assert_eq!(status["enrichment"]["stale"], 1);
+    assert_eq!(status["enrichment"]["current"], 3);
+    std::fs::remove_file(fixture.root.path().join("src/new.rs")).unwrap();
+    #[cfg(unix)]
+    {
+        let path = fixture.root.path().join("src/main.rs");
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(fixture.root.path().join("ignored.rs"), &path).unwrap();
+        let output = fixture.run(&["status", "--json"]);
+        let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(status["structural"], "stale");
+        assert_eq!(status["enrichment"]["stale"], 2);
+        assert_eq!(status["enrichment"]["current"], 2);
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, "pub fn main() {}\n").unwrap();
+    }
+    std::fs::write(
+        fixture.root.path().join(".mcptools/config.toml"),
+        "[atlas]\napi = 'fake'\nmodel = 'fake-model'\nmax_attempts = 3\nskip_patterns = ['ignored.rs', 'src/nested/**']\n",
+    ).unwrap();
+    let output = fixture.run(&["status", "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(status["structural"], "stale");
+    assert_eq!(status["enrichment"]["stale"], 3);
+    assert_eq!(status["enrichment"]["current"], 1);
+}
+
+#[test]
+fn json_failures_hide_template_and_config_source_and_classify_execution_errors() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.config_dir.join("templates/atlas-file.toml"),
+        "template = RAW_PROMPT_DO_NOT_EXPOSE",
+    )
+    .unwrap();
+    let output = fixture.run(&["enrich", "--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["outcome"], "config_failure");
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("RAW_PROMPT_DO_NOT_EXPOSE"));
+    std::fs::write(
+        fixture.config_dir.join("templates/atlas-file.toml"),
+        include_str!("../src/atlas/templates/atlas-file.toml"),
+    )
+    .unwrap();
+    fixture.success();
+    let db = rusqlite::Connection::open(fixture.db_path()).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_description BEFORE UPDATE OF short_description ON files BEGIN SELECT RAISE(ABORT, 'storage unavailable'); END;").unwrap();
+    let output = fixture.run(&["enrich", "src/main.rs", "--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["outcome"], "execution_failure");
+    std::fs::write(
+        fixture.root.path().join(".mcptools/config.toml"),
+        "[atlas]\nmodel = SECRET_CONFIG_DO_NOT_EXPOSE",
+    )
+    .unwrap();
+    for command in ["status", "enrich"] {
+        let output = fixture.run(&[command, "--json"]);
+        assert_eq!(output.status.code(), Some(1));
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(result["outcome"], "config_failure");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("SECRET_CONFIG_DO_NOT_EXPOSE"));
+    }
 }

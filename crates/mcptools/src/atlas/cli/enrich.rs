@@ -33,11 +33,104 @@ pub struct EnrichOptions {
     pub limit: Option<NonZeroUsize>,
     #[arg(long)]
     pub concurrency: Option<usize>,
+    #[arg(long)]
+    pub json: bool,
 }
 
 pub async fn run(opts: EnrichOptions, _global: crate::Global) -> Result<()> {
+    match run_inner(&opts).await {
+        Ok(result) => {
+            if opts.json {
+                crate::prelude::println!("{}", serde_json::to_string(&result)?);
+            } else {
+                crate::prelude::println!("Atlas enrichment {}: success={}, failure={}, deferred={}\nresume: {}\ntelemetry: {}", result.outcome.as_str(), result.telemetry.completed, result.telemetry.failed, result.telemetry.deferred, result.resume.as_deref().unwrap_or("none"), serde_json::to_string(&result.telemetry)?);
+            }
+            if matches!(
+                result.outcome,
+                EnrichOutcome::Partial | EnrichOutcome::Cancelled
+            ) {
+                return Err(eyre!("Atlas enrichment incomplete; completed work saved"));
+            }
+            Ok(())
+        }
+        Err(error) => {
+            let outcome = if error.downcast_ref::<ExecutionFailure>().is_some() {
+                EnrichOutcome::ExecutionFailure
+            } else {
+                EnrichOutcome::ConfigFailure
+            };
+            if opts.json {
+                crate::prelude::println!("{}", serde_json::to_string(&EnrichResult { schema_version: 1, outcome, plan: None, active_enrichment: None, telemetry: mcptools_core::atlas::ExecutionTelemetry::default(), retries: Vec::new(), resume: None, guidance: Some("Check Atlas configuration and runner; run `mcptools atlas init` if no structural index exists".into()) })?);
+            }
+            if let Some(error) = error.downcast_ref::<mcptools_core::atlas::TemplateError>() {
+                return Err(match error {
+                    mcptools_core::atlas::TemplateError::Missing { name } => {
+                        eyre!("template '{name}' is not installed; run `mcptools atlas setup`")
+                    }
+                    mcptools_core::atlas::TemplateError::Malformed { path, .. } => eyre!(
+                        "malformed template {}; check template syntax",
+                        path.display()
+                    ),
+                    mcptools_core::atlas::TemplateError::Render { name, .. } => eyre!(
+                        "failed to render template '{name}'; check template syntax and variables"
+                    ),
+                });
+            }
+            Err(error)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EnrichOutcome {
+    Success,
+    DryRun,
+    Partial,
+    Cancelled,
+    ConfigFailure,
+    ExecutionFailure,
+}
+
+impl EnrichOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "complete",
+            Self::DryRun => "dry_run",
+            Self::Partial => "partial",
+            Self::Cancelled => "cancelled",
+            Self::ConfigFailure => "config_failure",
+            Self::ExecutionFailure => "execution_failure",
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct EnrichResult {
+    schema_version: u32,
+    outcome: EnrichOutcome,
+    plan: Option<EnrichmentPlan>,
+    active_enrichment: Option<mcptools_core::atlas::ActiveEnrichment>,
+    telemetry: mcptools_core::atlas::ExecutionTelemetry,
+    retries: Vec<mcptools_core::atlas::RetryStatus>,
+    resume: Option<String>,
+    guidance: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Atlas execution failure; completed work saved; check index permissions and current inputs"
+)]
+struct ExecutionFailure;
+
+async fn run_inner(opts: &EnrichOptions) -> Result<EnrichResult> {
+    let started = std::time::Instant::now();
     let root = find_git_root()?;
     let structural = load_config(&root)?;
+    let db_path = structural.db_path.resolve(&root);
+    if !db_path.exists() {
+        return Err(eyre!("Atlas is uninitialized; run `mcptools atlas init`"));
+    }
     let runner = match load_enrichment_config(&root)? {
         EnrichmentConfig::Enabled(runner) => runner,
         EnrichmentConfig::Disabled => {
@@ -53,7 +146,6 @@ pub async fn run(opts: EnrichOptions, _global: crate::Global) -> Result<()> {
     let templates_dir = paths.config_dir.join("templates");
     let file_template = load(&templates_dir, runner.file.template.as_str())?;
     let directory_template = load(&templates_dir, runner.directory.template.as_str())?;
-    let db_path = structural.db_path.resolve(&root);
     let db = Database::open_read_only(&db_path)?;
     let all_files = db.all_file_paths()?;
     let all_directories: Vec<PathBuf> = db
@@ -72,6 +164,11 @@ pub async fn run(opts: EnrichOptions, _global: crate::Global) -> Result<()> {
         &structural.db_path.resolve(&root),
     )?;
     let primer = crate::atlas::fs::read_optional_primer(&structural.primer_path.resolve(&root))?;
+    if primer.is_none() {
+        crate::prelude::eprintln!(
+            "Optional primer absent (informational); enrichment uses no primer"
+        );
+    }
     let preparation = InputPreparation {
         db: &db,
         root: &root,
@@ -88,24 +185,80 @@ pub async fn run(opts: EnrichOptions, _global: crate::Global) -> Result<()> {
         candidates.push(directory_candidate(&preparation, path, &directory_template)?.0);
     }
     let plan = plan_enrichment(candidates, opts.refresh, opts.limit.map(NonZeroUsize::get));
-    crate::prelude::println!(
-        "{}",
-        format_plan(
-            &plan,
-            &scope,
-            &runner,
-            &runner_binary,
-            concurrency,
-            opts.limit,
-            opts.refresh,
-        )
+    let display_plan = format_plan(
+        &plan,
+        &scope,
+        &runner,
+        &runner_binary,
+        concurrency,
+        opts.limit,
+        opts.refresh,
     );
+    if opts.json {
+        crate::prelude::eprintln!("{display_plan}");
+    } else {
+        crate::prelude::println!("{display_plan}");
+    }
+    let mut telemetry = mcptools_core::atlas::ExecutionTelemetry {
+        preparation_ms: elapsed_ms(started),
+        cache_hits: plan.count(crate::atlas::enrichment::PlanStatus::Reusable),
+        ..Default::default()
+    };
+    let mut outcome = EnrichOutcome::DryRun;
+    let mut resume = None;
+    let mut retries = crate::atlas::data::retry_statuses(&db, &root)?;
     if !opts.dry_run {
         drop(db);
-        let db = Database::open(&db_path)?;
-        execute(&db, &root, &scope, &plan, &runner, concurrency, &opts).await?;
+        let db = Database::open_existing(&db_path).map_err(|_| ExecutionFailure)?;
+        let execution = execute(&db, &root, &scope, &plan, &runner, concurrency, opts)
+            .await
+            .map_err(|_| ExecutionFailure)?;
+        outcome = execution.0;
+        resume = Some(execution.1);
+        telemetry.completed = execution.2.completed;
+        telemetry.failed = execution.2.failed;
+        telemetry.deferred = execution.2.deferred;
+        telemetry.completed_requests = execution.2.completed_requests;
+        telemetry.failed_requests = execution.2.failed_requests;
+        telemetry.deferred_requests = execution.2.deferred_requests;
+        telemetry.files_ms = execution.2.files_ms;
+        telemetry.directories_ms = execution.2.directories_ms;
+        telemetry.requests = execution.2.requests;
+        telemetry.total_elapsed_ms = elapsed_ms(started);
+        db.set_metadata(
+            "last_enrichment_execution",
+            &serde_json::to_string(&telemetry)?,
+        )
+        .map_err(|_| ExecutionFailure)?;
+        retries = crate::atlas::data::retry_statuses(&db, &root).map_err(|_| ExecutionFailure)?;
     }
-    Ok(())
+    if opts.dry_run {
+        telemetry.total_elapsed_ms = elapsed_ms(started);
+    }
+    Ok(EnrichResult {
+        schema_version: 1,
+        outcome,
+        plan: Some(plan),
+        active_enrichment: Some(mcptools_core::atlas::ActiveEnrichment::Enabled {
+            provider: runner.provider.to_string(),
+            file: mcptools_core::atlas::RoleIdentity {
+                model: runner.file.model.to_string(),
+                template: runner.file.template.to_string(),
+            },
+            directory: mcptools_core::atlas::RoleIdentity {
+                model: runner.directory.model.to_string(),
+                template: runner.directory.template.to_string(),
+            },
+        }),
+        telemetry,
+        retries,
+        resume,
+        guidance: None,
+    })
+}
+
+fn elapsed_ms(started: std::time::Instant) -> u64 {
+    started.elapsed().as_millis().min(u64::MAX as u128) as u64
 }
 
 fn now_ms() -> i64 {
@@ -116,7 +269,7 @@ fn now_ms() -> i64 {
         .min(i64::MAX as u128) as i64
 }
 
-fn current_input(
+pub(crate) fn current_input(
     db: &Database,
     root: &Path,
     target: &EnrichmentTarget,
@@ -159,7 +312,12 @@ async fn execute(
     runner: &RunnerConfig,
     concurrency: usize,
     opts: &EnrichOptions,
-) -> Result<()> {
+) -> Result<(
+    EnrichOutcome,
+    String,
+    mcptools_core::atlas::ExecutionTelemetry,
+)> {
+    let mut telemetry = mcptools_core::atlas::ExecutionTelemetry::default();
     db.recover_enrichment(now_ms() / 1000)?;
     if opts.refresh {
         db.refresh_enrichment(
@@ -194,6 +352,7 @@ async fn execute(
             break;
         }
         let kind = first.target.kind;
+        let phase_started = std::time::Instant::now();
         let depth = first.target.path.components().count();
         let mut phase = Vec::new();
         while entries.peek().is_some_and(|entry| {
@@ -208,6 +367,7 @@ async fn execute(
             }
             let mut active = FuturesUnordered::new();
             let mut cancels = Vec::new();
+            let mut execution_failed = false;
             for target in chunk {
                 if target.kind == EntryKind::Directory
                     && plan.entries.iter().any(|entry| {
@@ -223,9 +383,12 @@ async fn execute(
                 }
                 let (candidate, input) = match current_input(db, root, target) {
                     Ok(work) => work,
-                    Err(error) => {
+                    Err(_) => {
                         db.invalidate_enrichment(std::slice::from_ref(target))?;
-                        crate::prelude::eprintln!("{}: deferred: {error}", target.path.display());
+                        crate::prelude::eprintln!(
+                            "{}: deferred: input unavailable",
+                            target.path.display()
+                        );
                         continue;
                     }
                 };
@@ -256,10 +419,24 @@ async fn execute(
                         for tx in cancels.drain(..) { let _ = tx.send(()); }
                     }
                     result = active.next() => {
-                        if let Some(Err(error)) = result { crate::prelude::eprintln!("enrichment error: {error}"); }
+                        match result {
+                            Some(Ok(requests)) => telemetry.requests.extend(requests),
+                            Some(Err(_)) => {
+                                execution_failed = true;
+                                crate::prelude::eprintln!("enrichment error: request did not complete");
+                            }
+                            None => {}
+                        }
                     }
                 }
             }
+            if execution_failed {
+                return Err(ExecutionFailure.into());
+            }
+        }
+        match kind {
+            EntryKind::File => telemetry.files_ms += elapsed_ms(phase_started),
+            EntryKind::Directory => telemetry.directories_ms += elapsed_ms(phase_started),
         }
     }
     let mut success = 0;
@@ -287,13 +464,18 @@ async fn execute(
             .map(|limit| format!(" --limit {limit}"))
             .unwrap_or_default()
     );
-    crate::prelude::println!("Atlas enrichment {}: success={success}, failure={failure}, deferred={deferred}\nresume: {resume}", if cancelled || failure + deferred > 0 { "partial" } else { "complete" });
-    if cancelled || failure + deferred > 0 {
-        return Err(eyre!(
-            "Atlas enrichment incomplete; completed work saved; resume: {resume}"
-        ));
-    }
-    Ok(())
+    telemetry.completed = success;
+    telemetry.failed = failure;
+    telemetry.deferred = deferred;
+    telemetry = telemetry.summarize_requests();
+    let outcome = if cancelled {
+        EnrichOutcome::Cancelled
+    } else if failure + deferred > 0 {
+        EnrichOutcome::Partial
+    } else {
+        EnrichOutcome::Success
+    };
+    Ok((outcome, resume, telemetry))
 }
 
 async fn execute_target(
@@ -304,7 +486,8 @@ async fn execute_target(
     slots: &Semaphore,
     deadline: i64,
     mut cancel: oneshot::Receiver<()>,
-) -> Result<()> {
+) -> Result<Vec<mcptools_core::atlas::RequestTelemetry>> {
+    let mut requests = Vec::new();
     let (target, input) = work;
     let role = match target.kind {
         EntryKind::File => &runner.file,
@@ -337,6 +520,9 @@ async fn execute_target(
             .attempt(&context, &input.system, &input.prompt, &mut cancel)
             .await?;
         crate::prelude::eprintln!("{}: {}", target.path.display(), report.format());
+        if let Some(telemetry) = report.telemetry {
+            requests.push(telemetry);
+        }
         match report.result {
             AttemptResult::Response { claim, answer } => {
                 match ValidatedDescription::parse(&answer) {
@@ -348,6 +534,10 @@ async fn execute_target(
                                 &description,
                                 now_ms() / 1000,
                             )? {
+                                if let Some(request) = requests.last_mut() {
+                                    request.outcome =
+                                        mcptools_core::atlas::RequestOutcome::Deferred;
+                                }
                                 db.finish_enrichment(
                                     &claim,
                                     &UnsuccessfulWork::Deferred(
@@ -358,6 +548,9 @@ async fn execute_target(
                             }
                         }
                         Err(error) => {
+                            if let Some(request) = requests.last_mut() {
+                                request.outcome = mcptools_core::atlas::RequestOutcome::Deferred;
+                            }
                             db.finish_enrichment(
                                 &claim,
                                 &UnsuccessfulWork::Deferred(error.to_string()),
@@ -366,6 +559,9 @@ async fn execute_target(
                         }
                     },
                     Err(error) => {
+                        if let Some(request) = requests.last_mut() {
+                            request.outcome = mcptools_core::atlas::RequestOutcome::Failed;
+                        }
                         let progress = crate::atlas::retry::RetryProgress {
                             exhausted: true,
                             reason: error.to_string(),
@@ -374,11 +570,18 @@ async fn execute_target(
                         db.finish_retry(&claim, &progress, &rate_scope, false, now_ms())?;
                     }
                 }
-                return Ok(());
+                if let Some(request) = requests.last() {
+                    crate::prelude::eprintln!(
+                        "{}: final request: {}",
+                        target.path.display(),
+                        serde_json::to_string(request)?
+                    );
+                }
+                return Ok(requests);
             }
             AttemptResult::Retry(decision)
                 if wait_for_retry(&decision, now_ms(), &mut cancel).await => {}
-            _ => return Ok(()),
+            _ => return Ok(requests),
         }
     }
 }
@@ -918,7 +1121,7 @@ fn format_plan(
             "beyond limit"
         };
         output.push_str(&format!(
-            "\n    {} {}  {}  {} tokens  {}",
+            "\n    {} {}  {}  {} estimated tokens  {}",
             entry.status.as_str(),
             kind,
             display_scope(&entry.target.path),
@@ -962,6 +1165,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("index.db");
         assert!(Database::open_read_only(&path).is_err());
+        assert!(Database::open_existing(&path).is_err());
         assert!(!path.exists());
     }
 }

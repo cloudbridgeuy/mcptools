@@ -18,7 +18,7 @@ const MAX_ATTEMPTS_LIMIT: usize = 10;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("invalid TOML: {0}")]
+    #[error("invalid TOML; check .mcptools/config.toml syntax")]
     InvalidToml(#[from] toml::de::Error),
     #[error("invalid max_file_tokens value: {0}")]
     InvalidMaxFileTokens(String),

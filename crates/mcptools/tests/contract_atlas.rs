@@ -59,11 +59,7 @@ fn run_fixture(root: &Path) -> Vec<serde_json::Value> {
             "tools/call",
             serde_json::json!({"name": "atlas_peek", "arguments": {"path": "src/main.rs"}}),
         ),
-        request(
-            4,
-            "tools/call",
-            serde_json::json!({"name": "atlas_status", "arguments": {}}),
-        ),
+        request(4, "tools/call", serde_json::json!({"name": "atlas_status"})),
         request(5, "resources/list", serde_json::json!({})),
         request(
             6,
