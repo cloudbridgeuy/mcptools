@@ -1,11 +1,13 @@
 pub mod chart;
 pub mod graph;
+pub mod issue_delete;
 pub mod project_update;
 pub mod resolve;
 pub mod retry;
 pub mod types;
 pub use chart::*;
 pub use graph::*;
+pub use issue_delete::*;
 pub use project_update::*;
 pub use resolve::*;
 pub use retry::*;
