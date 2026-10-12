@@ -1,6 +1,6 @@
 # MCPTools
 
-CLI and MCP tools that expose Linear, Jira, Atlas, and related services to coding agents.
+CLI and MCP tools that expose Linear, Jira, and related services to coding agents.
 
 ## Language
 

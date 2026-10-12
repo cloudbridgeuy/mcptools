@@ -4,20 +4,9 @@ Status: prepared, not created in Linear. On 2026-09-10, `LINEAR_API_KEY` was pre
 
 11 tickets: 1 parent and 10 implementation tickets. 10 parent links and 15 blocking dependencies. The existing importer validates the backlog and dependency order.
 
-Target: existing MCPTools project. Project/team IDs below come from `../atlas-redesign/backlog.linear-receipt.json`; remote identity and existing overlapping tickets could not be checked in this session. The importer verifies project/team association before writes. Review existing project tickets for semantic overlap when access returns; importer markers only prevent duplicate imports of this backlog.
+Target: existing MCPTools project. Project/team IDs are recorded in `backlog.linear-receipt.json`; remote identity and existing overlapping tickets could not be checked in this session. Review existing project tickets for semantic overlap when access returns.
 
-Repository inspected: `22ee93ccfa00283a3f7526a160326c40868a11e4`. Existing global installation installs the executable only. Existing agent setup is specific to Atlas and local Claude guidance. Reuse these components where applicable, plus the shared CLI/MCP operation pattern.
-
-## Import
-
-Run from the repository root in a session with Linear network access and `LINEAR_API_KEY` already exported. This reuses the existing importer without changes; its historical marker prefix is retained, with a distinct initiative ID for this backlog.
-
-```sh
-python3 docs/atlas-redesign/import_linear.py docs/linear-cli/backlog.json
-python3 docs/atlas-redesign/import_linear.py docs/linear-cli/backlog.json --apply --project-id 5fe03c79-0c6b-4e49-a56d-f10421143727 --team-id e3b567ba-bcd1-42d8-8ae8-129fd11c97ab
-```
-
-A successful import writes `backlog.linear-receipt.json` with issue URLs and dependency receipts. Reruns reconcile existing importer markers. If a mutation outcome is uncertain, inspect Linear before continuing. The importer does not update previously created descriptions.
+Repository inspected: `22ee93ccfa00283a3f7526a160326c40868a11e4`. Existing global installation installs the executable only. Reuse the shared CLI/MCP operation pattern.
 
 ## Ticket map
 
@@ -152,7 +141,7 @@ Acceptance criteria:
 
 - [ ] Provide install/setup, status/doctor, and uninstall with explicit targets codex, claude, pi, opencode2, or all; support a dry-run that shows planned paths and changes.
 - [ ] Resolve a stable executable path. Detect missing/obsolete binary, missing agent, unsupported version, and unavailable writable configuration separately. An absent pi executable must not be reported as a successful live integration.
-- [ ] Keep setup independent of Atlas indexing, models, and repository initialization. Never hard-code this checkout or its target directory into global setup.
+- [ ] Keep setup independent of repository indexing, models, and initialization. Never hard-code this checkout or its target directory into global setup.
 - [ ] Merge only owned entries, preserve unrelated configuration and formatting where supported, refuse conflicts, and use atomic file replacement plus rollback information. Repeating setup is a no-op.
 - [ ] Uninstall removes only owned unchanged entries; preserve user edits and unrelated skills/MCP servers. Honor supported environment overrides for configuration roots.
 - [ ] Generate reusable command-discovery guidance from a shared bundled source; no secret values in generated content. Test temporary-home setup, rerun, conflicts, rollback, uninstall, and paths with spaces.
@@ -161,8 +150,6 @@ Repository starting points:
 
 - xtask/src/scripts/install.rs
 - scripts/install.sh
-- crates/mcptools/src/atlas/cli/setup.rs
-- crates/core/src/atlas/setup.rs
 
 ### AGENTS-02: Integrate mcptools globally with Codex and Claude Code
 

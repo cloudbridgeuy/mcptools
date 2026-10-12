@@ -48,23 +48,6 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | Confluence | `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN` | `ATLASSIAN_*` |
 | Bitbucket | `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` | None (required) |
 
-**Atlas**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ATLAS_DB_PATH` | `.mcptools/atlas/index.db` | Database location |
-| `ATLAS_PRIMER_PATH` | `.mcptools/atlas/primer.md` | Optional operator-authored context; never rewritten |
-| `ATLAS_MAX_FILE_TOKENS` | `10000` | Max tokens per file for LLM |
-| `ATLAS_API` | unset | Explicit llm-stream provider |
-| `ATLAS_MODEL` | unset | Shared model for file and directory descriptions |
-| `ATLAS_FILE_MODEL` | shared model | File model override |
-| `ATLAS_DIR_MODEL` | shared model | Directory model override |
-| `ATLAS_FILE_TEMPLATE` | `atlas-file` | File template name |
-| `ATLAS_DIR_TEMPLATE` | `atlas-dir` | Directory template name |
-| `ATLAS_CONCURRENCY` | `1` | Maximum active enrichment requests |
-| `ATLAS_TIMEOUT_SECS` | `120` | Timeout for each llm-stream attempt |
-| `ATLAS_MAX_ATTEMPTS` | `1` | Attempts per enrichment, maximum `10` |
-
 **Jev**
 
 | Variable | Default | Description |
@@ -89,7 +72,6 @@ For detailed usage of each feature, see the context files:
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
-- **[Atlas](.claude/context/atlas.md)** - Codebase navigation for AI agents; symbol index, tree view, query/search, peek, status; MCP tools + primer resource
 - **[Images](.claude/context/images.md)** - ChatGPT Images 2.5 generation, editing, variations; subscription or API key
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
@@ -103,29 +85,6 @@ For detailed usage of each feature, see the context files:
 - **[Lint](.claude/context/lint.md)** - Unified lint pipeline; skip flags; git hook management
 
 ## Common Commands
-
-### Atlas
-
-```bash
-mcptools atlas init                   # Prepare repository and run initial index
-mcptools atlas index                  # Refresh structural index; no model calls
-mcptools atlas index --incremental    # Skip unchanged files
-mcptools atlas tree [path]            # Show annotated directory tree (--json)
-mcptools atlas peek <path>            # Show file or directory summary + symbols (--json)
-mcptools atlas query <query>          # Locate files/symbols when the path is unknown; alias: search (--json)
-mcptools atlas update                 # Incremental update (changed files only)
-mcptools atlas sync                   # Force full re-index
-mcptools atlas status                 # Index health (--json)
-mcptools atlas index --dry-run        # Show what would be indexed
-mcptools atlas update --dry-run       # Show what would change
-mcptools atlas enrich [path]
-mcptools atlas enrich [path] --dry-run  # Plan scoped model work without side effects
-git status --porcelain | mcptools atlas index --stdin  # Index only the listed paths
-mcptools atlas setup                  # Install post-commit hook + guidance + llm-stream templates (atlas-file/dir)
-mcptools atlas setup --no-skills --no-claude-md --no-templates  # Hook only, skip agent-guidance scaffolding
-```
-
-Enrichment executes resumable model work. Partial runs exit `1` and print success/failure/deferred totals plus a shell-quoted resume command. `--refresh` regenerates selected entries and resets their attempt state, not provider cooldowns. See the Atlas context for ordering and input validation.
 
 ### Jira
 

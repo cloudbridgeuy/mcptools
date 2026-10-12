@@ -20,6 +20,5 @@ docs/shaping
 .local/
 
 .gguf
-.mcptools/atlas/index.db
 .lane/
 docs/
