@@ -65,6 +65,7 @@ fn mcp_contract_pilot() {
         with_schema,
         vec![
             "atlas_peek",
+            "atlas_query",
             "atlas_status",
             "atlas_tree_view",
             "bitbucket_pr_comment_add",
