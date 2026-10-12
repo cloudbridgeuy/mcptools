@@ -31,6 +31,7 @@
     "bug"
   ],
   "priority": "High",
+  "parent": "PROJ-100",
   "status": "To Do",
   "summary": "Sample bug",
   "updated": "2024-01-02T10:00:00Z"

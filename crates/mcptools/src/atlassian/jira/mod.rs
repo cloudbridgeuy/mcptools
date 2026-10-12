@@ -121,10 +121,6 @@ pub async fn run(
     }
 }
 
-/// Display a ticket's details as a formatted CLI table.
-///
-/// Renders the standard ticket view used by the get, create, and update handlers:
-/// header line, metadata table, description, labels, components, attachments, and comments.
 fn display_ticket(ticket: &TicketOutput) {
     std::println!(
         "\n{} - {}\n",
@@ -182,6 +178,10 @@ fn display_ticket(ticket: &TicketOutput) {
             "Due Date".bold().cyan(),
             due_date.yellow().to_string()
         ]);
+    }
+
+    if let Some(parent) = &ticket.parent {
+        table.add_row(prettytable::row!["Parent".bold().cyan(), parent]);
     }
 
     table.printstd();
@@ -269,6 +269,111 @@ pub use update::update_ticket_data;
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[tokio::test]
+    async fn invalid_metadata_stops_before_assignee_lookup_and_mutation() {
+        let config = super::super::JiraConfig {
+            base_url: "not a URL".to_string(),
+            email: "test@example.com".to_string(),
+            api_token: "test".to_string(),
+        };
+        for command in ["create", "update"] {
+            let app = App::try_parse_from([
+                "jira",
+                command,
+                "PROJ-1",
+                "--assignee",
+                "me",
+                "--due-date",
+                "2026-02-29",
+            ])
+            .unwrap();
+            let error = match app.command {
+                Commands::Create(options) => {
+                    create_ticket_data(options, &config).await.unwrap_err()
+                }
+                Commands::Update(options) => {
+                    update_ticket_data(options, &config).await.unwrap_err()
+                }
+                _ => panic!("expected mutation"),
+            };
+            assert_eq!(
+                error.to_string(),
+                "due date must be a valid date in YYYY-MM-DD format"
+            );
+        }
+        let app = App::try_parse_from([
+            "jira", "update", "PROJ-1", "--status", "Done", "--label", "bug",
+        ])
+        .unwrap();
+        let Commands::Update(mut options) = app.command else {
+            panic!("expected update");
+        };
+        options.clear_labels = true;
+        assert_eq!(
+            update_ticket_data(options, &config)
+                .await
+                .unwrap_err()
+                .to_string(),
+            "cannot set and clear labels together"
+        );
+    }
+
+    #[test]
+    fn metadata_flags_parse_and_reject_set_clear_conflicts() {
+        let app = App::try_parse_from([
+            "jira",
+            "create",
+            "Task",
+            "--label",
+            "bug",
+            "--label",
+            "api",
+            "--component",
+            "Backend",
+            "--due-date",
+            "2026-10-31",
+            "--parent",
+            "PROJ-1",
+        ])
+        .unwrap();
+        let Commands::Create(options) = app.command else {
+            panic!("expected create");
+        };
+        assert_eq!(options.labels.unwrap(), ["bug", "api"]);
+        assert_eq!(options.components.unwrap(), ["Backend"]);
+        assert_eq!(options.due_date.as_deref(), Some("2026-10-31"));
+        assert_eq!(options.parent.as_deref(), Some("PROJ-1"));
+        for (set, clear) in [
+            ("--label", "--clear-labels"),
+            ("--component", "--clear-components"),
+            ("--due-date", "--clear-due-date"),
+            ("--parent", "--clear-parent"),
+        ] {
+            assert!(
+                App::try_parse_from(["jira", "update", "PROJ-1", set, "value", clear]).is_err()
+            );
+        }
+        let app = App::try_parse_from([
+            "jira",
+            "update",
+            "PROJ-1",
+            "--clear-labels",
+            "--clear-components",
+            "--clear-due-date",
+            "--clear-parent",
+        ])
+        .unwrap();
+        let Commands::Update(options) = app.command else {
+            panic!("expected update");
+        };
+        assert!(
+            options.clear_labels
+                && options.clear_components
+                && options.clear_due_date
+                && options.clear_parent
+        );
+    }
 
     #[test]
     fn transitions_list_parses_json() {

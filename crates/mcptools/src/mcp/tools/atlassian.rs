@@ -74,6 +74,29 @@ pub(crate) struct JiraUpdateArgs {
     issue_type: Option<String>,
     assignee: Option<String>,
     description: Option<String>,
+    #[schemars(description = "Replace the complete label set; an empty array removes all labels")]
+    labels: Option<Vec<String>>,
+    #[schemars(
+        description = "Replace the complete component set using component names; an empty array removes all components"
+    )]
+    components: Option<Vec<String>>,
+    #[serde(rename = "dueDate")]
+    #[schemars(description = "Valid due date in YYYY-MM-DD format")]
+    due_date: Option<String>,
+    #[schemars(description = "Parent issue key")]
+    parent: Option<String>,
+    #[serde(rename = "clearLabels", default)]
+    #[schemars(description = "Remove all labels; cannot be combined with labels")]
+    clear_labels: bool,
+    #[serde(rename = "clearComponents", default)]
+    #[schemars(description = "Remove all components; cannot be combined with components")]
+    clear_components: bool,
+    #[serde(rename = "clearDueDate", default)]
+    #[schemars(description = "Remove the due date; cannot be combined with dueDate")]
+    clear_due_date: bool,
+    #[serde(rename = "clearParent", default)]
+    #[schemars(description = "Remove the parent; cannot be combined with parent")]
+    clear_parent: bool,
     sprint: Option<String>,
     #[serde(rename = "boardId")]
     board_id: Option<u64>,
@@ -87,6 +110,14 @@ pub(crate) struct JiraCreateArgs {
     issue_type: Option<String>,
     priority: Option<String>,
     assignee: Option<String>,
+    labels: Option<Vec<String>>,
+    #[schemars(description = "Component names")]
+    components: Option<Vec<String>>,
+    #[serde(rename = "dueDate")]
+    #[schemars(description = "Valid due date in YYYY-MM-DD format")]
+    due_date: Option<String>,
+    #[schemars(description = "Parent issue key")]
+    parent: Option<String>,
     sprint: Option<String>,
     #[serde(rename = "boardId")]
     board_id: Option<u64>,
@@ -640,9 +671,17 @@ pub async fn handle_jira_update(
         issue_type: args.issue_type,
         assignee: args.assignee,
         description: args.description,
+        labels: args.labels,
+        components: args.components,
+        due_date: args.due_date,
+        parent: args.parent,
+        clear_labels: args.clear_labels,
+        clear_components: args.clear_components,
+        clear_due_date: args.clear_due_date,
+        clear_parent: args.clear_parent,
         sprint: args.sprint,
         board: args.board_id,
-        json: true, // MCP always returns JSON
+        json: true,
     };
 
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
@@ -698,9 +737,13 @@ pub async fn handle_jira_create(
         issue_type: args.issue_type.unwrap_or_else(|| "Task".to_string()),
         priority: args.priority,
         assignee: args.assignee,
+        labels: args.labels,
+        components: args.components,
+        due_date: args.due_date,
+        parent: args.parent,
         sprint: args.sprint,
         board: args.board_id,
-        json: true, // MCP always returns JSON
+        json: true,
     };
 
     let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {

@@ -1,67 +1,73 @@
-//! Create Jira tickets
-
 use clap::Args;
 use colored::Colorize;
 use mcptools_core::atlassian::jira::{
-    markdown_to_adf, parse_assignee_identifier, AssigneeIdentifier, TicketOutput,
+    build_create_payload, markdown_to_adf, parse_assignee_identifier, AssigneeIdentifier,
+    CreatePayloadInput, IssueFieldOptions, TicketOutput,
 };
 use serde::Deserialize;
 
 use crate::atlassian::create_jira_client;
 use crate::prelude::*;
 
-/// Create a new Jira ticket
 #[derive(Args, Debug, Clone)]
 pub struct CreateOptions {
-    /// Summary/title of the ticket (required)
+    #[arg(help = "Summary/title of the ticket (required)")]
     pub summary: String,
 
-    /// Description of the ticket
-    #[arg(long)]
+    #[arg(long, help = "Description of the ticket")]
     pub description: Option<String>,
 
-    /// Project key (defaults to PROD)
-    #[arg(long, default_value = "PROD")]
+    #[arg(long, default_value = "PROD", help = "Project key")]
     pub project: String,
 
-    /// Issue type (defaults to Task)
-    #[arg(long, default_value = "Task")]
+    #[arg(long, default_value = "Task", help = "Issue type")]
     pub issue_type: String,
 
-    /// Priority (e.g., Highest, High, Medium, Low, Lowest)
-    #[arg(long)]
+    #[arg(long, help = "Priority (e.g., Highest, High, Medium, Low, Lowest)")]
     pub priority: Option<String>,
 
-    /// Assignee (email, display name, account ID, or "me" for current user)
-    #[arg(long)]
+    #[arg(long, help = "Assignee (email, display name, account ID, or me)")]
     pub assignee: Option<String>,
 
-    /// Sprint name to assign the ticket to after creation
-    #[arg(long)]
+    #[arg(long = "label", help = "Label to add; repeat for multiple labels")]
+    pub labels: Option<Vec<String>>,
+
+    #[arg(
+        long = "component",
+        help = "Component name; repeat for multiple components"
+    )]
+    pub components: Option<Vec<String>>,
+
+    #[arg(long, help = "Due date in YYYY-MM-DD format")]
+    pub due_date: Option<String>,
+
+    #[arg(long, help = "Parent issue key")]
+    pub parent: Option<String>,
+
+    #[arg(long, help = "Sprint name to assign the ticket to after creation")]
     pub sprint: Option<String>,
 
-    /// Board ID for sprint operations
-    #[arg(long, env = "JIRA_BOARD_ID")]
+    #[arg(long, env = "JIRA_BOARD_ID", help = "Board ID for sprint operations")]
     pub board: Option<u64>,
 
-    /// Output as JSON
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help = "Output as JSON")]
     pub json: bool,
 }
 
-/// Response structure for created ticket - returns full ticket details
 pub type CreateOutput = TicketOutput;
 
-/// Create ticket data - handles all I/O and Jira API interactions
-///
-/// This is the imperative shell that handles:
-/// - Looking up assignee account ID from email/name
-/// - Building and sending create requests
-/// - Parsing the response
 pub async fn create_ticket_data(
     options: CreateOptions,
     config: &super::super::JiraConfig,
 ) -> Result<CreateOutput> {
+    let field_options = IssueFieldOptions {
+        labels: options.labels.as_deref(),
+        components: options.components.as_deref(),
+        due_date: options.due_date.as_deref(),
+        parent: options.parent.as_deref(),
+        ..Default::default()
+    };
+    field_options.validate()?;
     if options.sprint.is_some() && options.board.is_none() {
         return Err(eyre!(
             "--board is required when using --sprint (or set JIRA_BOARD_ID)"
@@ -71,7 +77,6 @@ pub async fn create_ticket_data(
     let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
-    // Handle assignee lookup if provided
     let assignee_account_id = if let Some(assignee_input) = &options.assignee {
         match lookup_assignee(&client, base_url, assignee_input).await {
             Ok(account_id) => Some(account_id),
@@ -83,33 +88,19 @@ pub async fn create_ticket_data(
         None
     };
 
-    // Build create payload
-    let mut fields = serde_json::json!({
-        "summary": options.summary,
-        "project": {
-            "key": options.project
-        }
-    });
-
-    // Add description if provided (convert markdown to ADF format)
-    if let Some(description) = &options.description {
-        fields["description"] = markdown_to_adf(description);
-    }
-
-    // Add issue type (defaults to Task)
-    fields["issuetype"] = serde_json::json!({ "name": options.issue_type });
-
-    if let Some(priority) = &options.priority {
-        fields["priority"] = serde_json::json!({ "name": priority });
-    }
-
-    if let Some(assignee_id) = assignee_account_id {
-        fields["assignee"] = serde_json::json!({ "id": assignee_id });
-    }
-
-    // Send create request
+    let description = options.description.as_deref().map(markdown_to_adf);
+    let payload = build_create_payload(
+        &CreatePayloadInput {
+            summary: &options.summary,
+            project: &options.project,
+            issue_type: &options.issue_type,
+            priority: options.priority.as_deref(),
+            assignee_account_id: assignee_account_id.as_deref(),
+            description: description.as_ref(),
+        },
+        &field_options,
+    )?;
     let url = format!("{base_url}/rest/api/3/issue");
-    let payload = serde_json::json!({ "fields": fields });
 
     let response = client
         .post(&url)
@@ -122,12 +113,10 @@ pub async fn create_ticket_data(
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
 
-        // Try to parse Jira error response
         let error_message = if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&body)
         {
             let mut messages = Vec::new();
 
-            // Collect error messages
             if let Some(error_messages) =
                 error_json.get("errorMessages").and_then(|em| em.as_array())
             {
@@ -138,7 +127,6 @@ pub async fn create_ticket_data(
                 }
             }
 
-            // Collect field-specific errors
             if let Some(errors) = error_json.get("errors").and_then(|e| e.as_object()) {
                 for (field, error) in errors {
                     if let Some(error_text) = error.as_str() {
@@ -176,12 +164,10 @@ pub async fn create_ticket_data(
     let create_response: CreateResponse = serde_json::from_str(&body_text)
         .map_err(|e| eyre!("Failed to parse create response: {}", e))?;
 
-    // Fetch the full ticket details using the get_ticket_data function
     let ticket = super::get::get_ticket_data(create_response.key.clone(), config).await?;
 
-    // Assign to sprint if requested (post-creation, graceful degradation)
     if let Some(sprint_name) = &options.sprint {
-        let board_id = options.board.unwrap(); // safe: validated above
+        let board_id = options.board.unwrap();
         match super::sprint::resolve_sprint_name(board_id, sprint_name, config).await {
             Ok(sprint_id) => {
                 if let Err(e) =

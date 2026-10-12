@@ -47,6 +47,9 @@ mcptools atlassian jira get PROJ-123          # alias: `jira read`
 mcptools atlassian jira get PROJ-123 --json
 ```
 
+Ticket output includes labels, component names, due date, and the parent issue key
+when present. The same output is returned after creation.
+
 ### Create Tickets
 
 ```bash
@@ -59,7 +62,11 @@ mcptools atlassian jira create "Implement feature" \
   --project PROJ \
   --issue-type Story \
   --priority High \
-  --assignee me
+  --assignee me \
+  --label backend --label api \
+  --component Backend \
+  --due-date 2026-10-31 \
+  --parent PROJ-100
 ```
 
 ### Update Tickets
@@ -76,7 +83,26 @@ mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issu
 
 # Update multiple fields
 mcptools atlassian jira update PROJ-123 --status Done --priority Low --issue-type Bug
+
+mcptools atlassian jira update PROJ-123 --label backend --label api --component Backend --due-date 2026-10-31 --parent PROJ-100
+mcptools atlassian jira update PROJ-123 --clear-labels --clear-components --clear-due-date --clear-parent
 ```
+
+`--label` and `--component` are repeatable. On update, they replace the complete
+sets, not append. Clear flags remove the corresponding values. Setting and
+clearing the same field is rejected before HTTP requests. Due dates must be valid
+calendar dates in `YYYY-MM-DD` format. Blank labels, component names, and parent
+keys are rejected. Component values are names; parent values are issue keys.
+
+Jira create screens, edit metadata, and project configuration determine which
+fields and parent relationships are permitted. Jira field errors are returned;
+no special epic-parent behavior is assumed. Parent clearing uses the documented
+`{"update":{"parent":[{"set":{"none":true}}]}}` operation for standard issue types; setting a
+parent uses `fields.parent: {"key": "PROJ-100"}`.
+
+MCP update results report per-field failures and `partial_failure`. CLI JSON
+updates return an error if any field fails, instead of silently returning the
+unchanged ticket.
 
 ### Comments
 
@@ -211,7 +237,11 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
       "summary": "Fix login bug",
       "description": "Details...",
       "issueType": "Bug",
-      "priority": "High"
+      "priority": "High",
+      "labels": ["backend", "api"],
+      "components": ["Backend"],
+      "dueDate": "2026-10-31",
+      "parent": "PROJ-100"
     }
   }
 }
@@ -228,9 +258,29 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
       "allowWrites": true,
       "ticketKey": "PROJ-123",
       "status": "In Progress",
-      "assignee": "me"
+      "assignee": "me",
+      "labels": ["backend", "api"],
+      "components": ["Backend"],
+      "dueDate": "2026-10-31",
+      "parent": "PROJ-100"
     }
   }
+}
+```
+
+Both mutation tools retain `allowWrites: true` gating. Update `labels` and
+`components` replace the complete sets; empty arrays clear them. Omitted fields
+remain unchanged. Use `clearLabels`, `clearComponents`, `clearDueDate`, or
+`clearParent` with `true` to clear values; do not also set that field. For example:
+
+```json
+{
+  "allowWrites": true,
+  "ticketKey": "PROJ-123",
+  "clearLabels": true,
+  "clearComponents": true,
+  "clearDueDate": true,
+  "clearParent": true
 }
 ```
 

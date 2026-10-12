@@ -90,6 +90,30 @@ fn mcp_contract_atlassian() {
     assert!(props.contains_key("issues"));
     assert!(props.contains_key("total"));
 
+    for name in ["jira_create", "jira_update"] {
+        let tool = atlassian.iter().find(|tool| tool["name"] == name).unwrap();
+        let props = tool["inputSchema"]["properties"].as_object().unwrap();
+        for field in ["labels", "components", "dueDate", "parent", "allowWrites"] {
+            assert!(props.contains_key(field), "missing {name}.{field}");
+        }
+        if name == "jira_update" {
+            for field in [
+                "clearLabels",
+                "clearComponents",
+                "clearDueDate",
+                "clearParent",
+            ] {
+                assert!(props.contains_key(field), "missing {name}.{field}");
+                assert_eq!(props[field]["default"], false);
+            }
+        }
+    }
+    let get = atlassian
+        .iter()
+        .find(|tool| tool["name"] == "jira_get")
+        .unwrap();
+    assert!(get["outputSchema"]["properties"].get("parent").is_some());
+
     let confluence_page_get = atlassian
         .iter()
         .find(|tool| {

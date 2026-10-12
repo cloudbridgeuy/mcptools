@@ -94,12 +94,11 @@ pub struct JiraComponent {
     pub name: String,
 }
 
-/// Extended fields for detailed ticket read
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct JiraExtendedFields {
     pub summary: String,
     #[serde(default)]
-    pub description: Option<serde_json::Value>, // Can be a string or ADF (Atlassian Document Format)
+    pub description: Option<serde_json::Value>,
     pub status: JiraStatus,
     #[serde(default)]
     pub assignee: Option<JiraAssignee>,
@@ -117,6 +116,8 @@ pub struct JiraExtendedFields {
     pub labels: Vec<String>,
     #[serde(default)]
     pub components: Vec<JiraComponent>,
+    #[serde(default)]
+    pub parent: Option<IssueLinkIssueReference>,
 }
 
 /// Extended issue response for detailed read
@@ -151,6 +152,8 @@ pub struct TicketOutput {
     pub due_date: Option<String>,
     pub labels: Vec<String>,
     pub components: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     pub comments: Vec<CommentOutput>,
     pub attachments: Vec<AttachmentOutput>,
 }
@@ -388,17 +391,6 @@ pub fn transform_search_response(search_response: JiraSearchResponse) -> SearchO
     }
 }
 
-/// Convert Jira extended issue response + comments + attachments to ticket output
-///
-/// Transforms the detailed API response into our clean domain model.
-///
-/// # Arguments
-/// * `issue` - The raw extended issue response from Jira API
-/// * `comments` - The parsed comments array
-/// * `attachments` - The transformed attachment outputs
-///
-/// # Returns
-/// * `TicketOutput` - Cleaned and transformed ticket with all details
 pub fn transform_ticket_response(
     issue: JiraExtendedIssueResponse,
     comments: Vec<JiraComment>,
@@ -429,6 +421,7 @@ pub fn transform_ticket_response(
         created: issue.fields.created,
         updated: issue.fields.updated,
         due_date: issue.fields.duedate,
+        parent: issue.fields.parent.map(|parent| parent.key),
         labels: issue.fields.labels,
         components: issue
             .fields
@@ -629,6 +622,10 @@ pub enum JiraRequestError {
     BlankValue(&'static str),
     #[error("invalid Jira response: {0}")]
     InvalidResponse(String),
+    #[error("due date must be a valid date in YYYY-MM-DD format")]
+    InvalidDueDate,
+    #[error("cannot set and clear {0} together")]
+    SetClearConflict(&'static str),
 }
 
 pub fn build_transition_list_request(
@@ -894,22 +891,96 @@ pub fn find_transition_by_status(
         .map(|t| t.id.clone())
 }
 
-/// Build update payload from field values
-///
-/// # Arguments
-/// * `priority` - Optional priority name
-/// * `issue_type` - Optional issue type name
-/// * `assignee_account_id` - Optional assignee account ID
-/// * `description` - Optional description in ADF format
-///
-/// # Returns
-/// * `serde_json::Value` - The fields object for the update request
+#[derive(Debug, Default)]
+pub struct IssueFieldOptions<'a> {
+    pub labels: Option<&'a [String]>,
+    pub components: Option<&'a [String]>,
+    pub due_date: Option<&'a str>,
+    pub parent: Option<&'a str>,
+    pub clear_labels: bool,
+    pub clear_components: bool,
+    pub clear_due_date: bool,
+    pub clear_parent: bool,
+}
+
+impl IssueFieldOptions<'_> {
+    pub fn validate(&self) -> Result<(), JiraRequestError> {
+        for (field, set, clear) in [
+            ("labels", self.labels.is_some(), self.clear_labels),
+            (
+                "components",
+                self.components.is_some(),
+                self.clear_components,
+            ),
+            ("due date", self.due_date.is_some(), self.clear_due_date),
+            ("parent", self.parent.is_some(), self.clear_parent),
+        ] {
+            if set && clear {
+                return Err(JiraRequestError::SetClearConflict(field));
+            }
+        }
+        if let Some(date) = self.due_date {
+            let bytes = date.as_bytes();
+            if bytes.len() != 10
+                || bytes[4] != b'-'
+                || bytes[7] != b'-'
+                || !bytes
+                    .iter()
+                    .enumerate()
+                    .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
+                || chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err()
+            {
+                return Err(JiraRequestError::InvalidDueDate);
+            }
+        }
+        for (field, values) in [("label", self.labels), ("component", self.components)] {
+            if let Some(values) = values {
+                for value in values {
+                    nonblank(field, value)?;
+                }
+            }
+        }
+        if let Some(parent) = self.parent {
+            nonblank("parent", parent)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct CreatePayloadInput<'a> {
+    pub summary: &'a str,
+    pub project: &'a str,
+    pub issue_type: &'a str,
+    pub priority: Option<&'a str>,
+    pub assignee_account_id: Option<&'a str>,
+    pub description: Option<&'a serde_json::Value>,
+}
+
+pub fn build_create_payload(
+    input: &CreatePayloadInput<'_>,
+    options: &IssueFieldOptions<'_>,
+) -> Result<serde_json::Value, JiraRequestError> {
+    let mut payload = build_update_payload(
+        input.priority,
+        Some(input.issue_type),
+        input.assignee_account_id,
+        input.description,
+        options,
+    )?;
+    payload["fields"]["summary"] = serde_json::json!(input.summary);
+    payload["fields"]["project"] = serde_json::json!({ "key": input.project });
+    Ok(payload)
+}
+
 pub fn build_update_payload(
     priority: Option<&str>,
     issue_type: Option<&str>,
     assignee_account_id: Option<&str>,
     description: Option<&serde_json::Value>,
-) -> serde_json::Value {
+    options: &IssueFieldOptions<'_>,
+) -> Result<serde_json::Value, JiraRequestError> {
+    options.validate()?;
     let mut fields = serde_json::json!({});
 
     if let Some(priority_name) = priority {
@@ -928,7 +999,74 @@ pub fn build_update_payload(
         fields["description"] = desc.clone();
     }
 
-    fields
+    if let Some(labels) = options.labels {
+        fields["labels"] = serde_json::json!(labels);
+    } else if options.clear_labels {
+        fields["labels"] = serde_json::json!([]);
+    }
+    if let Some(components) = options.components {
+        fields["components"] = components
+            .iter()
+            .map(|name| serde_json::json!({ "name": name }))
+            .collect();
+    } else if options.clear_components {
+        fields["components"] = serde_json::json!([]);
+    }
+    if let Some(date) = options.due_date {
+        fields["duedate"] = serde_json::json!(date);
+    } else if options.clear_due_date {
+        fields["duedate"] = serde_json::Value::Null;
+    }
+    if let Some(parent) = options.parent {
+        fields["parent"] = serde_json::json!({ "key": parent });
+    }
+    let mut payload = serde_json::json!({ "fields": fields });
+    if options.clear_parent {
+        payload["update"] = serde_json::json!({ "parent": [{ "set": { "none": true } }] });
+    }
+    Ok(payload)
+}
+
+pub fn update_payload_results(payload: &serde_json::Value) -> Vec<FieldUpdateResult> {
+    let mut results = Vec::new();
+    if let Some(fields) = payload["fields"].as_object() {
+        for (key, field_value) in fields {
+            let value = if field_value.is_null() {
+                Some("(cleared)".to_string())
+            } else if key == "description" {
+                Some("(updated)".to_string())
+            } else {
+                field_value
+                    .as_str()
+                    .or_else(|| field_value["key"].as_str())
+                    .or_else(|| field_value["id"].as_str())
+                    .or_else(|| field_value["name"].as_str())
+                    .or_else(|| field_value["value"].as_str())
+                    .map(str::to_string)
+                    .or_else(|| field_value.is_array().then(|| field_value.to_string()))
+            };
+            results.push(FieldUpdateResult {
+                field: if key == "issuetype" {
+                    "issue_type"
+                } else {
+                    key
+                }
+                .to_string(),
+                success: true,
+                value,
+                error: None,
+            });
+        }
+    }
+    if payload["update"]["parent"][0]["set"]["none"] == true {
+        results.push(FieldUpdateResult {
+            field: "parent".to_string(),
+            success: true,
+            value: Some("(cleared)".to_string()),
+            error: None,
+        });
+    }
+    results
 }
 
 /// Format a byte count as a human-readable size string (e.g., "1.5 KB", "3.0 MB").
@@ -1839,7 +1977,6 @@ mod tests {
         assert_eq!(output.issues.len(), 1);
     }
 
-    // Helper to create an extended issue response for testing
     fn create_extended_issue_response(
         key: &str,
         summary: &str,
@@ -1865,6 +2002,9 @@ mod tests {
                 created: Some("2024-01-01T10:00:00Z".to_string()),
                 updated: Some("2024-01-02T10:00:00Z".to_string()),
                 duedate: Some("2024-01-15".to_string()),
+                parent: Some(IssueLinkIssueReference {
+                    key: "PROJ-1".to_string(),
+                }),
                 labels: vec!["backend".to_string(), "api".to_string()],
                 components: vec![
                     JiraComponent {
@@ -1880,7 +2020,6 @@ mod tests {
 
     #[test]
     fn test_transform_ticket_response_full() {
-        // Arrange: Create a full ticket with all fields
         let issue = create_extended_issue_response(
             "PROJ-456",
             "Implement authentication",
@@ -1898,10 +2037,8 @@ mod tests {
             }),
         }];
 
-        // Act: Transform the ticket
         let output = transform_ticket_response(issue, comments.clone(), vec![]);
 
-        // Assert: Verify all fields are transformed correctly
         assert_eq!(output.key, "PROJ-456");
         assert_eq!(output.summary, "Implement authentication");
         assert_eq!(output.description, Some("Test description".to_string()));
@@ -1912,6 +2049,7 @@ mod tests {
         assert_eq!(output.created, Some("2024-01-01T10:00:00Z".to_string()));
         assert_eq!(output.updated, Some("2024-01-02T10:00:00Z".to_string()));
         assert_eq!(output.due_date, Some("2024-01-15".to_string()));
+        assert_eq!(output.parent.as_deref(), Some("PROJ-1"));
         assert_eq!(output.labels, vec!["backend", "api"]);
         assert_eq!(output.components, vec!["Auth", "API"]);
         assert_eq!(output.comments.len(), 1);
@@ -1919,7 +2057,6 @@ mod tests {
 
     #[test]
     fn test_transform_ticket_response_minimal() {
-        // Arrange: Create a minimal ticket with only required fields
         let issue = JiraExtendedIssueResponse {
             key: "PROJ-789".to_string(),
             fields: JiraExtendedFields {
@@ -1934,15 +2071,14 @@ mod tests {
                 created: None,
                 updated: None,
                 duedate: None,
+                parent: None,
                 labels: vec![],
                 components: vec![],
             },
         };
 
-        // Act: Transform the ticket
         let output = transform_ticket_response(issue, vec![], vec![]);
 
-        // Assert: Verify minimal fields work correctly
         assert_eq!(output.key, "PROJ-789");
         assert_eq!(output.summary, "Minimal ticket");
         assert_eq!(output.description, None);
@@ -1953,6 +2089,7 @@ mod tests {
         assert_eq!(output.created, None);
         assert_eq!(output.updated, None);
         assert_eq!(output.due_date, None);
+        assert_eq!(output.parent, None);
         assert!(output.labels.is_empty());
         assert!(output.components.is_empty());
         assert!(output.comments.is_empty());
@@ -1995,7 +2132,6 @@ mod tests {
 
     #[test]
     fn test_transform_ticket_response_empty_priority() {
-        // Arrange: Create a ticket with empty priority string
         let issue = JiraExtendedIssueResponse {
             key: "PROJ-300".to_string(),
             fields: JiraExtendedFields {
@@ -2006,21 +2142,20 @@ mod tests {
                 },
                 assignee: None,
                 priority: Some(JiraPriority {
-                    name: "".to_string(), // Empty priority name
+                    name: "".to_string(),
                 }),
                 issuetype: None,
                 created: None,
                 updated: None,
                 duedate: None,
+                parent: None,
                 labels: vec![],
                 components: vec![],
             },
         };
 
-        // Act: Transform the ticket
         let output = transform_ticket_response(issue, vec![], vec![]);
 
-        // Assert: Verify empty priority is filtered out
         assert_eq!(output.priority, None);
     }
 
@@ -2348,55 +2483,61 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    // Tests for build_update_payload
     #[test]
     fn test_build_update_payload_all_fields() {
-        // Arrange: All fields provided
         let payload = build_update_payload(
             Some("High"),
             Some("Story"),
             Some("5b10a2844c20165700edge21g"),
             None,
-        );
+            &IssueFieldOptions::default(),
+        )
+        .unwrap();
 
-        // Assert: Verify all fields are in payload
-        assert_eq!(payload["priority"]["name"], "High");
-        assert_eq!(payload["issuetype"]["name"], "Story");
-        assert_eq!(payload["assignee"]["id"], "5b10a2844c20165700edge21g");
+        assert_eq!(payload["fields"]["priority"]["name"], "High");
+        assert_eq!(payload["fields"]["issuetype"]["name"], "Story");
+        assert_eq!(
+            payload["fields"]["assignee"]["id"],
+            "5b10a2844c20165700edge21g"
+        );
     }
 
     #[test]
     fn test_build_update_payload_single_field() {
-        // Arrange: Only priority provided
-        let payload = build_update_payload(Some("Low"), None, None, None);
+        let payload =
+            build_update_payload(Some("Low"), None, None, None, &IssueFieldOptions::default())
+                .unwrap();
 
-        // Assert: Verify only priority is in payload
-        assert_eq!(payload["priority"]["name"], "Low");
-        assert!(payload.get("issuetype").is_none());
-        assert!(payload.get("assignee").is_none());
+        assert_eq!(payload["fields"]["priority"]["name"], "Low");
+        assert!(payload["fields"].get("issuetype").is_none());
+        assert!(payload["fields"].get("assignee").is_none());
     }
 
     #[test]
     fn test_build_update_payload_empty() {
-        // Arrange: No fields provided
-        let payload = build_update_payload(None, None, None, None);
+        let payload =
+            build_update_payload(None, None, None, None, &IssueFieldOptions::default()).unwrap();
 
-        // Assert: Verify payload is empty object
-        assert_eq!(payload, serde_json::json!({}));
+        assert_eq!(payload, serde_json::json!({"fields": {}}));
+        assert!(update_payload_results(&payload).is_empty());
     }
 
     #[test]
     fn test_build_update_payload_with_assignee() {
-        // Arrange: Assignee account ID provided
-        let payload = build_update_payload(None, None, Some("account123"), None);
+        let payload = build_update_payload(
+            None,
+            None,
+            Some("account123"),
+            None,
+            &IssueFieldOptions::default(),
+        )
+        .unwrap();
 
-        // Assert: Verify assignee is in payload with id field
-        assert_eq!(payload["assignee"]["id"], "account123");
+        assert_eq!(payload["fields"]["assignee"]["id"], "account123");
     }
 
     #[test]
     fn test_build_update_payload_with_description() {
-        // Arrange: Description ADF value provided
         let adf = serde_json::json!({
             "version": 1,
             "type": "doc",
@@ -2405,18 +2546,223 @@ mod tests {
                 "content": [{ "type": "text", "text": "Updated description" }]
             }]
         });
-        let payload = build_update_payload(None, None, None, Some(&adf));
+        let payload =
+            build_update_payload(None, None, None, Some(&adf), &IssueFieldOptions::default())
+                .unwrap();
 
-        // Assert: Verify description is in payload
-        assert_eq!(payload["description"]["type"], "doc");
-        assert_eq!(payload["description"]["version"], 1);
+        assert_eq!(payload["fields"]["description"]["type"], "doc");
+        assert_eq!(payload["fields"]["description"]["version"], 1);
         assert_eq!(
-            payload["description"]["content"][0]["content"][0]["text"],
+            payload["fields"]["description"]["content"][0]["content"][0]["text"],
             "Updated description"
         );
     }
 
-    // Tests for format_file_size
+    #[test]
+    fn issue_payloads_set_each_metadata_field_and_combinations() {
+        let labels = vec!["bug".to_string(), "api".to_string()];
+        let components = vec!["Backend".to_string()];
+        let cases = [
+            IssueFieldOptions {
+                labels: Some(&labels),
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                components: Some(&components),
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                due_date: Some("2024-02-29"),
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                parent: Some("PROJ-1"),
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                labels: Some(&labels),
+                components: Some(&components),
+                due_date: Some("2024-02-29"),
+                parent: Some("PROJ-1"),
+                ..Default::default()
+            },
+        ];
+        let expected = [
+            serde_json::json!({"labels": ["bug", "api"]}),
+            serde_json::json!({"components": [{"name": "Backend"}]}),
+            serde_json::json!({"duedate": "2024-02-29"}),
+            serde_json::json!({"parent": {"key": "PROJ-1"}}),
+            serde_json::json!({"labels": ["bug", "api"], "components": [{"name": "Backend"}], "duedate": "2024-02-29", "parent": {"key": "PROJ-1"}}),
+        ];
+        for (options, expected) in cases.iter().zip(expected) {
+            let update = build_update_payload(None, None, None, None, options).unwrap();
+            assert_eq!(update, serde_json::json!({"fields": expected}));
+            let create = build_create_payload(
+                &CreatePayloadInput {
+                    summary: "Fix bug",
+                    project: "PROJ",
+                    issue_type: "Bug",
+                    priority: None,
+                    assignee_account_id: None,
+                    description: None,
+                },
+                options,
+            )
+            .unwrap();
+            let mut fields = expected;
+            fields["summary"] = serde_json::json!("Fix bug");
+            fields["project"] = serde_json::json!({"key": "PROJ"});
+            fields["issuetype"] = serde_json::json!({"name": "Bug"});
+            assert_eq!(create, serde_json::json!({"fields": fields}));
+        }
+    }
+
+    #[test]
+    fn metadata_clears_and_empty_sets_replace_values() {
+        let clears = IssueFieldOptions {
+            clear_labels: true,
+            clear_components: true,
+            clear_due_date: true,
+            clear_parent: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            build_update_payload(None, None, None, None, &clears).unwrap(),
+            serde_json::json!({"fields": {"labels": [], "components": [], "duedate": null}, "update": {"parent": [{"set": {"none": true}}]}})
+        );
+        let empty = IssueFieldOptions {
+            labels: Some(&[]),
+            components: Some(&[]),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_update_payload(None, None, None, None, &empty).unwrap(),
+            serde_json::json!({"fields": {"labels": [], "components": []}})
+        );
+    }
+
+    #[test]
+    fn parent_clear_payload_and_results() {
+        let options = IssueFieldOptions {
+            clear_parent: true,
+            ..Default::default()
+        };
+        let payload = build_update_payload(None, None, None, None, &options).unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({"fields": {}, "update": {"parent": [{"set": {"none": true}}]}})
+        );
+        let results = update_payload_results(&payload);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].field, "parent");
+        assert!(results[0].success);
+        assert_eq!(results[0].value.as_deref(), Some("(cleared)"));
+        assert!(results[0].error.is_none());
+        let payload = build_update_payload(Some("High"), None, None, None, &options).unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({"fields": {"priority": {"name": "High"}}, "update": {"parent": [{"set": {"none": true}}]}})
+        );
+        let results = update_payload_results(&payload);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].field, "priority");
+        assert_eq!(results[0].value.as_deref(), Some("High"));
+        assert_eq!(results[1].field, "parent");
+    }
+
+    #[test]
+    fn metadata_rejects_conflicts_blank_values_and_invalid_dates() {
+        let values = vec!["value".to_string()];
+        for options in [
+            IssueFieldOptions {
+                labels: Some(&values),
+                clear_labels: true,
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                components: Some(&values),
+                clear_components: true,
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                due_date: Some("2026-01-01"),
+                clear_due_date: true,
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                parent: Some("PROJ-1"),
+                clear_parent: true,
+                ..Default::default()
+            },
+        ] {
+            assert!(matches!(
+                options.validate(),
+                Err(JiraRequestError::SetClearConflict(_))
+            ));
+        }
+        for date in [
+            "",
+            "2026-2-01",
+            "2026-02-1",
+            "2026-02-29",
+            "2024-02-30",
+            "2026-13-01",
+            "2026-01-00",
+            "2026-01-01T00:00:00Z",
+            " 2026-01-01",
+        ] {
+            let options = IssueFieldOptions {
+                due_date: Some(date),
+                ..Default::default()
+            };
+            assert_eq!(
+                build_update_payload(None, None, None, None, &options).unwrap_err(),
+                JiraRequestError::InvalidDueDate
+            );
+        }
+        let blank = vec![" ".to_string()];
+        for options in [
+            IssueFieldOptions {
+                labels: Some(&blank),
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                components: Some(&blank),
+                ..Default::default()
+            },
+            IssueFieldOptions {
+                parent: Some(""),
+                ..Default::default()
+            },
+        ] {
+            assert!(matches!(
+                options.validate(),
+                Err(JiraRequestError::BlankValue(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn create_payload_preserves_existing_fields_and_omits_missing_metadata() {
+        let description = markdown_to_adf("**Details**");
+        let payload = build_create_payload(
+            &CreatePayloadInput {
+                summary: "Task",
+                project: "PROD",
+                issue_type: "Task",
+                priority: Some("High"),
+                assignee_account_id: Some("account123"),
+                description: Some(&description),
+            },
+            &IssueFieldOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({"fields": {"summary": "Task", "project": {"key": "PROD"}, "issuetype": {"name": "Task"}, "priority": {"name": "High"}, "assignee": {"id": "account123"}, "description": description}})
+        );
+    }
+
     #[test]
     fn test_format_file_size_zero() {
         assert_eq!(format_file_size(0), "0 B");

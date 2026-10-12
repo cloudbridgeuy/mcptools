@@ -254,7 +254,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::TicketOutput>(),
             name: "jira_create".to_string(),
-            description: "Create a new Jira ticket with required summary. Supports optional fields like description, issue type, priority, assignee, and sprint assignment. Returns the created ticket key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            description: "Create a new Jira ticket with required summary. Supports description, issue type, priority, assignee, labels, component names, dueDate (YYYY-MM-DD), parent issue key, and sprint assignment. Returns full ticket details. Jira screen and project configuration can reject fields. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraCreateArgs>(),
             summary: "Create a Jira ticket",
             kind: ToolKind::Write,
@@ -272,7 +272,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::UpdateOutput>(),
             name: "jira_update".to_string(),
-            description: "Update Jira ticket fields. Supports updating Status, Priority, Type, Assignee, Description (markdown), and Sprint assignment. Can update multiple fields in a single call. Handles status transitions automatically and supports assignee lookup by email, display name, or account ID. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            description: "Update Jira ticket fields: status, priority, issueType, assignee, description (markdown), sprint, labels, component names, dueDate (YYYY-MM-DD), and parent issue key. Labels and components replace full sets; empty arrays clear them. clearLabels, clearComponents, clearDueDate, and clearParent remove values; setting and clearing the same field is rejected. Jira edit metadata and project configuration determine editable fields. Handles status transitions and assignee lookup. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraUpdateArgs>(),
             summary: "Update a Jira ticket: status (close, reopen), priority, assignee, sprint",
             kind: ToolKind::Write,
@@ -1845,6 +1845,79 @@ mod declaration_tests {
         let want =
             format!("{head}/** {} */\ndeclare function jira_search(input: JiraSearchInput): Promise<JiraSearchOutput>;\n", tool.description);
         assert_eq!(super::declaration(&tool), want);
+    }
+
+    #[test]
+    fn jira_mutation_declarations_include_metadata() {
+        for name in ["jira_create", "jira_update"] {
+            let declaration = super::declaration(&named(name));
+            for field in [
+                "labels?: string[];",
+                "components?: string[];",
+                "dueDate?: string;",
+                "parent?: string;",
+            ] {
+                assert!(declaration.contains(field), "missing {name}.{field}");
+            }
+            if name == "jira_update" {
+                for field in [
+                    "clearLabels?: boolean;",
+                    "clearComponents?: boolean;",
+                    "clearDueDate?: boolean;",
+                    "clearParent?: boolean;",
+                ] {
+                    assert!(declaration.contains(field), "missing {name}.{field}");
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn jira_mutations_keep_write_gating() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for name in ["jira_create", "jira_update"] {
+            assert_eq!(named(name).kind, super::ToolKind::Write);
+            for flags in [
+                super::ServeFlags {
+                    discovery: false,
+                    code_mode: false,
+                },
+                super::ServeFlags {
+                    discovery: true,
+                    code_mode: false,
+                },
+                super::ServeFlags {
+                    discovery: false,
+                    code_mode: true,
+                },
+            ] {
+                let denied = super::handle_tools_call(
+                    Some(serde_json::json!({"name": name, "arguments": {}})),
+                    &global,
+                    flags,
+                )
+                .await
+                .unwrap();
+                assert_eq!(denied["isError"], true);
+                assert!(denied["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("allowWrites"));
+                let allowed = super::handle_tools_call(
+                    Some(serde_json::json!({"name": name, "arguments": {"allowWrites": true}})),
+                    &global,
+                    flags,
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(allowed.code, -32602);
+            }
+        }
     }
 
     #[test]

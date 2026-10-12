@@ -1,95 +1,123 @@
-//! Update Jira ticket fields
-
 use crate::atlassian::create_jira_client;
 use crate::prelude::*;
 use clap::Args;
 use colored::Colorize;
 use mcptools_core::atlassian::jira::{
     build_update_payload, find_transition_by_status, markdown_to_adf, parse_assignee_identifier,
-    AssigneeIdentifier, FieldUpdateResult, JiraUserSearchResponse, UpdateOutput,
+    update_payload_results, AssigneeIdentifier, FieldUpdateResult, IssueFieldOptions,
+    JiraUserSearchResponse, UpdateOutput,
 };
 use prettytable::row;
 
-/// Update a Jira ticket's fields
 #[derive(Args, Debug, Clone)]
 pub struct UpdateOptions {
-    /// Ticket key (e.g., PROJ-123)
+    #[arg(help = "Ticket key (e.g., PROJ-123)")]
     pub ticket_key: String,
 
-    /// New status
-    #[arg(long)]
+    #[arg(long, help = "New status")]
     pub status: Option<String>,
 
-    /// New priority
-    #[arg(long)]
+    #[arg(long, help = "New priority")]
     pub priority: Option<String>,
 
-    /// New issue type
-    #[arg(long, value_name = "TYPE")]
+    #[arg(long, value_name = "TYPE", help = "New issue type")]
     pub issue_type: Option<String>,
 
-    /// New assignee (email, display name, account ID, or "me" for current user)
-    #[arg(long)]
+    #[arg(long, help = "New assignee (email, display name, account ID, or me)")]
     pub assignee: Option<String>,
 
-    /// New description (supports markdown)
-    #[arg(long, short = 'd')]
+    #[arg(long, short = 'd', help = "New description (supports markdown)")]
     pub description: Option<String>,
 
-    /// Sprint name to assign the ticket to
-    #[arg(long)]
+    #[arg(
+        long = "label",
+        conflicts_with = "clear_labels",
+        help = "Replace all labels; repeat for multiple labels"
+    )]
+    pub labels: Option<Vec<String>>,
+
+    #[arg(
+        long = "component",
+        conflicts_with = "clear_components",
+        help = "Replace all components by name; repeat for multiple components"
+    )]
+    pub components: Option<Vec<String>>,
+
+    #[arg(
+        long,
+        conflicts_with = "clear_due_date",
+        help = "Due date in YYYY-MM-DD format"
+    )]
+    pub due_date: Option<String>,
+
+    #[arg(long, conflicts_with = "clear_parent", help = "Parent issue key")]
+    pub parent: Option<String>,
+
+    #[arg(long, help = "Remove all labels")]
+    pub clear_labels: bool,
+
+    #[arg(long, help = "Remove all components")]
+    pub clear_components: bool,
+
+    #[arg(long, help = "Remove the due date")]
+    pub clear_due_date: bool,
+
+    #[arg(long, help = "Remove the parent")]
+    pub clear_parent: bool,
+
+    #[arg(long, help = "Sprint name to assign the ticket to")]
     pub sprint: Option<String>,
 
-    /// Board ID for sprint operations
-    #[arg(long, env = "JIRA_BOARD_ID")]
+    #[arg(long, env = "JIRA_BOARD_ID", help = "Board ID for sprint operations")]
     pub board: Option<u64>,
 
-    /// Output as JSON
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help = "Output as JSON")]
     pub json: bool,
 }
 
-/// Update ticket data - handles all I/O and Jira API interactions
-///
-/// This is the imperative shell that handles:
-/// - Fetching available transitions for status updates
-/// - Looking up assignee account ID from email/name
-/// - Building and sending update requests
-/// - Tracking partial failures
 pub async fn update_ticket_data(
     options: UpdateOptions,
     config: &super::super::JiraConfig,
 ) -> Result<UpdateOutput> {
+    let field_options = IssueFieldOptions {
+        labels: options.labels.as_deref(),
+        components: options.components.as_deref(),
+        due_date: options.due_date.as_deref(),
+        parent: options.parent.as_deref(),
+        clear_labels: options.clear_labels,
+        clear_components: options.clear_components,
+        clear_due_date: options.clear_due_date,
+        clear_parent: options.clear_parent,
+    };
+    field_options.validate()?;
     let client = create_jira_client(config)?;
     let base_url = config.base_url.trim_end_matches('/');
 
-    // Validate that at least one field is provided
     if options.status.is_none()
         && options.priority.is_none()
         && options.issue_type.is_none()
         && options.assignee.is_none()
         && options.description.is_none()
         && options.sprint.is_none()
+        && options.labels.is_none()
+        && options.components.is_none()
+        && options.due_date.is_none()
+        && options.parent.is_none()
+        && !options.clear_labels
+        && !options.clear_components
+        && !options.clear_due_date
+        && !options.clear_parent
     {
         return Err(eyre!(
-            "At least one field must be provided for update (--status, --priority, --type, --assignee, --description, or --sprint)"
+            "At least one field or clear flag must be provided for update"
         ));
     }
 
     let mut results = Vec::new();
 
-    // Handle assignee lookup if provided
     let assignee_account_id = if let Some(assignee_input) = &options.assignee {
         match lookup_assignee(&client, base_url, assignee_input).await {
-            Ok(account_id) => {
-                results.push(FieldUpdateResult {
-                    field: "assignee".to_string(),
-                    success: true,
-                    value: Some(account_id.clone()),
-                    error: None,
-                });
-                Some(account_id)
-            }
+            Ok(account_id) => Some(account_id),
             Err(e) => {
                 results.push(FieldUpdateResult {
                     field: "assignee".to_string(),
@@ -104,7 +132,6 @@ pub async fn update_ticket_data(
         None
     };
 
-    // Handle status transition if provided
     if let Some(new_status) = &options.status {
         match handle_status_transition(&client, base_url, &options.ticket_key, new_status).await {
             Ok(()) => {
@@ -126,7 +153,6 @@ pub async fn update_ticket_data(
         }
     }
 
-    // Handle sprint assignment if provided
     if let Some(sprint_name) = &options.sprint {
         let board_id = options.board.ok_or_else(|| {
             eyre!("--board is required when using --sprint (or set JIRA_BOARD_ID)")
@@ -151,45 +177,30 @@ pub async fn update_ticket_data(
         }
     }
 
-    // Convert description to ADF if provided
     let adf_description = options.description.as_deref().map(markdown_to_adf);
 
-    // Build payload for other fields (status is handled separately via transitions)
     let payload = build_update_payload(
         options.priority.as_deref(),
         options.issue_type.as_deref(),
         assignee_account_id.as_deref(),
         adf_description.as_ref(),
-    );
+        &field_options,
+    )?;
 
-    // Only send update request if the payload has fields (status is handled separately via transitions)
-    let has_fields = payload.as_object().map(|o| !o.is_empty()).unwrap_or(false);
-
-    if has_fields {
-        match update_issue_fields(&client, base_url, &options.ticket_key, payload).await {
-            Ok(updated_fields) => {
-                results.extend(updated_fields);
-            }
-            Err(e) => {
-                // Track which fields failed in the general update error
-                let failed_fields = [
-                    options.priority.as_ref().map(|_| "priority"),
-                    options.issue_type.as_ref().map(|_| "issue_type"),
-                    options.description.as_ref().map(|_| "description"),
-                ];
-                for field in failed_fields.into_iter().flatten() {
-                    results.push(FieldUpdateResult {
-                        field: field.to_string(),
-                        success: false,
-                        value: None,
-                        error: Some(e.to_string()),
-                    });
-                }
+    let mut field_results = update_payload_results(&payload);
+    if !field_results.is_empty() {
+        if let Err(error) =
+            update_issue_fields(&client, base_url, &options.ticket_key, payload).await
+        {
+            for result in &mut field_results {
+                result.success = false;
+                result.value = None;
+                result.error = Some(error.to_string());
             }
         }
+        results.extend(field_results);
     }
 
-    // Check if all updates succeeded
     let partial_failure = results.iter().any(|r| !r.success);
 
     Ok(UpdateOutput {
@@ -461,15 +472,13 @@ async fn handle_status_transition(
     Ok(())
 }
 
-/// Update issue fields via PUT request
 async fn update_issue_fields(
     client: &reqwest::Client,
     base_url: &str,
     ticket_key: &str,
-    fields: serde_json::Value,
-) -> Result<Vec<FieldUpdateResult>> {
+    payload: serde_json::Value,
+) -> Result<()> {
     let url = format!("{base_url}/rest/api/3/issue/{ticket_key}");
-    let payload = serde_json::json!({ "fields": fields });
 
     let response = client
         .put(&url)
@@ -484,36 +493,7 @@ async fn update_issue_fields(
         return Err(eyre!("Failed to update ticket [{}]: {}", status, body));
     }
 
-    // Determine which fields were successfully updated
-    let mut results = Vec::new();
-
-    if let Some(fields_obj) = payload["fields"].as_object() {
-        for key in fields_obj.keys() {
-            let field_name = match key.as_str() {
-                "priority" => "priority",
-                "issuetype" => "issue_type",
-                _ => key,
-            };
-
-            let value = if key == "description" {
-                Some("(updated)".to_string())
-            } else {
-                fields_obj[key]["name"]
-                    .as_str()
-                    .or_else(|| fields_obj[key]["value"].as_str())
-                    .map(|s| s.to_string())
-            };
-
-            results.push(FieldUpdateResult {
-                field: field_name.to_string(),
-                success: true,
-                value,
-                error: None,
-            });
-        }
-    }
-
-    Ok(results)
+    Ok(())
 }
 
 /// Handle sprint assignment via Agile API
@@ -527,16 +507,29 @@ async fn handle_sprint_assignment(
     super::sprint::move_issue_to_sprint(ticket_key, sprint_id, config).await
 }
 
-/// CLI handler for update command
 pub async fn handler(options: UpdateOptions, config: &super::super::JiraConfig) -> Result<()> {
     let update_output = update_ticket_data(options.clone(), config).await?;
 
     if options.json {
-        // For JSON output, fetch and return the full ticket details
+        if update_output.partial_failure {
+            return Err(eyre!(
+                "Some fields failed to update: {}",
+                update_output
+                    .fields_updated
+                    .iter()
+                    .filter(|result| !result.success)
+                    .map(|result| format!(
+                        "{}: {}",
+                        result.field,
+                        result.error.as_deref().unwrap_or("unknown error")
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
+        }
         let ticket = super::get::get_ticket_data(update_output.ticket_key.clone(), config).await?;
         std::println!("{}", serde_json::to_string_pretty(&ticket)?);
     } else {
-        // Display update summary
         std::println!(
             "{}",
             format!("Updated ticket: {}", update_output.ticket_key)
@@ -545,7 +538,6 @@ pub async fn handler(options: UpdateOptions, config: &super::super::JiraConfig) 
         );
         std::println!();
 
-        // Display field results in table
         let mut table = new_table();
 
         table.add_row(row![
@@ -589,7 +581,6 @@ pub async fn handler(options: UpdateOptions, config: &super::super::JiraConfig) 
             );
         }
 
-        // Fetch and display the full ticket details
         std::println!();
         std::println!("{}", "Current ticket state:".bold().cyan());
 

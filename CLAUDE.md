@@ -92,7 +92,10 @@ For detailed usage of each feature, see the context files:
 mcptools atlassian jira search "assignee = currentUser() AND status NOT IN (Done, Closed)"
 mcptools atlassian jira get PROJ-123                # alias: `jira read`
 mcptools atlassian jira create "Fix bug" --issue-type Bug
+mcptools atlassian jira create "Fix bug" --label bug --component Backend --due-date 2026-10-31 --parent PROJ-100
 mcptools atlassian jira update PROJ-123 --status "In Progress"
+mcptools atlassian jira update PROJ-123 --label backend --label api --component Backend
+mcptools atlassian jira update PROJ-123 --clear-labels --clear-components --clear-due-date --clear-parent
 mcptools atlassian jira transitions list PROJ-123
 mcptools atlassian jira link types
 mcptools atlassian jira link list PROJ-123
