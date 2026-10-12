@@ -21,7 +21,7 @@ mcptools agent setup --target all --mode code
 mcptools agent uninstall --target claude
 ```
 
-Targets: `codex`, `claude`, `opencode` (`opencode2` is an accepted alias), or `all`. Modes: `plain` (default) or `code`.
+Targets: `codex`, `claude`, `opencode`, or `all`. Modes: `plain` (default) or `code`.
 
 ## Status
 

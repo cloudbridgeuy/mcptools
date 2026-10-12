@@ -32,7 +32,6 @@ pub enum Commands {
 pub enum ShellTarget {
     Codex,
     Claude,
-    #[value(alias = "opencode2")]
     Opencode,
     All,
 }
@@ -298,7 +297,7 @@ mod tests {
     #[test]
     fn target_flag_accepts_all_names() {
         use clap::ValueEnum;
-        for name in ["codex", "claude", "opencode", "opencode2", "all"] {
+        for name in ["codex", "claude", "opencode", "all"] {
             assert!(ShellTarget::from_str(name, true).is_ok(), "{name}");
         }
         assert!(ShellTarget::from_str("unknown", true).is_err());
