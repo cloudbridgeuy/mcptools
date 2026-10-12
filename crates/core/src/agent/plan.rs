@@ -23,7 +23,7 @@ pub fn config_path(target: AgentTarget, home: &str) -> Option<PathBuf> {
     match target {
         AgentTarget::Claude => Some(base.join(".claude.json")),
         AgentTarget::Opencode => Some(base.join(".config/opencode/opencode.json")),
-        AgentTarget::Codex | AgentTarget::Pi | AgentTarget::All => None,
+        AgentTarget::Codex | AgentTarget::All => None,
     }
 }
 
@@ -32,7 +32,6 @@ pub fn skill_path(target: AgentTarget, home: &str) -> Option<PathBuf> {
     match target {
         AgentTarget::Codex => Some(base.join(".codex/skills/mcptools/SKILL.md")),
         AgentTarget::Claude => Some(base.join(".claude/skills/mcptools/SKILL.md")),
-        AgentTarget::Pi => Some(base.join(".pi/agent/skills/mcptools/SKILL.md")),
         AgentTarget::Opencode => Some(base.join(".config/opencode/skills/mcptools/SKILL.md")),
         AgentTarget::All => None,
     }
@@ -131,7 +130,7 @@ pub fn desired_server_value(
                 "enabled": true,
             })
         }),
-        AgentTarget::Codex | AgentTarget::Pi | AgentTarget::All => None,
+        AgentTarget::Codex | AgentTarget::All => None,
     }
 }
 
@@ -488,7 +487,6 @@ mod tests {
             Some(PathBuf::from("/tmp/t2/.config/opencode/opencode.json"))
         );
         assert_eq!(config_path(AgentTarget::Codex, "/tmp/t2"), None);
-        assert_eq!(config_path(AgentTarget::Pi, "/tmp/t2"), None);
         assert_eq!(config_path(AgentTarget::All, "/tmp/t2"), None);
     }
 
@@ -511,10 +509,6 @@ mod tests {
             Some(PathBuf::from("/tmp/t2/.claude/skills/mcptools/SKILL.md"))
         );
         assert_eq!(
-            skill_path(AgentTarget::Pi, "/tmp/t2"),
-            Some(PathBuf::from("/tmp/t2/.pi/agent/skills/mcptools/SKILL.md"))
-        );
-        assert_eq!(
             skill_path(AgentTarget::Opencode, "/tmp/t2"),
             Some(PathBuf::from(
                 "/tmp/t2/.config/opencode/skills/mcptools/SKILL.md"
@@ -528,7 +522,6 @@ mod tests {
         for target in [
             AgentTarget::Codex,
             AgentTarget::Claude,
-            AgentTarget::Pi,
             AgentTarget::Opencode,
         ] {
             let content = skill_content(target);
@@ -557,10 +550,6 @@ mod tests {
         );
         assert_eq!(
             desired_server_value(AgentTarget::Codex, "mcptools", ServerMode::Plain),
-            None
-        );
-        assert_eq!(
-            desired_server_value(AgentTarget::Pi, "mcptools", ServerMode::Plain),
             None
         );
     }
@@ -606,10 +595,6 @@ mod tests {
         );
         assert_eq!(
             desired_server_value(AgentTarget::Codex, "mcptools", ServerMode::Code),
-            None
-        );
-        assert_eq!(
-            desired_server_value(AgentTarget::Pi, "mcptools", ServerMode::Code),
             None
         );
     }
@@ -766,7 +751,7 @@ mod tests {
     #[test]
     fn absent_skill_plans_create() {
         let action = plan_skill(
-            PathBuf::from("/tmp/t2/.pi/agent/skills/mcptools/SKILL.md"),
+            PathBuf::from("/tmp/t2/.claude/skills/mcptools/SKILL.md"),
             None,
             "staged",
         );
@@ -808,27 +793,6 @@ mod tests {
             &read_none,
         );
         assert_eq!(actions.len(), 2);
-    }
-
-    #[test]
-    fn pi_target_plans_skill_only() {
-        let actions = plan_target(
-            AgentTarget::Pi,
-            ServerMode::Plain,
-            "/tmp/t2",
-            "mcptools",
-            &read_none,
-        );
-        assert_eq!(actions.len(), 1);
-        match &actions[0] {
-            GlobalAction::Create { path, .. } => {
-                assert_eq!(
-                    *path,
-                    PathBuf::from("/tmp/t2/.pi/agent/skills/mcptools/SKILL.md")
-                );
-            }
-            other => panic!("expected skill Create, got {other:?}"),
-        }
     }
 
     #[test]
@@ -874,7 +838,7 @@ mod tests {
             "mcptools",
             &read_none,
         );
-        assert_eq!(planned.len(), 6);
+        assert_eq!(planned.len(), 5);
     }
 
     #[test]
@@ -892,7 +856,7 @@ mod tests {
         );
         let after: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
         assert_eq!(before.len(), after.len());
-        assert_eq!(planned.len(), 6);
+        assert_eq!(planned.len(), 5);
     }
 
     #[test]
@@ -945,7 +909,6 @@ mod tests {
         for target in [
             AgentTarget::Codex,
             AgentTarget::Claude,
-            AgentTarget::Pi,
             AgentTarget::Opencode,
         ] {
             assert_eq!(stage_skill(target_name(target)), skill_content(target));
@@ -1066,9 +1029,9 @@ mod tests {
 
     #[test]
     fn uninstall_matching_skill_plans_remove() {
-        let desired = skill_content(AgentTarget::Pi);
+        let desired = skill_content(AgentTarget::Claude);
         let action = plan_uninstall_skill(
-            PathBuf::from("/tmp/t4/.pi/agent/skills/mcptools/SKILL.md"),
+            PathBuf::from("/tmp/t4/.claude/skills/mcptools/SKILL.md"),
             Some(&desired),
             &desired,
         );
@@ -1112,18 +1075,6 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_pi_target_covers_skill_only() {
-        let actions = plan_uninstall_target(
-            AgentTarget::Pi,
-            ServerMode::Plain,
-            "/tmp/t4",
-            "mcptools",
-            &read_none,
-        );
-        assert_eq!(actions.len(), 1);
-    }
-
-    #[test]
     fn uninstall_all_expands_to_every_config_and_skill() {
         let planned = plan_uninstall_with_home(
             &facts_of(vec![AgentTarget::All]),
@@ -1132,7 +1083,7 @@ mod tests {
             "mcptools",
             &read_none,
         );
-        assert_eq!(planned.len(), 6);
+        assert_eq!(planned.len(), 5);
     }
 
     #[test]

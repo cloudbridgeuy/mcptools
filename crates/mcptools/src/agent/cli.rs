@@ -32,7 +32,6 @@ pub enum Commands {
 pub enum ShellTarget {
     Codex,
     Claude,
-    Pi,
     #[value(alias = "opencode2")]
     Opencode,
     All,
@@ -91,7 +90,6 @@ impl From<ShellTarget> for AgentTarget {
         match target {
             ShellTarget::Codex => AgentTarget::Codex,
             ShellTarget::Claude => AgentTarget::Claude,
-            ShellTarget::Pi => AgentTarget::Pi,
             ShellTarget::Opencode => AgentTarget::Opencode,
             ShellTarget::All => AgentTarget::All,
         }
@@ -276,7 +274,7 @@ fn probe_version(exe: &PathBuf) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mcptools_core::agent::health::{classify_target, Health};
+    use mcptools_core::agent::health::Health;
 
     fn entry(target: AgentTarget, health: Health, detail: &str) -> TargetHealth {
         TargetHealth {
@@ -290,7 +288,6 @@ mod tests {
     fn shell_targets_map_to_core_targets() {
         assert_eq!(AgentTarget::from(ShellTarget::Codex), AgentTarget::Codex);
         assert_eq!(AgentTarget::from(ShellTarget::Claude), AgentTarget::Claude);
-        assert_eq!(AgentTarget::from(ShellTarget::Pi), AgentTarget::Pi);
         assert_eq!(
             AgentTarget::from(ShellTarget::Opencode),
             AgentTarget::Opencode
@@ -301,7 +298,7 @@ mod tests {
     #[test]
     fn target_flag_accepts_all_names() {
         use clap::ValueEnum;
-        for name in ["codex", "claude", "pi", "opencode", "opencode2", "all"] {
+        for name in ["codex", "claude", "opencode", "opencode2", "all"] {
             assert!(ShellTarget::from_str(name, true).is_ok(), "{name}");
         }
         assert!(ShellTarget::from_str("unknown", true).is_err());
@@ -312,30 +309,14 @@ mod tests {
         let health = vec![
             entry(AgentTarget::Codex, Health::Live, "ready"),
             entry(
-                AgentTarget::Pi,
+                AgentTarget::Claude,
                 Health::MissingAgent,
                 "executable not found",
             ),
         ];
         assert_eq!(
             format_doctor(&health),
-            "codex: Live (ready)\npi: MissingAgent (executable not found)"
-        );
-    }
-
-    #[test]
-    fn doctor_matches_demo_line() {
-        let health = vec![classify_target(
-            AgentTarget::Pi,
-            true,
-            Some("1.11.0"),
-            "1.11.0",
-            false,
-            true,
-        )];
-        assert_eq!(
-            format_doctor(&health),
-            "pi: MissingAgent (executable not found)"
+            "codex: Live (ready)\nclaude: MissingAgent (executable not found)"
         );
     }
 
@@ -353,14 +334,14 @@ mod tests {
         let before: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
         let facts = gather_global_facts(AgentTarget::All).unwrap();
         let after: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
-        assert_eq!(facts.targets.len(), 4);
+        assert_eq!(facts.targets.len(), 3);
         assert_eq!(before.len(), after.len());
     }
 
     #[test]
     fn gather_resolves_single_target() {
-        let facts = gather_global_facts(AgentTarget::Pi).unwrap();
-        assert_eq!(facts.targets, vec![AgentTarget::Pi]);
+        let facts = gather_global_facts(AgentTarget::Claude).unwrap();
+        assert_eq!(facts.targets, vec![AgentTarget::Claude]);
     }
 
     #[test]
@@ -490,7 +471,6 @@ mod tests {
         assert!(codex_included(AgentTarget::Codex));
         assert!(codex_included(AgentTarget::All));
         assert!(!codex_included(AgentTarget::Claude));
-        assert!(!codex_included(AgentTarget::Pi));
         assert!(!codex_included(AgentTarget::Opencode));
     }
 

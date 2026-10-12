@@ -42,16 +42,16 @@ fn run_status(home: &Path, path_dir: &Path, target: &str) -> (bool, String) {
 }
 
 #[test]
-fn status_all_reports_four_targets_and_writes_nothing() {
+fn status_all_reports_three_targets_and_writes_nothing() {
     let home = tempfile::tempdir().unwrap();
     let path_dir = tempfile::tempdir().unwrap();
     let before = snapshot(home.path());
     let (ok, stdout) = run_status(home.path(), path_dir.path(), "all");
     assert!(ok, "{stdout}");
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 4, "{stdout}");
+    assert_eq!(lines.len(), 3, "{stdout}");
     assert!(
-        stdout.contains("pi: MissingAgent (executable not found)"),
+        stdout.contains("claude: MissingAgent (executable not found)"),
         "{stdout}"
     );
     assert_eq!(before, snapshot(home.path()));
@@ -66,7 +66,7 @@ fn status_supports_home_with_spaces() {
     let before = snapshot(&home);
     let (ok, stdout) = run_status(&home, path_dir.path(), "all");
     assert!(ok, "{stdout}");
-    assert_eq!(stdout.lines().count(), 4, "{stdout}");
+    assert_eq!(stdout.lines().count(), 3, "{stdout}");
     assert_eq!(before, snapshot(&home));
 }
 
@@ -74,11 +74,11 @@ fn status_supports_home_with_spaces() {
 fn status_single_target_prints_single_line() {
     let home = tempfile::tempdir().unwrap();
     let path_dir = tempfile::tempdir().unwrap();
-    let (ok, stdout) = run_status(home.path(), path_dir.path(), "pi");
+    let (ok, stdout) = run_status(home.path(), path_dir.path(), "claude");
     assert!(ok, "{stdout}");
     assert_eq!(stdout.lines().count(), 1, "{stdout}");
     assert!(
-        stdout.contains("pi: MissingAgent (executable not found)"),
+        stdout.contains("claude: MissingAgent (executable not found)"),
         "{stdout}"
     );
 }
@@ -87,12 +87,12 @@ fn status_single_target_prints_single_line() {
 fn status_reports_live_when_agent_present() {
     let home = tempfile::tempdir().unwrap();
     let path_dir = tempfile::tempdir().unwrap();
-    let fake = path_dir.path().join("pi");
+    let fake = path_dir.path().join("claude");
     std::fs::write(&fake, "#!/bin/sh\nexit 0\n").unwrap();
     let mut permissions = std::fs::metadata(&fake).unwrap().permissions();
     permissions.set_mode(0o755);
     std::fs::set_permissions(&fake, permissions).unwrap();
-    let (ok, stdout) = run_status(home.path(), path_dir.path(), "pi");
+    let (ok, stdout) = run_status(home.path(), path_dir.path(), "claude");
     assert!(ok, "{stdout}");
-    assert!(stdout.contains("pi: Live (ready)"), "{stdout}");
+    assert!(stdout.contains("claude: Live (ready)"), "{stdout}");
 }

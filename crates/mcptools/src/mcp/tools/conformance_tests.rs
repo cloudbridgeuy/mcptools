@@ -359,13 +359,13 @@ fn loose_collect(
             loose_collect(items, root, &child, visited, paths);
         }
         if let Some(pis) = obj.get("prefixItems").and_then(|p| p.as_array()) {
-            for (i, pi) in pis.iter().enumerate() {
+            for (i, item) in pis.iter().enumerate() {
                 let child = if path.is_empty() {
                     format!("/prefixItems/{}", i)
                 } else {
                     format!("{}/prefixItems/{}", path, i)
                 };
-                loose_collect(pi, root, &child, visited, paths);
+                loose_collect(item, root, &child, visited, paths);
             }
         }
         if let Some(aos) = obj.get("anyOf").and_then(|a| a.as_array()) {
@@ -519,14 +519,14 @@ fn unreached_collect(
         if let Some(pis) = obj.get("prefixItems").and_then(|p| p.as_array()) {
             let empty: Vec<serde_json::Value> = vec![];
             let arr = value.as_array().unwrap_or(&empty);
-            for (i, pi) in pis.iter().enumerate() {
+            for (i, item) in pis.iter().enumerate() {
                 let child = if path.is_empty() {
                     format!("/prefixItems/{}", i)
                 } else {
                     format!("{}/prefixItems/{}", path, i)
                 };
                 if i < arr.len() && !arr[i].is_null() {
-                    unreached_collect(pi, root, &arr[i], &child, visited, paths);
+                    unreached_collect(item, root, &arr[i], &child, visited, paths);
                 } else {
                     paths.push(child);
                 }

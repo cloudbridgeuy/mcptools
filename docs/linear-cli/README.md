@@ -21,7 +21,7 @@ Repository inspected: `22ee93ccfa00283a3f7526a160326c40868a11e4`. Existing globa
 | LINEAR-06 | Expose Linear workflows through the existing MCP server | LINEAR-03, LINEAR-04, LINEAR-05 |
 | AGENTS-01 | Add user-level mcptools setup, status, and uninstall | None |
 | AGENTS-02 | Integrate mcptools globally with Codex and Claude Code | AGENTS-01, LINEAR-06 |
-| AGENTS-03 | Integrate mcptools globally with pi and opencode2 | AGENTS-01, LINEAR-06 |
+| AGENTS-03 | Integrate mcptools globally with opencode2 | AGENTS-01, LINEAR-06 |
 | LINEAR-07 | Verify and document the full Linear agent workflow | LINEAR-06, AGENTS-02, AGENTS-03 |
 
 ## Ticket details
@@ -33,7 +33,7 @@ Enable coding agents to discover and use Linear through mcptools from any workin
 Acceptance criteria:
 
 - [ ] An agent can find a team/project, search and read issues, create or update an issue, comment, and manage parent/blocking relations through CLI and MCP.
-- [ ] Codex, Claude Code, pi, and opencode2 can discover mcptools after one user-level setup; include status and uninstall.
+- [ ] Codex, Claude Code, and opencode2 can discover mcptools after one user-level setup; include status and uninstall.
 - [ ] Use LINEAR_API_KEY from the process environment. Never write the key into tickets, logs, skills, or client configuration.
 - [ ] Each child issue is complete with offline tests and a documented live verification result or explicit access limitation.
 - [ ] Initial scope excludes OAuth hosting, webhooks, autonomous background work, file uploads, arbitrary GraphQL, and full Linear administrative CRUD.
@@ -139,8 +139,8 @@ Add a small global agent setup command family. Reuse cargo xtask install for bin
 
 Acceptance criteria:
 
-- [ ] Provide install/setup, status/doctor, and uninstall with explicit targets codex, claude, pi, opencode2, or all; support a dry-run that shows planned paths and changes.
-- [ ] Resolve a stable executable path. Detect missing/obsolete binary, missing agent, unsupported version, and unavailable writable configuration separately. An absent pi executable must not be reported as a successful live integration.
+- [ ] Provide install/setup, status/doctor, and uninstall with explicit targets codex, claude, opencode2, or all; support a dry-run that shows planned paths and changes.
+- [ ] Resolve a stable executable path. Detect missing/obsolete binary, missing agent, unsupported version, and unavailable writable configuration separately.
 - [ ] Keep setup independent of repository indexing, models, and initialization. Never hard-code this checkout or its target directory into global setup.
 - [ ] Merge only owned entries, preserve unrelated configuration and formatting where supported, refuse conflicts, and use atomic file replacement plus rollback information. Repeating setup is a no-op.
 - [ ] Uninstall removes only owned unchanged entries; preserve user edits and unrelated skills/MCP servers. Honor supported environment overrides for configuration roots.
@@ -165,15 +165,14 @@ Acceptance criteria:
 - [ ] Respect client tool permissions and sandbox settings; setup does not broaden permissions.
 - [ ] Test config merge and discovery fixtures for supported versions; record a fresh session from an unrelated directory listing mcptools and making a read call, or state why live verification is blocked.
 
-### AGENTS-03: Integrate mcptools globally with pi and opencode2
+### AGENTS-03: Integrate mcptools globally with opencode2
 
 Support the exact requested executables. Verify opencode2 version and configuration format before choosing an OpenCode adapter.
 
-Sources: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md and https://opencode.ai/v2/docs/skills and https://opencode.ai/v2/docs/mcp-servers
+Sources: https://opencode.ai/v2/docs/skills and https://opencode.ai/v2/docs/mcp-servers
 
 Acceptance criteria:
 
-- [ ] Expose mcptools CLI through a global pi skill using pi-supported discovery. Do not require an MCP bridge for basic CLI access; make any bridge a separately documented optional integration.
 - [ ] For opencode2, register mcptools with the actual supported user-level MCP schema and install discoverable shared skill guidance. Do not infer configuration solely from the executable name.
 - [ ] Prevent duplicate skill registrations where clients already scan shared locations. Preserve existing client settings and MCP servers.
 - [ ] Inherit LINEAR_API_KEY without storing it; diagnose missing executable, environment, config support, or tool access clearly.

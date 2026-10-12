@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 pub enum AgentTarget {
     Codex,
     Claude,
-    Pi,
     Opencode,
     All,
 }
@@ -45,7 +44,6 @@ pub fn target_name(target: AgentTarget) -> &'static str {
     match target {
         AgentTarget::Codex => "codex",
         AgentTarget::Claude => "claude",
-        AgentTarget::Pi => "pi",
         AgentTarget::Opencode => "opencode",
         AgentTarget::All => "all",
     }
@@ -56,7 +54,6 @@ pub fn expand_targets(target: AgentTarget) -> Vec<AgentTarget> {
         AgentTarget::All => vec![
             AgentTarget::Codex,
             AgentTarget::Claude,
-            AgentTarget::Pi,
             AgentTarget::Opencode,
         ],
         single => vec![single],
@@ -67,7 +64,6 @@ pub fn agent_binaries(target: AgentTarget) -> &'static [&'static str] {
     match target {
         AgentTarget::Codex => &["codex"],
         AgentTarget::Claude => &["claude"],
-        AgentTarget::Pi => &["pi"],
         AgentTarget::Opencode => &["opencode", "opencode2"],
         AgentTarget::All => &[],
     }
@@ -78,7 +74,6 @@ pub fn config_root(target: AgentTarget, home: &str) -> Option<PathBuf> {
     match target {
         AgentTarget::Codex => Some(base.join(".codex")),
         AgentTarget::Claude => Some(base),
-        AgentTarget::Pi => Some(base.join(".pi")),
         AgentTarget::Opencode => Some(base.join(".config/opencode")),
         AgentTarget::All => None,
     }
@@ -228,19 +223,17 @@ mod tests {
     fn names_cover_every_target() {
         assert_eq!(target_name(AgentTarget::Codex), "codex");
         assert_eq!(target_name(AgentTarget::Claude), "claude");
-        assert_eq!(target_name(AgentTarget::Pi), "pi");
         assert_eq!(target_name(AgentTarget::Opencode), "opencode");
         assert_eq!(target_name(AgentTarget::All), "all");
     }
 
     #[test]
-    fn all_expands_to_four_concrete_targets() {
+    fn all_expands_to_three_concrete_targets() {
         assert_eq!(
             expand_targets(AgentTarget::All),
             vec![
                 AgentTarget::Codex,
                 AgentTarget::Claude,
-                AgentTarget::Pi,
                 AgentTarget::Opencode,
             ]
         );
@@ -248,14 +241,16 @@ mod tests {
 
     #[test]
     fn single_target_expands_to_itself() {
-        assert_eq!(expand_targets(AgentTarget::Pi), vec![AgentTarget::Pi]);
+        assert_eq!(
+            expand_targets(AgentTarget::Claude),
+            vec![AgentTarget::Claude]
+        );
     }
 
     #[test]
     fn binaries_list_covers_opencode_pair() {
         assert_eq!(agent_binaries(AgentTarget::Codex), &["codex"]);
         assert_eq!(agent_binaries(AgentTarget::Claude), &["claude"]);
-        assert_eq!(agent_binaries(AgentTarget::Pi), &["pi"]);
         assert_eq!(
             agent_binaries(AgentTarget::Opencode),
             &["opencode", "opencode2"]
@@ -274,10 +269,6 @@ mod tests {
             Some(PathBuf::from("/tmp/t1"))
         );
         assert_eq!(
-            config_root(AgentTarget::Pi, "/tmp/t1"),
-            Some(PathBuf::from("/tmp/t1/.pi"))
-        );
-        assert_eq!(
             config_root(AgentTarget::Opencode, "/tmp/t1"),
             Some(PathBuf::from("/tmp/t1/.config/opencode"))
         );
@@ -287,8 +278,8 @@ mod tests {
     #[test]
     fn config_roots_support_spaces_in_home() {
         assert_eq!(
-            config_root(AgentTarget::Pi, "/tmp/t 1"),
-            Some(PathBuf::from("/tmp/t 1/.pi"))
+            config_root(AgentTarget::Codex, "/tmp/t 1"),
+            Some(PathBuf::from("/tmp/t 1/.codex"))
         );
     }
 
@@ -315,7 +306,7 @@ mod tests {
 
     #[test]
     fn missing_exe_beats_everything() {
-        let health = classify_target(AgentTarget::Pi, false, None, "1.11.0", false, false);
+        let health = classify_target(AgentTarget::Claude, false, None, "1.11.0", false, false);
         assert_eq!(health.health, Health::MissingBinary);
         assert_eq!(health.detail, "mcptools executable not found");
     }
@@ -371,7 +362,7 @@ mod tests {
             targets: vec![AgentTarget::All],
         };
         let health = classify_health(&facts);
-        assert_eq!(health.len(), 4);
+        assert_eq!(health.len(), 3);
         for entry in &health {
             assert_eq!(entry.health, Health::MissingBinary);
         }

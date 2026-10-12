@@ -63,8 +63,6 @@ pub fn staged_skill_for_path(path: &Path) -> Option<String> {
         AgentTarget::Codex
     } else if text.ends_with(".claude/skills/mcptools/SKILL.md") {
         AgentTarget::Claude
-    } else if text.ends_with(".pi/agent/skills/mcptools/SKILL.md") {
-        AgentTarget::Pi
     } else if text.ends_with(".config/opencode/skills/mcptools/SKILL.md") {
         AgentTarget::Opencode
     } else {
@@ -319,7 +317,6 @@ mod tests {
         for (suffix, target) in [
             (".codex/skills/mcptools/SKILL.md", AgentTarget::Codex),
             (".claude/skills/mcptools/SKILL.md", AgentTarget::Claude),
-            (".pi/agent/skills/mcptools/SKILL.md", AgentTarget::Pi),
             (
                 ".config/opencode/skills/mcptools/SKILL.md",
                 AgentTarget::Opencode,
