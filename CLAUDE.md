@@ -68,7 +68,7 @@ For detailed usage of each feature, see the context files:
 ### Integrations
 - **[Jira](.claude/context/jira.md)** - Search, create, update tickets; saved queries; MCP tools
 - **[Linear](.claude/context/linear.md)** - Issues (including delete to trash) and discovery; MCP project creation, partial property updates, published progress report creation/listing, workspace project statuses
-- **[Confluence](.claude/context/confluence.md)** - Search pages; CQL queries
+- **[Confluence](.claude/context/confluence.md)** - Search and read pages; CQL queries
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
@@ -111,6 +111,8 @@ mcptools atlassian jira comment delete PROJ-123 12345
 
 ```bash
 mcptools atlassian confluence search "text ~ 'deployment'"
+mcptools atlassian confluence get 123456
+mcptools atlassian confluence read 'https://example.atlassian.net/wiki/spaces/ENG/pages/123456/Runbook' --json
 ```
 
 ### Linear

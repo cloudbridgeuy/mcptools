@@ -1,5 +1,5 @@
 use super::{create_confluence_client, ConfluenceConfig};
-use crate::prelude::{eprintln, println, *};
+use crate::prelude::{println, *};
 use serde::Deserialize;
 
 /// Confluence-specific configuration options
@@ -29,10 +29,11 @@ pub struct App {
     pub global: Global,
 }
 
-// Import domain models and pure functions from core crate
-use mcptools_core::atlassian::confluence::transform_search_results;
+use mcptools_core::atlassian::confluence::{
+    build_get_page_request, parse_get_page_response, transform_search_results,
+};
 pub use mcptools_core::atlassian::confluence::{
-    ConfluenceSearchResponse, PageOutput, SearchOutput,
+    ConfluenceSearchResponse, GetPageOutput, PageOutput, SearchOutput,
 };
 
 /// Confluence commands
@@ -41,6 +42,9 @@ pub enum Commands {
     /// Search Confluence pages using CQL
     #[clap(name = "search")]
     Search(SearchOptions),
+
+    #[clap(name = "get", alias = "read", about = "Read one page by ID or URL")]
+    Get(GetOptions),
 }
 
 /// Options for searching Confluence pages
@@ -55,6 +59,15 @@ pub struct SearchOptions {
     pub limit: usize,
 
     /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Deserialize, Clone)]
+pub struct GetOptions {
+    #[arg(help = "Numeric page ID or Confluence page URL")]
+    pub page: String,
+
     #[arg(long)]
     pub json: bool,
 }
@@ -107,6 +120,26 @@ pub async fn search_pages_data(
     Ok(transform_search_results(search_response))
 }
 
+pub async fn get_page_data(page: String, config: &ConfluenceConfig) -> Result<GetPageOutput> {
+    let request = build_get_page_request(&config.base_url, &page)?;
+    let response = create_confluence_client(config)?
+        .get(&request.url)
+        .send()
+        .await
+        .map_err(|error| eyre!("Failed to send request to Confluence: {error}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(eyre!("Confluence API error [{status}]: {body}"));
+    }
+    let response = response
+        .text()
+        .await
+        .map_err(|error| eyre!("Failed to read Confluence response: {error}"))?;
+    parse_get_page_response(&response, &config.base_url)
+        .map_err(|error| eyre!("Failed to parse Confluence response: {error}"))
+}
+
 /// Handle the search command
 async fn search_handler(options: SearchOptions, config: &ConfluenceConfig) -> Result<()> {
     let data = search_pages_data(options.query.clone(), options.limit, config).await?;
@@ -136,6 +169,20 @@ async fn search_handler(options: SearchOptions, config: &ConfluenceConfig) -> Re
     Ok(())
 }
 
+async fn get_handler(options: GetOptions, config: &ConfluenceConfig) -> Result<()> {
+    let page = get_page_data(options.page, config).await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&page)?);
+    } else {
+        println!("{}", page.title);
+        println!("Space: {}", page.space_id);
+        println!("Version: {}", page.version);
+        println!("URL: {}\n", page.url);
+        println!("{}", page.body);
+    }
+    Ok(())
+}
+
 /// Run Confluence commands
 pub async fn run(
     app: App,
@@ -151,5 +198,24 @@ pub async fn run(
 
     match app.command {
         Commands::Search(options) => search_handler(options, &config).await,
+        Commands::Get(options) => get_handler(options, &config).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn get_and_read_parse_the_same_options() {
+        for command in ["get", "read"] {
+            let app = App::try_parse_from(["confluence", command, "12345", "--json"]).unwrap();
+            let Commands::Get(options) = app.command else {
+                panic!("expected get command");
+            };
+            assert_eq!(options.page, "12345");
+            assert!(options.json);
+        }
     }
 }

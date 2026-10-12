@@ -7,7 +7,7 @@ Useful MCP Tools to use with LLM Coding Agents
 `mcptools` is a Model Context Protocol (MCP) server that exposes various tools for LLM agents to interact with external services. Currently provides tools for:
 
 - **Atlassian Jira**: Search, create, update tickets, and saved queries (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_query_list`, `jira_query_save`, `jira_query_delete`, `jira_query_load`)
-- **Atlassian Confluence**: Search pages using CQL (`confluence_search`)
+- **Atlassian Confluence**: Search pages and read one page by ID or URL (`confluence_search`, `confluence_page_get`)
 - **Atlassian Bitbucket**: List and read pull requests with diff support; add general or single-line inline comments (`bitbucket_pr_list`, `bitbucket_pr_read`, `bitbucket_pr_comment_add`)
 - **Linear**: Read a bounded issue dependency graph and ready-to-start frontier (`linear_issue_graph`); see [Linear](.claude/context/linear.md) for all Linear tools.
 - **Lanes**: Read Git worktrees, assess cleanup eligibility, and create guarded Worktrunk lanes (`lane_list`, `lane_cleanup_plan`, `lane_create`). Disabled until the server operator sets `MCPTOOLS_LANE_REPOS`. Plans are advisory, not removal permission. No deletion, cleanup execution, merge, or push. See [Lane security and contracts](.claude/context/lanes.md).
@@ -290,6 +290,28 @@ Search Confluence pages using CQL (Confluence Query Language).
     "arguments": {
       "query": "space = WIKI AND text ~ 'deployment'",
       "limit": 10
+    }
+  }
+}
+```
+
+#### confluence_page_get
+
+Read one Confluence page by numeric ID or by a URL containing its page ID. Returns the title, space ID, version, Markdown body, and web URL.
+
+**Parameters:**
+
+- `idOrUrl` (string, required) - Numeric page ID or Confluence page URL
+
+**Example:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "confluence_page_get",
+    "arguments": {
+      "idOrUrl": "https://example.atlassian.net/wiki/spaces/ENG/pages/123456/Runbook"
     }
   }
 }
@@ -1139,6 +1161,10 @@ mcptools atlassian confluence search "space = WIKI AND text ~ 'api'" --limit 10
 
 # Output as JSON
 mcptools atlassian confluence search "text ~ 'guide'" --json
+
+# Read one page by ID or URL; read is an alias for get
+mcptools atlassian confluence get 123456
+mcptools atlassian confluence read 'https://example.atlassian.net/wiki/spaces/ENG/pages/123456/Runbook' --json
 ```
 
 #### Bitbucket Pull Requests

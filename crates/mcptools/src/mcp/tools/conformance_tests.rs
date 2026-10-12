@@ -26,6 +26,9 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "confluence_search" => {
             roundtrip::<mcptools_core::atlassian::confluence::SearchOutput>(value)
         }
+        "confluence_page_get" => {
+            roundtrip::<mcptools_core::atlassian::confluence::GetPageOutput>(value)
+        }
         "hn_read_item" => roundtrip::<mcptools_core::hn::PostOutput>(value),
         "hn_list_items" => roundtrip::<mcptools_core::hn::ListOutput>(value),
         "md_fetch" => roundtrip::<mcptools_core::md::FetchOutput>(value),

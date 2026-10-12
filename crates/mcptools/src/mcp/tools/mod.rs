@@ -207,6 +207,15 @@ pub fn registered_tools() -> Vec<Tool> {
             destructive: false,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::confluence::GetPageOutput>(),
+            name: "confluence_page_get".to_string(),
+            description: "Read one Confluence page by numeric page ID or a URL containing its page ID. Returns its title, space ID, version, Markdown body, and web URL. Requires CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, and CONFLUENCE_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::ConfluencePageGetArgs>(),
+            summary: "Read one Confluence page by ID or URL",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::hn::PostOutput>(),
             name: "hn_read_item".to_string(),
             description: "Read a HackerNews post and its comments. Accepts HackerNews item ID (e.g., '8863') or full URL (e.g., 'https://news.ycombinator.com/item?id=8863'). Returns post details with paginated comments.".to_string(),
@@ -1126,6 +1135,9 @@ pub async fn dispatch_tool_call(
         "jira_query_delete" => atlassian::handle_jira_query_delete(params.arguments, global).await,
         "jira_query_load" => atlassian::handle_jira_query_load(params.arguments, global).await,
         "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
+        "confluence_page_get" => {
+            atlassian::handle_confluence_page_get(params.arguments, global).await
+        }
         "bitbucket_pr_list" => atlassian::handle_bitbucket_pr_list(params.arguments, global).await,
         "bitbucket_pr_read" => atlassian::handle_bitbucket_pr_read(params.arguments, global).await,
         "bitbucket_pr_create" => {
@@ -1289,7 +1301,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 79);
+        assert_eq!(catalog.len(), 80);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1354,7 +1366,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 82);
+        assert_eq!(super::registered_tools().len(), 83);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1429,7 +1441,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 82);
+        assert_eq!(names(serve_flags(false)).len(), 83);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1455,6 +1467,13 @@ mod catalog_tests {
         };
         assert_eq!(
             annotations("jira_search"),
+            super::ToolAnnotations {
+                read_only: true,
+                destructive: false,
+            }
+        );
+        assert_eq!(
+            annotations("confluence_page_get"),
             super::ToolAnnotations {
                 read_only: true,
                 destructive: false,
@@ -1523,7 +1542,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 82);
+        assert_eq!(tools.len(), 83);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1599,6 +1618,7 @@ mod catalog_tests {
             "lane_list",
             "lane_cleanup_plan",
             "jira_search",
+            "confluence_page_get",
             "confluence_search",
             "hn_read_item",
             "hn_list_items",
@@ -1650,7 +1670,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 82);
+        assert_eq!(union.len(), 83);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

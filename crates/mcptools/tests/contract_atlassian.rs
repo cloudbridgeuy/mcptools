@@ -65,7 +65,7 @@ fn mcp_contract_atlassian() {
             })
         })
         .collect();
-    assert_eq!(atlassian.len(), 25, "unexpected atlassian tools");
+    assert_eq!(atlassian.len(), 26, "unexpected atlassian tools");
     for tool in &atlassian {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();
         let schema = tool
@@ -89,6 +89,21 @@ fn mcp_contract_atlassian() {
         .unwrap();
     assert!(props.contains_key("issues"));
     assert!(props.contains_key("total"));
+
+    let confluence_page_get = atlassian
+        .iter()
+        .find(|tool| {
+            tool.get("name").and_then(|value| value.as_str()) == Some("confluence_page_get")
+        })
+        .unwrap();
+    let props = confluence_page_get
+        .get("outputSchema")
+        .and_then(|schema| schema.get("properties"))
+        .and_then(|value| value.as_object())
+        .unwrap();
+    for field in ["title", "space_id", "version", "body", "url"] {
+        assert!(props.contains_key(field), "missing {field}");
+    }
 
     let sample = recorded_jira_search();
     let output: SearchOutput = serde_json::from_value(sample.clone()).unwrap();
