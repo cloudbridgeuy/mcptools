@@ -29,61 +29,55 @@ cargo xtask install --path /usr/local/bin
 
 ## Usage
 
-### MCP Server Modes
+### MCP transports
 
-The MCP server can run in two transport modes:
+Local agents normally spawn `mcptools mcp stdio` and exchange JSON-RPC over standard input and output. Web clients can instead run `mcptools mcp sse --port 3000 --host 127.0.0.1`; its endpoints are `GET /sse` and `POST /message`.
 
-#### 1. stdio Transport (for local agents)
+### How agents invoke mcptools
 
-```bash
-mcptools mcp stdio
-```
+The stdio server has three invocation modes:
 
-This mode communicates via standard input/output, making it suitable for local LLM agents like Claude Desktop or other MCP clients that spawn server processes.
+| Mode | Start command or environment | `tools/list` returns | Agent workflow |
+|------|------------------------------|----------------------|----------------|
+| Plain | `mcptools mcp stdio` | Every registered tool | Call a listed tool directly with MCP `tools/call`. |
+| Discovery | `mcptools mcp stdio --discovery` or `MCPTOOLS_DISCOVERY=true` | `find_tools`, `call_tool` | Find declarations for the task, then invoke one catalog tool through `call_tool`. |
+| Code | `mcptools mcp stdio --code-mode` or `MCPTOOLS_CODE_MODE=true` | `find_tools`, `execute`, `call_tool` | Use `call_tool` for one catalog call or `execute` to chain calls in one round trip. |
 
-#### 2. SSE Transport (for web-based agents)
+Tool definitions in `tools/list` can consume model context on every turn, depending on how the host presents them. Plain mode avoids discovery indirection but repeatedly exposes every schema. Discovery and code mode reduce that recurring definition cost in exchange for lookup and wrapper calls; code mode can also keep intermediate results inside one `execute` call. The repository has no measured break-even tool count.
 
-```bash
-mcptools mcp sse --port 3000 --host 127.0.0.1
-```
+`find_tools` ranking uses the Jev classifier when `JEV_PROVIDER` is set (e.g. `opencode` with `OPENCODE_API_KEY` in the process environment); otherwise a local ranker applies. Keys stay in the environment and are never written to config files.
 
-This mode runs an HTTP server with Server-Sent Events (SSE) support, suitable for web-based clients.
+#### Per-call permissions
 
-Endpoints:
+Each outer invocation must opt in to side effects. Write tools require `allowWrites: true`; Spend tools require `allowSpend: true`; Read tools require neither. Omitted or false permission is denied before the target tool validates its input or performs I/O.
 
-- `GET /sse` - SSE endpoint for real-time updates
-- `POST /message` - JSON-RPC endpoint for tool calls
+| Invocation path | Where permission goes |
+|-----------------|-----------------------|
+| Direct MCP `tools/call` | In the tool `arguments`, beside its normal input fields. |
+| `call_tool` | On the `call_tool` arguments, beside `name` and `input`, not inside `input`. |
+| `execute` | On the `execute` arguments, beside `code`; the flag binds that class of tools into this sandbox only. |
 
-### Configuring MCP Clients
+Each `execute` call gets a fresh JavaScript sandbox. Its JavaScript has no direct filesystem, network, module-loading, process, or environment access; external operations are available only through bound mcptools functions. The defaults are a 30-second timeout, 64 MiB memory cap, and 256 KiB combined log/result cap. Configure them with `--execute-timeout-secs`, `--execute-memory-mb`, and `--execute-output-kb`, or their `MCPTOOLS_EXECUTE_*` environment variables.
 
-#### Claude Desktop Configuration
+#### Host wiring
 
-Add to your Claude Desktop config file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+`mcptools agent setup` supports plain and code mode. Plain is the default; add `--mode code` to wire `mcp stdio --code-mode`. Discovery mode must be set directly in the host command or environment.
 
-```json
-{
-  "mcpServers": {
-    "mcptools": {
-      "command": "mcptools",
-      "args": ["mcp", "stdio"]
-    }
-  }
-}
-```
+| Host | Setup command | MCP registration | Installed skill |
+|------|---------------|------------------|-----------------|
+| Claude | `mcptools agent setup --target claude` | Merges the `mcptools` entry into `~/.claude.json`. | `~/.claude/skills/mcptools/SKILL.md` |
+| Codex | `mcptools agent setup --target codex` | Runs `codex mcp add mcptools ...`. | `~/.codex/skills/mcptools/SKILL.md` |
+| OpenCode | `mcptools agent setup --target opencode` | Merges the `mcptools` entry into `~/.config/opencode/opencode.json`. | `~/.config/opencode/skills/mcptools/SKILL.md` |
 
-#### Claude Code Configuration
+Use `--target all` to configure all three supported hosts. With `--mode code`, setup also writes `JEV_PROVIDER=opencode` for each client.
 
-**Option 1: Using the `claude mcp add` command (recommended)**
+To register the server manually instead, add it with the Claude Code CLI:
 
 ```bash
 claude mcp add mcptools -- mcptools mcp stdio
 ```
 
-This automatically adds the server to your Claude Code configuration.
-
-**Option 2: Manual configuration**
-
-Add to your Claude Code config file (`~/Library/Application Support/Claude/claude_code_config.json` on macOS, `%APPDATA%\Claude\claude_code_config.json` on Windows):
+For Claude Desktop, add it to the config file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
 ```json
 {
@@ -96,27 +90,7 @@ Add to your Claude Code config file (`~/Library/Application Support/Claude/claud
 }
 ```
 
-After adding the configuration, restart Claude Code for the changes to take effect. The mcptools will be available for use in your coding sessions.
-
-#### Code Mode (find_tools + execute, JEV-powered)
-
-Code mode shrinks `tools/list` to `find_tools`, `execute`, and `call_tool`. Agents discover tools per task with `find_tools`, then chain calls through `execute`. Ranking uses the Jev classifier when `JEV_PROVIDER` is set (e.g. `opencode` with `OPENCODE_API_KEY` in the process environment); otherwise a local ranker applies. Keys stay in the environment and are never written to config files.
-
-```bash
-mcptools agent setup --mode code --target all
-```
-
-This writes `mcp stdio --code-mode` plus `JEV_PROVIDER=opencode` for each client (opencode additionally inherits `OPENCODE_API_KEY` and `LINEAR_API_KEY` via `{env:...}` references). Verify with a read-only chain: `find_tools` for a task, then `execute` code calling the ranked tool.
-
-#### Generic MCP Client (stdio)
-
-Any MCP client can connect by spawning the process and communicating via JSON-RPC 2.0 over stdio:
-
-```bash
-mcptools mcp stdio
-```
-
-Send JSON-RPC requests via stdin, receive responses via stdout.
+Append `--discovery` or `--code-mode` to the args to select another mode. See the [MCP server reference](.claude/context/mcp-server.md) for complete configuration, discovery, ranking, sandbox result, and nested execution details.
 
 ## Available Tools
 
