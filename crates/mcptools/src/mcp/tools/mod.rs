@@ -80,6 +80,12 @@ pub struct CallToolParams {
     pub arguments: Option<serde_json::Value>,
 }
 
+#[derive(Default)]
+struct DirectPermissions {
+    allow_writes: bool,
+    allow_spend: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CallToolResult {
     pub content: Vec<Content>,
@@ -645,7 +651,7 @@ pub fn registered_tools() -> Vec<Tool> {
             output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentCreateOutput>(),
             name: "linear_document_create".to_string(),
             summary: "Create a Markdown document attached to an existing Linear project",
-            description: "Create a document attached to an existing project UUID, or project name with team context. Requires a nonblank title; optional Markdown content preserves exact whitespace and is omitted when absent or null. Returns id, title, nullable content, url, createdAt, updatedAt and project {id, name}. Missing or ambiguous projects fail before mutation; mutation success and complete output are checked. MCP-only Write; requires LINEAR_API_KEY and allowWrites in call_tool and execute.".to_string(),
+            description: "Create a document attached to an existing project UUID, or project name with team context. Requires a nonblank title; optional Markdown content preserves exact whitespace and is omitted when absent or null. Returns id, title, nullable content, url, createdAt, updatedAt and project {id, name}. Missing or ambiguous projects fail before mutation; mutation success and complete output are checked. MCP-only Write; requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::DocumentCreateArgs>(),
         },
         Tool {
@@ -653,7 +659,7 @@ pub fn registered_tools() -> Vec<Tool> {
             output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentUpdateOutput>(),
             name: "linear_document_update".to_string(),
             summary: "Update a Linear document title or Markdown content",
-            description: "Update an existing document by required UUID. Supply at least one nonblank title or Markdown content; omitted or null fields remain unchanged and are never sent as null. Title is trimmed; content preserves exact indentation and line breaks, and an empty string clears the body. Returns id, title, nullable content, url, createdAt, updatedAt and nullable project {id, name}. Does not change ownership, associations, or archive/delete state. Checks mutation success and complete output; missing documents and HTTP/GraphQL errors fail without partial success or automatic mutation retry. MCP-only Write; requires LINEAR_API_KEY and allowWrites in call_tool and execute.".to_string(),
+            description: "Update an existing document by required UUID. Supply at least one nonblank title or Markdown content; omitted or null fields remain unchanged and are never sent as null. Title is trimmed; content preserves exact indentation and line breaks, and an empty string clears the body. Returns id, title, nullable content, url, createdAt, updatedAt and nullable project {id, name}. Does not change ownership, associations, or archive/delete state. Checks mutation success and complete output; missing documents and HTTP/GraphQL errors fail without partial success or automatic mutation retry. MCP-only Write; requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::DocumentUpdateArgs>(),
         },
         Tool {
@@ -661,7 +667,7 @@ pub fn registered_tools() -> Vec<Tool> {
             output_schema: schema::output_schema_for::<mcptools_core::linear::InitiativeProjectAddOutput>(),
             name: "linear_initiative_project_add".to_string(),
             summary: "Link an existing Linear project to an existing initiative",
-            description: "Associate an existing initiative UUID with an existing project UUID, or project name with team context. Resolves both entities before initiativeToProjectCreate; creates neither entity. Returns association id and initiative/project identities {id, name}. Checks mutation success and complete output. Duplicate links and hierarchy conflicts surface Linear API errors without retry or claimed success. MCP-only Write; requires LINEAR_API_KEY and allowWrites in call_tool and execute.".to_string(),
+            description: "Associate an existing initiative UUID with an existing project UUID, or project name with team context. Resolves both entities before initiativeToProjectCreate; creates neither entity. Returns association id and initiative/project identities {id, name}. Checks mutation success and complete output. Duplicate links and hierarchy conflicts surface Linear API errors without retry or claimed success. MCP-only Write; requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::InitiativeProjectAddArgs>(),
         },
         Tool {
@@ -675,7 +681,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectMilestone>(),
             name: "linear_project_milestone_update".to_string(),
-            description: "Partially update a Linear milestone by UUID. Supply at least one name, description, targetDate or sortOrder, or clearDescription/clearTargetDate. Omitted fields remain unchanged; clear flags set null and conflict with supplied values. Description whitespace is preserved, including empty strings. Name must not be blank; targetDate must be a valid YYYY-MM-DD date; sortOrder must be finite. No project reassignment. Returns complete milestone and project identity. MCP only; requires LINEAR_API_KEY and allowWrites in call_tool and execute.".to_string(),
+            description: "Partially update a Linear milestone by UUID. Supply at least one name, description, targetDate or sortOrder, or clearDescription/clearTargetDate. Omitted fields remain unchanged; clear flags set null and conflict with supplied values. Description whitespace is preserved, including empty strings. Name must not be blank; targetDate must be a valid YYYY-MM-DD date; sortOrder must be finite. No project reassignment. Returns complete milestone and project identity. MCP only; requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectMilestoneUpdateArgs>(),
             summary: "Partially update a Linear project milestone",
             kind: ToolKind::Write,
@@ -739,7 +745,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectUpdateCreateOutput>(),
             name: "linear_project_update_create".to_string(),
-            description: "Create a Linear project progress report, distinct from linear_project_update property editing. MCP only. Requires project UUID or project name with team, and nonblank Markdown body (whitespace preserved). Optional health: onTrack, atRisk, offTrack; omitted health is not sent. Returns report id, body, API health, createdAt, url and project id/name. Requires LINEAR_API_KEY; allowWrites in call_tool and execute.".to_string(),
+            description: "Create a Linear project progress report, distinct from linear_project_update property editing. MCP only. Requires project UUID or project name with team, and nonblank Markdown body (whitespace preserved). Optional health: onTrack, atRisk, offTrack; omitted health is not sent. Returns report id, body, API health, createdAt, url and project id/name. Requires LINEAR_API_KEY; allowWrites in direct tools/call, call_tool, and execute.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectUpdateCreateArgs>(),
             summary: "Publish a Linear project progress update",
             kind: ToolKind::Write,
@@ -771,7 +777,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<linear::IssueDeleteOutput>(),
             name: "linear_issue_delete".to_string(),
-            description: "Move one Linear issue by id or identifier to Linear trash. This never permanently deletes the issue. Returns the deleted issue id and identifier. Requires LINEAR_API_KEY and allowWrites in call_tool and execute.".to_string(),
+            description: "Move one Linear issue by id or identifier to Linear trash. This never permanently deletes the issue. Returns the deleted issue id and identifier. Requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueDeleteArgs>(),
             summary: "Move a Linear issue to trash",
             kind: ToolKind::Write,
@@ -856,7 +862,14 @@ pub fn listed_tools(tools: Vec<Tool>, flags: ServeFlags) -> Vec<Tool> {
 }
 
 pub fn handle_tools_list(flags: ServeFlags) -> Result<serde_json::Value, JsonRpcError> {
-    let tools = listed_tools(registered_tools(), flags);
+    let mut tools = listed_tools(registered_tools(), flags);
+    if !flags.discovery && !flags.code_mode {
+        for tool in &mut tools {
+            if !is_meta_tool(&tool.name) {
+                add_direct_permission_schema(&mut tool.input_schema, tool.kind);
+            }
+        }
+    }
     let kinds: Vec<ToolKind> = tools.iter().map(|tool| tool.kind).collect();
     let mut list = serde_json::to_value(ToolsList { tools }).map_err(|e| JsonRpcError {
         code: -32603,
@@ -874,6 +887,29 @@ pub fn handle_tools_list(flags: ServeFlags) -> Result<serde_json::Value, JsonRpc
         }
     }
     Ok(list)
+}
+
+fn add_direct_permission_schema(schema: &mut serde_json::Value, kind: ToolKind) {
+    let (name, description) = match kind {
+        ToolKind::Write => (
+            "allowWrites",
+            "Permits this direct write tool call. @default false",
+        ),
+        ToolKind::Spend => (
+            "allowSpend",
+            "Permits this direct spend tool call. @default false",
+        ),
+        ToolKind::Read => return,
+    };
+    if let Some(properties) = schema
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        properties.insert(
+            name.to_string(),
+            serde_json::json!({"type": "boolean", "description": description, "default": false}),
+        );
+    }
 }
 
 pub fn tool_catalog() -> Vec<mcptools_core::catalog::CatalogEntry> {
@@ -914,13 +950,75 @@ pub async fn handle_tools_call(
     global: &crate::Global,
     flags: ServeFlags,
 ) -> Result<serde_json::Value, JsonRpcError> {
-    let params: CallToolParams = serde_json::from_value(params.unwrap_or(serde_json::Value::Null))
-        .map_err(|e| JsonRpcError {
-            code: -32602,
-            message: format!("Invalid params: {e}"),
-            data: None,
-        })?;
+    let mut params = parse_call_tool_params(params)?;
+    let tools = registered_tools();
+    let name = aliases::resolve(&params.name, &tools)?;
+    if is_meta_tool(name) {
+        return dispatch_tool_call(params, global, flags).await;
+    }
+    let permissions = extract_direct_permissions(&mut params.arguments);
+    let kind = tools
+        .iter()
+        .find(|tool| tool.name == name)
+        .map(|tool| tool.kind)
+        .ok_or_else(|| invalid_tool_name(&params.name))?;
+    match kind {
+        ToolKind::Write if !permissions.allow_writes => {
+            return Ok(direct_permission_denied(name, "write", "allowWrites"));
+        }
+        ToolKind::Spend if !permissions.allow_spend => {
+            return Ok(direct_permission_denied(name, "spend", "allowSpend"));
+        }
+        _ => {}
+    }
+    dispatch_tool_call(params, global, flags).await
+}
 
+fn parse_call_tool_params(
+    params: Option<serde_json::Value>,
+) -> Result<CallToolParams, JsonRpcError> {
+    serde_json::from_value(params.unwrap_or(serde_json::Value::Null)).map_err(|e| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid params: {e}"),
+        data: None,
+    })
+}
+
+fn extract_direct_permissions(arguments: &mut Option<serde_json::Value>) -> DirectPermissions {
+    let Some(values) = arguments
+        .as_mut()
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return DirectPermissions::default();
+    };
+    DirectPermissions {
+        allow_writes: values.remove("allowWrites") == Some(serde_json::Value::Bool(true)),
+        allow_spend: values.remove("allowSpend") == Some(serde_json::Value::Bool(true)),
+    }
+}
+
+fn direct_permission_denied(name: &str, kind: &str, permission: &str) -> serde_json::Value {
+    serde_json::json!({
+        "content": [{"type": "text", "text": format!(
+            "{name} is a {kind} tool; pass {permission}: true in tools/call arguments"
+        )}],
+        "isError": true
+    })
+}
+
+fn invalid_tool_name(name: &str) -> JsonRpcError {
+    JsonRpcError {
+        code: -32602,
+        message: format!("Unknown tool: {name}"),
+        data: None,
+    }
+}
+
+pub async fn dispatch_tool_call(
+    params: CallToolParams,
+    global: &crate::Global,
+    flags: ServeFlags,
+) -> Result<serde_json::Value, JsonRpcError> {
     let tools = registered_tools();
     let name = aliases::resolve(&params.name, &tools)?;
     match name {

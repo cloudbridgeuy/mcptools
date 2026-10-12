@@ -184,6 +184,7 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
   "params": {
     "name": "jira_create",
     "arguments": {
+      "allowWrites": true,
       "summary": "Fix login bug",
       "description": "Details...",
       "issueType": "Bug",
@@ -201,6 +202,7 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
   "params": {
     "name": "jira_update",
     "arguments": {
+      "allowWrites": true,
       "ticketKey": "PROJ-123",
       "status": "In Progress",
       "assignee": "me"
@@ -217,6 +219,7 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
   "params": {
     "name": "jira_comment_add",
     "arguments": {
+      "allowWrites": true,
       "issueKey": "PROJ-123",
       "comment": "This is my comment with **markdown** support"
     }
@@ -244,6 +247,7 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
   "params": {
     "name": "jira_comment_update",
     "arguments": {
+      "allowWrites": true,
       "issueKey": "PROJ-123",
       "commentId": "12345",
       "comment": "Updated comment body"
@@ -260,6 +264,7 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
   "params": {
     "name": "jira_comment_delete",
     "arguments": {
+      "allowWrites": true,
       "issueKey": "PROJ-123",
       "commentId": "12345"
     }
@@ -318,6 +323,7 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
   "params": {
     "name": "jira_attachment_upload",
     "arguments": {
+      "allowWrites": true,
       "issueKey": "PROJ-123",
       "filePaths": ["/path/to/report.pdf", "/path/to/screenshot.png"]
     }

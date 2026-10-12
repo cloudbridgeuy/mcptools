@@ -43,6 +43,128 @@ fn without_jev_env(command: &mut Command) -> &mut Command {
         .env_remove("OPENROUTER_API_KEY")
         .env_remove("AI_GATEWAY_API_KEY")
         .env_remove("TYPESAFE_API_KEY")
+        .env_remove("LINEAR_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+}
+
+#[test]
+fn direct_permissions_gate_write_and_spend_tools_in_all_stdio_modes() {
+    let tools = [
+        (
+            "linear_issue_create",
+            "allowWrites",
+            serde_json::json!({"team": "GUZ", "title": "Offline"}),
+        ),
+        (
+            "linear_issue_delete",
+            "allowWrites",
+            serde_json::json!({"id": "GUZ-498"}),
+        ),
+        (
+            "lane_create",
+            "allowWrites",
+            serde_json::json!({"repo": "/", "branch": "topic", "base": "main"}),
+        ),
+        (
+            "images_generate",
+            "allowSpend",
+            serde_json::json!({"prompt": "Offline"}),
+        ),
+    ];
+    for mode in [None, Some("--discovery"), Some("--code-mode")] {
+        let mut command = Command::new(binary());
+        command.args(["mcp", "stdio"]);
+        if let Some(mode) = mode {
+            command.arg(mode);
+        }
+        without_jev_env(&mut command);
+        command
+            .env_remove("MCPTOOLS_DISCOVERY")
+            .env_remove("MCPTOOLS_CODE_MODE")
+            .env_remove("MCPTOOLS_LANE_REPOS");
+        let mut requests = Vec::new();
+        let mut id = 1;
+        for (name, permission, input) in &tools {
+            requests.push(request(
+                id,
+                "tools/call",
+                serde_json::json!({"name": name, "arguments": {}}),
+            ));
+            id += 1;
+            let mut denied = serde_json::json!({});
+            denied[permission] = serde_json::json!(false);
+            requests.push(request(
+                id,
+                "tools/call",
+                serde_json::json!({"name": name, "arguments": denied}),
+            ));
+            id += 1;
+            let mut allowed = input.clone();
+            allowed[permission] = serde_json::json!(true);
+            allowed[if *permission == "allowWrites" {
+                "allowSpend"
+            } else {
+                "allowWrites"
+            }] = serde_json::json!(false);
+            requests.push(request(
+                id,
+                "tools/call",
+                serde_json::json!({"name": name, "arguments": allowed}),
+            ));
+            id += 1;
+        }
+        let responses = run(&mut command, &requests);
+        for (index, (name, permission, _)) in tools.iter().enumerate() {
+            for response in &responses[index * 3..index * 3 + 2] {
+                assert!(
+                    response.get("error").is_none(),
+                    "{mode:?} {name}: {response}"
+                );
+                assert_eq!(response["result"]["isError"], true, "{mode:?} {name}");
+                assert!(response["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains(permission));
+            }
+            let allowed = &responses[index * 3 + 2];
+            assert!(
+                allowed.get("result").is_none(),
+                "{mode:?} {name}: {allowed}"
+            );
+            assert!(allowed.get("error").is_some(), "{mode:?} {name}: {allowed}");
+        }
+    }
+}
+
+#[test]
+fn plain_tools_list_advertises_only_each_direct_permission() {
+    let mut command = Command::new(binary());
+    command.args(["mcp", "stdio"]);
+    without_jev_env(&mut command);
+    command
+        .env_remove("MCPTOOLS_DISCOVERY")
+        .env_remove("MCPTOOLS_CODE_MODE");
+    let responses = run(
+        &mut command,
+        &[request(1, "tools/list", serde_json::json!({}))],
+    );
+    let tools = responses[0]["result"]["tools"].as_array().unwrap();
+    let properties = |name: &str| {
+        tools.iter().find(|tool| tool["name"] == name).unwrap()["inputSchema"]["properties"]
+            .as_object()
+            .unwrap()
+    };
+    for name in ["linear_issue_create", "linear_issue_delete", "lane_create"] {
+        assert_eq!(properties(name)["allowWrites"]["type"], "boolean");
+        assert!(!properties(name).contains_key("allowSpend"));
+    }
+    assert_eq!(
+        properties("images_generate")["allowSpend"]["type"],
+        "boolean"
+    );
+    assert!(!properties("images_generate").contains_key("allowWrites"));
+    assert!(!properties("linear_issue_get").contains_key("allowWrites"));
+    assert!(!properties("linear_issue_get").contains_key("allowSpend"));
 }
 
 #[test]

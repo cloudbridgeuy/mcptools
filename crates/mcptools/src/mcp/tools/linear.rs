@@ -1130,7 +1130,7 @@ mod tests {
                 code_mode: true,
             },
         ] {
-            assert_eq!(super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_initiative_project_add", "arguments": {}})), &global, flags).await.unwrap_err().code, -32602);
+            assert_eq!(super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_initiative_project_add", "arguments": {"allowWrites": true}})), &global, flags).await.unwrap_err().code, -32602);
             for allow in [false, true] {
                 let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_initiative_project_add", "input": {}, "allowWrites": allow}})), &global, flags).await;
                 if allow {
@@ -1226,7 +1226,7 @@ mod tests {
                 code_mode: true,
             },
         ] {
-            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_update_create", "arguments": {"project": id}})), &global, flags).await.unwrap_err();
+            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_update_create", "arguments": {"project": id, "allowWrites": true}})), &global, flags).await.unwrap_err();
             assert_eq!(direct.code, -32602);
             for allow in [false, true] {
                 let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_update_create", "input": {"project": id}, "allowWrites": allow}})), &global, flags).await;
@@ -1340,7 +1340,7 @@ mod tests {
         ] {
             let direct = super::super::handle_tools_call(
                 Some(
-                    serde_json::json!({"name": "linear_document_update", "arguments": {"id": id}}),
+                    serde_json::json!({"name": "linear_document_update", "arguments": {"id": id, "allowWrites": true}}),
                 ),
                 &global,
                 flags,
@@ -1444,7 +1444,7 @@ mod tests {
                 code_mode: true,
             },
         ] {
-            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_document_create", "arguments": {"project": id}})), &global, flags).await.unwrap_err();
+            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_document_create", "arguments": {"project": id, "allowWrites": true}})), &global, flags).await.unwrap_err();
             assert_eq!(direct.code, -32602);
             for allow in [false, true] {
                 let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_document_create", "input": {"project": id}, "allowWrites": allow}})), &global, flags).await;
@@ -1544,7 +1544,7 @@ mod tests {
                 code_mode: true,
             },
         ] {
-            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_milestone_create", "arguments": {"project": id}})), &global, flags).await.unwrap_err();
+            let direct = super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_milestone_create", "arguments": {"project": id, "allowWrites": true}})), &global, flags).await.unwrap_err();
             assert_eq!(direct.code, -32602);
             for allow in [false, true] {
                 let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_milestone_create", "input": {"project": id}, "allowWrites": allow}})), &global, flags).await;
@@ -1672,7 +1672,7 @@ mod tests {
                 code_mode: true,
             },
         ] {
-            assert_eq!(super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_milestone_update", "arguments": {"id": id}})), &global, flags).await.unwrap_err().code, -32602);
+            assert_eq!(super::super::handle_tools_call(Some(serde_json::json!({"name": "linear_project_milestone_update", "arguments": {"id": id, "allowWrites": true}})), &global, flags).await.unwrap_err().code, -32602);
             for allow in [false, true] {
                 let call = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": "linear_project_milestone_update", "input": {"id": id}, "allowWrites": allow}})), &global, flags).await;
                 if allow {
@@ -1819,7 +1819,7 @@ mod tests {
             },
         ] {
             let direct = super::super::handle_tools_call(
-                Some(serde_json::json!({"name": "linear_project_update", "arguments": {"id": id}})),
+                Some(serde_json::json!({"name": "linear_project_update", "arguments": {"id": id, "allowWrites": true}})),
                 &global,
                 flags,
             )

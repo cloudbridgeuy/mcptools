@@ -198,6 +198,7 @@ Create a new Jira ticket.
   "params": {
     "name": "jira_create",
     "arguments": {
+      "allowWrites": true,
       "summary": "Fix login bug",
       "description": "Users cannot log in with SSO",
       "issueType": "Bug",
@@ -227,6 +228,7 @@ Update fields on an existing Jira ticket.
   "params": {
     "name": "jira_update",
     "arguments": {
+      "allowWrites": true,
       "ticketKey": "PROJ-123",
       "status": "In Progress",
       "assignee": "me"
@@ -271,6 +273,7 @@ Save a Jira JQL query with a name for later reuse.
   "params": {
     "name": "jira_query_save",
     "arguments": {
+      "allowWrites": true,
       "name": "my-open-bugs",
       "query": "project = PROJ AND type = Bug AND status != Done"
     }
@@ -693,6 +696,7 @@ Mark a UI annotation as resolved with a summary of the changes made.
   "params": {
     "name": "ui_annotations_resolve",
     "arguments": {
+      "allowWrites": true,
       "id": "abc-123",
       "summary": "Increased font size to 24px for mobile"
     }
@@ -717,7 +721,9 @@ Clear all UI annotations from the dev server.
   "method": "tools/call",
   "params": {
     "name": "ui_annotations_clear",
-    "arguments": {}
+    "arguments": {
+      "allowWrites": true
+    }
   }
 }
 ```
@@ -913,6 +919,7 @@ Generate images from a text prompt. Saves files and returns paths plus metadata.
   "params": {
     "name": "images_generate",
     "arguments": {
+      "allowSpend": true,
       "prompt": "a fox reading a newspaper, watercolor",
       "quality": "low"
     }
@@ -1035,7 +1042,7 @@ Returns list of available tools.
 
 ### tools/call
 
-Executes a specific tool.
+Executes a specific tool. Direct Write calls require `allowWrites: true` in `arguments`; direct Spend calls require `allowSpend: true`. The server strips these permission fields before tool input validation. Read calls need neither field.
 
 **Request:**
 

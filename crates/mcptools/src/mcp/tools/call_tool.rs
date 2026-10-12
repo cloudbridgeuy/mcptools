@@ -1,5 +1,6 @@
 use super::{
-    aliases, handle_tools_call, is_meta_tool, registered_tools, JsonRpcError, ServeFlags, ToolKind,
+    aliases, dispatch_tool_call, is_meta_tool, registered_tools, CallToolParams, JsonRpcError,
+    ServeFlags, ToolKind,
 };
 
 pub const DESCRIPTION: &str = r#"Calls one catalog tool by name and returns its result unchanged, e.g. `await tools.mcptools.call_tool({ name: "linear_issue_list", input: { team: "GUZ" } })`. Use find_tools to look up names and input shapes. Write tools need allowWrites: true, spend tools need allowSpend: true."#;
@@ -69,8 +70,11 @@ pub async fn handle_call_tool(
         }
         _ => {}
     }
-    Box::pin(handle_tools_call(
-        Some(serde_json::json!({"name": name, "arguments": args.input})),
+    Box::pin(dispatch_tool_call(
+        CallToolParams {
+            name: name.to_string(),
+            arguments: args.input,
+        },
         global,
         flags,
     ))

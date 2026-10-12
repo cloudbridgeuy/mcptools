@@ -43,7 +43,7 @@ MCP server reference: [MCP Server](.claude/context/mcp-server.md).
 - **AND** do not delete, roll back, or retry creation
 
 ### Requirement: Discovery mode tool list
-The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **Discovery mode** on stdio and SSE. `MCPTOOLS_DISCOVERY` also accepts `y`, `yes`, `t`, `true`, `on`, `1`, `n`, `no`, `f`, `false`, `off`, and `0`, in upper or lower case. `tools/call` dispatches every registered tool by name in every mode.
+The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **Discovery mode** on stdio and SSE. `MCPTOOLS_DISCOVERY` also accepts `y`, `yes`, `t`, `true`, `on`, `1`, `n`, `no`, `f`, `false`, `off`, and `0`, in upper or lower case. `tools/call` accepts every registered tool name in every mode; direct Write calls require `allowWrites: true` and direct Spend calls require `allowSpend: true` in the arguments object.
 
 #### Scenario: Flag or env enables the mode
 - **WHEN** the server starts with `--discovery`, or with `MCPTOOLS_DISCOVERY=true` and no flag
@@ -51,18 +51,18 @@ The `--discovery` flag or `MCPTOOLS_DISCOVERY=true` starts the MCP server in **D
 
 #### Scenario: Default list
 - **WHEN** the server starts with neither mode flag nor either mode env var
-- **THEN** `tools/list` returns all 83 registered tools
+- **THEN** `tools/list` returns all 82 registered tools
 
 #### Scenario: Unlisted tool call
 - **WHEN** a client in **Discovery mode** sends `tools/call` with the name of a tool that `tools/list` did not return
-- **THEN** the server dispatches that tool and returns its result
+- **THEN** the server applies direct-call permission gating, then dispatches an authorized tool and returns its result
 
 #### Scenario: Invalid env value
 - **WHEN** `MCPTOOLS_DISCOVERY` holds a value outside the accepted list, including an empty value
 - **THEN** the process exits with code 2 and an error that says `value was not a boolean`
 
 ### Requirement: Code mode tool list
-The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in code mode on stdio and SSE. `MCPTOOLS_CODE_MODE` accepts the same values as `MCPTOOLS_DISCOVERY`; any other value exits with code 2. `tools/call` dispatches every registered tool by name in every mode.
+The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in code mode on stdio and SSE. `MCPTOOLS_CODE_MODE` accepts the same values as `MCPTOOLS_DISCOVERY`; any other value exits with code 2. `tools/call` accepts every registered tool name in every mode with the same direct Write and Spend permission gates.
 
 #### Scenario: Flag or env enables the mode
 - **WHEN** the server starts with `--code-mode`, or with `MCPTOOLS_CODE_MODE=true` and no flag
@@ -74,7 +74,7 @@ The `--code-mode` flag or `MCPTOOLS_CODE_MODE=true` starts the MCP server in cod
 
 #### Scenario: Unlisted tool call
 - **WHEN** a client in code mode sends `tools/call` with the name of a tool that `tools/list` did not return
-- **THEN** the server dispatches that tool and returns its result
+- **THEN** the server applies direct-call permission gating, then dispatches an authorized tool and returns its result
 
 #### Scenario: Code-mode usage text
 - **WHEN** `find_tools` runs in code mode, including a nested call inside `execute`
@@ -185,7 +185,7 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 - **THEN** the server returns a JSON-RPC error with code `-32602`
 
 ### Requirement: Linear initiative project linkage
-`linear_initiative_project_add` is an MCP-only Write. It requires an existing initiative UUID and an existing project UUID, or project name with team context. Both entities resolve before `initiativeToProjectCreate`. Output includes association id and initiative/project identities. Duplicate or hierarchy conflicts remain API errors; no mutation retry or entity creation. `call_tool` and `execute` require `allowWrites`.
+`linear_initiative_project_add` is an MCP-only Write. It requires an existing initiative UUID and an existing project UUID, or project name with team context. Both entities resolve before `initiativeToProjectCreate`. Output includes association id and initiative/project identities. Duplicate or hierarchy conflicts remain API errors; no mutation retry or entity creation. Direct `tools/call`, `call_tool`, and `execute` require `allowWrites`.
 
 ### Requirement: Linear chart rendering
 

@@ -105,7 +105,10 @@ async fn comments_map_payload_response_and_dispatch_in_all_modes() {
             .mount(&stub)
             .await;
         let result = match index {
-            0 => server.tools_call("bitbucket_pr_comment_add", args).await,
+            0 => {
+                args["allowWrites"] = json!(true);
+                server.tools_call("bitbucket_pr_comment_add", args).await
+            }
             1 => server
                 .tools_call(
                     "call_tool",
@@ -181,7 +184,7 @@ async fn invalid_comments_fail_before_http() {
         json!({"inline": {"path": "src/main.rs", "to": 1.5}}),
         json!({"inline": {"path": "src/main.rs", "to": 1, "start_to": 1}}),
     ] {
-        let mut input = json!({"repo": "workspace/repo", "prNumber": 123, "comment": "Review"});
+        let mut input = json!({"repo": "workspace/repo", "prNumber": 123, "comment": "Review", "allowWrites": true});
         input
             .as_object_mut()
             .unwrap()
@@ -218,7 +221,7 @@ async fn comment_http_and_response_errors_are_reported_without_retry() {
             .expect(1)
             .mount(&stub)
             .await;
-        let response = server.request(json!({"jsonrpc": "2.0", "id": 99, "method": "tools/call", "params": {"name": "bitbucket_pr_comment_add", "arguments": {"repo": "workspace/repo", "prNumber": 123, "comment": "Review"}}})).await;
+        let response = server.request(json!({"jsonrpc": "2.0", "id": 99, "method": "tools/call", "params": {"name": "bitbucket_pr_comment_add", "arguments": {"repo": "workspace/repo", "prNumber": 123, "comment": "Review", "allowWrites": true}}})).await;
         assert_eq!(response["error"]["code"], -32603, "{response}");
         assert!(
             response["error"]["message"]

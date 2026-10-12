@@ -1,4 +1,4 @@
-use crate::mcp::tools::handle_tools_call;
+use crate::mcp::tools::{dispatch_tool_call, CallToolParams};
 use crate::mcp::{JsonRpcError, Tool, ToolKind};
 use crate::sandbox::Bindings;
 use rquickjs::function::{Async, Opt};
@@ -39,13 +39,7 @@ async fn call<'js>(
     input: Option<Value<'js>>,
 ) -> rquickjs::Result<Value<'js>> {
     let arguments = arguments(&ctx, input)?;
-    match handle_tools_call(
-        Some(serde_json::json!({ "name": name, "arguments": arguments })),
-        &global,
-        flags,
-    )
-    .await
-    {
+    match dispatch_tool_call(CallToolParams { name, arguments }, &global, flags).await {
         Ok(envelope) => {
             let value = mcptools_core::sandbox::tool_result(envelope);
             let text = serde_json::to_string(&value)
@@ -214,14 +208,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_rejects_nonfinite_milestone_order_before_dispatch() {
         for number in ["NaN", "Infinity", "-Infinity"] {
-            let result = handle_tools_call(
-                Some(json!({
-                    "name": "execute",
-                    "arguments": {
+            let result = dispatch_tool_call(
+                CallToolParams {
+                    name: "execute".to_string(),
+                    arguments: Some(json!({
                         "code": format!("return await linear_project_milestone_create({{project: '12345678-1234-1234-1234-123456789abc', name: ' ', sortOrder: {number}}})"),
                         "allowWrites": true,
-                    },
-                })),
+                    })),
+                },
                 &test_global(),
                 test_flags(),
             )
@@ -325,8 +319,11 @@ mod tests {
         )
         .await;
         let result = run.outcome.unwrap();
-        let err = handle_tools_call(
-            Some(json!({"name": "jira_search", "arguments": {"jql": "x"}})),
+        let err = dispatch_tool_call(
+            CallToolParams {
+                name: "jira_search".to_string(),
+                arguments: Some(json!({"jql": "x"})),
+            },
             &global,
             test_flags(),
         )

@@ -89,7 +89,7 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `bitbucket_pr_read` | Read PR details/diff |
 | `bitbucket_pr_create` | Create a Bitbucket PR |
 | `bitbucket_pr_update` | Update a Bitbucket PR: metadata, reviewers, state |
-| `bitbucket_pr_comment_add` | Add a general or single-line inline PR comment (write; `allowWrites` required in discovery/Code Mode) |
+| `bitbucket_pr_comment_add` | Add a general or single-line inline PR comment (Write; `allowWrites` required) |
 
 ### Linear
 
@@ -101,7 +101,7 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `linear_issue_graph` | Bounded dependency closure, frontier, blocker status, and explicit truncation; no chart rendering or browser |
 | `linear_issue_create` | Create a Linear issue |
 | `linear_issue_update` | Update a Linear issue |
-| `linear_issue_delete` | Move a Linear issue to trash; never permanently delete; Write (`allowWrites` required in discovery/Code Mode) |
+| `linear_issue_delete` | Move a Linear issue to trash; never permanently delete; Write (`allowWrites` required) |
 | `linear_comment_list` | List comments on an issue |
 | `linear_comment_create` | Create a comment on an issue |
 | `linear_relation_list` | List relations on an issue |
@@ -115,14 +115,14 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `linear_initiative_list` | List workspace initiatives with case-sensitive name query; nullable description, targetDate and owner; limit 1–250, cursor, all (1000 pages maximum); MCP-only Read |
 | `linear_initiative_get` | Get initiative by required UUID; nullable metadata and Markdown content; every directly linked project including archived projects; 250 projects/page, 1000-page cap, no silent truncation; MCP-only Read |
 | `linear_document_get` | Get document by required UUID; title, nullable verbatim Markdown, timestamps, URL, nullable owner and project; MCP-only Read |
-| `linear_document_create` | Create a document attached to an existing project UUID or name with team; nonblank title, optional verbatim Markdown; complete document and project identity; MCP-only Write, requires `allowWrites` in discovery/code mode |
-| `linear_document_update` | Update document UUID with partial nonblank title or verbatim Markdown; empty content clears body, omitted fields unchanged; nullable project identity; MCP-only Write, requires `allowWrites` in discovery/code mode |
+| `linear_document_create` | Create a document attached to an existing project UUID or name with team; nonblank title, optional verbatim Markdown; complete document and project identity; MCP-only Write, requires `allowWrites` |
+| `linear_document_update` | Update document UUID with partial nonblank title or verbatim Markdown; empty content clears body, omitted fields unchanged; nullable project identity; MCP-only Write, requires `allowWrites` |
 | `linear_initiative_project_add` | Link existing initiative UUID to existing project UUID or name with team; returns association id and initiative/project identities; duplicate links and hierarchy conflicts fail without mutation retry; MCP-only Write (`allowWrites` required) |
 | `linear_project_milestone_list` | List milestones scoped to project UUID or name with team; nullable description/date; limit 1–250, cursor, all; Read |
 | `linear_project_milestone_create` | Create a milestone in project UUID or name with team; name required, verbatim Markdown description, YYYY-MM-DD targetDate, finite sortOrder; absent/null optionals omitted; Write |
 | `linear_project_milestone_update` | Partial milestone UUID update: name, verbatim description, targetDate, sortOrder; omission unchanged, explicit clearDescription/clearTargetDate set null; no project reassignment; Write |
 | `linear_project_create` | Create a project in one team with optional description and Markdown content |
-| `linear_project_update` | Partially update project properties by UUID or name with team; explicit clear flags; Write (`allowWrites` required in discovery/Code Mode) |
+| `linear_project_update` | Partially update project properties by UUID or name with team; explicit clear flags; Write (`allowWrites` required) |
 | `linear_project_update_create` | Create a progress report, not a property edit; project UUID or name with team, nonblank verbatim Markdown body, optional onTrack/atRisk/offTrack health; MCP-only Write (`allowWrites` required) |
 | `linear_project_update_list` | List published progress reports, not property changes; project UUID or name with team; verbatim body, health, timestamps, URL, project and pageInfo; createdAt API order; limit 1–250, cursor, all (1000 report pages maximum); MCP-only Read (no `allowWrites` required) |
 | `linear_user_list` | List users matching a query |
@@ -138,7 +138,7 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `lane_cleanup_plan` | Read-only advisory removal eligibility with typed blockers and bounded ignored-path evidence; no approval token |
 | `lane_create` | Create one guarded Worktrunk lane from an existing local base branch; write tool |
 
-All three deny access when the operator-controlled server environment `MCPTOOLS_LANE_REPOS` is unset or empty. Set an exact canonical path list, or explicitly set the whole value to `'*'` to authorize all otherwise-supported repository roots. Mixed wildcard/path lists and whitespace wildcards are invalid; repository-root, containment, identity, and executable-filter guards remain unchanged. Requests and repository configuration cannot opt in. `lane_create` needs `allowWrites: true` in `call_tool` and `execute`; `lane_cleanup_plan` is Read and needs neither write nor spend permission. Direct `tools/call` uses the existing write dispatch policy and the same repository guards. Omit plan `laneIds` to assess all registered worktrees, or pass 1 to 100 unique managed IDs; unknown IDs fail. Plans do not authorize deletion. No lane removal, cleanup execution, merge, or push tools exist. See [Lanes](lanes.md).
+All three deny access when the operator-controlled server environment `MCPTOOLS_LANE_REPOS` is unset or empty. Set an exact canonical path list, or explicitly set the whole value to `'*'` to authorize all otherwise-supported repository roots. Mixed wildcard/path lists and whitespace wildcards are invalid; repository-root, containment, identity, and executable-filter guards remain unchanged. Requests and repository configuration cannot opt in. `lane_create` needs `allowWrites: true` in direct `tools/call`, `call_tool`, and `execute`; `lane_cleanup_plan` is Read and needs neither write nor spend permission. Omit plan `laneIds` to assess all registered worktrees, or pass 1 to 100 unique managed IDs; unknown IDs fail. Plans do not authorize deletion. No lane removal, cleanup execution, merge, or push tools exist. See [Lanes](lanes.md).
 
 ### HackerNews
 
@@ -248,9 +248,11 @@ Limits come from the server flags `--execute-timeout-secs` (default 30),
 
 ## Agent loop
 
+Direct `tools/call` extracts and removes `allowWrites` and `allowSpend` before tool input validation. A Write tool runs only with `allowWrites: true`; a Spend tool runs only with `allowSpend: true`. Omitted or false permission denies the call before tool validation or I/O. Read tools need neither field. Plain `tools/list` schemas advertise the applicable optional field. Hidden aliases use the canonical tool kind. The `call_tool` and `execute` permission contracts are unchanged.
+
 1. Call `find_tools` with a task that names the system (e.g. "mark the Jira ticket done", not "mark it done").
 2. Read the returned `declaration` on the tool(s) of interest.
-3. Call the tool by name through `tools/call`.
+3. Call the tool by name through `tools/call`; include `allowWrites: true` or `allowSpend: true` in the arguments for Write or Spend tools.
 4. For a same-domain follow-up (e.g. `jira_comment_list` then `jira_comment_update`), call the follow-up tool directly; do not call `find_tools` again.
 5. `find_tools` is advisory: it never dispatches a tool, and Jev is consulted only inside `find_tools` itself, never in front of or around any other tool call.
 6. In discovery mode, call the tool through `call_tool({ name, input })`; it is listed beside `find_tools`.
@@ -262,8 +264,8 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 `on`, `1` enable the mode; `n`, `no`, `f`, `false`, `off`, `0` keep it off;
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
-`find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
-either discovery or code mode, hosts load all 86 schemas and Jev saves no context.
+`find_tools` then `call_tool`; `tools/call` still accepts every real tool name and applies direct-call permission gating. Without
+either discovery or code mode, hosts load all 82 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,
@@ -278,7 +280,7 @@ variable, with the same accepted values as `MCPTOOLS_DISCOVERY`. In this mode
 `await tools.mcptools.call_tool({ name: "linear_issue_list", input: { team: "GUZ" } })`
 (`allowWrites` and `allowSpend` gate write and spend tools; the meta tools
 cannot be called through it) and chain many calls with `execute`. Code mode wins over Discovery mode when both are enabled.
-`tools/call` still dispatches every real tool by name. The `find_tools`
+`tools/call` still accepts every real tool name and applies direct-call permission gating. The `find_tools`
 response `usage` field, also for nested `find_tools` calls inside `execute`,
 is `Call a single tool with tools.mcptools.call_tool, e.g. await tools.mcptools.call_tool({ name: "linear_issue_list", input: { team: "GUZ" } }). To chain many calls in one round trip, pass code as a string to tools.mcptools.execute, where each declared function is an async global (one fresh sandbox per call). The outer Code Mode scope has only find_tools, execute and call_tool; a declared name called there is a ReferenceError, not a TTL or expiry.`; other
 modes keep `Each declaration is the call signature: the input interface is
