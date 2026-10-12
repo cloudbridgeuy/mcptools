@@ -454,6 +454,22 @@ pub struct CommentCreateArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommentUpdateArgs {
+    #[schemars(description = "Comment id (not an issue id)")]
+    pub id: String,
+    #[schemars(description = "Replacement comment body; trimmed, must not be empty")]
+    pub body: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CommentDeleteArgs {
+    #[schemars(description = "Comment id (not an issue id)")]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct RelationAddArgs {
     #[schemars(description = "Source issue id or identifier (e.g. GUZ-84)")]
     pub source: String,

@@ -122,6 +122,8 @@ mcptools linear auth status
 mcptools linear issue get GUZ-79
 mcptools linear issue update GUZ-22 --state Done
 mcptools linear issue delete GUZ-22                 # moves to Linear trash; add --json
+mcptools linear comment update COMMENT_ID "Updated note" --json
+mcptools linear comment delete COMMENT_ID --json
 mcptools linear issue list --team GUZ --state "In Progress"
 mcptools linear issue list --assignee me --json
 mcptools linear teams list

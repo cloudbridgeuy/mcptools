@@ -67,6 +67,17 @@ Selector rules:
 - Issue update `--label` replaces the full label set; `--clear-labels` (alias `--clear-label`) empties it. The two flags reject when combined.
 - Issue delete accepts an issue UUID or identifier and moves it to Linear trash. It never permanently deletes the issue.
 
+### Comment edits and deletion
+
+```bash
+mcptools linear comment update COMMENT_ID "Updated note" --json
+mcptools linear comment delete COMMENT_ID --json
+```
+
+These commands take a comment id, not an issue id. Update returns the same comment shape as create. Delete returns `{"id": "COMMENT_ID"}`. Both reject blank ids before configuration or HTTP; update also rejects blank bodies. MCP calls require `allowWrites: true` in direct calls, `call_tool`, and `execute`; both advertise `destructiveHint: true`.
+
+The [official API schema](https://github.com/linear/linear/blob/master/packages/sdk/src/schema.graphql) documents `commentDelete(id: String!): DeletePayload!` as “Deletes a comment.” The payload has `success` and `entityId`; no trash/restore or `permanentlyDelete` option is documented for comments. The source does not specify retention or permanent removal. Do not assume issue trash behavior applies.
+
 ### Chart
 
 ```bash
@@ -115,7 +126,7 @@ arguments, results, and read policy in direct calls, `call_tool`, and inner
 `execute`. Discovery and declarations expose only `linear_issue_get`. This does
 not add a CLI alias or change other tool names.
 
-34 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+36 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -144,6 +155,8 @@ linear_issue_create (needs team, title; accepts labels string-or-array)
 linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent, labels, clearLabels; state and label names resolve from the issue identifier team, or team; labels replaces, clearLabels empties, the two reject when combined)
 linear_issue_delete (needs id; moves the issue to trash, never permanently deletes it; requires allowWrites)
 linear_comment_create (needs id, body; body trims, empty rejects)
+linear_comment_update (needs comment id, body; body trims, empty rejects; requires allowWrites)
+linear_comment_delete (needs comment id; requires allowWrites)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```
 

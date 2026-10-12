@@ -786,6 +786,48 @@ pub async fn handle_linear_comment_create(
     super::to_dual_result(created)
 }
 
+pub async fn handle_linear_comment_update(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::CommentUpdateArgs = parse_args(arguments)?;
+    mcptools_core::linear::comment_update_request(&args.id, &args.body).map_err(|error| {
+        JsonRpcError {
+            code: -32602,
+            message: format!("Invalid arguments: {error}"),
+            data: None,
+        }
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_comment_update: id={}", args.id);
+    }
+    let client = linear_client()?;
+    let updated = crate::linear::comments::comment_update_data(&client, &args.id, &args.body)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(updated)
+}
+
+pub async fn handle_linear_comment_delete(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::CommentDeleteArgs = parse_args(arguments)?;
+    mcptools_core::linear::comment_delete_request(&args.id).map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling linear_comment_delete: id={}", args.id);
+    }
+    let client = linear_client()?;
+    let deleted = crate::linear::comments::comment_delete_data(&client, &args.id)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(deleted)
+}
+
 pub async fn handle_linear_relation_add(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,
@@ -861,6 +903,100 @@ pub async fn handle_linear_cycle_list(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn comment_mutations_validate_and_require_write_permission() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for name in ["linear_comment_update", "linear_comment_delete"] {
+            let tool = super::super::registered_tools()
+                .into_iter()
+                .find(|tool| tool.name == name)
+                .unwrap();
+            assert_eq!(tool.kind, super::super::ToolKind::Write);
+            assert!(tool.destructive);
+            for flags in [
+                super::super::ServeFlags {
+                    discovery: false,
+                    code_mode: false,
+                },
+                super::super::ServeFlags {
+                    discovery: true,
+                    code_mode: false,
+                },
+                super::super::ServeFlags {
+                    discovery: false,
+                    code_mode: true,
+                },
+            ] {
+                for input in [
+                    serde_json::json!({}),
+                    serde_json::json!({"id": " ", "body": "note"}),
+                    serde_json::json!({"id": 1}),
+                    serde_json::json!({"id": "c1", "extra": true}),
+                ] {
+                    let direct = super::super::handle_tools_call(
+                        Some(serde_json::json!({"name": name, "arguments": input})),
+                        &global,
+                        flags,
+                    )
+                    .await
+                    .unwrap();
+                    assert!(direct["content"][0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("allowWrites"));
+                    let mut allowed = input.clone();
+                    allowed["allowWrites"] = serde_json::json!(true);
+                    assert_eq!(
+                        super::super::handle_tools_call(
+                            Some(serde_json::json!({"name": name, "arguments": allowed})),
+                            &global,
+                            flags
+                        )
+                        .await
+                        .unwrap_err()
+                        .code,
+                        -32602
+                    );
+                    for allow in [false, true] {
+                        let called = super::super::handle_tools_call(Some(serde_json::json!({"name": "call_tool", "arguments": {"name": name, "input": input, "allowWrites": allow}})), &global, flags).await;
+                        if allow {
+                            assert_eq!(called.unwrap_err().code, -32602);
+                        } else {
+                            assert!(called.unwrap()["content"][0]["text"]
+                                .as_str()
+                                .unwrap()
+                                .contains("allowWrites"));
+                        }
+                        let executed = super::super::handle_tools_call(Some(serde_json::json!({"name": "execute", "arguments": {"code": format!("return await {name}({input})"), "allowWrites": allow}})), &global, flags).await.unwrap();
+                        assert!(executed["structuredContent"]["error"]["message"]
+                            .as_str()
+                            .unwrap()
+                            .contains(if allow {
+                                "Invalid arguments:"
+                            } else {
+                                "allowWrites"
+                            }));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            super::handle_linear_comment_update(
+                Some(serde_json::json!({"id": "c1", "body": " "})),
+                &global
+            )
+            .await
+            .unwrap_err()
+            .code,
+            -32602
+        );
+    }
+
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]

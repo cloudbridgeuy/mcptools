@@ -20,6 +20,8 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
+    #[command(subcommand, about = "Comment operations")]
+    Comment(CommentCommands),
     /// Authentication and access checks
     #[command(subcommand)]
     Auth(AuthCommands),
@@ -52,6 +54,34 @@ pub enum Commands {
 pub enum AuthCommands {
     /// Show the viewer identity for LINEAR_API_KEY
     Status(StatusOptions),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum CommentCommands {
+    #[command(about = "Replace a Linear comment body")]
+    Update(CommentUpdateOptions),
+    #[command(
+        about = "Delete a Linear comment; the API does not specify trash versus permanent deletion and documents no restore operation"
+    )]
+    Delete(CommentDeleteOptions),
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct CommentUpdateOptions {
+    #[arg(value_name = "COMMENT_ID", help = "Comment id (not an issue id)")]
+    pub id: String,
+    #[arg(help = "Replacement comment body; trimmed, must not be empty")]
+    pub body: String,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct CommentDeleteOptions {
+    #[arg(value_name = "COMMENT_ID", help = "Comment id (not an issue id)")]
+    pub id: String,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -488,6 +518,10 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
         println!("Running Linear command...");
     }
     match app.command {
+        Commands::Comment(cmd) => match cmd {
+            CommentCommands::Update(options) => comment_update_handler(options).await,
+            CommentCommands::Delete(options) => comment_delete_handler(options).await,
+        },
         Commands::Auth(cmd) => match cmd {
             AuthCommands::Status(options) => status_handler(options).await,
         },
@@ -875,6 +909,32 @@ async fn issue_delete_handler(options: IssueDeleteOptions) -> Result<()> {
             "Moved {} ({}) to Linear trash",
             deleted.identifier, deleted.id
         );
+    }
+    Ok(())
+}
+
+async fn comment_update_handler(options: CommentUpdateOptions) -> Result<()> {
+    mcptools_core::linear::comment_update_request(&options.id, &options.body)?;
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let updated = comments::comment_update_data(&client, &options.id, &options.body).await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&updated)?);
+    } else {
+        println!("Updated comment {}: {}", updated.id, updated.body);
+    }
+    Ok(())
+}
+
+async fn comment_delete_handler(options: CommentDeleteOptions) -> Result<()> {
+    mcptools_core::linear::comment_delete_request(&options.id)?;
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let deleted = comments::comment_delete_data(&client, &options.id).await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&deleted)?);
+    } else {
+        println!("Deleted comment {}", deleted.id);
     }
     Ok(())
 }
@@ -1351,6 +1411,31 @@ async fn cycles_list_handler(options: TeamScopedListOptions) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn comment_mutation_cli_contract() {
+        use clap::{CommandFactory, Parser};
+        let update =
+            App::try_parse_from(["linear", "comment", "update", "c1", "note", "--json"]).unwrap();
+        assert!(
+            matches!(update.command, Commands::Comment(CommentCommands::Update(CommentUpdateOptions { id, body, json: true })) if id == "c1" && body == "note")
+        );
+        let delete = App::try_parse_from(["linear", "comment", "delete", "c1", "--json"]).unwrap();
+        assert!(
+            matches!(delete.command, Commands::Comment(CommentCommands::Delete(CommentDeleteOptions { id, json: true })) if id == "c1")
+        );
+        assert!(App::try_parse_from(["linear", "comment", "update", "c1"]).is_err());
+        assert!(App::try_parse_from(["linear", "comment", "delete"]).is_err());
+        let mut command = App::command();
+        let help = command
+            .find_subcommand_mut("comment")
+            .unwrap()
+            .find_subcommand_mut("delete")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(help.contains("does not specify trash versus permanent deletion"));
+    }
+
     use super::*;
     use clap::Parser;
 

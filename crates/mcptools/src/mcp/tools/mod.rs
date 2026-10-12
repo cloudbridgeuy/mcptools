@@ -870,6 +870,24 @@ pub fn registered_tools() -> Vec<Tool> {
             destructive: false,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::linear::Comment>(),
+            name: "linear_comment_update".to_string(),
+            description: "Replace a Linear comment body by comment id, not issue id. Body is trimmed and must not be empty. Returns id, body, URL, author, created_at. Requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::CommentUpdateArgs>(),
+            summary: "Replace a Linear comment body",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::linear::CommentDeleteOutput>(),
+            name: "linear_comment_delete".to_string(),
+            description: "Delete a Linear comment by comment id, not issue id. The API does not specify trash versus permanent deletion and documents no restore operation; do not assume issue trash behavior applies. Returns the deleted comment id. Requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::CommentDeleteArgs>(),
+            summary: "Delete a Linear comment",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::RelationAddOutput>(),
             name: "linear_relation_add".to_string(),
             description: "Add a relation between two Linear issues. Type is 'blocks' or 'related'. Returns status created or already_exists plus the relation. Requires LINEAR_API_KEY environment variable.".to_string(),
@@ -1245,6 +1263,12 @@ pub async fn dispatch_tool_call(
         "linear_comment_create" => {
             linear::handle_linear_comment_create(params.arguments, global).await
         }
+        "linear_comment_update" => {
+            linear::handle_linear_comment_update(params.arguments, global).await
+        }
+        "linear_comment_delete" => {
+            linear::handle_linear_comment_delete(params.arguments, global).await
+        }
         "linear_relation_add" => linear::handle_linear_relation_add(params.arguments, global).await,
         "linear_relation_remove" => {
             linear::handle_linear_relation_remove(params.arguments, global).await
@@ -1301,7 +1325,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 80);
+        assert_eq!(catalog.len(), 82);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1366,7 +1390,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 83);
+        assert_eq!(super::registered_tools().len(), 85);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1441,7 +1465,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 83);
+        assert_eq!(names(serve_flags(false)).len(), 85);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1531,6 +1555,8 @@ mod catalog_tests {
             "linear_project_update",
             "linear_issue_update",
             "linear_issue_delete",
+            "linear_comment_update",
+            "linear_comment_delete",
             "linear_relation_remove",
             "ui_annotations_resolve",
             "ui_annotations_clear",
@@ -1542,7 +1568,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 83);
+        assert_eq!(tools.len(), 85);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1568,7 +1594,7 @@ mod catalog_tests {
             .iter()
             .filter(|tool| tool["name"].as_str().unwrap().ends_with("_delete"))
             .collect();
-        assert_eq!(delete_tools.len(), 3);
+        assert_eq!(delete_tools.len(), 4);
         for tool in delete_tools {
             assert_eq!(tool["annotations"]["destructiveHint"], true, "{tool}");
         }
@@ -1601,6 +1627,8 @@ mod catalog_tests {
             "linear_issue_update",
             "linear_issue_delete",
             "linear_comment_create",
+            "linear_comment_update",
+            "linear_comment_delete",
             "linear_relation_add",
             "linear_relation_remove",
             "ui_annotations_resolve",
@@ -1670,7 +1698,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 83);
+        assert_eq!(union.len(), 85);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

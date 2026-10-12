@@ -104,6 +104,37 @@ pub async fn comment_create_data(
     })
 }
 
+pub async fn comment_update_data(
+    client: &reqwest::Client,
+    id: &str,
+    body: &str,
+) -> Result<mcptools_core::linear::Comment> {
+    let request = mcptools_core::linear::comment_update_request(id, body)
+        .map_err(|error| eyre!("{}", error))?;
+    let data = execute(
+        client,
+        mcptools_core::linear::COMMENT_UPDATE_MUTATION,
+        request["variables"].clone(),
+    )
+    .await?;
+    mcptools_core::linear::transform_comment_update(data).map_err(|error| eyre!("{}", error))
+}
+
+pub async fn comment_delete_data(
+    client: &reqwest::Client,
+    id: &str,
+) -> Result<mcptools_core::linear::CommentDeleteOutput> {
+    let request =
+        mcptools_core::linear::comment_delete_request(id).map_err(|error| eyre!("{}", error))?;
+    let data = execute(
+        client,
+        mcptools_core::linear::COMMENT_DELETE_MUTATION,
+        request["variables"].clone(),
+    )
+    .await?;
+    mcptools_core::linear::transform_comment_delete(data).map_err(|error| eyre!("{}", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

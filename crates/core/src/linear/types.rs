@@ -1727,7 +1727,14 @@ pub fn relation_add_input(issue: &str, related: &str, rel_type: &str) -> serde_j
 }
 
 pub fn transform_comment_create(data: serde_json::Value) -> Result<Comment, LinearError> {
-    let payload = match data.get("commentCreate") {
+    transform_comment_mutation(data, "commentCreate")
+}
+
+pub(super) fn transform_comment_mutation(
+    data: serde_json::Value,
+    mutation: &str,
+) -> Result<Comment, LinearError> {
+    let payload = match data.get(mutation) {
         None | Some(serde_json::Value::Null) => return Err(LinearError::MissingComments),
         Some(payload) => payload,
     };
@@ -1736,12 +1743,12 @@ pub fn transform_comment_create(data: serde_json::Value) -> Result<Comment, Line
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
     {
-        return Err(LinearError::GraphQl("comment creation failed".to_string()));
+        return Err(LinearError::GraphQl(format!("{mutation} failed")));
     }
     match payload.get("comment") {
-        None | Some(serde_json::Value::Null) => Err(LinearError::Parse(
-            "commentCreate.comment missing".to_string(),
-        )),
+        None | Some(serde_json::Value::Null) => {
+            Err(LinearError::Parse(format!("{mutation}.comment missing")))
+        }
         Some(comment) => {
             let raw: RawComment = serde_json::from_value(comment.clone())
                 .map_err(|e| LinearError::Parse(e.to_string()))?;

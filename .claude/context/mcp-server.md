@@ -104,6 +104,8 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `linear_issue_delete` | Move a Linear issue to trash; never permanently delete; Write (`allowWrites` required) |
 | `linear_comment_list` | List comments on an issue |
 | `linear_comment_create` | Create a comment on an issue |
+| `linear_comment_update` | Replace a comment body by comment id; requires allowWrites |
+| `linear_comment_delete` | Delete a comment by comment id; no API trash/restore operation documented; requires allowWrites |
 | `linear_relation_list` | List relations on an issue |
 | `linear_relation_add` | Add a relation between issues |
 | `linear_relation_remove` | Remove a relation by triple |
@@ -265,7 +267,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still accepts every real tool name and applies direct-call permission gating. Without
-either discovery or code mode, hosts load all 83 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 85 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

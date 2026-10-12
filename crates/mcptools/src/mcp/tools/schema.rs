@@ -179,6 +179,8 @@ mod tests {
             (input_schema_for::<IssueCreateArgs>(), vec!["team", "title"]),
             (input_schema_for::<IssueUpdateArgs>(), vec!["id"]),
             (input_schema_for::<CommentCreateArgs>(), vec!["id", "body"]),
+            (input_schema_for::<CommentUpdateArgs>(), vec!["id", "body"]),
+            (input_schema_for::<CommentDeleteArgs>(), vec!["id"]),
             (
                 input_schema_for::<RelationAddArgs>(),
                 vec!["related", "source", "type"],

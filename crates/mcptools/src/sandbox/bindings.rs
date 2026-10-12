@@ -255,13 +255,15 @@ mod tests {
         assert!(!read.contains(&"linear_project_update_create".to_string()));
         assert!(!read.contains(&"linear_initiative_project_add".to_string()));
         assert!(!read.contains(&"linear_issue_delete".to_string()));
+        assert!(!read.contains(&"linear_comment_update".to_string()));
+        assert!(!read.contains(&"linear_comment_delete".to_string()));
         assert!(!read.contains(&"bitbucket_pr_comment_add".to_string()));
         assert!(!read.contains(&"images_generate".to_string()));
         let all = bound_names(
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 81);
+        assert_eq!(all.len(), 83);
         assert!(all.contains(&"linear_document_create".to_string()));
         assert!(all.contains(&"linear_document_update".to_string()));
         assert!(!read.contains(&"linear_project_milestone_update".to_string()));
@@ -271,6 +273,8 @@ mod tests {
         assert!(all.contains(&"linear_project_update_create".to_string()));
         assert!(all.contains(&"linear_initiative_project_add".to_string()));
         assert!(all.contains(&"linear_issue_delete".to_string()));
+        assert!(all.contains(&"linear_comment_update".to_string()));
+        assert!(all.contains(&"linear_comment_delete".to_string()));
         assert!(all.contains(&"bitbucket_pr_comment_add".to_string()));
     }
 
