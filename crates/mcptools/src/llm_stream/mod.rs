@@ -14,7 +14,6 @@ use mcptools_core::llm_stream::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
-use tokio::sync::oneshot;
 
 const VERSION_UNSET: i64 = 0;
 const TERMINATION_GRACE: Duration = Duration::from_secs(2);
@@ -33,43 +32,16 @@ pub async fn run_with_timeout(
     run_with_paths(req, paths, timeout, Box::pin(std::future::pending())).await
 }
 
-pub async fn run_cancellable(
-    req: LlmStreamRequest,
-    cancel: oneshot::Receiver<()>,
-) -> Result<String, ContractError> {
-    let paths = resolve_paths()?;
-    let signal = async move {
-        let _ = cancel.await;
-    };
-    run_with_paths(
-        req,
-        paths,
-        Duration::from_secs(LLM_STREAM_TIMEOUT_SECS),
-        Box::pin(signal),
-    )
-    .await
-}
-
 pub(crate) async fn run_with_paths(
     req: LlmStreamRequest,
     paths: ResolvedPaths,
     timeout: Duration,
     cancel: CancelSignal<'_>,
 ) -> Result<String, ContractError> {
-    run_envelope_with_paths(req, paths, timeout, cancel)
-        .await
-        .map(|success| success.answer)
-}
-
-pub(crate) async fn run_envelope_with_paths(
-    req: LlmStreamRequest,
-    paths: ResolvedPaths,
-    timeout: Duration,
-    cancel: CancelSignal<'_>,
-) -> Result<mcptools_core::llm_stream::MachineSuccess, ContractError> {
     let secrets = collect_secrets(&paths);
     run_attempt(req, &paths, timeout, cancel)
         .await
+        .map(|success| success.answer)
         .map_err(|e| e.redacted(&secrets))
 }
 
@@ -322,7 +294,7 @@ mod tests {
     fn ollama_test_model(env: &HashMap<String, String>) -> String {
         env.get("LLM_STREAM_TEST_MODEL")
             .cloned()
-            .unwrap_or_else(|| "atlas".to_string())
+            .unwrap_or_else(|| "llama3.2".to_string())
     }
 
     fn ollama_test_base_url(env: &HashMap<String, String>) -> String {
@@ -496,6 +468,7 @@ mod tests {
 mod stub_tests {
     use super::*;
     use std::path::PathBuf;
+    use tokio::sync::oneshot;
 
     use super::TEST_SERIAL as SERIAL;
 

@@ -49,18 +49,6 @@ pdf = { version = "0.1.0", path = "crates/pdf" }
 rand = "0.8"
 image = { version = "0.25", default-features = false, features = ["png"] }
 fax = "0.2"
-tree-sitter = "0.24"
-tree-sitter-rust = "0.23"
-tree-sitter-javascript = "0.23"
-tree-sitter-typescript = "0.23"
-tree-sitter-python = "0.23"
-tree-sitter-go = "0.23"
-globset = "0.4"
-ignore = "0.4"
-rusqlite = { version = "0.34", features = ["bundled"] }
-sha2 = "0.10"
-tera = "1.20.0"
-toml = "0.8"
 schemars = "1.2"
 jsonschema = "0.56"
 rquickjs = { version = "0.14", features = ["futures"] }

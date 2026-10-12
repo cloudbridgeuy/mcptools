@@ -6,7 +6,6 @@ use mcptools_core::sandbox::Limits;
 use std::time::Duration;
 
 mod agent;
-mod atlas;
 mod atlassian;
 mod error;
 mod find_tools;
@@ -91,9 +90,6 @@ pub enum SubCommands {
     /// Agent setup, status, and uninstall
     Agent(crate::agent::App),
 
-    /// Code-aware repository index (symbol tree, peek, search)
-    Atlas(crate::atlas::App),
-
     /// Atlassian (Jira, Confluence) operations
     Atlassian(Box<crate::atlassian::App>),
 
@@ -130,7 +126,6 @@ async fn main() -> Result<()> {
 
     match app.command {
         SubCommands::Agent(sub_app) => crate::agent::run(sub_app, app.global).await,
-        SubCommands::Atlas(sub_app) => crate::atlas::run(sub_app, app.global).await,
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(*sub_app, app.global).await,
         SubCommands::FindTools(sub_app) => crate::find_tools::run(sub_app, app.global).await,
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
