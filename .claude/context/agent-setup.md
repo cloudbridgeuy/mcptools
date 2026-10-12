@@ -25,7 +25,7 @@ Targets: `codex`, `claude`, `opencode` (`opencode2` is an accepted alias), or `a
 
 ## Status
 
-`agent status` prints one `name: Health (detail)` line per target and writes no files. Health is one of `Live`, `MissingBinary`, `ObsoleteBinary`, `MissingAgent`, `UnsupportedVersion`, `UnwritableConfig`. Status performs no network calls.
+`agent status` prints one `name: Health (detail)` line per target and writes no files. Health is one of `Live`, `MissingBinary`, `ObsoleteBinary`, `MissingAgent`, `UnwritableConfig`. Status performs no network calls.
 
 ## Setup
 

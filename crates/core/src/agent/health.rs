@@ -20,7 +20,6 @@ pub enum Health {
     MissingBinary,
     ObsoleteBinary,
     MissingAgent,
-    UnsupportedVersion,
     UnwritableConfig,
     Live,
 }
@@ -64,7 +63,7 @@ pub fn agent_binaries(target: AgentTarget) -> &'static [&'static str] {
     match target {
         AgentTarget::Codex => &["codex"],
         AgentTarget::Claude => &["claude"],
-        AgentTarget::Opencode => &["opencode", "opencode2"],
+        AgentTarget::Opencode => &["opencode"],
         AgentTarget::All => &[],
     }
 }
@@ -248,13 +247,10 @@ mod tests {
     }
 
     #[test]
-    fn binaries_list_covers_opencode_pair() {
+    fn binaries_list_per_target() {
         assert_eq!(agent_binaries(AgentTarget::Codex), &["codex"]);
         assert_eq!(agent_binaries(AgentTarget::Claude), &["claude"]);
-        assert_eq!(
-            agent_binaries(AgentTarget::Opencode),
-            &["opencode", "opencode2"]
-        );
+        assert_eq!(agent_binaries(AgentTarget::Opencode), &["opencode"]);
         assert!(agent_binaries(AgentTarget::All).is_empty());
     }
 
