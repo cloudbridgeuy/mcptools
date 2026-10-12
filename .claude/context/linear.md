@@ -110,7 +110,7 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
-32 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+34 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -137,6 +137,7 @@ linear_project_update (project UUID, or name with team; partial property updates
 linear_project_update_create (needs project, nonblank Markdown body; names require team; optional health)
 linear_issue_create (needs team, title; accepts labels string-or-array)
 linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent, labels, clearLabels; state and label names resolve from the issue identifier team, or team; labels replaces, clearLabels empties, the two reject when combined)
+linear_issue_delete (needs id; moves the issue to trash, never permanently deletes it; requires allowWrites)
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```

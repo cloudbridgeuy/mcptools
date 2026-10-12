@@ -90,6 +90,7 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 | `linear_issue_graph` | Bounded dependency closure, frontier, blocker status, and explicit truncation; no chart rendering or browser |
 | `linear_issue_create` | Create a Linear issue |
 | `linear_issue_update` | Update a Linear issue |
+| `linear_issue_delete` | Move a Linear issue to trash; never permanently delete; Write (`allowWrites` required in discovery/Code Mode) |
 | `linear_comment_list` | List comments on an issue |
 | `linear_comment_create` | Create a comment on an issue |
 | `linear_relation_list` | List relations on an issue |
@@ -251,7 +252,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still dispatches every real tool by name. Without
-either discovery or code mode, hosts load all 81 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 86 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

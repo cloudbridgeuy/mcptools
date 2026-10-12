@@ -144,6 +144,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn linear_issue_delete_requires_allow_writes() {
+        let result = call(json!({"name": "linear_issue_delete", "input": {"id": "GUZ-479"}}))
+            .await
+            .unwrap();
+        assert_eq!(result["isError"], json!(true));
+        assert_eq!(
+            result["content"][0]["text"],
+            json!("linear_issue_delete is a write tool; pass allowWrites: true to call_tool")
+        );
+    }
+
+    #[tokio::test]
     async fn lane_create_requires_write_permission_before_dispatch() {
         let denied = call(json!({"name":"lane_create", "input":{}}))
             .await

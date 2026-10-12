@@ -364,6 +364,27 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn linear_issue_delete_requires_allow_writes() {
+        clear_offline_env();
+        let global = global_with(&[]);
+        let executed = call(
+            "execute",
+            json!({"code": "linear_issue_delete({id: 'GUZ-479'})"}),
+            &global,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            executed["structuredContent"]["error"],
+            json!({
+                "message": "linear_issue_delete is a write tool; pass allowWrites: true to execute",
+                "name": "ReferenceError"
+            })
+        );
+        assert_eq!(executed["isError"], json!(true));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn spend_tool_names_allow_spend_flag() {
         clear_offline_env();
         let global = global_with(&[]);

@@ -8,6 +8,12 @@ use mcptools_core::linear::{
     StateListOutput, TeamListOutput, UserListOutput,
 };
 
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct IssueDeleteOutput {
+    pub id: String,
+    pub identifier: String,
+}
+
 fn invalid(e: serde_json::Error) -> JsonRpcError {
     JsonRpcError {
         code: -32602,
@@ -73,6 +79,24 @@ pub async fn handle_linear_issue_get(
         .await
         .map_err(exec)?;
     super::to_dual_result(output)
+}
+
+pub async fn handle_linear_issue_delete(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::IssueDeleteArgs = parse_args(arguments)?;
+    if global.verbose {
+        eprintln!("Calling linear_issue_delete: id={}", args.id);
+    }
+    let client = linear_client()?;
+    let deleted = crate::linear::issue::issue_delete_data(&client, &args.id)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(IssueDeleteOutput {
+        id: deleted.id,
+        identifier: deleted.identifier,
+    })
 }
 
 pub async fn handle_linear_issue_list(

@@ -802,6 +802,14 @@ pub fn registered_tools() -> Vec<Tool> {
             kind: ToolKind::Write,
         },
         Tool {
+            output_schema: schema::output_schema_for::<linear::IssueDeleteOutput>(),
+            name: "linear_issue_delete".to_string(),
+            description: "Move one Linear issue by id or identifier to Linear trash. This never permanently deletes the issue. Returns the deleted issue id and identifier. Requires LINEAR_API_KEY and allowWrites in call_tool and execute.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::IssueDeleteArgs>(),
+            summary: "Move a Linear issue to trash",
+            kind: ToolKind::Write,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::Comment>(),
             name: "linear_comment_create".to_string(),
             description: "Create a comment on a Linear issue. Returns id, body, URL, author, createdAt. Requires LINEAR_API_KEY environment variable.".to_string(),
@@ -1084,6 +1092,7 @@ pub async fn handle_tools_call(
         "linear_cycle_list" => linear::handle_linear_cycle_list(params.arguments, global).await,
         "linear_issue_create" => linear::handle_linear_issue_create(params.arguments, global).await,
         "linear_issue_update" => linear::handle_linear_issue_update(params.arguments, global).await,
+        "linear_issue_delete" => linear::handle_linear_issue_delete(params.arguments, global).await,
         "linear_comment_create" => {
             linear::handle_linear_comment_create(params.arguments, global).await
         }
@@ -1143,7 +1152,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 82);
+        assert_eq!(catalog.len(), 83);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1209,7 +1218,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 85);
+        assert_eq!(super::registered_tools().len(), 86);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1286,7 +1295,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 85);
+        assert_eq!(names(serve_flags(false)).len(), 86);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1368,6 +1377,7 @@ mod catalog_tests {
             "linear_initiative_project_add",
             "linear_issue_create",
             "linear_issue_update",
+            "linear_issue_delete",
             "linear_comment_create",
             "linear_relation_add",
             "linear_relation_remove",
@@ -1379,7 +1389,7 @@ mod catalog_tests {
         let spend = ["images_generate", "images_edit", "images_vary"];
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 85);
+        assert_eq!(tools.len(), 86);
         let entry = |name: &str| {
             tools
                 .iter()
@@ -1398,7 +1408,7 @@ mod catalog_tests {
             .filter(|t| t["annotations"] == readonly)
             .count();
         assert_eq!(read_count, 53);
-        assert_eq!(read_count, 85 - mutable_names.len());
+        assert_eq!(read_count, 86 - mutable_names.len());
     }
 
     #[test]
@@ -1426,6 +1436,7 @@ mod catalog_tests {
             "linear_initiative_project_add",
             "linear_issue_create",
             "linear_issue_update",
+            "linear_issue_delete",
             "linear_comment_create",
             "linear_relation_add",
             "linear_relation_remove",
@@ -1499,7 +1510,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 85);
+        assert_eq!(union.len(), 86);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

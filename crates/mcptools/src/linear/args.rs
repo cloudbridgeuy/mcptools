@@ -14,6 +14,13 @@ pub struct IssueGetArgs {
     pub id: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IssueDeleteArgs {
+    #[schemars(description = "Issue id or identifier to move to Linear trash")]
+    pub id: String,
+}
+
 fn graph_default_limit() -> usize {
     100
 }

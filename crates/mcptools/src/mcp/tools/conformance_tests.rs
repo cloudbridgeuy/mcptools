@@ -97,6 +97,7 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "atlas_status" => roundtrip::<super::atlas::AtlasTextOutput>(value),
         "linear_auth_status" => roundtrip::<mcptools_core::linear::Viewer>(value),
         "linear_issue_get" => roundtrip::<mcptools_core::linear::IssueGetOutput>(value),
+        "linear_issue_delete" => roundtrip::<super::linear::IssueDeleteOutput>(value),
         "linear_issue_list" => roundtrip::<mcptools_core::linear::IssueListOutput>(value),
         "linear_issue_graph" => roundtrip::<mcptools_core::linear::IssueGraphOutput>(value),
         "linear_comment_list" => roundtrip::<mcptools_core::linear::CommentListOutput>(value),
