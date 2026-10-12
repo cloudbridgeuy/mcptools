@@ -1,10 +1,11 @@
 use crate::linear::client::execute;
 use crate::prelude::*;
 use mcptools_core::linear::{
-    format_label_candidates, is_uuid, issue_create_input, issue_filter_value, issue_sort_value,
-    issue_update_input, match_label, match_state, parse_label_selector, parse_state_selector,
-    team_key_from_identifier, transform_issue_create, transform_issue_update, Activity,
-    IssueGetOutput, IssueListFilter, IssueMini, IssueSort, LabelResolution, StateResolution,
+    format_label_candidates, is_uuid, issue_create_input, issue_delete_request, issue_filter_value,
+    issue_sort_value, issue_update_input, match_label, match_state, parse_label_selector,
+    parse_state_selector, team_key_from_identifier, transform_issue_create, transform_issue_delete,
+    transform_issue_update, Activity, DeletedIssue, IssueGetOutput, IssueListFilter, IssueMini,
+    IssueSort, LabelResolution, StateResolution,
 };
 
 pub const ISSUE_QUERY: &str =
@@ -68,6 +69,21 @@ pub async fn issue_get_output(client: &reqwest::Client, id: &str) -> Result<Issu
         blocked_by: snapshot.blocked_by,
         comments,
         activity,
+    })
+}
+
+pub async fn issue_delete_data(client: &reqwest::Client, id: &str) -> Result<DeletedIssue> {
+    let request = issue_delete_request(id).map_err(|error| eyre!("{}", error))?;
+    let query = request["query"]
+        .as_str()
+        .ok_or_else(|| eyre!("Linear issue delete request has no query"))?;
+    let variables = request["variables"].clone();
+    let data = execute(client, query, variables).await?;
+    transform_issue_delete(data).map_err(|error| match error {
+        mcptools_core::linear::LinearError::MissingIssue => {
+            eyre!("Linear issue not found: {}", id.trim())
+        }
+        other => eyre!("{}", other),
     })
 }
 

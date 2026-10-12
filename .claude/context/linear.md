@@ -49,6 +49,10 @@ mcptools linear issue update GUZ-22 --state Done
 mcptools linear issue update GUZ-22 --state Done --team GUZ
 mcptools linear issue update GUZ-22 --label docs,api
 mcptools linear issue update GUZ-22 --clear-labels
+
+# Move an issue to Linear trash; this never permanently deletes it
+mcptools linear issue delete GUZ-22
+mcptools linear issue delete GUZ-22 --json
 ```
 
 Selector rules:
@@ -61,6 +65,7 @@ Selector rules:
 - `--sort` accepts `priority` or `updatedAt`. Omitted, the order stays newest-first.
 - Issue update `--state` and `--label` names resolve from the issue identifier team (`GUZ-22` → `GUZ`). `--team` overrides. UUID issue ids still need `--team` or a state/label UUID.
 - Issue update `--label` replaces the full label set; `--clear-labels` (alias `--clear-label`) empties it. The two flags reject when combined.
+- Issue delete accepts an issue UUID or identifier and moves it to Linear trash. It never permanently deletes the issue.
 
 ### Chart
 

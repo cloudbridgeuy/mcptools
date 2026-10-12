@@ -64,6 +64,8 @@ pub enum IssueCommands {
     Create(IssueCreateOptions),
     #[command(about = "Update one issue")]
     Update(IssueUpdateOptions),
+    #[command(about = "Move one issue to Linear trash")]
+    Delete(IssueDeleteOptions),
     /// Comment operations
     #[command(subcommand)]
     Comments(IssueCommentsCommands),
@@ -341,6 +343,14 @@ pub struct IssueUpdateOptions {
 }
 
 #[derive(Debug, clap::Args, Clone)]
+pub struct IssueDeleteOptions {
+    #[arg(help = "Issue id or identifier")]
+    pub id: String,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
 pub struct TeamsListOptions {
     /// Max items per page
     #[arg(long, default_value = "25")]
@@ -486,6 +496,7 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
             IssueCommands::List(options) => issues_list_handler(options).await,
             IssueCommands::Create(options) => issue_create_handler(options).await,
             IssueCommands::Update(options) => issue_update_handler(options).await,
+            IssueCommands::Delete(options) => issue_delete_handler(options).await,
             IssueCommands::Comments(cmd) => match cmd {
                 IssueCommentsCommands::List(options) => comments_list_handler(options).await,
                 IssueCommentsCommands::Create(options) => comments_create_handler(options).await,
@@ -849,6 +860,21 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
             found.parent.as_deref().unwrap_or("")
         ]);
         table.printstd();
+    }
+    Ok(())
+}
+
+async fn issue_delete_handler(options: IssueDeleteOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let deleted = issue::issue_delete_data(&client, &options.id).await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&deleted)?);
+    } else {
+        println!(
+            "Moved {} ({}) to Linear trash",
+            deleted.identifier, deleted.id
+        );
     }
     Ok(())
 }
