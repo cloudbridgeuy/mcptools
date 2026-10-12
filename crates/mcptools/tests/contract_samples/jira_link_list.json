@@ -1,0 +1,14 @@
+{
+  "issue_key": "PROJ-1",
+  "links": [
+    {
+      "direction": "outward",
+      "id": "10001",
+      "link_type": "Blocks",
+      "other_issue_key": "PROJ-2",
+      "relation": "blocks",
+      "status": "Open",
+      "summary": "Ship the dependency"
+    }
+  ]
+}

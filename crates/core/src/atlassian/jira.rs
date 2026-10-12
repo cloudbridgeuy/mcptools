@@ -447,12 +447,365 @@ pub struct JiraTransition {
     pub id: String,
     pub name: String,
     pub to: JiraStatus,
+    #[serde(rename = "isAvailable", default)]
+    pub is_available: Option<bool>,
+    #[serde(rename = "hasScreen", default)]
+    pub has_screen: Option<bool>,
 }
 
 /// Transitions response from Jira API
 #[derive(Debug, Deserialize, Clone)]
 pub struct JiraTransitionsResponse {
     pub transitions: Vec<JiraTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransitionListRequest {
+    pub url: String,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct TransitionOutput {
+    pub id: String,
+    pub name: String,
+    pub to_status: String,
+    pub is_available: Option<bool>,
+    pub has_screen: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct TransitionListOutput {
+    pub issue_key: String,
+    pub transitions: Vec<TransitionOutput>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IssueLinkListRequest {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IssueLinkTypeListRequest {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IssueLinkDeleteRequest {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IssueLinkCreateRequest {
+    pub url: String,
+    pub body: LinkIssueRequest,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+pub struct LinkIssueRequest {
+    #[serde(rename = "type")]
+    pub link_type: IssueLinkTypeReference,
+    #[serde(rename = "outwardIssue")]
+    pub outward_issue: IssueLinkIssueReference,
+    #[serde(rename = "inwardIssue")]
+    pub inward_issue: IssueLinkIssueReference,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+pub struct IssueLinkTypeReference {
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq)]
+pub struct IssueLinkIssueReference {
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct JiraIssueLinkType {
+    pub id: String,
+    pub name: String,
+    pub inward: String,
+    pub outward: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct JiraIssueLink {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub link_type: JiraIssueLinkType,
+    #[serde(rename = "inwardIssue", default)]
+    pub inward_issue: Option<JiraLinkedIssue>,
+    #[serde(rename = "outwardIssue", default)]
+    pub outward_issue: Option<JiraLinkedIssue>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct JiraLinkedIssue {
+    pub key: String,
+    pub fields: JiraLinkedIssueFields,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct JiraLinkedIssueFields {
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub status: Option<JiraStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JiraIssueLinksResponse {
+    fields: JiraIssueLinksFields,
+}
+
+#[derive(Debug, Deserialize)]
+struct JiraIssueLinksFields {
+    #[serde(rename = "issuelinks", default)]
+    issue_links: Vec<JiraIssueLink>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JiraIssueLinkTypesResponse {
+    #[serde(rename = "issueLinkTypes", default)]
+    issue_link_types: Vec<JiraIssueLinkType>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum IssueLinkDirection {
+    Inward,
+    Outward,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct IssueLinkOutput {
+    pub id: String,
+    pub link_type: String,
+    pub direction: IssueLinkDirection,
+    pub relation: String,
+    pub other_issue_key: String,
+    pub summary: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct IssueLinkListOutput {
+    pub issue_key: String,
+    pub links: Vec<IssueLinkOutput>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct IssueLinkTypeOutput {
+    pub id: String,
+    pub name: String,
+    pub inward: String,
+    pub outward: String,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct IssueLinkTypeListOutput {
+    pub link_types: Vec<IssueLinkTypeOutput>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct IssueLinkCreateOutput {
+    pub created: bool,
+    pub from_issue: String,
+    pub link_type: String,
+    pub to_issue: String,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct IssueLinkDeleteOutput {
+    pub deleted: bool,
+    pub link_id: String,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq)]
+pub enum JiraRequestError {
+    #[error("invalid Jira base URL: {0}")]
+    InvalidBaseUrl(String),
+    #[error("{0} must not be blank")]
+    BlankValue(&'static str),
+    #[error("invalid Jira response: {0}")]
+    InvalidResponse(String),
+}
+
+pub fn build_transition_list_request(
+    base_url: &str,
+    issue_key: &str,
+) -> Result<TransitionListRequest, JiraRequestError> {
+    Ok(TransitionListRequest {
+        url: build_jira_url(
+            base_url,
+            &["issue", nonblank("issue key", issue_key)?, "transitions"],
+        )?,
+    })
+}
+
+pub fn parse_transitions_response(
+    response: &str,
+) -> Result<JiraTransitionsResponse, JiraRequestError> {
+    serde_json::from_str(response)
+        .map_err(|error| JiraRequestError::InvalidResponse(error.to_string()))
+}
+
+pub fn build_transition_list_output(
+    issue_key: &str,
+    response: JiraTransitionsResponse,
+) -> TransitionListOutput {
+    TransitionListOutput {
+        issue_key: issue_key.to_string(),
+        transitions: response
+            .transitions
+            .into_iter()
+            .map(|transition| TransitionOutput {
+                id: transition.id,
+                name: transition.name,
+                to_status: transition.to.name,
+                is_available: transition.is_available,
+                has_screen: transition.has_screen,
+            })
+            .collect(),
+    }
+}
+
+pub fn build_issue_link_list_request(
+    base_url: &str,
+    issue_key: &str,
+) -> Result<IssueLinkListRequest, JiraRequestError> {
+    let mut url = build_jira_url(base_url, &["issue", nonblank("issue key", issue_key)?])?;
+    let mut parsed = reqwest::Url::parse(&url)
+        .map_err(|error| JiraRequestError::InvalidBaseUrl(error.to_string()))?;
+    parsed.query_pairs_mut().append_pair("fields", "issuelinks");
+    url = parsed.into();
+    Ok(IssueLinkListRequest { url })
+}
+
+pub fn parse_issue_links_response(
+    issue_key: &str,
+    response: &str,
+) -> Result<IssueLinkListOutput, JiraRequestError> {
+    let response: JiraIssueLinksResponse = serde_json::from_str(response)
+        .map_err(|error| JiraRequestError::InvalidResponse(error.to_string()))?;
+    let links = response
+        .fields
+        .issue_links
+        .into_iter()
+        .map(flatten_issue_link)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(IssueLinkListOutput {
+        issue_key: issue_key.to_string(),
+        links,
+    })
+}
+
+pub fn build_issue_link_type_list_request(
+    base_url: &str,
+) -> Result<IssueLinkTypeListRequest, JiraRequestError> {
+    Ok(IssueLinkTypeListRequest {
+        url: build_jira_url(base_url, &["issueLinkType"])?,
+    })
+}
+
+pub fn parse_issue_link_types_response(
+    response: &str,
+) -> Result<IssueLinkTypeListOutput, JiraRequestError> {
+    let response: JiraIssueLinkTypesResponse = serde_json::from_str(response)
+        .map_err(|error| JiraRequestError::InvalidResponse(error.to_string()))?;
+    Ok(IssueLinkTypeListOutput {
+        link_types: response
+            .issue_link_types
+            .into_iter()
+            .map(|link_type| IssueLinkTypeOutput {
+                id: link_type.id,
+                name: link_type.name,
+                inward: link_type.inward,
+                outward: link_type.outward,
+            })
+            .collect(),
+    })
+}
+
+pub fn build_issue_link_create_request(
+    base_url: &str,
+    from_issue: &str,
+    link_type: &str,
+    to_issue: &str,
+) -> Result<IssueLinkCreateRequest, JiraRequestError> {
+    Ok(IssueLinkCreateRequest {
+        url: build_jira_url(base_url, &["issueLink"])?,
+        body: LinkIssueRequest {
+            link_type: IssueLinkTypeReference {
+                name: nonblank("link type", link_type)?.to_string(),
+            },
+            outward_issue: IssueLinkIssueReference {
+                key: nonblank("to issue", to_issue)?.to_string(),
+            },
+            inward_issue: IssueLinkIssueReference {
+                key: nonblank("from issue", from_issue)?.to_string(),
+            },
+        },
+    })
+}
+
+pub fn build_issue_link_delete_request(
+    base_url: &str,
+    link_id: &str,
+) -> Result<IssueLinkDeleteRequest, JiraRequestError> {
+    Ok(IssueLinkDeleteRequest {
+        url: build_jira_url(base_url, &["issueLink", nonblank("link id", link_id)?])?,
+    })
+}
+
+fn nonblank<'a>(name: &'static str, value: &'a str) -> Result<&'a str, JiraRequestError> {
+    let value = value.trim();
+    if value.is_empty() {
+        Err(JiraRequestError::BlankValue(name))
+    } else {
+        Ok(value)
+    }
+}
+
+fn build_jira_url(base_url: &str, segments: &[&str]) -> Result<String, JiraRequestError> {
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|error| JiraRequestError::InvalidBaseUrl(error.to_string()))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(JiraRequestError::InvalidBaseUrl(base_url.to_string()));
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    {
+        let mut path = url
+            .path_segments_mut()
+            .map_err(|_| JiraRequestError::InvalidBaseUrl(base_url.to_string()))?;
+        path.pop_if_empty();
+        path.extend(["rest", "api", "3"]);
+        path.extend(segments.iter().copied());
+    }
+    Ok(url.into())
+}
+
+fn flatten_issue_link(link: JiraIssueLink) -> Result<IssueLinkOutput, JiraRequestError> {
+    let (direction, relation, issue) = match (link.inward_issue, link.outward_issue) {
+        (Some(issue), None) => (IssueLinkDirection::Inward, link.link_type.inward, issue),
+        (None, Some(issue)) => (IssueLinkDirection::Outward, link.link_type.outward, issue),
+        _ => {
+            return Err(JiraRequestError::InvalidResponse(format!(
+                "issue link {} must contain exactly one linked issue",
+                link.id
+            )))
+        }
+    };
+    Ok(IssueLinkOutput {
+        id: link.id,
+        link_type: link.link_type.name,
+        direction,
+        relation,
+        other_issue_key: issue.key,
+        summary: issue.fields.summary,
+        status: issue.fields.status.map(|status| status.name),
+    })
 }
 
 /// User search result from Jira API
@@ -1114,6 +1467,107 @@ pub struct CommentDeleteOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transition_request_and_parser_build_structured_output() {
+        let request =
+            build_transition_list_request("https://example.atlassian.net/", "PROJ-1").unwrap();
+        assert_eq!(
+            request.url,
+            "https://example.atlassian.net/rest/api/3/issue/PROJ-1/transitions"
+        );
+        let parsed = parse_transitions_response(
+            r#"{"transitions":[{"id":"21","name":"Start progress","to":{"name":"In Progress"},"isAvailable":true,"hasScreen":false},{"id":"31","name":"Done","to":{"name":"Done"}}]}"#,
+        )
+        .unwrap();
+        let output = build_transition_list_output("PROJ-1", parsed);
+        assert_eq!(output.issue_key, "PROJ-1");
+        assert_eq!(output.transitions.len(), 2);
+        assert_eq!(output.transitions[0].to_status, "In Progress");
+        assert_eq!(output.transitions[0].is_available, Some(true));
+        assert_eq!(output.transitions[0].has_screen, Some(false));
+        assert_eq!(output.transitions[1].is_available, None);
+    }
+
+    #[test]
+    fn issue_link_list_parser_uses_the_matching_relation_text() {
+        let request =
+            build_issue_link_list_request("https://example.atlassian.net", "PROJ-1").unwrap();
+        assert_eq!(
+            request.url,
+            "https://example.atlassian.net/rest/api/3/issue/PROJ-1?fields=issuelinks"
+        );
+        let output = parse_issue_links_response(
+            "PROJ-1",
+            r#"{"fields":{"issuelinks":[{"id":"10001","type":{"id":"10000","name":"Blocks","inward":"is blocked by","outward":"blocks"},"outwardIssue":{"key":"PROJ-2","fields":{"summary":"Second","status":{"name":"Open"}}}},{"id":"10002","type":{"id":"10000","name":"Blocks","inward":"is blocked by","outward":"blocks"},"inwardIssue":{"key":"PROJ-3","fields":{"summary":"Third","status":{"name":"Done"}}}}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(output.links.len(), 2);
+        assert_eq!(output.links[0].direction, IssueLinkDirection::Outward);
+        assert_eq!(output.links[0].relation, "blocks");
+        assert_eq!(output.links[0].other_issue_key, "PROJ-2");
+        assert_eq!(output.links[1].direction, IssueLinkDirection::Inward);
+        assert_eq!(output.links[1].relation, "is blocked by");
+        assert_eq!(output.links[1].status.as_deref(), Some("Done"));
+    }
+
+    #[test]
+    fn issue_link_parser_rejects_ambiguous_link_ends() {
+        let error = parse_issue_links_response(
+            "PROJ-1",
+            r#"{"fields":{"issuelinks":[{"id":"10001","type":{"id":"10000","name":"Blocks","inward":"is blocked by","outward":"blocks"}}]}}"#,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            JiraRequestError::InvalidResponse(
+                "issue link 10001 must contain exactly one linked issue".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn issue_link_create_maps_outward_relation_to_jira_opposite_end_fields() {
+        let request = build_issue_link_create_request(
+            "https://example.atlassian.net",
+            "PROJ-1",
+            "Blocks",
+            "PROJ-2",
+        )
+        .unwrap();
+        assert_eq!(
+            request.url,
+            "https://example.atlassian.net/rest/api/3/issueLink"
+        );
+        assert_eq!(
+            serde_json::to_value(request.body).unwrap(),
+            serde_json::json!({
+                "type": {"name": "Blocks"},
+                "inwardIssue": {"key": "PROJ-1"},
+                "outwardIssue": {"key": "PROJ-2"}
+            })
+        );
+    }
+
+    #[test]
+    fn issue_link_type_and_delete_requests_parse_and_escape() {
+        let types = build_issue_link_type_list_request("https://example.atlassian.net").unwrap();
+        assert_eq!(
+            types.url,
+            "https://example.atlassian.net/rest/api/3/issueLinkType"
+        );
+        let output = parse_issue_link_types_response(
+            r#"{"issueLinkTypes":[{"id":"10000","name":"Blocks","inward":"is blocked by","outward":"blocks"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(output.link_types[0].outward, "blocks");
+        let delete =
+            build_issue_link_delete_request("https://example.atlassian.net", "10/20").unwrap();
+        assert_eq!(
+            delete.url,
+            "https://example.atlassian.net/rest/api/3/issueLink/10%2F20"
+        );
+    }
 
     // Helper to create a basic issue response for testing
     fn create_issue_response(
@@ -1821,6 +2275,8 @@ mod tests {
                 to: JiraStatus {
                     name: "In Progress".to_string(),
                 },
+                is_available: None,
+                has_screen: None,
             },
             JiraTransition {
                 id: "2".to_string(),
@@ -1828,6 +2284,8 @@ mod tests {
                 to: JiraStatus {
                     name: "Done".to_string(),
                 },
+                is_available: None,
+                has_screen: None,
             },
         ];
 
@@ -1847,6 +2305,8 @@ mod tests {
             to: JiraStatus {
                 name: "Done".to_string(),
             },
+            is_available: None,
+            has_screen: None,
         }];
 
         // Act: Find transition with different case
@@ -1865,6 +2325,8 @@ mod tests {
             to: JiraStatus {
                 name: "In Progress".to_string(),
             },
+            is_available: None,
+            has_screen: None,
         }];
 
         // Act: Find non-existent transition

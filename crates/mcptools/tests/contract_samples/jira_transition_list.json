@@ -1,0 +1,12 @@
+{
+  "issue_key": "PROJ-1",
+  "transitions": [
+    {
+      "has_screen": false,
+      "id": "21",
+      "is_available": true,
+      "name": "Start progress",
+      "to_status": "In Progress"
+    }
+  ]
+}

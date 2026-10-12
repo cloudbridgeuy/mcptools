@@ -1,0 +1,10 @@
+{
+  "link_types": [
+    {
+      "id": "10000",
+      "inward": "is blocked by",
+      "name": "Blocks",
+      "outward": "blocks"
+    }
+  ]
+}

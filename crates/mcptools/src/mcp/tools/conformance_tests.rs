@@ -36,6 +36,19 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "jira_create" => roundtrip::<mcptools_core::atlassian::jira::TicketOutput>(value),
         "jira_get" => roundtrip::<mcptools_core::atlassian::jira::TicketOutput>(value),
         "jira_update" => roundtrip::<mcptools_core::atlassian::jira::UpdateOutput>(value),
+        "jira_transition_list" => {
+            roundtrip::<mcptools_core::atlassian::jira::TransitionListOutput>(value)
+        }
+        "jira_link_list" => roundtrip::<mcptools_core::atlassian::jira::IssueLinkListOutput>(value),
+        "jira_link_type_list" => {
+            roundtrip::<mcptools_core::atlassian::jira::IssueLinkTypeListOutput>(value)
+        }
+        "jira_link_create" => {
+            roundtrip::<mcptools_core::atlassian::jira::IssueLinkCreateOutput>(value)
+        }
+        "jira_link_delete" => {
+            roundtrip::<mcptools_core::atlassian::jira::IssueLinkDeleteOutput>(value)
+        }
         "jira_comment_add" => roundtrip::<mcptools_core::atlassian::jira::CommentOutput>(value),
         "jira_comment_list" => {
             roundtrip::<mcptools_core::atlassian::jira::CommentListOutput>(value)

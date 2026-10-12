@@ -30,6 +30,35 @@ pub(crate) struct JiraGetArgs {
     issue_key: String,
 }
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraTransitionListArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraLinkListArgs {
+    #[serde(rename = "issueKey")]
+    issue_key: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraLinkCreateArgs {
+    #[serde(rename = "fromIssue")]
+    #[schemars(description = "Issue using the outward relation; maps to Jira inwardIssue")]
+    from_issue: String,
+    #[serde(rename = "linkType")]
+    #[schemars(description = "Jira issue link type name, such as Blocks")]
+    link_type: String,
+    #[serde(rename = "toIssue")]
+    #[schemars(description = "Issue using the inward relation; maps to Jira outwardIssue")]
+    to_issue: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraLinkDeleteArgs {
+    #[serde(rename = "linkId")]
+    link_id: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraLinkTypeListArgs {}
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct JiraSprintListArgs {
     #[serde(rename = "boardId")]
     board_id: u64,
@@ -378,6 +407,164 @@ pub async fn handle_jira_get(
         })?;
 
     super::to_dual_result(ticket_data)
+}
+
+pub async fn handle_jira_transition_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: JiraTransitionListArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|error| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {error}"),
+                data: None,
+            }
+        })?;
+    if global.verbose {
+        eprintln!("Calling jira_transition_list: issueKey={}", args.issue_key);
+    }
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {error}"),
+        data: None,
+    })?;
+    let output = crate::atlassian::jira::transition::list_transitions_data(args.issue_key, &config)
+        .await
+        .map_err(|error| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {error}"),
+            data: None,
+        })?;
+    super::to_dual_result(output)
+}
+
+pub async fn handle_jira_link_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: JiraLinkListArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|error| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {error}"),
+                data: None,
+            }
+        })?;
+    if global.verbose {
+        eprintln!("Calling jira_link_list: issueKey={}", args.issue_key);
+    }
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {error}"),
+        data: None,
+    })?;
+    let output = crate::atlassian::jira::link::list_issue_links_data(args.issue_key, &config)
+        .await
+        .map_err(|error| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {error}"),
+            data: None,
+        })?;
+    super::to_dual_result(output)
+}
+
+pub async fn handle_jira_link_type_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let _: JiraLinkTypeListArgs = serde_json::from_value(
+        arguments.unwrap_or_else(|| serde_json::json!({})),
+    )
+    .map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!("Calling jira_link_type_list");
+    }
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {error}"),
+        data: None,
+    })?;
+    let output = crate::atlassian::jira::link::list_issue_link_types_data(&config)
+        .await
+        .map_err(|error| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {error}"),
+            data: None,
+        })?;
+    super::to_dual_result(output)
+}
+
+pub async fn handle_jira_link_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: JiraLinkCreateArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|error| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {error}"),
+                data: None,
+            }
+        })?;
+    if global.verbose {
+        eprintln!(
+            "Calling jira_link_create: fromIssue={}, linkType={}, toIssue={}",
+            args.from_issue, args.link_type, args.to_issue
+        );
+    }
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {error}"),
+        data: None,
+    })?;
+    let output = crate::atlassian::jira::link::create_issue_link_data(
+        args.from_issue,
+        args.link_type,
+        args.to_issue,
+        &config,
+    )
+    .await
+    .map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {error}"),
+        data: None,
+    })?;
+    super::to_dual_result(output)
+}
+
+pub async fn handle_jira_link_delete(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: JiraLinkDeleteArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|error| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {error}"),
+                data: None,
+            }
+        })?;
+    if global.verbose {
+        eprintln!("Calling jira_link_delete: linkId={}", args.link_id);
+    }
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {error}"),
+        data: None,
+    })?;
+    let output = crate::atlassian::jira::link::delete_issue_link_data(args.link_id, &config)
+        .await
+        .map_err(|error| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {error}"),
+            data: None,
+        })?;
+    super::to_dual_result(output)
 }
 
 pub async fn handle_jira_sprint_list(

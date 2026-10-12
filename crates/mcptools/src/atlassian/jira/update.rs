@@ -6,8 +6,7 @@ use clap::Args;
 use colored::Colorize;
 use mcptools_core::atlassian::jira::{
     build_update_payload, find_transition_by_status, markdown_to_adf, parse_assignee_identifier,
-    AssigneeIdentifier, FieldUpdateResult, JiraTransitionsResponse, JiraUserSearchResponse,
-    UpdateOutput,
+    AssigneeIdentifier, FieldUpdateResult, JiraUserSearchResponse, UpdateOutput,
 };
 use prettytable::row;
 
@@ -413,28 +412,8 @@ async fn handle_status_transition(
     ticket_key: &str,
     target_status: &str,
 ) -> Result<()> {
-    // Fetch available transitions
-    let url = format!("{base_url}/rest/api/3/issue/{ticket_key}/transitions");
-
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| eyre!("Failed to fetch transitions: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(eyre!("Jira transitions API error [{}]: {}", status, body));
-    }
-
-    let body_text = response
-        .text()
-        .await
-        .map_err(|e| eyre!("Failed to read transitions response: {}", e))?;
-
-    let transitions_response: JiraTransitionsResponse = serde_json::from_str(&body_text)
-        .map_err(|e| eyre!("Failed to parse transitions response: {}", e))?;
+    let transitions_response =
+        super::transition::fetch_transitions(client, base_url, ticket_key).await?;
 
     // Find matching transition
     let transition_id = find_transition_by_status(&transitions_response.transitions, target_status)
@@ -459,7 +438,10 @@ async fn handle_status_transition(
     });
 
     let response = client
-        .post(&url)
+        .post(
+            mcptools_core::atlassian::jira::build_transition_list_request(base_url, ticket_key)?
+                .url,
+        )
         .json(&transition_payload)
         .send()
         .await

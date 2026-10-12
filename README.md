@@ -6,7 +6,7 @@ Useful MCP Tools to use with LLM Coding Agents
 
 `mcptools` is a Model Context Protocol (MCP) server that exposes various tools for LLM agents to interact with external services. Currently provides tools for:
 
-- **Atlassian Jira**: Search, create, update tickets, and saved queries (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_query_list`, `jira_query_save`, `jira_query_delete`, `jira_query_load`)
+- **Atlassian Jira**: Search, create, update, inspect transitions, and manage issue links and saved queries (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_transition_list`, `jira_link_list`, `jira_link_type_list`, `jira_link_create`, `jira_link_delete`)
 - **Atlassian Confluence**: Search pages and read one page by ID or URL (`confluence_search`, `confluence_page_get`)
 - **Atlassian Bitbucket**: List and read pull requests with diff support; add general or single-line inline comments (`bitbucket_pr_list`, `bitbucket_pr_read`, `bitbucket_pr_comment_add`)
 - **Linear**: Read a bounded issue dependency graph and ready-to-start frontier (`linear_issue_graph`); see [Linear](.claude/context/linear.md) for all Linear tools.
@@ -1125,8 +1125,15 @@ mcptools atlassian jira create --summary "Fix bug" --description "Details..." --
 # Update a ticket
 mcptools atlassian jira update PROJ-123 --status "In Progress" --assignee me
 
-# List custom field values
-mcptools atlassian jira fields --project PROJ
+# List available transitions
+mcptools atlassian jira transitions list PROJ-123
+
+# PROJ-123 blocks PROJ-456
+mcptools atlassian jira link add PROJ-123 --type Blocks PROJ-456
+
+# List links and configured link types
+mcptools atlassian jira link list PROJ-123
+mcptools atlassian jira link types
 
 # Output as JSON
 mcptools atlassian jira search "project = PROJ" --json

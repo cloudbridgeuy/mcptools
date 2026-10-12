@@ -98,6 +98,29 @@ mcptools atlassian jira comment update PROJ-123 12345 "Updated comment body"
 mcptools atlassian jira comment delete PROJ-123 12345
 ```
 
+### Transitions
+
+```bash
+mcptools atlassian jira transitions list PROJ-123
+mcptools atlassian jira transitions list PROJ-123 --json
+```
+
+Use the returned target statuses with `jira update --status`.
+
+### Issue Links
+
+```bash
+mcptools atlassian jira link types
+mcptools atlassian jira link list PROJ-123
+mcptools atlassian jira link add PROJ-123 --type Blocks PROJ-456
+mcptools atlassian jira link delete 10001
+```
+
+`link add FROM --type NAME TO` means `FROM <outward relation> TO`. For the
+`Blocks` type, `PROJ-123 --type Blocks PROJ-456` means PROJ-123 blocks
+PROJ-456. Jira's request field names are counterintuitive: FROM maps to
+`inwardIssue` and TO maps to `outwardIssue`. Every subcommand accepts `--json`.
+
 ### Attachments
 
 ```bash
@@ -271,6 +294,55 @@ The `--description` flag on `create` and `update` accepts markdown and converts 
   }
 }
 ```
+
+### jira_transition_list
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_transition_list",
+    "arguments": { "issueKey": "PROJ-123" }
+  }
+}
+```
+
+### jira_link_list and jira_link_type_list
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_link_list",
+    "arguments": { "issueKey": "PROJ-123" }
+  }
+}
+```
+
+`jira_link_type_list` accepts an empty arguments object and returns each type's
+name plus its inward and outward relation text.
+
+### jira_link_create and jira_link_delete
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_link_create",
+    "arguments": {
+      "allowWrites": true,
+      "fromIssue": "PROJ-123",
+      "linkType": "Blocks",
+      "toIssue": "PROJ-456"
+    }
+  }
+}
+```
+
+The user-facing statement is `fromIssue <outward relation> toIssue`. Jira's
+request maps `fromIssue` to `inwardIssue` and `toIssue` to `outwardIssue`.
+`jira_link_delete` takes `linkId` from `jira_link_list` and also requires
+`allowWrites: true`.
 
 ### jira_sprint_list
 

@@ -2,8 +2,10 @@ pub mod attachment;
 pub mod comment;
 pub mod create;
 pub mod get;
+pub mod link;
 pub mod search;
 pub mod sprint;
+pub mod transition;
 pub mod update;
 
 use colored::Colorize;
@@ -85,6 +87,12 @@ pub enum Commands {
     /// Manage sprints on a Jira board
     #[command(subcommand)]
     Sprint(sprint::SprintCommands),
+
+    #[command(name = "transitions", subcommand)]
+    Transitions(transition::TransitionCommands),
+
+    #[command(subcommand)]
+    Link(link::LinkCommands),
 }
 
 /// Run Jira commands
@@ -108,6 +116,8 @@ pub async fn run(
         Commands::Comment(cmd) => comment::handler(cmd, &config).await,
         Commands::Attachment(cmd) => attachment::handler(cmd, &config).await,
         Commands::Sprint(cmd) => sprint::handler(cmd, &config).await,
+        Commands::Transitions(cmd) => transition::handler(cmd, &config).await,
+        Commands::Link(cmd) => link::handler(cmd, &config).await,
     }
 }
 
@@ -247,7 +257,6 @@ fn display_ticket(ticket: &TicketOutput) {
     std::println!();
 }
 
-// Re-export public data functions for external use (e.g., MCP)
 pub use attachment::{download_attachment_data, list_attachments_data, upload_attachment_data};
 pub use comment::{add_comment_data, delete_comment_data, list_comments_data, update_comment_data};
 pub use create::create_ticket_data;
@@ -255,3 +264,42 @@ pub use get::get_ticket_data;
 pub use search::search_issues_data;
 pub use sprint::{list_sprints_data, move_issue_to_sprint, resolve_sprint_name};
 pub use update::update_ticket_data;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn transitions_list_parses_json() {
+        let app = App::try_parse_from(["jira", "transitions", "list", "PROJ-1", "--json"]).unwrap();
+        let Commands::Transitions(transition::TransitionCommands::List { issue_key, json }) =
+            app.command
+        else {
+            panic!("expected transitions list");
+        };
+        assert_eq!(issue_key, "PROJ-1");
+        assert!(json);
+    }
+
+    #[test]
+    fn link_add_parses_from_type_to_order() {
+        let app = App::try_parse_from([
+            "jira", "link", "add", "PROJ-1", "--type", "Blocks", "PROJ-2", "--json",
+        ])
+        .unwrap();
+        let Commands::Link(link::LinkCommands::Add {
+            from_issue,
+            link_type,
+            to_issue,
+            json,
+        }) = app.command
+        else {
+            panic!("expected link add");
+        };
+        assert_eq!(from_issue, "PROJ-1");
+        assert_eq!(link_type, "Blocks");
+        assert_eq!(to_issue, "PROJ-2");
+        assert!(json);
+    }
+}

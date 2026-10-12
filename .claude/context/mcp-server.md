@@ -80,6 +80,11 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `jira_get` | Get Jira ticket details |
 | `jira_create` | Create a new Jira ticket |
 | `jira_update` | Update Jira ticket fields |
+| `jira_transition_list` | List available transitions for an issue |
+| `jira_link_list` | List links on an issue |
+| `jira_link_type_list` | List configured link types and direction text |
+| `jira_link_create` | Create a directed issue link; Write (`allowWrites` required) |
+| `jira_link_delete` | Delete an issue link by ID; destructive Write (`allowWrites` required) |
 | `jira_query_list` | List saved queries |
 | `jira_query_save` | Save a JQL query |
 | `jira_query_delete` | Delete a saved query |
@@ -267,7 +272,7 @@ variable. Env values are case-insensitive booleans: `y`, `yes`, `t`, `true`,
 any other value, including an empty one, exits with code 2 and the error
 `value was not a boolean`. In this mode `tools/list` returns exactly two tools, in order,
 `find_tools` then `call_tool`; `tools/call` still accepts every real tool name and applies direct-call permission gating. Without
-either discovery or code mode, hosts load all 85 schemas and Jev saves no context.
+either discovery or code mode, hosts load all 90 schemas and Jev saves no context.
 
 Hosts that declare only listed tools to the model, such as Claude Code, call
 any catalog tool through the listed `call_tool`, which takes `name`, `input`,

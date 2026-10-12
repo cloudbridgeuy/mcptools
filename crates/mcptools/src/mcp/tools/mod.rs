@@ -279,6 +279,51 @@ pub fn registered_tools() -> Vec<Tool> {
             destructive: true,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::TransitionListOutput>(),
+            name: "jira_transition_list".to_string(),
+            description: "List the transitions currently available for one Jira issue. Returns each transition ID, name, target status, availability, and whether it has a screen. Use this before jira_update status changes instead of guessing a status. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::JiraTransitionListArgs>(),
+            summary: "List available transitions for a Jira issue",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::IssueLinkListOutput>(),
+            name: "jira_link_list".to_string(),
+            description: "List issue links on one Jira issue. Returns link ID, type, inward or outward direction, relation text, other issue key, summary, and status. Use the link ID for jira_link_delete. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::JiraLinkListArgs>(),
+            summary: "List links on a Jira issue",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::IssueLinkTypeListOutput>(),
+            name: "jira_link_type_list".to_string(),
+            description: "List configured Jira issue link types with their names and inward and outward relation text. Use a returned type name with jira_link_create. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::JiraLinkTypeListArgs>(),
+            summary: "List Jira issue link types",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::IssueLinkCreateOutput>(),
+            name: "jira_link_create".to_string(),
+            description: "Create a Jira issue link using a configured link type name. The user-facing statement is fromIssue <outward relation> toIssue; for type Blocks, fromIssue blocks toIssue. Jira's endpoint naming is counterintuitive: the request maps fromIssue to inwardIssue and toIssue to outwardIssue. Requires allowWrites: true plus Jira credentials.".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::JiraLinkCreateArgs>(),
+            summary: "Link two Jira issues with an explicit direction",
+            kind: ToolKind::Write,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::IssueLinkDeleteOutput>(),
+            name: "jira_link_delete".to_string(),
+            description: "Delete a Jira issue link by its link ID. Use jira_link_list to obtain the ID. Requires allowWrites: true plus JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::JiraLinkDeleteArgs>(),
+            summary: "Delete a Jira issue link by ID",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::CommentOutput>(),
             name: "jira_comment_add".to_string(),
             description: "Post a comment on a Jira ticket. Supports markdown in the comment body (bold, italic, headings, lists, code blocks, links) which is automatically converted to Atlassian Document Format. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
@@ -1130,6 +1175,15 @@ pub async fn dispatch_tool_call(
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
         "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
         "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
+        "jira_transition_list" => {
+            atlassian::handle_jira_transition_list(params.arguments, global).await
+        }
+        "jira_link_list" => atlassian::handle_jira_link_list(params.arguments, global).await,
+        "jira_link_type_list" => {
+            atlassian::handle_jira_link_type_list(params.arguments, global).await
+        }
+        "jira_link_create" => atlassian::handle_jira_link_create(params.arguments, global).await,
+        "jira_link_delete" => atlassian::handle_jira_link_delete(params.arguments, global).await,
         "jira_comment_add" => atlassian::handle_jira_comment_add(params.arguments, global).await,
         "jira_comment_list" => atlassian::handle_jira_comment_list(params.arguments, global).await,
         "jira_comment_update" => {
@@ -1325,7 +1379,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 82);
+        assert_eq!(catalog.len(), 87);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1390,7 +1444,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 85);
+        assert_eq!(super::registered_tools().len(), 90);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1465,7 +1519,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 85);
+        assert_eq!(names(serve_flags(false)).len(), 90);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1518,6 +1572,20 @@ mod catalog_tests {
             }
         );
         assert_eq!(
+            annotations("jira_link_create"),
+            super::ToolAnnotations {
+                read_only: false,
+                destructive: false,
+            }
+        );
+        assert_eq!(
+            annotations("jira_link_delete"),
+            super::ToolAnnotations {
+                read_only: false,
+                destructive: true,
+            }
+        );
+        assert_eq!(
             annotations("images_generate"),
             super::ToolAnnotations {
                 read_only: false,
@@ -1547,6 +1615,7 @@ mod catalog_tests {
             "jira_update",
             "jira_comment_update",
             "jira_comment_delete",
+            "jira_link_delete",
             "jira_query_save",
             "jira_query_delete",
             "bitbucket_pr_update",
@@ -1568,7 +1637,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 85);
+        assert_eq!(tools.len(), 90);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1594,7 +1663,7 @@ mod catalog_tests {
             .iter()
             .filter(|tool| tool["name"].as_str().unwrap().ends_with("_delete"))
             .collect();
-        assert_eq!(delete_tools.len(), 4);
+        assert_eq!(delete_tools.len(), 5);
         for tool in delete_tools {
             assert_eq!(tool["annotations"]["destructiveHint"], true, "{tool}");
         }
@@ -1609,6 +1678,8 @@ mod catalog_tests {
             "jira_comment_add",
             "jira_comment_update",
             "jira_comment_delete",
+            "jira_link_create",
+            "jira_link_delete",
             "jira_attachment_upload",
             "jira_query_save",
             "jira_query_delete",
@@ -1653,6 +1724,9 @@ mod catalog_tests {
             "md_fetch",
             "md_toc",
             "jira_get",
+            "jira_transition_list",
+            "jira_link_list",
+            "jira_link_type_list",
             "jira_comment_list",
             "jira_sprint_list",
             "jira_attachment_list",
@@ -1698,7 +1772,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 85);
+        assert_eq!(union.len(), 90);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

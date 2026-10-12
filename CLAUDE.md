@@ -66,7 +66,7 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 For detailed usage of each feature, see the context files:
 
 ### Integrations
-- **[Jira](.claude/context/jira.md)** - Search, create, update tickets; saved queries; MCP tools
+- **[Jira](.claude/context/jira.md)** - Search, create, update, inspect transitions, and manage issue links; saved queries; MCP tools
 - **[Linear](.claude/context/linear.md)** - Issues (including delete to trash) and discovery; MCP project creation, partial property updates, published progress report creation/listing, workspace project statuses
 - **[Confluence](.claude/context/confluence.md)** - Search and read pages; CQL queries
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
@@ -93,6 +93,11 @@ mcptools atlassian jira search "assignee = currentUser() AND status NOT IN (Done
 mcptools atlassian jira get PROJ-123                # alias: `jira read`
 mcptools atlassian jira create "Fix bug" --issue-type Bug
 mcptools atlassian jira update PROJ-123 --status "In Progress"
+mcptools atlassian jira transitions list PROJ-123
+mcptools atlassian jira link types
+mcptools atlassian jira link list PROJ-123
+mcptools atlassian jira link add PROJ-123 --type Blocks PROJ-456
+mcptools atlassian jira link delete 10001
 mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issue"
 mcptools atlassian jira attachment list PROJ-123
 mcptools atlassian jira attachment download PROJ-123 12345
