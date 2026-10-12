@@ -1,6 +1,0 @@
-{
-  "format": "text",
-  "text": "src/\n  main.rs",
-  "freshness": "structural=ready; semantic=cached_unverified missing=2; model-free, no automatic refresh",
-  "bounds": {"limit": 100, "total": 2, "returned": 2, "truncated": false, "context_chars": 8192, "context_truncated": false}
-}

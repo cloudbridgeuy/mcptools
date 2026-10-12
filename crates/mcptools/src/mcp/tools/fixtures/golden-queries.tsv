@@ -6,7 +6,6 @@ who's assigned to XYZ-456	jira_get,linear_issue_get	in_scope
 add a note to DEV-101	jira_comment_add,linear_comment_create	in_scope
 what are people discussing about rust on the news site	hn_list_items	in_scope
 grab that third diagram from the report	pdf_image	in_scope
-sketch out the project directory structure	atlas_tree_view	in_scope
 convert this website to markdown format	md_fetch	in_scope
 which pull requests are waiting for review in bitbucket	bitbucket_pr_list	in_scope
 show the UI overlays from the dev screen	ui_annotations_list	in_scope
@@ -27,7 +26,6 @@ file a new jira ticket	jira_create	in_scope
 change the ticket status to done	jira_update	in_scope
 save this jql query for later	jira_query_save	in_scope
 create a pull request in bitbucket	bitbucket_pr_create	in_scope
-verify the atlas index health	atlas_status	in_scope
 find linear users by name	linear_user_list	in_scope
 bake a chocolate cake	NONE	unrelated
 what is the weather in Montevideo	NONE	unrelated
