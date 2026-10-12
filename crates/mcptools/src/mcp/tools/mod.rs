@@ -20,7 +20,6 @@ use serde::{Deserialize, Serialize};
 pub use super::{JsonRpcError, ServeFlags, Tool, ToolKind};
 pub use find_tools::find_tools;
 
-// MCP Protocol types for tools
 #[derive(Debug, Serialize)]
 pub struct ServerInfo {
     pub name: String,
@@ -61,16 +60,10 @@ pub struct ToolAnnotations {
     pub destructive: bool,
 }
 
-pub fn annotations_for(kind: ToolKind) -> ToolAnnotations {
-    match kind {
-        ToolKind::Read => ToolAnnotations {
-            read_only: true,
-            destructive: false,
-        },
-        ToolKind::Write | ToolKind::Spend => ToolAnnotations {
-            read_only: false,
-            destructive: true,
-        },
+pub fn annotations_for(tool: &Tool) -> ToolAnnotations {
+    ToolAnnotations {
+        read_only: tool.kind == ToolKind::Read,
+        destructive: tool.destructive,
     }
 }
 
@@ -173,6 +166,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "List Git worktrees of an exact repository root permitted by server environment MCPTOOLS_LANE_REPOS. Denied when unset or empty. Native Git avoids Worktrunk cache writes. Missing HEAD is null; unavailable status is unknown. Only unchanged registered identities are managed. Cleanup planning is read-only; no lane deletion, cleanup execution, merge, or push tools exist.".into(),
             summary: "Inspect Git worktree lanes and registered ownership",
             kind: ToolKind::Read,
+            destructive: false,
             input_schema: schema::input_schema_for::<mcptools_core::lane::ListArgs>(),
             output_schema: schema::output_schema_for::<mcptools_core::lane::ListOutput>(),
         },
@@ -181,6 +175,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Assess lane removal eligibility without changing Git, ownership records, files, or Worktrunk caches. Requires an operator-permitted repository root. Omit laneIds to inspect all registered worktrees, including unmanaged blockers; otherwise supply 1 to 100 unique managed IDs from lane_list. Unknown or no longer managed IDs fail. Main, current, unmanaged, locked, dirty, unresolved, missing HEAD, ignored content, and unknown inspection states block removal. Ignored evidence is relative, sorted, capped at 100 paths; directories collapse. Advisory observation only, not an atomic snapshot or approval token. Git clean does not mean disposable. No removal tool exists.".into(),
             summary: "Plan lane cleanup with read-only eligibility and blockers",
             kind: ToolKind::Read,
+            destructive: false,
             input_schema: schema::input_schema_for::<mcptools_core::lane::CleanupPlanArgs>(),
             output_schema: schema::output_schema_for::<mcptools_core::lane::CleanupPlanOutput>(),
         },
@@ -189,6 +184,7 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Create a new local branch and Worktrunk lane from an explicit existing local base branch in an exact root permitted by server environment MCPTOOLS_LANE_REPOS. Uses a fixed .worktrees root, isolated configuration, disabled hooks, and durable ownership records. Requires Worktrunk 0.77.0. Executable Git filters/drivers are rejected. Errors after creation starts explicitly warn of possible partial mutation; never roll back or retry automatically. No OS sandbox is claimed.".into(),
             summary: "Allocate a Git worktree lane on a new branch",
             kind: ToolKind::Write,
+            destructive: true,
             input_schema: schema::input_schema_for::<mcptools_core::lane::CreateArgs>(),
             output_schema: schema::output_schema_for::<mcptools_core::lane::CreateOutput>(),
         },
@@ -199,6 +195,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraSearchArgs>(),
             summary: "Search Jira issues with JQL or a saved query",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::confluence::SearchOutput>(),
@@ -207,6 +204,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::ConfluenceSearchArgs>(),
             summary: "Search Confluence pages with CQL",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::hn::PostOutput>(),
@@ -215,6 +213,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<hn::HnReadItemArgs>(),
             summary: "Read a HackerNews post and its comments",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::hn::ListOutput>(),
@@ -223,6 +222,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<hn::HnListItemsArgs>(),
             summary: "List HackerNews stories: top, new, best, ask, show, job",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::projected_output_schema_for::<mcptools_core::md::FetchOutput>(),
@@ -231,6 +231,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<md::MdFetchArgs>(),
             summary: "Fetch a web page as Markdown",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<crate::md::toc::TocOutput>(),
@@ -239,6 +240,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<md::MdTocArgs>(),
             summary: "List the headings of a web page as a table of contents",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::TicketOutput>(),
@@ -247,6 +249,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraCreateArgs>(),
             summary: "Create a Jira ticket",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::TicketOutput>(),
@@ -255,6 +258,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraGetArgs>(),
             summary: "Get one Jira ticket by key",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::UpdateOutput>(),
@@ -263,6 +267,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraUpdateArgs>(),
             summary: "Update a Jira ticket: status (close, reopen), priority, assignee, sprint",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::CommentOutput>(),
@@ -271,6 +276,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraCommentAddArgs>(),
             summary: "Add a comment to a Jira ticket",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::CommentListOutput>(),
@@ -279,6 +285,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraCommentListArgs>(),
             summary: "List comments on a Jira ticket",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::CommentOutput>(),
@@ -287,6 +294,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraCommentUpdateArgs>(),
             summary: "Edit a comment on a Jira ticket",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::CommentDeleteOutput>(),
@@ -295,6 +303,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraCommentDeleteArgs>(),
             summary: "Delete a comment from a Jira ticket",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::SprintListOutput>(),
@@ -303,6 +312,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraSprintListArgs>(),
             summary: "List sprints of a Jira board",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::AttachmentListOutput>(),
@@ -311,6 +321,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraAttachmentListArgs>(),
             summary: "List attachments on a Jira ticket",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::AttachmentDownloadOutput>(),
@@ -319,6 +330,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraAttachmentDownloadArgs>(),
             summary: "Download one attachment from a Jira ticket to a file",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::AttachmentListOutput>(),
@@ -327,6 +339,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraAttachmentUploadArgs>(),
             summary: "Upload files as attachments to a Jira ticket",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::QueryListOutput>(),
@@ -335,6 +348,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraQueryListArgs>(),
             summary: "List saved Jira JQL queries",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::QueryStatusOutput>(),
@@ -343,6 +357,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraQuerySaveArgs>(),
             summary: "Save a named Jira JQL query",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::QueryStatusOutput>(),
@@ -351,6 +366,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraQueryDeleteArgs>(),
             summary: "Delete a saved Jira JQL query",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::QueryLoadOutput>(),
@@ -359,6 +375,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraQueryLoadArgs>(),
             summary: "Show the JQL text of a saved Jira query",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRListOutput>(),
@@ -367,6 +384,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::BitbucketPRListArgs>(),
             summary: "List pull requests of a Bitbucket repository",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::projected_output_schema_for::<
@@ -377,6 +395,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::BitbucketPRReadArgs>(),
             summary: "Read one Bitbucket pull request with diff and comments",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCreateOutput>(),
@@ -385,6 +404,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::BitbucketPRCreateArgs>(),
             summary: "Create a pull request in a Bitbucket repository",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentAddOutput>(),
@@ -393,6 +413,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentAddArgs>(),
             summary: "Add a general or inline Bitbucket pull request comment",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCreateOutput>(),
@@ -401,6 +422,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::BitbucketPRUpdateArgs>(),
             summary: "Update a Bitbucket pull request: metadata, reviewers, state",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::WorkspaceListOutput>(),
@@ -409,6 +431,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::BitbucketWorkspaceListArgs>(),
             summary: "List Bitbucket workspaces",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::RepoListOutput>(),
@@ -417,6 +440,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::BitbucketRepoListArgs>(),
             summary: "List repositories in a Bitbucket workspace",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::BranchListOutput>(),
@@ -425,6 +449,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::BitbucketRepoBranchesArgs>(),
             summary: "List branches of a Bitbucket repository",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::annotations::ListAnnotationsResponse>(),
@@ -433,6 +458,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<annotations::AnnotationsListArgs>(),
             summary: "List UI annotations from the calendsync dev overlay",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::annotations::DevAnnotation>(),
@@ -441,6 +467,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<annotations::AnnotationsGetArgs>(),
             summary: "Get one UI annotation with styles, bounding box, and screenshot",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<annotations::AnnotationResolveOutput>(),
@@ -449,6 +476,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<annotations::AnnotationsResolveArgs>(),
             summary: "Mark a UI annotation as resolved with a change summary",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<annotations::AnnotationClearOutput>(),
@@ -457,6 +485,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<annotations::AnnotationsClearArgs>(),
             summary: "Delete all UI annotations",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<::pdf::DocumentTree>(),
@@ -465,6 +494,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<pdf::PdfTocArgs>(),
             summary: "List the sections of a PDF as a table of contents",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::projected_output_schema_for::<::pdf::SectionContent>(),
@@ -473,6 +503,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<pdf::PdfReadArgs>(),
             summary: "Read a PDF section, or the whole PDF, as Markdown",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<::pdf::PeekContent>(),
@@ -481,6 +512,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<pdf::PdfPeekArgs>(),
             summary: "Sample a short text snippet from a PDF section",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<pdf::PdfImagesOutput>(),
@@ -489,6 +521,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<pdf::PdfImagesArgs>(),
             summary: "List the images in a PDF or in one section",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<pdf::PdfImageOutput>(),
@@ -497,6 +530,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<pdf::PdfImageArgs>(),
             summary: "Extract one image from a PDF by id or at random",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<::pdf::DocumentMetadata>(),
@@ -505,6 +539,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<pdf::PdfInfoArgs>(),
             summary: "Get PDF metadata: title, author, page count",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<crate::images::SavedOutput>(),
@@ -513,6 +548,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<images::ImagesGenerateArgs>(),
             summary: "Generate an image from a text prompt",
             kind: ToolKind::Spend,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<crate::images::SavedOutput>(),
@@ -521,6 +557,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<images::ImagesEditArgs>(),
             summary: "Edit an image with a prompt, reference images, and an optional mask",
             kind: ToolKind::Spend,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<crate::images::SavedOutput>(),
@@ -529,6 +566,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<images::ImagesVaryArgs>(),
             summary: "Create variations of reference images",
             kind: ToolKind::Spend,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::Viewer>(),
@@ -537,6 +575,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::AuthStatusArgs>(),
             summary: "Show the authenticated Linear user",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<
@@ -547,6 +586,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::IssueGetArgs>(),
             summary: "Get one Linear issue with its comments and activity",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::projected_output_schema_for::<
@@ -557,6 +597,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::IssueListArgs>(),
             summary: "List Linear issues by team, state, assignee, project, label, or cycle",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueGraphOutput>(),
@@ -565,6 +606,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::IssueGraphArgs>(),
             summary: "Get a bounded Linear dependency graph and ready-to-start frontier",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::CommentListOutput>(),
@@ -573,6 +615,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::CommentListArgs>(),
             summary: "List comments on a Linear issue",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::RelationListOutput>(),
@@ -581,6 +624,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::RelationListArgs>(),
             summary: "List relations of a Linear issue",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::TeamListOutput>(),
@@ -589,6 +633,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::TeamListArgs>(),
             summary: "List Linear teams",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::Team>(),
@@ -597,6 +642,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::TeamGetArgs>(),
             summary: "Get one Linear team by id, key, or name",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectListOutput>(),
@@ -605,6 +651,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectListArgs>(),
             summary: "List projects in a Linear team",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::Project>(),
@@ -613,6 +660,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectGetArgs>(),
             summary: "Get one Linear project by id or name",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectStatusListOutput>(),
@@ -621,9 +669,11 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectStatusListArgs>(),
             summary: "List workspace Linear project statuses",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             kind: ToolKind::Read,
+            destructive: false,
             output_schema: schema::output_schema_for::<mcptools_core::linear::InitiativeListOutput>(),
             name: "linear_initiative_list".to_string(),
             summary: "List workspace Linear initiatives by name",
@@ -632,6 +682,7 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             kind: ToolKind::Read,
+            destructive: false,
             output_schema: schema::output_schema_for::<mcptools_core::linear::InitiativeGetOutput>(),
             name: "linear_initiative_get".to_string(),
             summary: "Get a Linear initiative with Markdown and linked projects",
@@ -640,6 +691,7 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             kind: ToolKind::Read,
+            destructive: false,
             output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentGetOutput>(),
             name: "linear_document_get".to_string(),
             summary: "Get a Linear document with Markdown and parent project",
@@ -648,6 +700,7 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             kind: ToolKind::Write,
+            destructive: false,
             output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentCreateOutput>(),
             name: "linear_document_create".to_string(),
             summary: "Create a Markdown document attached to an existing Linear project",
@@ -656,6 +709,7 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             kind: ToolKind::Write,
+            destructive: true,
             output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentUpdateOutput>(),
             name: "linear_document_update".to_string(),
             summary: "Update a Linear document title or Markdown content",
@@ -664,6 +718,7 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             kind: ToolKind::Write,
+            destructive: false,
             output_schema: schema::output_schema_for::<mcptools_core::linear::InitiativeProjectAddOutput>(),
             name: "linear_initiative_project_add".to_string(),
             summary: "Link an existing Linear project to an existing initiative",
@@ -677,6 +732,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectMilestoneListArgs>(),
             summary: "List milestones in one Linear project",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectMilestone>(),
@@ -685,6 +741,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectMilestoneUpdateArgs>(),
             summary: "Partially update a Linear project milestone",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectMilestone>(),
@@ -693,6 +750,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::output_schema_for::<crate::linear::args::ProjectMilestoneCreateArgs>(),
             summary: "Create a milestone in one Linear project",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::UserListOutput>(),
@@ -701,6 +759,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::UserListArgs>(),
             summary: "Find Linear users by name",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::StateListOutput>(),
@@ -709,6 +768,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::StateListArgs>(),
             summary: "List workflow states of a Linear team",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::LabelListOutput>(),
@@ -717,6 +777,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::LabelListArgs>(),
             summary: "List labels of a Linear team",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::CycleListOutput>(),
@@ -725,6 +786,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::CycleListArgs>(),
             summary: "List cycles of a Linear team",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::Project>(),
@@ -733,6 +795,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectCreateArgs>(),
             summary: "Create a Linear project in a team",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectUpdateOutput>(),
@@ -741,6 +804,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectUpdateArgs>(),
             summary: "Update a Linear project: properties, project status, lead, dates, priority",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectUpdateCreateOutput>(),
@@ -749,6 +813,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectUpdateCreateArgs>(),
             summary: "Publish a Linear project progress update",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::ProjectUpdateListOutput>(),
@@ -757,6 +822,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::ProjectUpdateListArgs>(),
             summary: "List published Linear project progress updates",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueMini>(),
@@ -765,6 +831,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::IssueCreateArgs>(),
             summary: "Create a Linear issue in a team",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueMini>(),
@@ -773,6 +840,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::IssueUpdateArgs>(),
             summary: "Update a Linear issue: state (close, reopen), title, assignee, parent",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<linear::IssueDeleteOutput>(),
@@ -781,6 +849,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::IssueDeleteArgs>(),
             summary: "Move a Linear issue to trash",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::Comment>(),
@@ -789,6 +858,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::CommentCreateArgs>(),
             summary: "Add a comment to a Linear issue",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::RelationAddOutput>(),
@@ -797,6 +867,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::RelationAddArgs>(),
             summary: "Add a blocks or related relation between two Linear issues",
             kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::RelationRemoveOutput>(),
@@ -805,6 +876,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<crate::linear::args::RelationRemoveArgs>(),
             summary: "Remove a relation between two Linear issues",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: {
@@ -819,6 +891,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<find_tools::FindToolsArgs>(),
             summary: "Rank for task, listDomains, or domain",
             kind: ToolKind::Read,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::sandbox::ExecuteOutput>(),
@@ -827,6 +900,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<execute::ExecuteArgs>(),
             summary: "Run JavaScript that calls the tools find_tools returns",
             kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<serde_json::Map<String, serde_json::Value>>(),
@@ -835,6 +909,7 @@ pub fn registered_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<call_tool::CallToolArgs>(),
             summary: "Call one catalog tool by name",
             kind: ToolKind::Write,
+            destructive: true,
         },
     ]
 }
@@ -870,20 +945,19 @@ pub fn handle_tools_list(flags: ServeFlags) -> Result<serde_json::Value, JsonRpc
             }
         }
     }
-    let kinds: Vec<ToolKind> = tools.iter().map(|tool| tool.kind).collect();
+    let annotations: Vec<ToolAnnotations> = tools.iter().map(annotations_for).collect();
     let mut list = serde_json::to_value(ToolsList { tools }).map_err(|e| JsonRpcError {
         code: -32603,
         message: format!("Internal error: {e}"),
         data: None,
     })?;
     if let Some(entries) = list.get_mut("tools").and_then(|tools| tools.as_array_mut()) {
-        for (entry, kind) in entries.iter_mut().zip(kinds) {
-            entry["annotations"] =
-                serde_json::to_value(annotations_for(kind)).map_err(|e| JsonRpcError {
-                    code: -32603,
-                    message: format!("Internal error: {e}"),
-                    data: None,
-                })?;
+        for (entry, annotations) in entries.iter_mut().zip(annotations) {
+            entry["annotations"] = serde_json::to_value(annotations).map_err(|e| JsonRpcError {
+                code: -32603,
+                message: format!("Internal error: {e}"),
+                data: None,
+            })?;
         }
     }
     Ok(list)
@@ -1374,26 +1448,37 @@ mod catalog_tests {
     }
 
     #[test]
-    fn annotations_follow_kind() {
+    fn annotations_follow_tool_metadata() {
+        let tools = super::registered_tools();
+        let annotations = |name: &str| {
+            super::annotations_for(tools.iter().find(|tool| tool.name == name).unwrap())
+        };
         assert_eq!(
-            super::annotations_for(super::ToolKind::Read),
+            annotations("jira_search"),
             super::ToolAnnotations {
                 read_only: true,
                 destructive: false,
             }
         );
         assert_eq!(
-            super::annotations_for(super::ToolKind::Write),
+            annotations("jira_create"),
+            super::ToolAnnotations {
+                read_only: false,
+                destructive: false,
+            }
+        );
+        assert_eq!(
+            annotations("jira_update"),
             super::ToolAnnotations {
                 read_only: false,
                 destructive: true,
             }
         );
         assert_eq!(
-            super::annotations_for(super::ToolKind::Spend),
+            annotations("images_generate"),
             super::ToolAnnotations {
                 read_only: false,
-                destructive: true,
+                destructive: false,
             }
         );
     }
@@ -1414,61 +1499,60 @@ mod catalog_tests {
 
     #[test]
     fn full_table_matches_oracle_annotations() {
-        let write = [
+        let destructive: std::collections::BTreeSet<&str> = [
             "lane_create",
-            "jira_create",
             "jira_update",
-            "jira_comment_add",
             "jira_comment_update",
             "jira_comment_delete",
-            "jira_attachment_upload",
             "jira_query_save",
             "jira_query_delete",
-            "bitbucket_pr_create",
-            "bitbucket_pr_comment_add",
             "bitbucket_pr_update",
-            "linear_project_create",
-            "linear_document_create",
             "linear_document_update",
-            "linear_project_milestone_create",
             "linear_project_milestone_update",
             "linear_project_update",
-            "linear_project_update_create",
-            "linear_initiative_project_add",
-            "linear_issue_create",
             "linear_issue_update",
             "linear_issue_delete",
-            "linear_comment_create",
-            "linear_relation_add",
             "linear_relation_remove",
             "ui_annotations_resolve",
             "ui_annotations_clear",
             "execute",
             "call_tool",
-        ];
-        let spend = ["images_generate", "images_edit", "images_vary"];
+        ]
+        .into_iter()
+        .collect();
+        let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 82);
-        let entry = |name: &str| {
-            tools
+        for tool in registry {
+            let entry = tools
                 .iter()
-                .find(|t| t.get("name") == Some(&serde_json::json!(name)))
-                .unwrap_or_else(|| panic!("missing tool {name}"))
-        };
-        let mutable = serde_json::json!({"readOnlyHint": false, "destructiveHint": true});
-        let readonly = serde_json::json!({"readOnlyHint": true, "destructiveHint": false});
-        for name in write.into_iter().chain(spend) {
-            assert_eq!(entry(name)["annotations"], mutable, "{name}");
+                .find(|entry| entry["name"] == tool.name)
+                .unwrap_or_else(|| panic!("missing tool {}", tool.name));
+            assert_eq!(
+                entry["annotations"],
+                serde_json::json!({
+                    "readOnlyHint": tool.kind == super::ToolKind::Read,
+                    "destructiveHint": destructive.contains(tool.name.as_str())
+                }),
+                "{}",
+                tool.name
+            );
         }
-        let mutable_names: std::collections::BTreeSet<&str> =
-            write.into_iter().chain(spend).collect();
-        let read_count = tools
+    }
+
+    #[test]
+    fn delete_tools_are_destructive() {
+        let list = super::handle_tools_list(serve_flags(false)).unwrap();
+        let tools = list["tools"].as_array().unwrap();
+        let delete_tools: Vec<_> = tools
             .iter()
-            .filter(|t| t["annotations"] == readonly)
-            .count();
-        assert_eq!(read_count, 49);
-        assert_eq!(read_count, 82 - mutable_names.len());
+            .filter(|tool| tool["name"].as_str().unwrap().ends_with("_delete"))
+            .collect();
+        assert_eq!(delete_tools.len(), 3);
+        for tool in delete_tools {
+            assert_eq!(tool["annotations"]["destructiveHint"], true, "{tool}");
+        }
     }
 
     #[test]
@@ -1586,7 +1670,7 @@ mod catalog_tests {
     }
 
     #[test]
-    fn pilot_entries_carry_kind_annotations() {
+    fn pilot_entries_carry_reviewed_annotations() {
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
         let entry = |name: &str| {
@@ -1601,11 +1685,11 @@ mod catalog_tests {
         );
         assert_eq!(
             entry("jira_create")["annotations"],
-            serde_json::json!({"readOnlyHint": false, "destructiveHint": true})
+            serde_json::json!({"readOnlyHint": false, "destructiveHint": false})
         );
         assert_eq!(
             entry("images_generate")["annotations"],
-            serde_json::json!({"readOnlyHint": false, "destructiveHint": true})
+            serde_json::json!({"readOnlyHint": false, "destructiveHint": false})
         );
         for tool in tools {
             let annotations = tool.get("annotations").unwrap();

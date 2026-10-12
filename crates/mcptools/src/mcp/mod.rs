@@ -10,7 +10,6 @@ pub use tools::find_tools;
 use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 
-// JSON-RPC 2.0 types
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
     jsonrpc: String,
@@ -56,6 +55,8 @@ pub struct Tool {
     pub summary: &'static str,
     #[serde(skip)]
     pub kind: ToolKind,
+    #[serde(skip)]
+    pub destructive: bool,
 }
 
 pub async fn run(app: App, global: crate::Global) -> Result<()> {
