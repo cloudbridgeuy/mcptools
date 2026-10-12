@@ -61,6 +61,17 @@ Or manually add to `~/Library/Application Support/Claude/claude_code_config.json
 
 ## Available MCP Tools
 
+### Hidden tool-name aliases
+
+Aliases are opt-in entries in `crates/mcptools/src/mcp/tools/aliases.rs`.
+The only alias is `linear_issue_view` → `linear_issue_get`. It accepts the same
+arguments and returns the same result through direct `tools/call`, `call_tool`,
+and the inner `execute` sandbox. Resolution precedes dispatch and policy checks;
+permissions and policy errors use the canonical name. Aliases are absent from
+`tools/list`, `mcptools mcp catalog`, declarations, and `find_tools` results.
+Alias names cannot collide with registered tools; targets must be real,
+non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
+
 ### Atlassian
 
 | Tool | Description |

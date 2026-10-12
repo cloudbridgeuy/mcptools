@@ -1,5 +1,5 @@
 use super::{
-    handle_tools_call, is_meta_tool, registered_tools, JsonRpcError, ServeFlags, ToolKind,
+    aliases, handle_tools_call, is_meta_tool, registered_tools, JsonRpcError, ServeFlags, ToolKind,
 };
 
 pub const DESCRIPTION: &str = r#"Calls one catalog tool by name and returns its result unchanged, e.g. `await tools.mcptools.call_tool({ name: "linear_issue_list", input: { team: "GUZ" } })`. Use find_tools to look up names and input shapes. Write tools need allowWrites: true, spend tools need allowSpend: true."#;
@@ -41,34 +41,36 @@ pub async fn handle_call_tool(
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: CallToolArgs = serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null))
         .map_err(|e| invalid(format!("Invalid params: {e}")))?;
-    if is_meta_tool(&args.name) {
+    let tools = registered_tools();
+    let name = aliases::resolve(&args.name, &tools)?;
+    if is_meta_tool(name) {
         return Err(invalid(format!(
             "{} cannot be called through call_tool",
-            args.name
+            name
         )));
     }
-    let kind = registered_tools()
+    let kind = tools
         .iter()
-        .find(|tool| tool.name == args.name)
+        .find(|tool| tool.name == name)
         .map(|tool| tool.kind)
         .ok_or_else(|| invalid(format!("Unknown tool: {}", args.name)))?;
     match kind {
         ToolKind::Write if !args.allow_writes => {
             return Ok(denied(format!(
                 "{} is a write tool; pass allowWrites: true to call_tool",
-                args.name
+                name
             )))
         }
         ToolKind::Spend if !args.allow_spend => {
             return Ok(denied(format!(
                 "{} is a spend tool; pass allowSpend: true to call_tool",
-                args.name
+                name
             )))
         }
         _ => {}
     }
     Box::pin(handle_tools_call(
-        Some(serde_json::json!({"name": args.name, "arguments": args.input})),
+        Some(serde_json::json!({"name": name, "arguments": args.input})),
         global,
         flags,
     ))

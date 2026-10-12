@@ -110,6 +110,11 @@ mcptools linear cycles list --team GUZ
 
 ## MCP Tools
 
+`linear_issue_view` is a hidden MCP alias for `linear_issue_get`, with identical
+arguments, results, and read policy in direct calls, `call_tool`, and inner
+`execute`. Discovery and declarations expose only `linear_issue_get`. This does
+not add a CLI alias or change other tool names.
+
 34 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash

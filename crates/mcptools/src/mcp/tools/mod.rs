@@ -1,3 +1,4 @@
+mod aliases;
 mod annotations;
 mod atlassian;
 mod call_tool;
@@ -16,7 +17,6 @@ mod conformance_tests;
 
 use serde::{Deserialize, Serialize};
 
-// Re-export types needed by tool handlers
 pub use super::{JsonRpcError, ServeFlags, Tool, ToolKind};
 pub use find_tools::find_tools;
 
@@ -921,7 +921,9 @@ pub async fn handle_tools_call(
             data: None,
         })?;
 
-    match params.name.as_str() {
+    let tools = registered_tools();
+    let name = aliases::resolve(&params.name, &tools)?;
+    match name {
         "lane_list" => lane::list(params.arguments).await,
         "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
         "lane_create" => lane::create(params.arguments).await,

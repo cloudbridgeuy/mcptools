@@ -1,4 +1,4 @@
-use super::{registered_tools, to_dual_result, JsonRpcError, Tool, ToolKind};
+use super::{aliases, registered_tools, to_dual_result, JsonRpcError, Tool, ToolKind};
 use crate::sandbox;
 use mcptools_core::sandbox::execute_output;
 
@@ -35,7 +35,7 @@ pub async fn handle_execute(
         kinds.push(ToolKind::Spend);
     }
     let tools = registered_tools();
-    let names = sandbox::bindings::bound_names(&tools, &kinds);
+    let names = aliases::extend_bindings(sandbox::bindings::bound_names(&tools, &kinds), &tools)?;
     let run = sandbox::run(
         &args.code,
         global.sandbox_limits(),
@@ -66,6 +66,7 @@ pub async fn handle_execute(
 
 fn gated_reference_message(message: &str, tools: &[Tool], allowed: &[ToolKind]) -> Option<String> {
     let name = message.strip_suffix(" is not defined")?;
+    let name = aliases::resolve(name, tools).ok()?;
     if name == "execute" {
         return None;
     }
