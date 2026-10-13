@@ -1,21 +1,14 @@
 use crate::linear::client::execute;
 use crate::prelude::*;
 use mcptools_core::linear::{
-    format_label_candidates, is_uuid, issue_create_input, issue_delete_request, issue_filter_value,
-    issue_restore_request, issue_sort_value, issue_update_input, match_label, match_state,
-    parse_label_selector, parse_state_selector, resolve_named_id, team_key_from_identifier,
-    transform_issue_create, transform_issue_delete, transform_issue_restore,
-    transform_issue_update, valid_timeless_date, Activity, Cycle, DeletedIssue, IssueGetOutput,
-    IssueListFilter, IssueMini, IssueSort, LabelResolution, NamedIdError, Project, RestoredIssue,
-    StateResolution,
+    format_label_candidates, is_uuid, issue_create_input, issue_delete_request, issue_get_request,
+    issue_restore_request, issue_update_input, issues_list_request, match_label, match_state,
+    parse_issue_get, parse_label_selector, parse_state_selector, resolve_named_id,
+    team_key_from_identifier, transform_issue_create, transform_issue_delete,
+    transform_issue_restore, transform_issue_update, valid_timeless_date, Activity, Cycle,
+    DeletedIssue, IssueGetOutput, IssueListFilter, IssueMini, IssueSort, LabelResolution,
+    NamedIdError, Project, RestoredIssue, StateResolution,
 };
-
-pub const ISSUE_QUERY: &str =
-    "query ($id: String!) { issue(id: $id) { id identifier title description priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } createdAt creator { name displayName } history(first: 50) { nodes { createdAt actor { name displayName } botActor { name } fromState { name } toState { name } fromTitle toTitle updatedDescription addedLabels { name } removedLabels { name } fromParent { identifier } toParent { identifier } fromAssignee { name displayName } toAssignee { name displayName } fromCycle { number name } toCycle { number name } fromProject { name } toProject { name } attachment { title } relationChanges { identifier type } } pageInfo { hasNextPage } } } }";
-
-pub const ISSUES_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter) { issues(first: $first, after: $after, filter: $filter, orderBy: updatedAt) { nodes { id identifier title priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
-
-pub const ISSUES_SORT_QUERY: &str = "query ($first: Int!, $after: String, $filter: IssueFilter, $sort: [IssueSortInput!]) { issues(first: $first, after: $after, filter: $filter, sort: $sort) { nodes { id identifier title priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } inverseRelations(first: 25) { nodes { type issue { identifier state { name } } } } } pageInfo { hasNextPage endCursor } } }";
 
 pub const ISSUE_CREATE_MUTATION: &str = "mutation ($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title priorityLabel url state { name } project { id name } parent { identifier } labels(first: 25) { nodes { name } } } } }";
 
@@ -24,29 +17,25 @@ pub const ISSUE_UPDATE_MUTATION: &str = "mutation IssueUpdate($id: String!, $inp
 pub async fn issue_get_data(
     client: &reqwest::Client,
     id_or_identifier: &str,
+    history_limit: u32,
 ) -> Result<(IssueMini, Vec<Activity>)> {
     let selector = id_or_identifier.trim();
-    if selector.is_empty() {
-        return Err(eyre!("Linear issue id must not be empty"));
-    }
-    let data = execute(client, ISSUE_QUERY, serde_json::json!({"id": selector})).await?;
-    let snapshot = mcptools_core::linear::transform_issue(data.clone()).map_err(|e| match e {
+    let (query, variables) = issue_get_request(selector, history_limit).map_err(|e| eyre!(e))?;
+    let data = execute(client, query, variables).await?;
+    parse_issue_get(data).map_err(|e| match e {
         mcptools_core::linear::LinearError::MissingIssue => {
             eyre!("Linear issue not found: {}", selector)
         }
         other => eyre!("{}", other),
-    })?;
-    let activity = mcptools_core::linear::transform_activity(data).map_err(|e| match e {
-        mcptools_core::linear::LinearError::MissingIssue => {
-            eyre!("Linear issue not found: {}", selector)
-        }
-        other => eyre!("{}", other),
-    })?;
-    Ok((snapshot, activity))
+    })
 }
 
-pub async fn issue_get_output(client: &reqwest::Client, id: &str) -> Result<IssueGetOutput> {
-    let (snapshot, activity) = issue_get_data(client, id).await?;
+pub async fn issue_get_output(
+    client: &reqwest::Client,
+    id: &str,
+    history_limit: u32,
+) -> Result<IssueGetOutput> {
+    let (snapshot, activity) = issue_get_data(client, id, history_limit).await?;
     let mut comments = Vec::new();
     let mut cursor = None;
     loop {
@@ -180,18 +169,8 @@ pub async fn issues_list_data(
     limit: u32,
     cursor: Option<String>,
 ) -> Result<mcptools_core::linear::Paginated<mcptools_core::linear::IssueMini>> {
-    let filter_value =
-        issue_filter_value(filter).map_err(|e| eyre!("Invalid Linear issue filter: {}", e))?;
-    let (query, variables) = match sort {
-        None => (
-            ISSUES_QUERY,
-            serde_json::json!({"first": limit, "after": cursor, "filter": filter_value}),
-        ),
-        Some(value) => (
-            ISSUES_SORT_QUERY,
-            serde_json::json!({"first": limit, "after": cursor, "filter": filter_value, "sort": issue_sort_value(value)}),
-        ),
-    };
+    let (query, variables) =
+        issues_list_request(filter, sort, limit, cursor.as_deref()).map_err(|e| eyre!(e))?;
     let data = execute(client, query, variables).await?;
     mcptools_core::linear::transform_issues(data).map_err(|e| eyre!("{}", e))
 }
@@ -625,7 +604,7 @@ mod tests {
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
         for selector in ["", "   "] {
-            let err = issue_get_data(&client, selector).await.unwrap_err();
+            let err = issue_get_data(&client, selector, 5).await.unwrap_err();
             assert!(err.to_string().contains("must not be empty"));
         }
     }

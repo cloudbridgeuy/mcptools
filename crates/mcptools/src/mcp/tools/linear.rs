@@ -75,9 +75,14 @@ pub async fn handle_linear_issue_get(
         eprintln!("Calling linear_issue_get: id={}", args.id);
     }
     let client = linear_client()?;
-    let output = crate::linear::issue::issue_get_output(&client, &args.id)
-        .await
-        .map_err(exec)?;
+    let output = crate::linear::issue::issue_get_output(
+        &client,
+        &args.id,
+        args.history_limit
+            .unwrap_or(mcptools_core::linear::DEFAULT_HISTORY_LIMIT),
+    )
+    .await
+    .map_err(exec)?;
     super::to_dual_result(output)
 }
 
@@ -144,6 +149,7 @@ pub async fn handle_linear_issue_list(
     let fetch_all = args.all.unwrap_or(false);
     let mut nodes = Vec::new();
     let mut cursor = args.cursor.clone();
+    let mut seen = cursor.iter().cloned().collect::<Vec<_>>();
     let mut page_info = mcptools_core::linear::PageInfo {
         has_next: false,
         end_cursor: None,
@@ -160,10 +166,13 @@ pub async fn handle_linear_issue_list(
         .map_err(exec)?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
+        let next = mcptools_core::linear::issue_list_continuation(&page_info, &seen)
+            .map_err(|e| exec(e.into()))?;
         if !fetch_all || !page_info.has_next {
             break;
         }
-        cursor = page_info.end_cursor.clone();
+        cursor = next;
+        seen.extend(cursor.iter().cloned());
     }
     super::to_dual_result_projected(
         IssueListOutput::from(Paginated { nodes, page_info }),

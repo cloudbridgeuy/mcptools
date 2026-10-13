@@ -519,13 +519,17 @@ async fn api_issue_handler(
             "issue id must not be empty".to_string(),
         ));
     }
-    issue::issue_get_output(&config.client, id)
-        .await
-        .map(Json)
-        .map_err(|e| match e.to_string().contains("not found") {
-            true => api_error(StatusCode::NOT_FOUND, e.to_string()),
-            false => api_error(StatusCode::BAD_GATEWAY, e.to_string()),
-        })
+    issue::issue_get_output(
+        &config.client,
+        id,
+        mcptools_core::linear::DEFAULT_HISTORY_LIMIT,
+    )
+    .await
+    .map(Json)
+    .map_err(|e| match e.to_string().contains("not found") {
+        true => api_error(StatusCode::NOT_FOUND, e.to_string()),
+        false => api_error(StatusCode::BAD_GATEWAY, e.to_string()),
+    })
 }
 
 async fn api_states_handler(

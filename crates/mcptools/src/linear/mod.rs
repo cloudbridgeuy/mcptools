@@ -253,53 +253,51 @@ pub struct StatusOptions {
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct IssueGetOptions {
-    /// Issue id or identifier (e.g. GUZ-79)
+    #[arg(help = "Issue id or identifier (e.g. GUZ-79)")]
     pub id: String,
-    /// Output as JSON
-    #[arg(long)]
+    #[arg(long, default_value_t = mcptools_core::linear::DEFAULT_HISTORY_LIMIT, help = "History entries (0–250); 0 skips history, 50 restores the previous count")]
+    pub history_limit: u32,
+    #[arg(long, help = "Output as JSON")]
     pub json: bool,
 }
 
 #[derive(Debug, clap::Args, Clone)]
 pub struct IssueListOptions {
-    /// Team id, key, or name
-    #[arg(long)]
+    #[arg(long, help = "Team id, key, or name")]
     pub team: Option<String>,
-    /// Project id or name (names need --team)
-    #[arg(long)]
+    #[arg(long, help = "Project id or name (names need --team)")]
     pub project: Option<String>,
-    /// Assignee user UUID or 'me'
-    #[arg(long)]
+    #[arg(long, help = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,
-    /// Workflow state name (e.g. Todo)
-    #[arg(long)]
+    #[arg(long, help = "Workflow state name (e.g. Todo)")]
     pub state: Option<String>,
-    /// Label name
-    #[arg(long)]
+    #[arg(long, help = "Label name")]
     pub label: Option<String>,
-    /// Cycle number or id
-    #[arg(long)]
+    #[arg(long, help = "Cycle number or id")]
     pub cycle: Option<String>,
-    /// Title substring to search
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Case-sensitive substring in title or description (not comments)"
+    )]
     pub query: Option<String>,
-    /// Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)
-    #[arg(long)]
+    #[arg(long, help = "Only issues updated at or after RFC3339 time")]
     pub updated_after: Option<String>,
-    /// Issue order: priority or updatedAt; omitted means updatedAt, newest first
-    #[arg(long, value_parser = parse_issue_sort)]
+    #[arg(long, value_parser = parse_issue_sort, help = "Issue order: priority or updatedAt; default newest first")]
     pub sort: Option<mcptools_core::linear::IssueSort>,
-    /// Max items per page
-    #[arg(long, default_value = "25")]
+    #[arg(
+        long,
+        default_value = "25",
+        help = "Items per page (1–250); use --cursor or --all for more"
+    )]
     pub limit: u32,
-    /// Page cursor for pagination
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Continue after the returned endCursor with the same filters and sort"
+    )]
     pub cursor: Option<String>,
-    /// Fetch all pages
-    #[arg(long)]
+    #[arg(long, help = "Fetch all remaining pages; can produce large output")]
     pub all: bool,
-    /// Output as JSON
-    #[arg(long)]
+    #[arg(long, help = "Output as JSON")]
     pub json: bool,
 }
 
@@ -695,7 +693,7 @@ async fn chart_handler(options: ChartOptions) -> Result<()> {
 async fn issue_get_handler(options: IssueGetOptions) -> Result<()> {
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
-    let output = issue::issue_get_output(&client, &options.id).await?;
+    let output = issue::issue_get_output(&client, &options.id, options.history_limit).await?;
     if options.json {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -778,6 +776,7 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
     .await?;
     let mut nodes = Vec::new();
     let mut cursor = options.cursor.clone();
+    let mut seen = cursor.iter().cloned().collect::<Vec<_>>();
     let mut page_info = mcptools_core::linear::PageInfo {
         has_next: false,
         end_cursor: None,
@@ -793,10 +792,13 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
         .await?;
         page_info = page.page_info.clone();
         nodes.extend(page.nodes);
+        let next = mcptools_core::linear::issue_list_continuation(&page_info, &seen)
+            .map_err(|e| eyre!(e))?;
         if !options.all || !page_info.has_next {
             break;
         }
-        cursor = page_info.end_cursor.clone();
+        cursor = next;
+        seen.extend(cursor.iter().cloned());
     }
     if options.json {
         println!(

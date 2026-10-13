@@ -1556,7 +1556,13 @@ pub fn issue_filter_value(filter: &IssueListFilter) -> Result<serde_json::Value,
         }
     }
     if let Some(query) = present(&filter.query) {
-        out.insert("title".to_string(), serde_json::json!({"contains": query}));
+        out.insert(
+            "or".to_string(),
+            serde_json::json!([
+                {"title": {"contains": query}},
+                {"description": {"contains": query}}
+            ]),
+        );
     }
     if let Some(updated_after) = present(&filter.updated_after) {
         chrono::DateTime::parse_from_rfc3339(updated_after).map_err(|_| {
@@ -2840,8 +2846,11 @@ mod tests {
             Some(&serde_json::json!("Bug"))
         );
         assert_eq!(
-            value.get("title").and_then(|v| v.get("contains")),
-            Some(&serde_json::json!("authéntico"))
+            value.get("or"),
+            Some(&serde_json::json!([
+                {"title": {"contains": "authéntico"}},
+                {"description": {"contains": "authéntico"}}
+            ]))
         );
     }
 
@@ -2903,7 +2912,7 @@ mod tests {
         let value = issue_filter_value(&filter).unwrap();
         assert!(value.get("state").is_none());
         assert_eq!(
-            value.get("title").and_then(|v| v.get("contains")),
+            value["or"][0]["title"].get("contains"),
             Some(&serde_json::json!("x"))
         );
     }

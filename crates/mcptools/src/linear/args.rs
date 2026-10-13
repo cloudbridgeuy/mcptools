@@ -12,6 +12,11 @@ pub struct AuthStatusArgs {}
 pub struct IssueGetArgs {
     #[schemars(description = "Issue id or identifier (e.g. GUZ-85)")]
     pub id: String,
+    #[serde(rename = "historyLimit")]
+    #[schemars(
+        description = "History entries to fetch (default: 5, range 0–250); 0 skips history. Activity also includes the created row."
+    )]
+    pub history_limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -76,7 +81,7 @@ pub struct IssueListArgs {
     pub label: Option<String>,
     #[schemars(description = "Cycle number or id")]
     pub cycle: Option<String>,
-    #[schemars(description = "Title substring to search")]
+    #[schemars(description = "Case-sensitive substring in title or description (not comments)")]
     pub query: Option<String>,
     #[schemars(
         description = "Only issues updated at or after RFC3339 time (e.g. 2026-01-01T00:00:00Z)"
@@ -86,11 +91,13 @@ pub struct IssueListArgs {
         description = "Issue order: priority or updatedAt; omitted means updatedAt, newest first"
     )]
     pub sort: Option<mcptools_core::linear::IssueSort>,
-    #[schemars(description = "Max items per page (default: 25)")]
+    #[schemars(
+        description = "Items per page (default: 25, range 1–250); use cursor or all for more"
+    )]
     pub limit: Option<u32>,
-    #[schemars(description = "Page cursor for pagination")]
+    #[schemars(description = "Continue after pageInfo.endCursor with the same filters and sort")]
     pub cursor: Option<String>,
-    #[schemars(description = "Fetch all pages")]
+    #[schemars(description = "Fetch all remaining pages; can produce large output")]
     pub all: Option<bool>,
 }
 

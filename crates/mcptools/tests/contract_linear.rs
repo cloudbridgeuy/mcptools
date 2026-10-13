@@ -63,6 +63,13 @@ fn mcp_contract_linear_issue_get() {
     let schema = tool
         .get("outputSchema")
         .unwrap_or_else(|| panic!("missing outputSchema in linear_issue_get"));
+    assert!(tool["inputSchema"]["properties"]
+        .get("historyLimit")
+        .is_some());
+    assert!(tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("defaults to 5"));
     assert_eq!(
         schema.get("type").and_then(|v| v.as_str()),
         Some("object"),

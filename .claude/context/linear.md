@@ -17,6 +17,8 @@ Missing or invalid credentials return actionable errors. The key never appears i
 ```bash
 # Get one issue by UUID or identifier
 mcptools linear issue get GUZ-79
+mcptools linear issue get GUZ-79 --history-limit 0
+mcptools linear issue get GUZ-79 --history-limit 50
 
 # List issues, newest first
 mcptools linear issue list --limit 5
@@ -25,7 +27,7 @@ mcptools linear issue list --limit 5
 mcptools linear issue list --sort priority
 mcptools linear issue list --sort updatedAt
 
-# Filter by team, state, label, cycle, assignee, title text
+# Filter by team, state, label, cycle, assignee, title or description text
 mcptools linear issue list --team GUZ --state "In Progress"
 mcptools linear issue list --team GUZ --project "MCPTools"
 mcptools linear issue list --assignee me
@@ -34,6 +36,7 @@ mcptools linear issue list --cycle 3
 mcptools linear issue list --updated-after 2026-01-01T00:00:00Z
 
 # Pagination
+mcptools linear issue list --limit 100 --json
 mcptools linear issue list --cursor <cursor>
 mcptools linear issue list --all
 
@@ -68,7 +71,8 @@ Selector rules:
 - `--project` and issue create/update `--cycle` accept UUID or name. Create names resolve against `--team`; update names use the issue identifier team or `--team`.
 - `--assignee` accepts a user UUID or `me` (current viewer). Find UUIDs with `linear users list --query NAME`.
 - `--state` and `--label` match by name (labels also accept UUIDs). Issue list `--cycle` accepts a cycle number or id.
-- `--query` matches a title substring. `--updated-after` needs RFC3339 and is rejected before any request when malformed.
+- `--query` matches a case-sensitive substring in title OR description, not comments. Other filters still apply. `--updated-after` needs RFC3339 and is rejected before the issue-list request when malformed.
+- Issue-list pages default to 25, range 1–250. Continue with `--cursor` / MCP `cursor` set to `pageInfo.endCursor`, keeping the same filters and sort. `--all` / `all: true` reads all remaining pages, with no 50-result cap. Missing or repeated continuation cursors fail instead of looping.
 - `--sort` accepts `priority` or `updatedAt`. Omitted, the order stays newest-first.
 - Issue update state, label, project, and cycle names resolve from the issue identifier team (`GUZ-22` → `GUZ`). `--team` overrides. UUID issue ids need `--team` for name resolution.
 - Issue update `--label` replaces the full label set; `--clear-labels` (alias `--clear-label`) empties it. The two flags reject when combined.
@@ -123,12 +127,16 @@ mcptools linear cycles list --team GUZ
 - Tables show compact rows plus a `hasMore/endCursor` line. Truncation is never hidden.
 - `issue get` and `issue list` include `Project` (project name, empty when none), `Parent` (parent issue identifier, empty when none) and `BlockedBy` (comma-separated identifiers of issues blocking this one). `--json` carries the same data as `project` (`{id, name}`, absent when none), `parent` and `blocked_by` fields. Issue `labels` (name list, empty when none) ride along in `--json` and in create/update output.
 - `issue get` and `issue list` include `priority`, the label string (`Urgent`, `High`, `Medium`, `Low`, `No priority`), never the 0–4 number. `--json` carries it as `priority`. A `--sort` table run adds a `Priority` column between `State` and `Project`; the table otherwise shows `ID Identifier Title State [Priority] Project Parent BlockedBy`. `issue get` prints a `Project:` line and create/update tables show a `Project` column.
-- `issue get` prints snapshot fields, then `Comments (N):`, then `Activity (N):`. A missing comment author or activity actor prints as `unknown`. Activity always starts with a created row. History after created is capped at 50 events.
+- `issue get` prints snapshot fields, then `Comments (N):`, then `Activity (N):`. A missing comment author or activity actor prints as `unknown`. Activity always starts with a created row. `--history-limit` / MCP `historyLimit` defaults to 5 history entries, range 0–250. Zero skips fetching history; 50 restores the previous count. Each entry can produce multiple activity rows. Activity is a bounded excerpt, not a complete audit log. Comments remain unchanged and are fully fetched.
 - CLI `issue get --json` and MCP `linear_issue_get` serialize the same object, with top-level `comments` and `activity` arrays.
 - `--json` returns `{"nodes": [...], "pageInfo": {...}}`.
 - `--all` follows cursors until no pages remain.
 
 ## MCP Tools
+
+Issue read schema verified on 2026-10-13 through authenticated, read-only GraphQL introspection: `IssueFilter.or`, `title: StringComparator`, `description: NullableStringComparator`, both comparators' `contains`, `Query.issues(first: Int, after: String, filter: IssueFilter, sort)`, and `Issue.history(first: Int)`. Search uses the public title/description comparators, not internal `searchableContent` or deprecated `issueSearch`.
+
+`linear_issue_list({query: "auth", limit: 100})` searches titles and descriptions. Continue with `{query: "auth", limit: 100, cursor: "returned-endCursor"}`. `linear_issue_get({id: "GUZ-532", historyLimit: 0})` skips history; `historyLimit: 50` restores the previous count.
 
 `linear_issue_view` is a hidden MCP alias for `linear_issue_get`, with identical
 arguments, results, and read policy in direct calls, `call_tool`, and inner
