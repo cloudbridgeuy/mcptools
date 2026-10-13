@@ -470,6 +470,51 @@ pub fn registered_tools() -> Vec<Tool> {
             destructive: false,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentListOutput>(),
+            name: "bitbucket_pr_comment_list".to_string(),
+            description: "List general, inline, and reply comments on a Bitbucket Cloud pull request, including resolution state and pagination.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentListArgs>(),
+            summary: "List comments on a Bitbucket pull request",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentItem>(),
+            name: "bitbucket_pr_comment_update".to_string(),
+            description: "Replace the Markdown content of a Bitbucket Cloud pull request comment.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentUpdateArgs>(),
+            summary: "Update a Bitbucket pull request comment",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentDeleteOutput>(),
+            name: "bitbucket_pr_comment_delete".to_string(),
+            description: "Delete a Bitbucket Cloud pull request comment.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentIdArgs>(),
+            summary: "Delete a Bitbucket pull request comment",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentThreadOutput>(),
+            name: "bitbucket_pr_comment_resolve".to_string(),
+            description: "Resolve a Bitbucket Cloud pull request comment thread.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentIdArgs>(),
+            summary: "Resolve a Bitbucket pull request comment thread",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentThreadOutput>(),
+            name: "bitbucket_pr_comment_reopen".to_string(),
+            description: "Reopen a resolved Bitbucket Cloud pull request comment thread.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::PRCommentIdArgs>(),
+            summary: "Reopen a Bitbucket pull request comment thread",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::PRCreateOutput>(),
             name: "bitbucket_pr_update".to_string(),
             description: "Update a Bitbucket pull request: title, description, destination branch, reviewers, and state. Provide at least one metadata field or one state action (approve, unapprove, decline, merge); at most one state action per call. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
@@ -504,6 +549,24 @@ pub fn registered_tools() -> Vec<Tool> {
             summary: "List branches of a Bitbucket repository",
             kind: ToolKind::Read,
             destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::BranchItem>(),
+            name: "bitbucket_repo_branch_create".to_string(),
+            description: "Create a Bitbucket Cloud repository branch from a commit hash or branch name.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::RepoBranchCreateArgs>(),
+            summary: "Create a Bitbucket repository branch",
+            kind: ToolKind::Write,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::RepoBranchDeleteOutput>(),
+            name: "bitbucket_repo_branch_delete".to_string(),
+            description: "Delete a Bitbucket Cloud repository branch. The main branch cannot be deleted.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::RepoBranchDeleteArgs>(),
+            summary: "Delete a Bitbucket repository branch",
+            kind: ToolKind::Write,
+            destructive: true,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::annotations::ListAnnotationsResponse>(),
@@ -1221,6 +1284,21 @@ pub async fn dispatch_tool_call(
         "bitbucket_pr_comment_add" => {
             atlassian::handle_bitbucket_pr_comment_add(params.arguments, global).await
         }
+        "bitbucket_pr_comment_list" => {
+            atlassian::handle_bitbucket_pr_comment_list(params.arguments, global).await
+        }
+        "bitbucket_pr_comment_update" => {
+            atlassian::handle_bitbucket_pr_comment_update(params.arguments, global).await
+        }
+        "bitbucket_pr_comment_delete" => {
+            atlassian::handle_bitbucket_pr_comment_delete(params.arguments, global).await
+        }
+        "bitbucket_pr_comment_resolve" => {
+            atlassian::handle_bitbucket_pr_comment_resolve(params.arguments, global).await
+        }
+        "bitbucket_pr_comment_reopen" => {
+            atlassian::handle_bitbucket_pr_comment_reopen(params.arguments, global).await
+        }
         "bitbucket_workspace_list" => {
             atlassian::handle_bitbucket_workspace_list(params.arguments, global).await
         }
@@ -1229,6 +1307,12 @@ pub async fn dispatch_tool_call(
         }
         "bitbucket_repo_branches" => {
             atlassian::handle_bitbucket_repo_branches(params.arguments, global).await
+        }
+        "bitbucket_repo_branch_create" => {
+            atlassian::handle_bitbucket_repo_branch_create(params.arguments, global).await
+        }
+        "bitbucket_repo_branch_delete" => {
+            atlassian::handle_bitbucket_repo_branch_delete(params.arguments, global).await
         }
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
@@ -1379,7 +1463,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 87);
+        assert_eq!(catalog.len(), 94);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1444,7 +1528,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 90);
+        assert_eq!(super::registered_tools().len(), 97);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1519,7 +1603,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 90);
+        assert_eq!(names(serve_flags(false)).len(), 97);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1619,6 +1703,11 @@ mod catalog_tests {
             "jira_query_save",
             "jira_query_delete",
             "bitbucket_pr_update",
+            "bitbucket_pr_comment_update",
+            "bitbucket_pr_comment_delete",
+            "bitbucket_pr_comment_resolve",
+            "bitbucket_pr_comment_reopen",
+            "bitbucket_repo_branch_delete",
             "linear_document_update",
             "linear_project_milestone_update",
             "linear_project_update",
@@ -1637,7 +1726,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 90);
+        assert_eq!(tools.len(), 97);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1663,7 +1752,7 @@ mod catalog_tests {
             .iter()
             .filter(|tool| tool["name"].as_str().unwrap().ends_with("_delete"))
             .collect();
-        assert_eq!(delete_tools.len(), 5);
+        assert_eq!(delete_tools.len(), 7);
         for tool in delete_tools {
             assert_eq!(tool["annotations"]["destructiveHint"], true, "{tool}");
         }
@@ -1685,6 +1774,12 @@ mod catalog_tests {
             "jira_query_delete",
             "bitbucket_pr_create",
             "bitbucket_pr_comment_add",
+            "bitbucket_pr_comment_update",
+            "bitbucket_pr_comment_delete",
+            "bitbucket_pr_comment_resolve",
+            "bitbucket_pr_comment_reopen",
+            "bitbucket_repo_branch_create",
+            "bitbucket_repo_branch_delete",
             "bitbucket_pr_update",
             "linear_project_create",
             "linear_document_create",
@@ -1735,6 +1830,7 @@ mod catalog_tests {
             "jira_query_load",
             "bitbucket_pr_list",
             "bitbucket_pr_read",
+            "bitbucket_pr_comment_list",
             "bitbucket_workspace_list",
             "bitbucket_repo_list",
             "bitbucket_repo_branches",
@@ -1772,7 +1868,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 90);
+        assert_eq!(union.len(), 97);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

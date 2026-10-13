@@ -95,6 +95,13 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `bitbucket_pr_create` | Create a Bitbucket PR |
 | `bitbucket_pr_update` | Update a Bitbucket PR: metadata, reviewers, state |
 | `bitbucket_pr_comment_add` | Add a general or single-line inline PR comment (Write; `allowWrites` required) |
+| `bitbucket_pr_comment_list` | List PR comments and thread resolution state; Read |
+| `bitbucket_pr_comment_update` | Replace PR comment Markdown; destructive Write (`allowWrites` required) |
+| `bitbucket_pr_comment_delete` | Delete a PR comment; destructive Write (`allowWrites` required) |
+| `bitbucket_pr_comment_resolve` | Resolve a PR comment thread; destructive Write (`allowWrites` required) |
+| `bitbucket_pr_comment_reopen` | Reopen a PR comment thread; destructive Write (`allowWrites` required) |
+| `bitbucket_repo_branch_create` | Create a branch from a target; additive Write (`allowWrites` required) |
+| `bitbucket_repo_branch_delete` | Delete a non-main branch; destructive Write (`allowWrites` required) |
 
 ### Linear
 

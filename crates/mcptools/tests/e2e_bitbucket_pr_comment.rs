@@ -240,3 +240,167 @@ async fn comment_http_and_response_errors_are_reported_without_retry() {
         stub.reset().await;
     }
 }
+
+#[tokio::test]
+async fn comment_and_branch_management_map_confirmed_rest_endpoints() {
+    let stub = MockServer::start().await;
+    let uri = format!("{}/2.0", stub.uri());
+    let mut server = common::spawn_server(&[
+        ("BITBUCKET_BASE_URL", &uri),
+        ("BITBUCKET_USERNAME", "test-user"),
+        ("BITBUCKET_APP_PASSWORD", "test-password"),
+        ("MCPTOOLS_CODE_MODE", "false"),
+    ])
+    .unwrap();
+    let comment = json!({
+        "id": 42,
+        "user": {"display_name": "Test User"},
+        "content": {"raw": "Review"},
+        "created_on": "2026-10-13T10:00:00Z",
+        "updated_on": "2026-10-13T10:00:00Z",
+        "deleted": false
+    });
+
+    Mock::given(method("GET"))
+        .and(path(
+            "/2.0/repositories/workspace/repo/pullrequests/7/comments",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "values": [comment.clone()],
+            "size": 1
+        })))
+        .expect(1)
+        .mount(&stub)
+        .await;
+    let listed = server
+        .tools_call(
+            "bitbucket_pr_comment_list",
+            json!({"repo":"workspace/repo","prNumber":7}),
+        )
+        .await;
+    assert_eq!(listed["structuredContent"]["comments"][0]["id"], 42);
+    stub.verify().await;
+    stub.reset().await;
+
+    Mock::given(method("PUT"))
+        .and(path(
+            "/2.0/repositories/workspace/repo/pullrequests/7/comments/42",
+        ))
+        .and(body_json(json!({"content":{"raw":"Updated"}})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 42,
+            "user": {"display_name": "Test User"},
+            "content": {"raw": "Updated"},
+            "created_on": "2026-10-13T10:00:00Z",
+            "updated_on": "2026-10-13T11:00:00Z",
+            "deleted": false
+        })))
+        .expect(1)
+        .mount(&stub)
+        .await;
+    let updated = server
+        .tools_call(
+            "bitbucket_pr_comment_update",
+            json!({"repo":"workspace/repo","prNumber":7,"commentId":42,"comment":"Updated","allowWrites":true}),
+        )
+        .await;
+    assert_eq!(updated["structuredContent"]["content"], "Updated");
+    stub.verify().await;
+    stub.reset().await;
+
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/2.0/repositories/workspace/repo/pullrequests/7/comments/42",
+        ))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&stub)
+        .await;
+    let deleted = server
+        .tools_call(
+            "bitbucket_pr_comment_delete",
+            json!({"repo":"workspace/repo","prNumber":7,"commentId":42,"allowWrites":true}),
+        )
+        .await;
+    assert_eq!(deleted["structuredContent"]["deleted"], true);
+    stub.verify().await;
+    stub.reset().await;
+
+    Mock::given(method("POST"))
+        .and(path(
+            "/2.0/repositories/workspace/repo/pullrequests/7/comments/42/resolve",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "user":{"display_name":"Resolver"},
+            "created_on":"2026-10-13T12:00:00Z"
+        })))
+        .expect(1)
+        .mount(&stub)
+        .await;
+    let resolved = server
+        .tools_call(
+            "bitbucket_pr_comment_resolve",
+            json!({"repo":"workspace/repo","prNumber":7,"commentId":42,"allowWrites":true}),
+        )
+        .await;
+    assert_eq!(resolved["structuredContent"]["resolved"], true);
+    stub.verify().await;
+    stub.reset().await;
+
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/2.0/repositories/workspace/repo/pullrequests/7/comments/42/resolve",
+        ))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&stub)
+        .await;
+    let reopened = server
+        .tools_call(
+            "bitbucket_pr_comment_reopen",
+            json!({"repo":"workspace/repo","prNumber":7,"commentId":42,"allowWrites":true}),
+        )
+        .await;
+    assert_eq!(reopened["structuredContent"]["resolved"], false);
+    stub.verify().await;
+    stub.reset().await;
+
+    Mock::given(method("POST"))
+        .and(path("/2.0/repositories/workspace/repo/refs/branches"))
+        .and(body_json(
+            json!({"name":"feature-one","target":{"hash":"main"}}),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "name":"feature-one",
+            "target":{"hash":"abc123"}
+        })))
+        .expect(1)
+        .mount(&stub)
+        .await;
+    let created = server
+        .tools_call(
+            "bitbucket_repo_branch_create",
+            json!({"repo":"workspace/repo","name":"feature-one","target":"main","allowWrites":true}),
+        )
+        .await;
+    assert_eq!(created["structuredContent"]["commit_hash"], "abc123");
+    stub.verify().await;
+    stub.reset().await;
+
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/2.0/repositories/workspace/repo/refs/branches/feature-one",
+        ))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&stub)
+        .await;
+    let deleted = server
+        .tools_call(
+            "bitbucket_repo_branch_delete",
+            json!({"repo":"workspace/repo","name":"feature-one","allowWrites":true}),
+        )
+        .await;
+    assert_eq!(deleted["structuredContent"]["deleted"], true);
+    stub.verify().await;
+}

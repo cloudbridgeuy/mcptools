@@ -93,12 +93,16 @@ pub async fn run(
     }
 }
 
-pub use pr::comment::add_pr_comment_data;
+pub use pr::comment::{
+    add_pr_comment_data, delete_pr_comment_data, list_pr_comments_data, reopen_pr_comment_data,
+    resolve_pr_comment_data, update_pr_comment_data,
+};
 pub use pr::create::{create_pr_data, CreatePRParams};
 pub use pr::list::{list_pr_data, ListPRParams};
 pub use pr::read::{read_pr_data, ReadPRParams};
 pub use pr::update::{update_pr_data, UpdatePRParams};
 
+pub use repo::branch::{create_branch_data, delete_branch_data};
 pub use repo::branches::{list_branches_data, ListBranchesParams};
 pub use repo::deploy_key::add::{add_deploy_key_data, AddDeployKeyParams};
 pub use repo::deploy_key::list::{list_deploy_keys_data, ListDeployKeysParams};

@@ -117,6 +117,19 @@ mcptools atlassian bitbucket pr update --repo "myworkspace/myrepo" 123 --title "
 - `--merge-message`: Merge commit message
 - `--json`: Output as JSON
 
+### Pull Request Comments
+
+```bash
+mcptools atlassian bitbucket pr comment add --repo "myworkspace/myrepo" 123 "Please review" --json
+mcptools atlassian bitbucket pr comment list --repo "myworkspace/myrepo" 123 --json
+mcptools atlassian bitbucket pr comment update --repo "myworkspace/myrepo" 123 456 "Updated review" --json
+mcptools atlassian bitbucket pr comment delete --repo "myworkspace/myrepo" 123 456 --json
+mcptools atlassian bitbucket pr comment resolve --repo "myworkspace/myrepo" 123 456 --json
+mcptools atlassian bitbucket pr comment reopen --repo "myworkspace/myrepo" 123 456 --json
+```
+
+Comment and pull request IDs must be positive. `list` accepts `--limit` and `--next-page`. All comment commands accept `--json`.
+
 ### List Workspaces
 
 ```bash
@@ -191,6 +204,15 @@ mcptools atlassian bitbucket repo branches myworkspace/myrepo --format json
 # Output as CSV
 mcptools atlassian bitbucket repo branches myworkspace/myrepo --format csv
 ```
+
+### Create and Delete Branches
+
+```bash
+mcptools atlassian bitbucket repo branch create --repo "myworkspace/myrepo" feature/login --target main --json
+mcptools atlassian bitbucket repo branch delete --repo "myworkspace/myrepo" feature/login --json
+```
+
+The target can be a commit hash or branch name. Branch names must omit the `refs/heads/` prefix. Bitbucket does not allow deletion of the main branch.
 
 ### Deploy Keys
 
@@ -336,7 +358,7 @@ mcptools atlassian bitbucket repo deploy-key remove -w "myworkspace" -r "myrepo"
 
 ### bitbucket_pr_comment_add
 
-Create a general PR comment, or a single-line inline comment. MCP only; no new CLI command.
+Create a general PR comment, or a single-line inline comment. The CLI add command creates general comments; MCP also supports single-line inline comments.
 
 ```json
 {
@@ -363,6 +385,12 @@ Create a general PR comment, or a single-line inline comment. MCP only; no new C
 **REST contract:** `POST /2.0/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/comments`, JSON `content.raw` and optional `inline`; HTTP 201 returns the created comment. Official [REST reference](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-pullrequests/#api-repositories-workspace-repo-slug-pullrequests-pull-request-id-comments-post) and [OpenAPI schema](https://dac-static.atlassian.com/cloud/bitbucket/swagger.v3.json) define `from` as the old-version anchor, `to` as the new-version anchor, both minimum 1. These are file line numbers, not diff offsets or a start/end range. Multi-line ranges (`start_from`, `start_to`), path-only anchors, and replies are not exposed.
 
 HTTP failures retain status and response body. Invalid input fails before authentication or HTTP. No automatic retry: a failed or unparseable response can follow a successful remote write; check PR comments before retrying.
+
+### Pull Request Comment Management
+
+`bitbucket_pr_comment_list` is read-only. `bitbucket_pr_comment_update`, `bitbucket_pr_comment_delete`, `bitbucket_pr_comment_resolve`, and `bitbucket_pr_comment_reopen` are Write tools and require `allowWrites: true`.
+
+All tools take `repo` and positive `prNumber`. Update, delete, resolve, and reopen also take positive `commentId`; update takes nonblank Markdown `comment`. List accepts `limit` and `nextPage`. The official [pull request REST reference](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-pullrequests/) documents GET list, PUT update, DELETE comment, POST resolve, and DELETE reopen endpoints under `/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/comments`.
 
 ### bitbucket_workspace_list
 
@@ -425,6 +453,10 @@ HTTP failures retain status and response body. Invalid input fails before authen
 - `nextPage` (optional): Pagination URL for next page
 - `query` (optional): Bitbucket query filter (e.g., `name ~ "feature"`)
 - `sort` (optional): Sort field (e.g., `-target.date` for newest first)
+
+### Branch Mutation Tools
+
+`bitbucket_repo_branch_create` takes `repo`, `name`, and `target`. It is an additive Write tool with `destructiveHint: false`. `bitbucket_repo_branch_delete` takes `repo` and `name`; it is a destructive Write tool. Both require `allowWrites: true`. The official [refs REST reference](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-refs/) documents POST `/repositories/{workspace}/{repo_slug}/refs/branches` with `{name,target:{hash}}` and DELETE `/repositories/{workspace}/{repo_slug}/refs/branches/{name}`.
 
 ## Environment Variables
 

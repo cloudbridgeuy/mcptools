@@ -80,6 +80,18 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "bitbucket_pr_comment_add" => {
             roundtrip::<mcptools_core::atlassian::bitbucket::PRCommentAddOutput>(value)
         }
+        "bitbucket_pr_comment_list" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::PRCommentListOutput>(value)
+        }
+        "bitbucket_pr_comment_update" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::PRCommentItem>(value)
+        }
+        "bitbucket_pr_comment_delete" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::PRCommentDeleteOutput>(value)
+        }
+        "bitbucket_pr_comment_resolve" | "bitbucket_pr_comment_reopen" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::PRCommentThreadOutput>(value)
+        }
         "bitbucket_pr_create" | "bitbucket_pr_update" => {
             roundtrip::<mcptools_core::atlassian::bitbucket::PRCreateOutput>(value)
         }
@@ -91,6 +103,12 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         }
         "bitbucket_repo_branches" => {
             roundtrip::<mcptools_core::atlassian::bitbucket::BranchListOutput>(value)
+        }
+        "bitbucket_repo_branch_create" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::BranchItem>(value)
+        }
+        "bitbucket_repo_branch_delete" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::RepoBranchDeleteOutput>(value)
         }
         "ui_annotations_list" => {
             roundtrip::<mcptools_core::annotations::ListAnnotationsResponse>(value)

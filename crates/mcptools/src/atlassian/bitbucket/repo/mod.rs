@@ -1,3 +1,4 @@
+pub mod branch;
 pub mod branches;
 pub mod deploy_key;
 pub mod list;
@@ -14,6 +15,9 @@ pub enum Commands {
     /// List branches in a repository
     #[clap(name = "branches")]
     Branches(branches::ListBranchesOptions),
+
+    #[clap(subcommand, name = "branch")]
+    Branch(branch::Commands),
 
     /// Manage deploy keys (SSH access keys) on repositories
     #[clap(subcommand, name = "deploy-key", alias = "ssh-key")]
@@ -33,6 +37,7 @@ pub async fn run(
     match cmd {
         Commands::List(options) => list::handler(options, config, main_global).await,
         Commands::Branches(options) => branches::handler(options, config, main_global).await,
+        Commands::Branch(command) => branch::run(command, config).await,
         Commands::DeployKey(deploy_key_cmd) => {
             deploy_key::run(deploy_key_cmd, config, main_global).await
         }

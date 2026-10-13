@@ -26,6 +26,9 @@ pub enum Commands {
     /// Update a pull request: metadata and state
     #[clap(name = "update")]
     Update(update::UpdateOptions),
+
+    #[clap(subcommand, name = "comment")]
+    Comment(comment::Commands),
 }
 
 /// Run PR commands
@@ -43,6 +46,7 @@ pub async fn run(
         Commands::Read(options) => read::handler(options, config, main_global).await,
         Commands::Create(options) => create::handler(options, config, main_global).await,
         Commands::Update(options) => update::handler(options, config, main_global).await,
+        Commands::Comment(command) => comment::run(command, config).await,
     }
 }
 

@@ -150,9 +150,13 @@ mcptools atlassian bitbucket pr list --repo "workspace/repo"
 mcptools atlassian bitbucket pr read --repo "workspace/repo" 123
 mcptools atlassian bitbucket pr create --repo "workspace/repo" "Fix login bug" --source feature-branch
 mcptools atlassian bitbucket pr update --repo "workspace/repo" 123 --title "New title" --approve
+mcptools atlassian bitbucket pr comment list --repo "workspace/repo" 123 --json
+mcptools atlassian bitbucket pr comment update --repo "workspace/repo" 123 456 "Updated review" --json
 mcptools atlassian bitbucket workspace list
 mcptools atlassian bitbucket repo list -w "my-workspace" --all
 mcptools atlassian bitbucket repo branches "my-workspace/my-repo" --all
+mcptools atlassian bitbucket repo branch create --repo "my-workspace/my-repo" feature/login --target main --json
+mcptools atlassian bitbucket repo branch delete --repo "my-workspace/my-repo" feature/login --json
 mcptools atlassian bitbucket repo deploy-key list -w "my-workspace" -r "my-repo"
 mcptools atlassian bitbucket repo deploy-key add -w "my-workspace" -r "my-repo" -l "ci-key" --key-file ~/.ssh/id_ed25519.pub
 mcptools atlassian bitbucket repo deploy-key remove -w "my-workspace" -r "my-repo" --key-id 123

@@ -116,6 +116,14 @@ pub struct BitbucketComment {
     pub inline: Option<BitbucketInlineComment>,
     #[serde(default)]
     pub parent: Option<BitbucketCommentParent>,
+    #[serde(default)]
+    pub resolution: Option<BitbucketCommentResolution>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketCommentResolution {
+    pub user: BitbucketUser,
+    pub created_on: String,
 }
 
 /// Content of a comment (supports multiple formats)
@@ -241,18 +249,7 @@ pub struct PRCommentRequest {
 
 impl PRCommentAddArgs {
     pub fn into_request(self) -> Result<PRCommentRequest, String> {
-        let parts: Vec<&str> = self.repo.split('/').collect();
-        if parts.len() != 2
-            || parts.iter().any(|part| {
-                part.is_empty()
-                    || matches!(*part, "." | "..")
-                    || !part.chars().all(|c| {
-                        c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '{' | '}')
-                    })
-            })
-        {
-            return Err("repo must be workspace/repo_slug, with two nonempty identifiers".into());
-        }
+        validate_repo(&self.repo)?;
         if self.comment.trim().is_empty() {
             return Err("comment must not be blank".into());
         }
@@ -312,6 +309,331 @@ pub fn transform_pr_comment_add_response(comment: BitbucketComment) -> PRComment
         created_on: comment.created_on,
         updated_on: comment.updated_on,
         inline: comment.inline,
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase")]
+pub struct PRCommentListArgs {
+    pub repo: String,
+    pub pr_number: std::num::NonZeroU64,
+    #[serde(default)]
+    pub limit: Option<std::num::NonZeroUsize>,
+    #[serde(default)]
+    pub next_page: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase")]
+pub struct PRCommentUpdateArgs {
+    pub repo: String,
+    pub pr_number: std::num::NonZeroU64,
+    pub comment_id: std::num::NonZeroU64,
+    pub comment: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase")]
+pub struct PRCommentIdArgs {
+    pub repo: String,
+    pub pr_number: std::num::NonZeroU64,
+    pub comment_id: std::num::NonZeroU64,
+}
+
+pub struct PRCommentListRequest {
+    endpoint: String,
+}
+
+pub struct PRCommentMutationRequest {
+    endpoint: String,
+    payload: Option<serde_json::Value>,
+}
+
+impl PRCommentListArgs {
+    pub fn into_request(self) -> Result<PRCommentListRequest, String> {
+        validate_repo(&self.repo)?;
+        let endpoint = match self.next_page {
+            Some(url)
+                if reqwest::Url::parse(&url)
+                    .is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https")) =>
+            {
+                url
+            }
+            Some(_) => return Err("nextPage must be an HTTP or HTTPS URL".into()),
+            None => format!(
+                "repositories/{}/pullrequests/{}/comments?pagelen={}",
+                self.repo,
+                self.pr_number,
+                self.limit.map_or(100, std::num::NonZeroUsize::get).min(100)
+            ),
+        };
+        Ok(PRCommentListRequest { endpoint })
+    }
+}
+
+impl PRCommentUpdateArgs {
+    pub fn into_request(self) -> Result<PRCommentMutationRequest, String> {
+        validate_repo(&self.repo)?;
+        if self.comment.trim().is_empty() {
+            return Err("comment must not be blank".into());
+        }
+        Ok(PRCommentMutationRequest {
+            endpoint: comment_endpoint(&self.repo, self.pr_number, self.comment_id),
+            payload: Some(serde_json::json!({"content": {"raw": self.comment}})),
+        })
+    }
+}
+
+impl PRCommentIdArgs {
+    pub fn delete_request(&self) -> Result<PRCommentMutationRequest, String> {
+        validate_repo(&self.repo)?;
+        Ok(PRCommentMutationRequest {
+            endpoint: comment_endpoint(&self.repo, self.pr_number, self.comment_id),
+            payload: None,
+        })
+    }
+
+    pub fn resolve_request(&self) -> Result<PRCommentMutationRequest, String> {
+        let mut request = self.delete_request()?;
+        request.endpoint.push_str("/resolve");
+        Ok(request)
+    }
+}
+
+impl PRCommentListRequest {
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+}
+
+impl PRCommentMutationRequest {
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn payload(&self) -> Option<&serde_json::Value> {
+        self.payload.as_ref()
+    }
+}
+
+fn comment_endpoint(
+    repo: &str,
+    pr_number: std::num::NonZeroU64,
+    comment_id: std::num::NonZeroU64,
+) -> String {
+    format!("repositories/{repo}/pullrequests/{pr_number}/comments/{comment_id}")
+}
+
+fn validate_repo(repo: &str) -> Result<(), String> {
+    let parts: Vec<&str> = repo.split('/').collect();
+    if parts.len() != 2
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || matches!(*part, "." | "..")
+                || !part
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '{' | '}'))
+        })
+    {
+        return Err("repo must be workspace/repo_slug, with two nonempty identifiers".into());
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct PRCommentItem {
+    pub id: u64,
+    pub author: String,
+    pub content: String,
+    pub created_on: String,
+    pub updated_on: String,
+    pub deleted: bool,
+    pub inline: Option<BitbucketInlineComment>,
+    pub parent_id: Option<u64>,
+    pub resolved_by: Option<String>,
+    pub resolved_on: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct PRCommentListOutput {
+    pub comments: Vec<PRCommentItem>,
+    pub next_page: Option<String>,
+    pub total_count: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct PRCommentDeleteOutput {
+    pub repo: String,
+    pub pr_number: u64,
+    pub comment_id: u64,
+    pub deleted: bool,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct PRCommentThreadOutput {
+    pub repo: String,
+    pub pr_number: u64,
+    pub comment_id: u64,
+    pub resolved: bool,
+    pub resolved_by: Option<String>,
+    pub resolved_on: Option<String>,
+}
+
+pub fn transform_pr_comment(comment: BitbucketComment) -> PRCommentItem {
+    let resolution = comment.resolution;
+    PRCommentItem {
+        id: comment.id,
+        author: comment.user.display_name,
+        content: comment
+            .content
+            .raw
+            .or_else(|| comment.content.html.map(|html| strip_html(&html)))
+            .unwrap_or_default(),
+        created_on: comment.created_on,
+        updated_on: comment.updated_on,
+        deleted: comment.deleted,
+        inline: comment.inline,
+        parent_id: comment.parent.map(|parent| parent.id),
+        resolved_by: resolution
+            .as_ref()
+            .map(|value| value.user.display_name.clone()),
+        resolved_on: resolution.map(|value| value.created_on),
+    }
+}
+
+pub fn transform_pr_comment_list_response(
+    response: BitbucketCommentsResponse,
+) -> PRCommentListOutput {
+    PRCommentListOutput {
+        comments: response
+            .values
+            .into_iter()
+            .map(transform_pr_comment)
+            .collect(),
+        next_page: response.next,
+        total_count: response.size,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BitbucketCommentResolutionResponse {
+    pub user: BitbucketUser,
+    pub created_on: String,
+}
+
+pub fn transform_pr_comment_resolution(
+    repo: String,
+    pr_number: u64,
+    comment_id: u64,
+    response: BitbucketCommentResolutionResponse,
+) -> PRCommentThreadOutput {
+    PRCommentThreadOutput {
+        repo,
+        pr_number,
+        comment_id,
+        resolved: true,
+        resolved_by: Some(response.user.display_name),
+        resolved_on: Some(response.created_on),
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase")]
+pub struct RepoBranchCreateArgs {
+    pub repo: String,
+    pub name: String,
+    pub target: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase")]
+pub struct RepoBranchDeleteArgs {
+    pub repo: String,
+    pub name: String,
+}
+
+pub struct RepoBranchRequest {
+    endpoint: String,
+    payload: Option<serde_json::Value>,
+}
+
+impl RepoBranchCreateArgs {
+    pub fn into_request(self) -> Result<RepoBranchRequest, String> {
+        validate_repo(&self.repo)?;
+        validate_branch_name(&self.name)?;
+        if self.target.trim().is_empty() || self.target.chars().any(char::is_control) {
+            return Err("target must be nonblank and contain no control characters".into());
+        }
+        Ok(RepoBranchRequest {
+            endpoint: format!("repositories/{}/refs/branches", self.repo),
+            payload: Some(serde_json::json!({
+                "name": self.name,
+                "target": {"hash": self.target}
+            })),
+        })
+    }
+}
+
+impl RepoBranchDeleteArgs {
+    pub fn into_request(self) -> Result<RepoBranchRequest, String> {
+        validate_repo(&self.repo)?;
+        validate_branch_name(&self.name)?;
+        Ok(RepoBranchRequest {
+            endpoint: format!(
+                "repositories/{}/refs/branches/{}",
+                self.repo,
+                urlencoding::encode(&self.name)
+            ),
+            payload: None,
+        })
+    }
+}
+
+impl RepoBranchRequest {
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub fn payload(&self) -> Option<&serde_json::Value> {
+        self.payload.as_ref()
+    }
+}
+
+fn validate_branch_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() || name.starts_with("refs/") || name.chars().any(char::is_control) {
+        return Err("name must be a nonblank branch name without a refs/ prefix".into());
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct RepoBranchDeleteOutput {
+    pub repo: String,
+    pub name: String,
+    pub deleted: bool,
+}
+
+pub fn transform_branch_response(response: BitbucketBranchEntry) -> BranchItem {
+    let (commit_hash, commit_date, commit_message, author) = match response.target {
+        Some(target) => (
+            Some(target.hash),
+            target.date,
+            target.message.map(|message| message.trim().to_string()),
+            target.author.and_then(|author| author.raw),
+        ),
+        None => (None, None, None, None),
+    };
+    BranchItem {
+        name: response.name,
+        commit_hash,
+        commit_date,
+        commit_message,
+        author,
     }
 }
 
@@ -1043,6 +1365,7 @@ mod tests {
             deleted: false,
             inline: None,
             parent: None,
+            resolution: None,
         }
     }
 
@@ -1070,6 +1393,7 @@ mod tests {
                 to: Some(line),
             }),
             parent: None,
+            resolution: None,
         }
     }
 
@@ -1753,5 +2077,108 @@ mod tests {
         assert_eq!(output.keys.len(), 0);
         assert_eq!(output.total_count, Some(0));
         assert_eq!(output.next_page, None);
+    }
+
+    #[test]
+    fn pr_comment_requests_build_confirmed_endpoints() {
+        let list = PRCommentListArgs {
+            repo: "ws/repo".into(),
+            pr_number: std::num::NonZeroU64::new(7).unwrap(),
+            limit: std::num::NonZeroUsize::new(25),
+            next_page: None,
+        }
+        .into_request()
+        .unwrap();
+        assert_eq!(
+            list.endpoint(),
+            "repositories/ws/repo/pullrequests/7/comments?pagelen=25"
+        );
+        let update = PRCommentUpdateArgs {
+            repo: "ws/repo".into(),
+            pr_number: std::num::NonZeroU64::new(7).unwrap(),
+            comment_id: std::num::NonZeroU64::new(9).unwrap(),
+            comment: "Updated".into(),
+        }
+        .into_request()
+        .unwrap();
+        assert_eq!(
+            update.endpoint(),
+            "repositories/ws/repo/pullrequests/7/comments/9"
+        );
+        assert_eq!(
+            update.payload().unwrap(),
+            &serde_json::json!({"content":{"raw":"Updated"}})
+        );
+        let id = PRCommentIdArgs {
+            repo: "ws/repo".into(),
+            pr_number: std::num::NonZeroU64::new(7).unwrap(),
+            comment_id: std::num::NonZeroU64::new(9).unwrap(),
+        };
+        assert_eq!(
+            id.delete_request().unwrap().endpoint(),
+            "repositories/ws/repo/pullrequests/7/comments/9"
+        );
+        assert_eq!(
+            id.resolve_request().unwrap().endpoint(),
+            "repositories/ws/repo/pullrequests/7/comments/9/resolve"
+        );
+    }
+
+    #[test]
+    fn pr_comment_parser_keeps_thread_state_and_pagination() {
+        let mut comment = sample_comment(9, "Ada", "Review");
+        comment.parent = Some(BitbucketCommentParent { id: 4 });
+        comment.resolution = Some(BitbucketCommentResolution {
+            user: sample_user("Grace"),
+            created_on: "2026-10-13T12:00:00Z".into(),
+        });
+        let output = transform_pr_comment_list_response(BitbucketCommentsResponse {
+            values: vec![comment],
+            next: Some("next".into()),
+            page: Some(1),
+            size: Some(1),
+        });
+        assert_eq!(output.comments[0].parent_id, Some(4));
+        assert_eq!(output.comments[0].resolved_by.as_deref(), Some("Grace"));
+        assert_eq!(output.next_page.as_deref(), Some("next"));
+        assert_eq!(output.total_count, Some(1));
+    }
+
+    #[test]
+    fn branch_requests_encode_names_and_parse_response() {
+        let create = RepoBranchCreateArgs {
+            repo: "ws/repo".into(),
+            name: "feature/one".into(),
+            target: "main".into(),
+        }
+        .into_request()
+        .unwrap();
+        assert_eq!(create.endpoint(), "repositories/ws/repo/refs/branches");
+        assert_eq!(
+            create.payload().unwrap(),
+            &serde_json::json!({"name":"feature/one","target":{"hash":"main"}})
+        );
+        let delete = RepoBranchDeleteArgs {
+            repo: "ws/repo".into(),
+            name: "feature/one".into(),
+        }
+        .into_request()
+        .unwrap();
+        assert_eq!(
+            delete.endpoint(),
+            "repositories/ws/repo/refs/branches/feature%2Fone"
+        );
+        let output = transform_branch_response(BitbucketBranchEntry {
+            name: "feature/one".into(),
+            target: Some(BitbucketBranchTarget {
+                hash: "abc".into(),
+                date: None,
+                message: Some("subject\n".into()),
+                author: None,
+            }),
+        });
+        assert_eq!(output.name, "feature/one");
+        assert_eq!(output.commit_hash.as_deref(), Some("abc"));
+        assert_eq!(output.commit_message.as_deref(), Some("subject"));
     }
 }

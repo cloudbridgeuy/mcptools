@@ -8,7 +8,7 @@ Useful MCP Tools to use with LLM Coding Agents
 
 - **Atlassian Jira**: Search, create, update, inspect transitions, and manage issue links and saved queries (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_transition_list`, `jira_link_list`, `jira_link_type_list`, `jira_link_create`, `jira_link_delete`)
 - **Atlassian Confluence**: Search pages and read one page by ID or URL (`confluence_search`, `confluence_page_get`)
-- **Atlassian Bitbucket**: List and read pull requests with diff support; add general or single-line inline comments (`bitbucket_pr_list`, `bitbucket_pr_read`, `bitbucket_pr_comment_add`)
+- **Atlassian Bitbucket**: List and read pull requests with diff support; add, list, update, delete, resolve, and reopen comments; create and delete repository branches. See [Bitbucket](.claude/context/bitbucket.md).
 - **Linear**: Read a bounded issue dependency graph and ready-to-start frontier (`linear_issue_graph`); see [Linear](.claude/context/linear.md) for all Linear tools.
 - **Lanes**: Read Git worktrees, assess cleanup eligibility, and create guarded Worktrunk lanes (`lane_list`, `lane_cleanup_plan`, `lane_create`). Disabled until the server operator sets `MCPTOOLS_LANE_REPOS`. Plans are advisory, not removal permission. No deletion, cleanup execution, merge, or push. See [Lane security and contracts](.claude/context/lanes.md).
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)

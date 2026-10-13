@@ -231,9 +231,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn read_only_set_has_fifty_three_names_and_no_writes() {
+    async fn read_only_set_has_fifty_four_names_and_no_writes() {
         let read = bound_names(&registered_tools(), &[ToolKind::Read]);
-        assert_eq!(read.len(), 53);
+        assert_eq!(read.len(), 54);
         assert!(read.contains(&"lane_list".to_string()));
         assert!(read.contains(&"lane_cleanup_plan".to_string()));
         assert!(!read.contains(&"lane_create".to_string()));
@@ -261,12 +261,17 @@ mod tests {
         assert!(!read.contains(&"linear_comment_update".to_string()));
         assert!(!read.contains(&"linear_comment_delete".to_string()));
         assert!(!read.contains(&"bitbucket_pr_comment_add".to_string()));
+        assert!(read.contains(&"bitbucket_pr_comment_list".to_string()));
+        assert!(!read.contains(&"bitbucket_pr_comment_update".to_string()));
+        assert!(!read.contains(&"bitbucket_pr_comment_delete".to_string()));
+        assert!(!read.contains(&"bitbucket_repo_branch_create".to_string()));
+        assert!(!read.contains(&"bitbucket_repo_branch_delete".to_string()));
         assert!(!read.contains(&"images_generate".to_string()));
         let all = bound_names(
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 88);
+        assert_eq!(all.len(), 95);
         assert!(all.contains(&"linear_document_create".to_string()));
         assert!(all.contains(&"linear_document_update".to_string()));
         assert!(!read.contains(&"linear_project_milestone_update".to_string()));
@@ -281,6 +286,10 @@ mod tests {
         assert!(all.contains(&"jira_link_create".to_string()));
         assert!(all.contains(&"jira_link_delete".to_string()));
         assert!(all.contains(&"bitbucket_pr_comment_add".to_string()));
+        assert!(all.contains(&"bitbucket_pr_comment_update".to_string()));
+        assert!(all.contains(&"bitbucket_pr_comment_delete".to_string()));
+        assert!(all.contains(&"bitbucket_repo_branch_create".to_string()));
+        assert!(all.contains(&"bitbucket_repo_branch_delete".to_string()));
     }
 
     #[tokio::test(flavor = "multi_thread")]
