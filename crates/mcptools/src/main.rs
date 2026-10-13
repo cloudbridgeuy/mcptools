@@ -102,6 +102,8 @@ pub enum SubCommands {
     /// ChatGPT Images 2.5 generation, editing and variations
     Images(crate::images::App),
 
+    Lane(crate::lane::App),
+
     /// Model Context Protocol server
     MCP(crate::mcp::App),
 
@@ -130,6 +132,7 @@ async fn main() -> Result<()> {
         SubCommands::FindTools(sub_app) => crate::find_tools::run(sub_app, app.global).await,
         SubCommands::HN(sub_app) => crate::hn::run(sub_app, app.global).await,
         SubCommands::Images(sub_app) => crate::images::run(sub_app, app.global).await,
+        SubCommands::Lane(sub_app) => crate::lane::run(sub_app, app.global).await,
         SubCommands::MCP(sub_app) => crate::mcp::run(sub_app, app.global).await,
         SubCommands::MD(sub_app) => crate::md::run(sub_app, app.global).await,
         SubCommands::Pdf(sub_app) => crate::pdf::run(sub_app, app.global).await,

@@ -250,7 +250,7 @@ fn no_flag_no_env_lists_all_tools() {
     );
 
     let tools = responses[0]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 104);
+    assert_eq!(tools.len(), 105);
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn lanes_are_discoverable_and_deny_unconfigured_access_in_all_modes() {
         let found = responses[0]["result"]["structuredContent"]["tools"]
             .as_array()
             .unwrap();
-        assert_eq!(found.len(), 3);
+        assert_eq!(found.len(), 4);
         assert_eq!(found[0]["name"], "lane_list");
         let declaration = found[0]["declaration"].as_str().unwrap();
         assert!(declaration.contains("string | null"));

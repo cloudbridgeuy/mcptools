@@ -163,7 +163,7 @@ pub fn registered_tools() -> Vec<Tool> {
     vec![
         Tool {
             name: "lane_list".into(),
-            description: "List Git worktrees of an exact repository root permitted by server environment MCPTOOLS_LANE_REPOS. Denied when unset or empty. Native Git avoids Worktrunk cache writes. Missing HEAD is null; unavailable status is unknown. Only unchanged registered identities are managed. Cleanup planning is read-only; no lane deletion, cleanup execution, merge, or push tools exist.".into(),
+            description: "List Git worktrees of an exact repository root permitted by server environment MCPTOOLS_LANE_REPOS. Denied when unset or empty. Native Git avoids Worktrunk cache writes. Missing HEAD is null; unavailable status is unknown. Only unchanged registered identities are managed. Cleanup planning is read-only; cleanup apply can remove eligible managed lanes. No merge or push tools exist.".into(),
             summary: "Inspect Git worktree lanes and registered ownership",
             kind: ToolKind::Read,
             destructive: false,
@@ -172,12 +172,21 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             name: "lane_cleanup_plan".into(),
-            description: "Assess lane removal eligibility without changing Git, ownership records, files, or Worktrunk caches. Requires an operator-permitted repository root. Omit laneIds to inspect all registered worktrees, including unmanaged blockers; otherwise supply 1 to 100 unique managed IDs from lane_list. Unknown or no longer managed IDs fail. Main, current, unmanaged, locked, dirty, unresolved, missing HEAD, ignored content, and unknown inspection states block removal. Ignored evidence is relative, sorted, capped at 100 paths; directories collapse. Advisory observation only, not an atomic snapshot or approval token. Git clean does not mean disposable. No removal tool exists.".into(),
+            description: "Assess lane removal eligibility without changing Git, ownership records, files, or Worktrunk caches. Requires an operator-permitted repository root. Omit laneIds to inspect all registered worktrees, including unmanaged blockers; otherwise supply 1 to 100 unique managed IDs from lane_list. Unknown or no longer managed IDs fail. Main, current, unmanaged, locked, dirty, unresolved, missing HEAD, ignored content, unmerged branches, and unknown inspection states block removal. Ignored evidence is relative, sorted, capped at 100 paths; directories collapse. Advisory observation only, not an atomic snapshot or approval token. Git clean does not mean disposable.".into(),
             summary: "Plan lane cleanup with read-only eligibility and blockers",
             kind: ToolKind::Read,
             destructive: false,
             input_schema: schema::input_schema_for::<mcptools_core::lane::CleanupPlanArgs>(),
             output_schema: schema::output_schema_for::<mcptools_core::lane::CleanupPlanOutput>(),
+        },
+        Tool {
+            name: "lane_cleanup_apply".into(),
+            description: "Recompute the guarded lane cleanup plan, then remove only managed lanes marked removable. Uses native non-force git worktree remove and branch --delete, then removes the matching ownership record. Dirty, ignored-dirty, locked, missing, unmanaged, unmerged, changed, and unknown lanes remain blocked. Omit laneIds to assess all lanes or supply 1 to 100 unique managed IDs. Requires an operator-permitted repository root and allowWrites. Failures after mutation starts report possible partial mutation; no force, rollback, retry, merge, or push is performed.".into(),
+            summary: "Apply guarded lane cleanup without force deletion",
+            kind: ToolKind::Write,
+            destructive: true,
+            input_schema: schema::input_schema_for::<mcptools_core::lane::CleanupPlanArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::lane::CleanupApplyOutput>(),
         },
         Tool {
             name: "lane_create".into(),
@@ -1296,6 +1305,7 @@ pub async fn dispatch_tool_call(
     match name {
         "lane_list" => lane::list(params.arguments).await,
         "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
+        "lane_cleanup_apply" => lane::cleanup_apply(params.arguments).await,
         "lane_create" => lane::create(params.arguments).await,
         "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
         "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
@@ -1545,7 +1555,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 101);
+        assert_eq!(catalog.len(), 102);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1610,7 +1620,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 104);
+        assert_eq!(super::registered_tools().len(), 105);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1685,7 +1695,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 104);
+        assert_eq!(names(serve_flags(false)).len(), 105);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1777,6 +1787,7 @@ mod catalog_tests {
     #[test]
     fn full_table_matches_oracle_annotations() {
         let destructive: std::collections::BTreeSet<&str> = [
+            "lane_cleanup_apply",
             "lane_create",
             "jira_update",
             "jira_comment_update",
@@ -1810,7 +1821,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 104);
+        assert_eq!(tools.len(), 105);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1845,6 +1856,7 @@ mod catalog_tests {
     #[test]
     fn registered_names_match_oracle_sets() {
         let write: std::collections::BTreeSet<&str> = [
+            "lane_cleanup_apply",
             "lane_create",
             "confluence_page_create",
             "confluence_page_update",
@@ -1959,7 +1971,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 104);
+        assert_eq!(union.len(), 105);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();
@@ -2212,6 +2224,24 @@ mod declaration_tests {
         assert!(tool
             .description
             .contains("not an atomic snapshot or approval token"));
+    }
+
+    #[test]
+    fn cleanup_apply_declaration_is_a_destructive_write_contract() {
+        let tool = named("lane_cleanup_apply");
+        assert_eq!(tool.kind, super::ToolKind::Write);
+        assert!(tool.destructive);
+        let text = super::declaration(&tool);
+        for expected in [
+            "declare function lane_cleanup_apply",
+            "laneIds?: string[]",
+            "removed:",
+            "blocked:",
+            "\"unmerged\"",
+            "\"unknownMerge\"",
+        ] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
     }
 
     fn pascal_case(name: &str) -> String {

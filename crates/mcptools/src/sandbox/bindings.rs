@@ -236,6 +236,7 @@ mod tests {
         assert_eq!(read.len(), 56);
         assert!(read.contains(&"lane_list".to_string()));
         assert!(read.contains(&"lane_cleanup_plan".to_string()));
+        assert!(!read.contains(&"lane_cleanup_apply".to_string()));
         assert!(!read.contains(&"lane_create".to_string()));
         assert!(read.contains(&"find_tools".to_string()));
         assert!(read.contains(&"jira_search".to_string()));
@@ -275,7 +276,8 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 102);
+        assert_eq!(all.len(), 103);
+        assert!(all.contains(&"lane_cleanup_apply".to_string()));
         assert!(all.contains(&"linear_document_create".to_string()));
         assert!(all.contains(&"linear_document_update".to_string()));
         assert!(!read.contains(&"linear_project_milestone_update".to_string()));

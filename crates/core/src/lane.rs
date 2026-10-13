@@ -177,6 +177,8 @@ pub enum CleanupBlocker {
     IgnoredFiles,
     IgnoredInspectionUnknown,
     ChangedDuringInspection,
+    Unmerged,
+    UnknownMerge,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -190,6 +192,53 @@ pub struct CleanupAssessment {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CleanupPlanOutput {
     pub assessments: Vec<CleanupAssessment>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CleanupRemoval {
+    pub id: String,
+    pub path: String,
+    pub branch: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CleanupApplyOutput {
+    pub removed: Vec<CleanupRemoval>,
+    pub blocked: Vec<CleanupAssessment>,
+}
+
+pub fn cleanup_merge_blocker(merged: Option<bool>) -> Option<CleanupBlocker> {
+    match merged {
+        Some(true) => None,
+        Some(false) => Some(CleanupBlocker::Unmerged),
+        None => Some(CleanupBlocker::UnknownMerge),
+    }
+}
+
+pub fn cleanup_apply_decision(plan: CleanupPlanOutput) -> Result<CleanupApplyOutput, String> {
+    let mut removed = Vec::new();
+    let mut blocked = Vec::new();
+    for assessment in plan.assessments {
+        if assessment.removable != assessment.blockers.is_empty() {
+            return Err("Cleanup assessment eligibility is inconsistent".into());
+        }
+        if assessment.removable {
+            removed.push(CleanupRemoval {
+                id: assessment
+                    .lane
+                    .id
+                    .ok_or("Removable lane is missing its managed ID")?,
+                path: assessment.lane.path,
+                branch: assessment
+                    .lane
+                    .branch
+                    .ok_or("Removable lane is missing its local branch")?,
+            });
+        } else {
+            blocked.push(assessment);
+        }
+    }
+    Ok(CleanupApplyOutput { removed, blocked })
 }
 
 pub fn cleanup_blockers(
@@ -351,6 +400,7 @@ mod tests {
                 IgnoredFiles => ignored.paths.push("target/".into()),
                 IgnoredInspectionUnknown => ignored.state = IgnoredState::Unknown,
                 UnresolvedWorktree | ChangedDuringInspection => {}
+                Unmerged | UnknownMerge => unreachable!(),
             }
             assert_eq!(
                 cleanup_blockers(
@@ -362,6 +412,9 @@ mod tests {
                 vec![expected]
             );
         }
+        assert_eq!(cleanup_merge_blocker(Some(true)), None);
+        assert_eq!(cleanup_merge_blocker(Some(false)), Some(Unmerged));
+        assert_eq!(cleanup_merge_blocker(None), Some(UnknownMerge));
         for state in [
             IgnoredState::NotChecked,
             IgnoredState::Truncated,
@@ -378,6 +431,39 @@ mod tests {
             )
             .contains(&IgnoredInspectionUnknown));
         }
+    }
+
+    #[test]
+    fn cleanup_apply_decision_partitions_only_consistent_removable_assessments() {
+        let removable = CleanupAssessment {
+            lane: eligible_lane(),
+            removable: true,
+            blockers: Vec::new(),
+            ignored: IgnoredInspection {
+                state: IgnoredState::Complete,
+                paths: Vec::new(),
+            },
+        };
+        let mut blocked_lane = eligible_lane();
+        blocked_lane.id = Some("b".repeat(32));
+        let blocked = CleanupAssessment {
+            lane: blocked_lane,
+            removable: false,
+            blockers: vec![CleanupBlocker::Dirty],
+            ignored: IgnoredInspection::unchecked(),
+        };
+        let decision = cleanup_apply_decision(CleanupPlanOutput {
+            assessments: vec![removable, blocked],
+        })
+        .unwrap();
+        assert_eq!(decision.removed.len(), 1);
+        assert_eq!(decision.blocked.len(), 1);
+        let mut inconsistent = decision.blocked.into_iter().next().unwrap();
+        inconsistent.removable = true;
+        assert!(cleanup_apply_decision(CleanupPlanOutput {
+            assessments: vec![inconsistent]
+        })
+        .is_err());
     }
 
     #[test]

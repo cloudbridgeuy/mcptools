@@ -5,7 +5,10 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use mcptools_core::lane::{CreateArgs, CreateOutput, ListOutput, State};
+use color_eyre::Report;
+use mcptools_core::lane::{
+    CleanupApplyOutput, CleanupSelection, CreateArgs, CreateOutput, ListOutput, State,
+};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
@@ -14,6 +17,44 @@ type Result<T> = std::result::Result<T, String>;
 
 const OUTPUT_LIMIT: usize = 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(20);
+
+#[derive(Debug, clap::Parser)]
+#[command(name = "lane", about = "Guarded Git worktree lane operations")]
+pub struct App {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum Commands {
+    Cleanup(CleanupOptions),
+}
+
+#[derive(Debug, clap::Args)]
+pub struct CleanupOptions {
+    #[arg(long)]
+    pub repo: String,
+    #[arg(long = "lane-id")]
+    pub lane_ids: Vec<String>,
+}
+
+pub async fn run(app: App, _global: crate::Global) -> crate::prelude::Result<()> {
+    match app.command {
+        Commands::Cleanup(options) => {
+            let selection =
+                CleanupSelection::parse((!options.lane_ids.is_empty()).then_some(options.lane_ids))
+                    .map_err(Report::msg)?;
+            let root = permitted_repo(&options.repo, std::env::var_os("MCPTOOLS_LANE_REPOS"))
+                .map_err(Report::msg)?;
+            let runner = Runner::new().map_err(Report::msg)?;
+            let output = cleanup_apply(&runner, root, selection)
+                .await
+                .map_err(Report::msg)?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            Ok(())
+        }
+    }
+}
 
 pub struct Runner {
     home: tempfile::TempDir,
@@ -142,6 +183,21 @@ impl Runner {
                 output.stderr
             )),
         }
+    }
+
+    async fn branch_merged(&self, repo: &Path, head: &str) -> Option<bool> {
+        self.run(
+            &self.git,
+            repo,
+            &["merge-base", "--is-ancestor", head, "HEAD"],
+        )
+        .await
+        .ok()
+        .and_then(|output| match output.code {
+            Some(0) => Some(true),
+            Some(1) => Some(false),
+            _ => None,
+        })
     }
 }
 
@@ -625,6 +681,16 @@ pub async fn cleanup_plan(
             changed |= !matches!((&before, &after), (Ok(before), Ok(after)) if before == after);
         }
         let blockers = cleanup_blockers(&lane, resolved, &evidence, changed);
+        let mut blockers = blockers;
+        if blockers.is_empty() {
+            let merged = match lane.head.as_deref() {
+                Some(head) => runner.branch_merged(&repo.root, head).await,
+                None => None,
+            };
+            if let Some(blocker) = mcptools_core::lane::cleanup_merge_blocker(merged) {
+                blockers.push(blocker);
+            }
+        }
         assessments.push(CleanupAssessment {
             lane,
             removable: blockers.is_empty(),
@@ -647,6 +713,62 @@ pub async fn cleanup_plan(
         }
     }
     Ok(CleanupPlanOutput { assessments })
+}
+
+fn sync_directory(path: &Path) -> Result<()> {
+    std::fs::File::open(path)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| error.to_string())
+}
+
+pub async fn cleanup_apply(
+    runner: &Runner,
+    root: PathBuf,
+    selection: CleanupSelection,
+) -> Result<CleanupApplyOutput> {
+    let repo = Repository::open(runner, root.clone()).await?;
+    let plan = cleanup_plan(runner, root, selection).await?;
+    let decision = mcptools_core::lane::cleanup_apply_decision(plan)?;
+    let removed = decision.removed;
+    let records = repo.records()?;
+    let record_paths = removed
+        .iter()
+        .map(|lane| {
+            records
+                .iter()
+                .find(|record| {
+                    record.id == lane.id
+                        && record.branch == lane.branch
+                        && record.worktree.path == Path::new(&lane.path)
+                })
+                .map(|record| repo.registry.join(record.filename()))
+                .ok_or_else(|| format!("Lane ownership changed before cleanup: {}", lane.id))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for (lane, record_path) in removed.iter().zip(record_paths) {
+        let mutation = async {
+            runner
+                .git(&repo.root, &["worktree", "remove", "--", &lane.path])
+                .await?;
+            runner
+                .git(&repo.root, &["branch", "--delete", "--", &lane.branch])
+                .await?;
+            std::fs::remove_file(&record_path).map_err(|error| error.to_string())?;
+            sync_directory(&repo.registry)?;
+            sync_directory(&repo.common)
+        }
+        .await;
+        mutation.map_err(|error| {
+            format!(
+                "PARTIAL_MUTATION_POSSIBLE: {error}; lane={}; path={}; branch={}. No force, rollback, or retry was performed. Inspect Git worktree, branch, and ownership state before any retry.",
+                lane.id, lane.path, lane.branch
+            )
+        })?;
+    }
+    Ok(CleanupApplyOutput {
+        removed,
+        blocked: decision.blocked,
+    })
 }
 
 #[derive(Deserialize)]
@@ -1060,6 +1182,147 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
         assert!(plan.assessments[0]
             .blockers
             .contains(&CleanupBlocker::UnknownStatus));
+    }
+
+    #[tokio::test]
+    async fn cleanup_apply_removes_only_merged_clean_lanes_and_preserves_every_blocker() {
+        use mcptools_core::lane::CleanupBlocker::*;
+        let (_directory, mut runner, root) = repository().await;
+        std::fs::write(root.join(".gitignore"), ".worktrees/\nignored/\n").unwrap();
+        std::fs::write(root.join("tracked"), "base").unwrap();
+        runner
+            .git(&root, &["add", ".gitignore", "tracked"])
+            .await
+            .unwrap();
+        runner
+            .git(
+                &root,
+                &[
+                    "-c",
+                    "user.name=Lane",
+                    "-c",
+                    "user.email=lane@example.invalid",
+                    "commit",
+                    "-m",
+                    "files",
+                ],
+            )
+            .await
+            .unwrap();
+        fake_wt(&mut runner, "");
+        let mut created = Vec::new();
+        for branch in [
+            "clean",
+            "dirty",
+            "ignored",
+            "locked",
+            "missing",
+            "unmanaged",
+            "unmerged",
+        ] {
+            created.push(
+                create(&runner, root.clone(), args(&root, branch))
+                    .await
+                    .unwrap(),
+            );
+        }
+        std::fs::write(Path::new(&created[1].path).join("tracked"), "dirty").unwrap();
+        std::fs::create_dir(Path::new(&created[2].path).join("ignored")).unwrap();
+        std::fs::write(
+            Path::new(&created[2].path).join("ignored/private"),
+            "preserve",
+        )
+        .unwrap();
+        runner
+            .git(&root, &["worktree", "lock", &created[3].path])
+            .await
+            .unwrap();
+        let moved = root.join("missing-moved");
+        std::fs::rename(&created[4].path, &moved).unwrap();
+        runner
+            .git(Path::new(&created[5].path), &["checkout", "--detach"])
+            .await
+            .unwrap();
+        runner
+            .git(
+                Path::new(&created[6].path),
+                &[
+                    "-c",
+                    "user.name=Lane",
+                    "-c",
+                    "user.email=lane@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "unmerged",
+                ],
+            )
+            .await
+            .unwrap();
+        let output = cleanup_apply(
+            &runner,
+            root.clone(),
+            CleanupSelection::parse(None).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.removed.len(), 1);
+        assert_eq!(output.removed[0].id, created[0].id);
+        assert!(!Path::new(&created[0].path).exists());
+        assert_eq!(
+            runner
+                .run(
+                    &runner.git,
+                    &root,
+                    &["show-ref", "--verify", "--quiet", "refs/heads/clean"]
+                )
+                .await
+                .unwrap()
+                .code,
+            Some(1)
+        );
+        for (index, blocker) in [
+            (1, Dirty),
+            (2, IgnoredFiles),
+            (3, Locked),
+            (4, Unmanaged),
+            (5, Unmanaged),
+            (6, Unmerged),
+        ] {
+            let assessment = output
+                .blocked
+                .iter()
+                .find(|assessment| assessment.lane.path == created[index].path)
+                .unwrap();
+            assert!(assessment.blockers.contains(&blocker), "{assessment:?}");
+        }
+        for lane in [
+            &created[1],
+            &created[2],
+            &created[3],
+            &created[5],
+            &created[6],
+        ] {
+            assert!(Path::new(&lane.path).exists());
+        }
+        assert!(moved.exists());
+        let repo = Repository::open(&runner, root).await.unwrap();
+        assert!(!repo
+            .records()
+            .unwrap()
+            .iter()
+            .any(|record| record.id == created[0].id));
+    }
+
+    #[test]
+    fn cleanup_cli_accepts_optional_repeated_lane_ids() {
+        use clap::Parser;
+        let id = "a".repeat(32);
+        let app =
+            App::try_parse_from(["lane", "cleanup", "--repo", "/repo", "--lane-id", &id]).unwrap();
+        let Commands::Cleanup(options) = app.command;
+        assert_eq!(options.repo, "/repo");
+        assert_eq!(options.lane_ids, [id]);
     }
 
     #[test]

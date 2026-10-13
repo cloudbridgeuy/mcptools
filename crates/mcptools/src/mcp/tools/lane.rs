@@ -63,6 +63,25 @@ pub async fn cleanup_plan(
     )
 }
 
+pub async fn cleanup_apply(
+    arguments: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: CleanupPlanArgs = parse(arguments)?;
+    let selection = CleanupSelection::parse(args.lane_ids).map_err(|message| JsonRpcError {
+        code: -32602,
+        message,
+        data: None,
+    })?;
+    let root = crate::lane::permitted_repo(&args.repo, std::env::var_os("MCPTOOLS_LANE_REPOS"))
+        .map_err(failure)?;
+    let runner = crate::lane::Runner::new().map_err(failure)?;
+    super::to_dual_result(
+        crate::lane::cleanup_apply(&runner, root, selection)
+            .await
+            .map_err(failure)?,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     #[tokio::test]
