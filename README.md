@@ -925,7 +925,7 @@ Generate images from a text prompt. Saves files and returns paths plus metadata.
 
 #### images_edit
 
-Edit 1-16 reference images with a prompt and optional mask. Preserves subject and composition outside the edit.
+Edit 1-16 reference image files with a prompt and optional mask. Saves generated files and returns their paths.
 
 **Parameters:**
 

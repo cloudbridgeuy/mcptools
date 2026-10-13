@@ -94,7 +94,7 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `bitbucket_pr_list` | List Bitbucket PRs |
 | `bitbucket_pr_read` | Read PR details/diff |
 | `bitbucket_pr_create` | Create a Bitbucket PR |
-| `bitbucket_pr_update` | Update a Bitbucket PR: metadata, reviewers, state |
+| `bitbucket_pr_update` | Update PR metadata/reviewers; approve, unapprove, decline, or merge |
 | `bitbucket_pr_comment_add` | Add a general or single-line inline PR comment (Write; `allowWrites` required) |
 | `bitbucket_pr_comment_list` | List PR comments and thread resolution state; Read |
 | `bitbucket_pr_comment_update` | Replace PR comment Markdown; destructive Write (`allowWrites` required) |
@@ -170,7 +170,7 @@ All three deny access when the operator-controlled server environment `MCPTOOLS_
 
 | Tool | Description |
 |------|-------------|
-| `md_fetch` | Fetch page as Markdown |
+| `md_fetch` | Fetch page as Markdown or HTML with CSS selection and character pagination |
 | `md_toc` | Extract table of contents |
 
 ### PDF
@@ -179,7 +179,7 @@ All three deny access when the operator-controlled server environment `MCPTOOLS_
 |------|-------------|
 | `pdf_toc` | Parse document tree / table of contents |
 | `pdf_read` | Read section content as Markdown |
-| `pdf_peek` | Sample text snippet from section |
+| `pdf_peek` | Sample text from a section or whole document at a chosen or random position |
 | `pdf_images` | List images in section or document |
 | `pdf_image` | Extract specific image by ID |
 | `pdf_info` | Get document metadata |
