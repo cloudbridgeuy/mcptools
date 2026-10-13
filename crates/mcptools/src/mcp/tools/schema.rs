@@ -52,7 +52,7 @@ fn schema_value<T: schemars::JsonSchema>(normalize: bool) -> serde_json::Value {
         "type": "object",
     }));
     strip_envelope(&mut value, normalize);
-    value
+    mcptools_core::json_schema::objectify_boolean_subschemas(value)
 }
 
 fn strip_envelope(value: &mut serde_json::Value, normalize: bool) {

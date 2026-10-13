@@ -646,6 +646,23 @@ fn output_schemas_have_no_any_nodes() {
 }
 
 #[test]
+fn tool_schemas_have_no_boolean_subschemas() {
+    let mut bad = vec![];
+    for tool in super::registered_tools() {
+        for (kind, schema) in [
+            ("input", &tool.input_schema),
+            ("output", &tool.output_schema),
+        ] {
+            let paths = mcptools_core::json_schema::boolean_subschema_paths(schema);
+            if !paths.is_empty() {
+                bad.push((tool.name.to_string(), kind, paths));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "boolean subschemas: {bad:?}");
+}
+
+#[test]
 fn samples_cover_their_schemas() {
     let mut bad = vec![];
     for tool in super::registered_tools() {
