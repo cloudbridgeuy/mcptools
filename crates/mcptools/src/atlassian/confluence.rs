@@ -30,11 +30,9 @@ pub struct App {
 }
 
 use mcptools_core::atlassian::confluence::{
-    build_get_page_request, parse_get_page_response, transform_search_results,
+    build_get_page_request, build_search_request, parse_get_page_response, parse_search_response,
 };
-pub use mcptools_core::atlassian::confluence::{
-    ConfluenceSearchResponse, GetPageOutput, PageOutput, SearchOutput,
-};
+pub use mcptools_core::atlassian::confluence::{GetPageOutput, PageOutput, SearchOutput};
 
 /// Confluence commands
 #[derive(Debug, clap::Subcommand)]
@@ -72,52 +70,29 @@ pub struct GetOptions {
     pub json: bool,
 }
 
-/// Public data function - used by both CLI and MCP
-/// Searches Confluence pages using CQL
-///
-/// This function handles I/O operations only and delegates transformation
-/// to the pure function in the core crate.
 pub async fn search_pages_data(
     query: String,
     limit: usize,
     config: &ConfluenceConfig,
 ) -> Result<SearchOutput> {
-    // Configure HTTP client (I/O setup)
+    let request = build_search_request(&config.base_url, &query, limit)?;
     let client = create_confluence_client(config)?;
-
-    // Build API URL (I/O configuration)
-    let base_url = config.base_url.trim_end_matches('/');
-    let url = format!("{base_url}/wiki/api/v2/pages/search");
-
-    let limit_str = limit.to_string();
-
-    // Perform HTTP request (I/O operation)
     let response = client
-        .get(&url)
-        .query(&[
-            ("cql", query.as_str()),
-            ("limit", &limit_str),
-            ("bodyFormat", "view"),
-        ])
+        .get(&request.url)
         .send()
         .await
         .map_err(|e| eyre!("Failed to send request to Confluence: {}", e))?;
-
-    // Handle HTTP errors (I/O error handling)
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         return Err(eyre!("Confluence API error [{}]: {}", status, body));
     }
-
-    // Parse response (I/O operation)
-    let search_response: ConfluenceSearchResponse = response
-        .json()
+    let response = response
+        .text()
         .await
-        .map_err(|e| eyre!("Failed to parse Confluence response: {}", e))?;
-
-    // Delegate to pure transformation function from core crate
-    Ok(transform_search_results(search_response))
+        .map_err(|e| eyre!("Failed to read Confluence response: {}", e))?;
+    parse_search_response(&response)
+        .map_err(|e| eyre!("Failed to parse Confluence response: {}", e))
 }
 
 pub async fn get_page_data(page: String, config: &ConfluenceConfig) -> Result<GetPageOutput> {

@@ -40,14 +40,20 @@ pub struct ViewContent {
     pub value: Option<String>,
 }
 
-/// Search response from Confluence API
-#[derive(Debug, Deserialize, Clone)]
-pub struct ConfluenceSearchResponse {
-    pub results: Vec<ConfluencePageResponse>,
+#[derive(Debug, Deserialize)]
+struct ConfluenceSearchResponse {
+    results: Vec<ConfluenceSearchResult>,
     #[serde(default)]
-    pub size: usize,
+    size: usize,
     #[serde(default, rename = "totalSize")]
-    pub total_size: usize,
+    total_size: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConfluenceSearchResult {
+    content: ConfluencePageResponse,
+    #[serde(default)]
+    url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
@@ -63,6 +69,19 @@ pub struct PageOutput {
 pub struct SearchOutput {
     pub pages: Vec<PageOutput>,
     pub total: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchRequest {
+    pub url: String,
+}
+
+#[derive(Debug, Error, PartialEq)]
+pub enum SearchError {
+    #[error("invalid Confluence base URL: {0}")]
+    InvalidBaseUrl(String),
+    #[error("invalid Confluence search response: {0}")]
+    InvalidResponse(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +108,59 @@ pub enum GetPageError {
     InvalidBaseUrl(String),
     #[error("invalid Confluence page response: {0}")]
     InvalidResponse(String),
+}
+
+pub fn build_search_request(
+    base_url: &str,
+    query: &str,
+    limit: usize,
+) -> Result<SearchRequest, SearchError> {
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|error| SearchError::InvalidBaseUrl(error.to_string()))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(SearchError::InvalidBaseUrl(base_url.to_string()));
+    }
+    let base_path = url.path().trim_end_matches('/');
+    let path = if base_path.ends_with("/wiki") {
+        format!("{base_path}/rest/api/search")
+    } else {
+        format!("{base_path}/wiki/rest/api/search")
+    };
+    url.set_path(&path);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.query_pairs_mut()
+        .append_pair("cql", query)
+        .append_pair("limit", &limit.to_string())
+        .append_pair("expand", "content.body.view");
+    Ok(SearchRequest { url: url.into() })
+}
+
+pub fn parse_search_response(response: &str) -> Result<SearchOutput, SearchError> {
+    let response: ConfluenceSearchResponse = serde_json::from_str(response)
+        .map_err(|error| SearchError::InvalidResponse(error.to_string()))?;
+    let total = response.total_size.max(response.size);
+    let pages = response
+        .results
+        .into_iter()
+        .map(|result| {
+            let page = result.content;
+            let content = page
+                .body
+                .as_ref()
+                .and_then(|body| body.view.as_ref())
+                .and_then(|view| view.value.as_ref())
+                .map(|html| html_to_plaintext(html));
+            PageOutput {
+                id: page.id,
+                title: page.title,
+                page_type: page.page_type,
+                url: result.url.or(page.links.webui),
+                content,
+            }
+        })
+        .collect();
+    Ok(SearchOutput { pages, total })
 }
 
 #[derive(Debug, Deserialize)]
@@ -322,66 +394,9 @@ pub fn html_to_plaintext(html: &str) -> String {
         .join("\n")
 }
 
-/// Convert Confluence API response to domain model
-///
-/// Transforms the raw API response into our clean domain model.
-///
-/// # Arguments
-/// * `search_response` - The raw response from Confluence search API
-///
-/// # Returns
-/// * `SearchOutput` - Cleaned and transformed search results
-pub fn transform_search_results(search_response: ConfluenceSearchResponse) -> SearchOutput {
-    let pages = search_response
-        .results
-        .into_iter()
-        .map(|page| {
-            let content = page
-                .body
-                .as_ref()
-                .and_then(|b| b.view.as_ref())
-                .and_then(|v| v.value.as_ref())
-                .map(|html| html_to_plaintext(html));
-
-            PageOutput {
-                id: page.id,
-                title: page.title,
-                page_type: page.page_type,
-                url: page.links.webui,
-                content,
-            }
-        })
-        .collect();
-
-    SearchOutput {
-        pages,
-        total: search_response.total_size,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Helper to create a basic page response for testing
-    fn create_page_response(
-        id: &str,
-        title: &str,
-        page_type: &str,
-        webui: Option<String>,
-        html_content: Option<String>,
-    ) -> ConfluencePageResponse {
-        ConfluencePageResponse {
-            id: id.to_string(),
-            title: title.to_string(),
-            page_type: page_type.to_string(),
-            status: Some("current".to_string()),
-            links: PageLinks { webui },
-            body: html_content.map(|html| PageBody {
-                view: Some(ViewContent { value: Some(html) }),
-            }),
-        }
-    }
 
     #[test]
     fn test_html_to_plaintext_basic() {
@@ -412,195 +427,69 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_search_results_basic() {
-        // Arrange: Create a basic search response with one page
-        let response = ConfluenceSearchResponse {
-            results: vec![create_page_response(
-                "123",
-                "Test Page",
-                "page",
-                Some("https://example.com/test".to_string()),
-                Some("<p>Test content</p>".to_string()),
-            )],
-            size: 1,
-            total_size: 1,
-        };
-
-        // Act: Transform the response
-        let output = transform_search_results(response);
-
-        // Assert: Verify the transformation
-        assert_eq!(output.total, 1);
-        assert_eq!(output.pages.len(), 1);
-
-        let page = &output.pages[0];
-        assert_eq!(page.id, "123");
-        assert_eq!(page.title, "Test Page");
-        assert_eq!(page.page_type, "page");
-        assert_eq!(page.url, Some("https://example.com/test".to_string()));
-        assert_eq!(page.content, Some("Test content".to_string()));
+    fn build_search_request_uses_v1_cql_endpoint() {
+        let request = build_search_request(
+            "https://example.atlassian.net/wiki/",
+            "text ~ 'deployment'",
+            10,
+        )
+        .unwrap();
+        let url = reqwest::Url::parse(&request.url).unwrap();
+        assert_eq!(url.path(), "/wiki/rest/api/search");
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            vec![
+                ("cql".into(), "text ~ 'deployment'".into()),
+                ("limit".into(), "10".into()),
+                ("expand".into(), "content.body.view".into()),
+            ]
+        );
     }
 
     #[test]
-    fn test_transform_search_results_empty() {
-        // Arrange: Create an empty search response
-        let response = ConfluenceSearchResponse {
-            results: vec![],
-            size: 0,
-            total_size: 0,
-        };
-
-        // Act: Transform the response
-        let output = transform_search_results(response);
-
-        // Assert: Verify empty results
-        assert_eq!(output.total, 0);
-        assert_eq!(output.pages.len(), 0);
+    fn parse_search_response_reads_nested_v1_content() {
+        let response = r#"{
+            "results": [{
+                "content": {
+                    "id": "123",
+                    "title": "Deployment Runbook",
+                    "type": "page",
+                    "body": { "view": { "value": "<p>Deploy &amp; verify</p>" } },
+                    "_links": { "webui": "/wiki/spaces/ENG/pages/123" }
+                },
+                "url": "/wiki/spaces/ENG/pages/123/Deployment-Runbook"
+            }],
+            "size": 1,
+            "totalSize": 4
+        }"#;
+        let output = parse_search_response(response).unwrap();
+        assert_eq!(output.total, 4);
+        assert_eq!(
+            output.pages,
+            vec![PageOutput {
+                id: "123".to_string(),
+                title: "Deployment Runbook".to_string(),
+                page_type: "page".to_string(),
+                url: Some("/wiki/spaces/ENG/pages/123/Deployment-Runbook".to_string()),
+                content: Some("Deploy & verify".to_string()),
+            }]
+        );
     }
 
     #[test]
-    fn test_transform_search_results_missing_content() {
-        // Arrange: Create a page without body content
-        let response = ConfluenceSearchResponse {
-            results: vec![create_page_response(
-                "456",
-                "Empty Page",
-                "page",
-                Some("https://example.com/empty".to_string()),
-                None, // No content
-            )],
-            size: 1,
-            total_size: 1,
-        };
-
-        // Act: Transform the response
-        let output = transform_search_results(response);
-
-        // Assert: Verify page with no content
-        assert_eq!(output.pages.len(), 1);
-        let page = &output.pages[0];
-        assert_eq!(page.id, "456");
-        assert_eq!(page.content, None);
-    }
-
-    #[test]
-    fn test_transform_search_results_missing_webui() {
-        // Arrange: Create a page without webui link
-        let response = ConfluenceSearchResponse {
-            results: vec![create_page_response(
-                "789",
-                "No URL Page",
-                "page",
-                None, // No webui link
-                Some("<p>Content here</p>".to_string()),
-            )],
-            size: 1,
-            total_size: 1,
-        };
-
-        // Act: Transform the response
-        let output = transform_search_results(response);
-
-        // Assert: Verify page with no URL
-        assert_eq!(output.pages.len(), 1);
-        let page = &output.pages[0];
-        assert_eq!(page.url, None);
-        assert_eq!(page.content, Some("Content here".to_string()));
-    }
-
-    #[test]
-    fn test_transform_search_results_multiple_pages() {
-        // Arrange: Create a search response with multiple pages
-        let response = ConfluenceSearchResponse {
-            results: vec![
-                create_page_response(
-                    "1",
-                    "Page One",
-                    "page",
-                    Some("https://example.com/1".to_string()),
-                    Some("<p>Content 1</p>".to_string()),
-                ),
-                create_page_response(
-                    "2",
-                    "Page Two",
-                    "blogpost",
-                    Some("https://example.com/2".to_string()),
-                    Some("<p>Content 2</p>".to_string()),
-                ),
-                create_page_response("3", "Page Three", "page", None, None),
-            ],
-            size: 3,
-            total_size: 3,
-        };
-
-        // Act: Transform the response
-        let output = transform_search_results(response);
-
-        // Assert: Verify all pages transformed correctly
-        assert_eq!(output.total, 3);
-        assert_eq!(output.pages.len(), 3);
-
-        // Check first page
-        assert_eq!(output.pages[0].id, "1");
-        assert_eq!(output.pages[0].title, "Page One");
-        assert_eq!(output.pages[0].page_type, "page");
-
-        // Check second page (blogpost type)
-        assert_eq!(output.pages[1].id, "2");
-        assert_eq!(output.pages[1].page_type, "blogpost");
-
-        // Check third page (no URL or content)
-        assert_eq!(output.pages[2].id, "3");
-        assert_eq!(output.pages[2].url, None);
-        assert_eq!(output.pages[2].content, None);
-    }
-
-    #[test]
-    fn test_transform_search_results_complex_html() {
-        // Arrange: Create a page with complex HTML content
-        let complex_html = r#"
-            <div>
-                <h1>Title</h1>
-                <p>First paragraph with <strong>bold</strong> and <em>italic</em>.</p>
-                <ul>
-                    <li>Item 1</li>
-                    <li>Item 2</li>
-                </ul>
-                <p>Second paragraph with &amp; special &lt;chars&gt;.</p>
-            </div>
-        "#;
-
-        let response = ConfluenceSearchResponse {
-            results: vec![create_page_response(
-                "complex",
-                "Complex Page",
-                "page",
-                Some("https://example.com/complex".to_string()),
-                Some(complex_html.to_string()),
-            )],
-            size: 1,
-            total_size: 1,
-        };
-
-        // Act: Transform the response
-        let output = transform_search_results(response);
-
-        // Assert: Verify HTML was converted to clean text
-        assert_eq!(output.pages.len(), 1);
-        let content = output.pages[0].content.as_ref().unwrap();
-
-        // Should contain the text but not the HTML tags
-        assert!(content.contains("Title"));
-        assert!(content.contains("First paragraph with bold and italic"));
-        assert!(content.contains("Item 1"));
-        assert!(content.contains("Item 2"));
-        assert!(content.contains("& special <chars>"));
-
-        // Should not contain HTML tags
-        assert!(!content.contains("<h1>"));
-        assert!(!content.contains("<p>"));
-        assert!(!content.contains("<ul>"));
-        assert!(!content.contains("&amp;"));
+    fn parse_search_response_rejects_v2_page_shape() {
+        let response = r#"{
+            "results": [{
+                "id": "123",
+                "title": "Deployment Runbook",
+                "type": "page",
+                "_links": {}
+            }]
+        }"#;
+        assert!(matches!(
+            parse_search_response(response),
+            Err(SearchError::InvalidResponse(_))
+        ));
     }
 
     #[test]
