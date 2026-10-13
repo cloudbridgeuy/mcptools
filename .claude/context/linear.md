@@ -56,6 +56,10 @@ mcptools linear issue update GUZ-22 --clear-estimate --clear-due-date --clear-cy
 # Move an issue to Linear trash; this never permanently deletes it
 mcptools linear issue delete GUZ-22
 mcptools linear issue delete GUZ-22 --json
+
+# Restore an issue from Linear trash
+mcptools linear issue restore GUZ-22
+mcptools linear issue restore GUZ-22 --json
 ```
 
 Selector rules:
@@ -70,6 +74,7 @@ Selector rules:
 - Issue update `--label` replaces the full label set; `--clear-labels` (alias `--clear-label`) empties it. The two flags reject when combined.
 - Issue priority is integer 0–4. Due dates must be valid `YYYY-MM-DD` calendar dates. Update clear flags set estimate, due date, cycle, or project to null and reject with the matching set flag.
 - Issue delete accepts an issue UUID or identifier and moves it to Linear trash. It never permanently deletes the issue.
+- Issue restore accepts an issue UUID or identifier and clears its trashed state.
 
 ### Comment edits and deletion
 
@@ -130,7 +135,7 @@ arguments, results, and read policy in direct calls, `call_tool`, and inner
 `execute`. Discovery and declarations expose only `linear_issue_get`. This does
 not add a CLI alias or change other tool names.
 
-36 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+37 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
@@ -158,6 +163,7 @@ linear_project_update_create (needs project, nonblank Markdown body; names requi
 linear_issue_create (needs team, title; accepts priority 0–4, estimate, dueDate, cycle, project, and labels string-or-array)
 linear_issue_update (needs id plus one changed field; supports priority, estimate, dueDate, cycle, project, clearEstimate, clearDueDate, clearCycle, clearProject, and existing issue fields; names resolve from the issue identifier team or team)
 linear_issue_delete (needs id; moves the issue to trash, never permanently deletes it; requires allowWrites)
+linear_issue_restore (needs id; restores the issue from trash; requires allowWrites)
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_comment_update (needs comment id, body; body trims, empty rejects; requires allowWrites)
 linear_comment_delete (needs comment id; requires allowWrites)
@@ -165,6 +171,8 @@ linear_relation_add / linear_relation_remove (source, related, type triple; type
 ```
 
 Linear issue mutation field names were verified on 2026-10-13 against the public Linear SDK GraphQL schema. `IssueCreateInput` and `IssueUpdateInput` both define `priority: Int`, `estimate: Int`, `dueDate: TimelessDate`, `cycleId: String`, and `projectId: String`. No authenticated live mutation was used.
+
+The restore path was verified on 2026-10-13 against the current public Linear SDK GraphQL schema. `IssueUpdateInput.trashed` says “Set to true to trash, or null to restore.” `linear_issue_restore` therefore sends `issueUpdate` with an explicit `trashed: null`; it does not use `issueUnarchive`, whose schema description only says that it unarchives an issue. No authenticated live mutation was used.
 
 ### Project progress reports (MCP only)
 

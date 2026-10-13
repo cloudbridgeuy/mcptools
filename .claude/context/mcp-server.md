@@ -85,6 +85,7 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `jira_link_type_list` | List configured link types and direction text |
 | `jira_link_create` | Create a directed issue link; Write (`allowWrites` required) |
 | `jira_link_delete` | Delete an issue link by ID; destructive Write (`allowWrites` required) |
+| `jira_board_list` | List visible Jira Software boards and IDs; Read |
 | `jira_query_list` | List saved queries |
 | `jira_query_save` | Save a JQL query |
 | `jira_query_delete` | Delete a saved query |
@@ -102,6 +103,9 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `bitbucket_pr_comment_reopen` | Reopen a PR comment thread; destructive Write (`allowWrites` required) |
 | `bitbucket_repo_branch_create` | Create a branch from a target; additive Write (`allowWrites` required) |
 | `bitbucket_repo_branch_delete` | Delete a non-main branch; destructive Write (`allowWrites` required) |
+| `bitbucket_deploy_key_list` | List repository deploy keys; Read |
+| `bitbucket_deploy_key_add` | Add a repository deploy key; additive Write (`allowWrites` required) |
+| `bitbucket_deploy_key_remove` | Remove a repository deploy key; destructive Write (`allowWrites` required) |
 
 ### Linear
 
@@ -114,6 +118,7 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `linear_issue_create` | Create a Linear issue |
 | `linear_issue_update` | Update a Linear issue |
 | `linear_issue_delete` | Move a Linear issue to trash; never permanently delete; Write (`allowWrites` required) |
+| `linear_issue_restore` | Restore a Linear issue from trash; Write (`allowWrites` required) |
 | `linear_comment_list` | List comments on an issue |
 | `linear_comment_create` | Create a comment on an issue |
 | `linear_comment_update` | Replace a comment body by comment id; requires allowWrites |

@@ -105,6 +105,7 @@ mcptools atlassian jira update PROJ-123 -d "## Summary\nFixed the **login** issu
 mcptools atlassian jira attachment list PROJ-123
 mcptools atlassian jira attachment download PROJ-123 12345
 mcptools atlassian jira attachment upload PROJ-123 report.pdf screenshot.png
+mcptools atlassian jira board list --project PROJ --type scrum --json
 mcptools atlassian jira sprint list --board 1
 mcptools atlassian jira sprint list --board 1 --state active,future,closed
 mcptools atlassian jira update PROJ-123 --sprint "Sprint 30" --board 1
@@ -133,6 +134,7 @@ mcptools linear issue update GUZ-22 --state Done
 mcptools linear issue update GUZ-22 --priority 1 --estimate 3 --due-date 2026-11-07 --cycle "Sprint 2" --project MCPTools
 mcptools linear issue update GUZ-22 --clear-estimate --clear-due-date --clear-cycle --clear-project
 mcptools linear issue delete GUZ-22                 # moves to Linear trash; add --json
+mcptools linear issue restore GUZ-22                # restores from Linear trash; add --json
 mcptools linear comment update COMMENT_ID "Updated note" --json
 mcptools linear comment delete COMMENT_ID --json
 mcptools linear issue list --team GUZ --state "In Progress"

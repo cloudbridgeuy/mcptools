@@ -64,6 +64,9 @@ fn mcp_contract_pilot() {
     assert_eq!(
         with_schema,
         vec![
+            "bitbucket_deploy_key_add",
+            "bitbucket_deploy_key_list",
+            "bitbucket_deploy_key_remove",
             "bitbucket_pr_comment_add",
             "bitbucket_pr_comment_delete",
             "bitbucket_pr_comment_list",
@@ -92,6 +95,7 @@ fn mcp_contract_pilot() {
             "jira_attachment_download",
             "jira_attachment_list",
             "jira_attachment_upload",
+            "jira_board_list",
             "jira_comment_add",
             "jira_comment_delete",
             "jira_comment_list",
@@ -130,6 +134,7 @@ fn mcp_contract_pilot() {
             "linear_issue_get",
             "linear_issue_graph",
             "linear_issue_list",
+            "linear_issue_restore",
             "linear_issue_update",
             "linear_label_list",
             "linear_project_create",

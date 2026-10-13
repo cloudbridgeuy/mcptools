@@ -458,6 +458,10 @@ All tools take `repo` and positive `prNumber`. Update, delete, resolve, and reop
 
 `bitbucket_repo_branch_create` takes `repo`, `name`, and `target`. It is an additive Write tool with `destructiveHint: false`. `bitbucket_repo_branch_delete` takes `repo` and `name`; it is a destructive Write tool. Both require `allowWrites: true`. The official [refs REST reference](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-refs/) documents POST `/repositories/{workspace}/{repo_slug}/refs/branches` with `{name,target:{hash}}` and DELETE `/repositories/{workspace}/{repo_slug}/refs/branches/{name}`.
 
+### Deploy Key Tools
+
+`bitbucket_deploy_key_list` takes `workspace`, `repo`, optional `limit`, and optional `nextPage`. It is read-only. `bitbucket_deploy_key_add` takes `workspace`, `repo`, `label`, and inline SSH public `key`; it is an additive Write tool with `destructiveHint: false`. `bitbucket_deploy_key_remove` takes `workspace`, `repo`, and `keyId`; it is a destructive Write tool. Add and remove require `allowWrites: true`.
+
 ## Environment Variables
 
 | Variable | Description |

@@ -1,4 +1,5 @@
 pub mod attachment;
+pub mod board;
 pub mod comment;
 pub mod create;
 pub mod get;
@@ -88,6 +89,9 @@ pub enum Commands {
     #[command(subcommand)]
     Sprint(sprint::SprintCommands),
 
+    #[command(subcommand)]
+    Board(board::BoardCommands),
+
     #[command(name = "transitions", subcommand)]
     Transitions(transition::TransitionCommands),
 
@@ -116,6 +120,7 @@ pub async fn run(
         Commands::Comment(cmd) => comment::handler(cmd, &config).await,
         Commands::Attachment(cmd) => attachment::handler(cmd, &config).await,
         Commands::Sprint(cmd) => sprint::handler(cmd, &config).await,
+        Commands::Board(cmd) => board::handler(cmd, &config).await,
         Commands::Transitions(cmd) => transition::handler(cmd, &config).await,
         Commands::Link(cmd) => link::handler(cmd, &config).await,
     }
@@ -258,6 +263,7 @@ fn display_ticket(ticket: &TicketOutput) {
 }
 
 pub use attachment::{download_attachment_data, list_attachments_data, upload_attachment_data};
+pub use board::list_boards_data;
 pub use comment::{add_comment_data, delete_comment_data, list_comments_data, update_comment_data};
 pub use create::create_ticket_data;
 pub use get::get_ticket_data;

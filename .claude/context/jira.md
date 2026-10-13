@@ -162,6 +162,16 @@ mcptools atlassian jira attachment download PROJ-123 12345 --output ./file.pdf
 mcptools atlassian jira attachment upload PROJ-123 report.pdf screenshot.png
 ```
 
+### Boards
+
+```bash
+mcptools atlassian jira board list
+mcptools atlassian jira board list --project PROJ --name Delivery --type scrum
+mcptools atlassian jira board list --json
+```
+
+Board listing follows all Jira pages. `--project` accepts a project key or ID, `--name` is a partial name filter, and `--type` accepts `scrum` or `kanban`. Use the returned board ID with sprint commands.
+
 ### Sprints
 
 ```bash
@@ -393,6 +403,24 @@ The user-facing statement is `fromIssue <outward relation> toIssue`. Jira's
 request maps `fromIssue` to `inwardIssue` and `toIssue` to `outwardIssue`.
 `jira_link_delete` takes `linkId` from `jira_link_list` and also requires
 `allowWrites: true`.
+
+### jira_board_list
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "jira_board_list",
+    "arguments": {
+      "project": "PROJ",
+      "name": "Delivery",
+      "type": "scrum"
+    }
+  }
+}
+```
+
+This read-only tool follows all pages and returns board IDs, names, types, and project location fields. All filters are optional.
 
 ### jira_sprint_list
 

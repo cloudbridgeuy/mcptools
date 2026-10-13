@@ -65,6 +65,13 @@ pub(crate) struct JiraSprintListArgs {
     state: Option<String>,
 }
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct JiraBoardListArgs {
+    project: Option<String>,
+    name: Option<String>,
+    #[serde(rename = "type")]
+    board_type: Option<mcptools_core::atlassian::jira::JiraBoardType>,
+}
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct JiraUpdateArgs {
     #[serde(rename = "ticketKey")]
     ticket_key: String,
@@ -260,6 +267,28 @@ pub(crate) struct BitbucketRepoBranchesArgs {
     next_page: Option<String>,
     query: Option<String>,
     sort: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketDeployKeyListArgs {
+    workspace: String,
+    repo: String,
+    limit: Option<usize>,
+    #[serde(rename = "nextPage")]
+    next_page: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketDeployKeyAddArgs {
+    workspace: String,
+    repo: String,
+    label: String,
+    key: String,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct BitbucketDeployKeyRemoveArgs {
+    workspace: String,
+    repo: String,
+    #[serde(rename = "keyId")]
+    key_id: u64,
 }
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct JiraQueryListArgs {}
@@ -637,6 +666,46 @@ pub async fn handle_jira_sprint_list(
     })?;
 
     super::to_dual_result(sprints)
+}
+
+pub async fn handle_jira_board_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: JiraBoardListArgs = serde_json::from_value(
+        arguments.unwrap_or_else(|| serde_json::json!({})),
+    )
+    .map_err(|error| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {error}"),
+        data: None,
+    })?;
+    if global.verbose {
+        eprintln!(
+            "Calling jira_board_list: project={:?}, name={:?}, type={:?}",
+            args.project, args.name, args.board_type
+        );
+    }
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {error}"),
+        data: None,
+    })?;
+    let boards = crate::atlassian::jira::list_boards_data(
+        mcptools_core::atlassian::jira::BoardListFilter {
+            project: args.project,
+            name: args.name,
+            board_type: args.board_type,
+        },
+        &config,
+    )
+    .await
+    .map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {error}"),
+        data: None,
+    })?;
+    super::to_dual_result(boards)
 }
 
 pub async fn handle_jira_update(
@@ -1288,6 +1357,92 @@ pub async fn handle_bitbucket_repo_branch_delete(
         crate::atlassian::bitbucket::delete_branch_data(request, output, &bitbucket_config()?)
             .await
             .map_err(bitbucket_execution_error)?;
+    super::to_dual_result(output)
+}
+
+pub async fn handle_bitbucket_deploy_key_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{list_deploy_keys_data, ListDeployKeysParams};
+
+    let args: BitbucketDeployKeyListArgs = bitbucket_args(arguments)?;
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_deploy_key_list: {}/{}, limit={:?}",
+            args.workspace, args.repo, args.limit
+        );
+    }
+    let output = list_deploy_keys_data(
+        ListDeployKeysParams {
+            workspace: args.workspace,
+            repo_slug: args.repo,
+            limit: args.limit.unwrap_or(10),
+            next_page: args.next_page,
+            base_url_override: None,
+        },
+        &bitbucket_config()?,
+        None,
+    )
+    .await
+    .map_err(bitbucket_execution_error)?;
+    super::to_dual_result(output)
+}
+
+pub async fn handle_bitbucket_deploy_key_add(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{add_deploy_key_data, AddDeployKeyParams};
+
+    let args: BitbucketDeployKeyAddArgs = bitbucket_args(arguments)?;
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_deploy_key_add: {}/{}",
+            args.workspace, args.repo
+        );
+    }
+    let output = add_deploy_key_data(
+        AddDeployKeyParams {
+            workspace: args.workspace,
+            repo_slug: args.repo,
+            key: args.key,
+            label: args.label,
+            base_url_override: None,
+        },
+        &bitbucket_config()?,
+        None,
+    )
+    .await
+    .map_err(bitbucket_execution_error)?;
+    super::to_dual_result(output)
+}
+
+pub async fn handle_bitbucket_deploy_key_remove(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::atlassian::bitbucket::{remove_deploy_key_data, RemoveDeployKeyParams};
+
+    let args: BitbucketDeployKeyRemoveArgs = bitbucket_args(arguments)?;
+    if global.verbose {
+        eprintln!(
+            "Calling bitbucket_deploy_key_remove: {}/{}, keyId={}",
+            args.workspace, args.repo, args.key_id
+        );
+    }
+    let output = remove_deploy_key_data(
+        RemoveDeployKeyParams {
+            workspace: args.workspace,
+            repo_slug: args.repo,
+            key_id: args.key_id,
+            base_url_override: None,
+        },
+        &bitbucket_config()?,
+        None,
+    )
+    .await
+    .map_err(bitbucket_execution_error)?;
     super::to_dual_result(output)
 }
 

@@ -1,0 +1,1 @@
+{"total_count":1,"keys":[{"id":123,"label":"ci-key","key":"ssh-ed25519 AAAA","comment":"CI key","created_on":"2026-10-13T00:00:00Z"}],"next_page":"https://api.bitbucket.org/2.0/repositories/workspace/repo/deploy-keys?page=2"}

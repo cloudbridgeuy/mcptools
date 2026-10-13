@@ -96,6 +96,8 @@ pub enum IssueCommands {
     Update(IssueUpdateOptions),
     #[command(about = "Move one issue to Linear trash")]
     Delete(IssueDeleteOptions),
+    #[command(about = "Restore one issue from Linear trash")]
+    Restore(IssueRestoreOptions),
     /// Comment operations
     #[command(subcommand)]
     Comments(IssueCommentsCommands),
@@ -427,6 +429,14 @@ pub struct IssueDeleteOptions {
 }
 
 #[derive(Debug, clap::Args, Clone)]
+pub struct IssueRestoreOptions {
+    #[arg(help = "Issue id or identifier")]
+    pub id: String,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
 pub struct TeamsListOptions {
     /// Max items per page
     #[arg(long, default_value = "25")]
@@ -577,6 +587,7 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
             IssueCommands::Create(options) => issue_create_handler(options).await,
             IssueCommands::Update(options) => issue_update_handler(options).await,
             IssueCommands::Delete(options) => issue_delete_handler(options).await,
+            IssueCommands::Restore(options) => issue_restore_handler(options).await,
             IssueCommands::Comments(cmd) => match cmd {
                 IssueCommentsCommands::List(options) => comments_list_handler(options).await,
                 IssueCommentsCommands::Create(options) => comments_create_handler(options).await,
@@ -979,6 +990,21 @@ async fn issue_delete_handler(options: IssueDeleteOptions) -> Result<()> {
         println!(
             "Moved {} ({}) to Linear trash",
             deleted.identifier, deleted.id
+        );
+    }
+    Ok(())
+}
+
+async fn issue_restore_handler(options: IssueRestoreOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let restored = issue::issue_restore_data(&client, &options.id).await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&restored)?);
+    } else {
+        println!(
+            "Restored {} ({}) from Linear trash",
+            restored.identifier, restored.id
         );
     }
     Ok(())

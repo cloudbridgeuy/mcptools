@@ -160,6 +160,7 @@ mod tests {
             (input_schema_for::<AuthStatusArgs>(), vec![]),
             (input_schema_for::<IssueGetArgs>(), vec!["id"]),
             (input_schema_for::<IssueDeleteArgs>(), vec!["id"]),
+            (input_schema_for::<IssueRestoreArgs>(), vec!["id"]),
             (input_schema_for::<IssueListArgs>(), vec![]),
             (input_schema_for::<CommentListArgs>(), vec!["id"]),
             (input_schema_for::<RelationListArgs>(), vec!["id"]),

@@ -99,6 +99,21 @@ pub async fn handle_linear_issue_delete(
     })
 }
 
+pub async fn handle_linear_issue_restore(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::IssueRestoreArgs = parse_args(arguments)?;
+    if global.verbose {
+        eprintln!("Calling linear_issue_restore: id={}", args.id);
+    }
+    let client = linear_client()?;
+    let restored = crate::linear::issue::issue_restore_data(&client, &args.id)
+        .await
+        .map_err(exec)?;
+    super::to_dual_result(restored)
+}
+
 pub async fn handle_linear_issue_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,

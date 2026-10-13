@@ -360,6 +360,15 @@ pub fn registered_tools() -> Vec<Tool> {
             destructive: true,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::BoardListOutput>(),
+            name: "jira_board_list".to_string(),
+            description: "List all visible Jira Software boards, with optional project, partial name, and scrum or kanban type filters. Returns board IDs for jira_sprint_list. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::JiraBoardListArgs>(),
+            summary: "List visible Jira boards and their IDs",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::SprintListOutput>(),
             name: "jira_sprint_list".to_string(),
             description: "List sprints for a Jira board. Returns sprint metadata including ID, name, state, and dates. Use this to discover sprint IDs and names before assigning issues to sprints via jira_update or jira_create. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
@@ -565,6 +574,33 @@ pub fn registered_tools() -> Vec<Tool> {
             description: "Delete a Bitbucket Cloud repository branch. The main branch cannot be deleted.".to_string(),
             input_schema: schema::input_schema_for::<mcptools_core::atlassian::bitbucket::RepoBranchDeleteArgs>(),
             summary: "Delete a Bitbucket repository branch",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::DeployKeyListOutput>(),
+            name: "bitbucket_deploy_key_list".to_string(),
+            description: "List Bitbucket Cloud repository deploy keys. Supports pagination. Requires BITBUCKET_USERNAME and BITBUCKET_APP_PASSWORD environment variables.".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::BitbucketDeployKeyListArgs>(),
+            summary: "List deploy keys on a Bitbucket repository",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::DeployKeyAddOutput>(),
+            name: "bitbucket_deploy_key_add".to_string(),
+            description: "Add an SSH public deploy key to a Bitbucket Cloud repository. Requires BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD, and allowWrites.".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::BitbucketDeployKeyAddArgs>(),
+            summary: "Add a Bitbucket repository deploy key",
+            kind: ToolKind::Write,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::bitbucket::DeployKeyRemoveOutput>(),
+            name: "bitbucket_deploy_key_remove".to_string(),
+            description: "Remove a deploy key from a Bitbucket Cloud repository by key ID. Requires BITBUCKET_USERNAME, BITBUCKET_APP_PASSWORD, and allowWrites.".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::BitbucketDeployKeyRemoveArgs>(),
+            summary: "Remove a Bitbucket repository deploy key",
             kind: ToolKind::Write,
             destructive: true,
         },
@@ -881,9 +917,9 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::StateListOutput>(),
             name: "linear_state_list".to_string(),
-            description: "List workflow states in a Linear team. Returns nodes with id, name, type plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
+            description: "List Linear issue workflow states and categories in a team. Returns nodes with id, name, type plus pageInfo. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::StateListArgs>(),
-            summary: "List workflow states of a Linear team",
+            summary: "List Linear issue workflow states and categories",
             kind: ToolKind::Read,
             destructive: false,
         },
@@ -967,6 +1003,15 @@ pub fn registered_tools() -> Vec<Tool> {
             summary: "Move a Linear issue to trash",
             kind: ToolKind::Write,
             destructive: true,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::linear::RestoredIssue>(),
+            name: "linear_issue_restore".to_string(),
+            description: "Restore one Linear issue from trash by id or identifier. Uses the schema-documented IssueUpdateInput trashed null restore operation. Returns the restored issue id and identifier. Requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::IssueRestoreArgs>(),
+            summary: "Restore a Linear issue from trash",
+            kind: ToolKind::Write,
+            destructive: false,
         },
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::Comment>(),
@@ -1256,6 +1301,7 @@ pub async fn dispatch_tool_call(
             atlassian::handle_jira_comment_delete(params.arguments, global).await
         }
         "jira_sprint_list" => atlassian::handle_jira_sprint_list(params.arguments, global).await,
+        "jira_board_list" => atlassian::handle_jira_board_list(params.arguments, global).await,
         "jira_attachment_list" => {
             atlassian::handle_jira_attachment_list(params.arguments, global).await
         }
@@ -1313,6 +1359,15 @@ pub async fn dispatch_tool_call(
         }
         "bitbucket_repo_branch_delete" => {
             atlassian::handle_bitbucket_repo_branch_delete(params.arguments, global).await
+        }
+        "bitbucket_deploy_key_list" => {
+            atlassian::handle_bitbucket_deploy_key_list(params.arguments, global).await
+        }
+        "bitbucket_deploy_key_add" => {
+            atlassian::handle_bitbucket_deploy_key_add(params.arguments, global).await
+        }
+        "bitbucket_deploy_key_remove" => {
+            atlassian::handle_bitbucket_deploy_key_remove(params.arguments, global).await
         }
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
@@ -1398,6 +1453,9 @@ pub async fn dispatch_tool_call(
         "linear_issue_create" => linear::handle_linear_issue_create(params.arguments, global).await,
         "linear_issue_update" => linear::handle_linear_issue_update(params.arguments, global).await,
         "linear_issue_delete" => linear::handle_linear_issue_delete(params.arguments, global).await,
+        "linear_issue_restore" => {
+            linear::handle_linear_issue_restore(params.arguments, global).await
+        }
         "linear_comment_create" => {
             linear::handle_linear_comment_create(params.arguments, global).await
         }
@@ -1463,7 +1521,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 94);
+        assert_eq!(catalog.len(), 99);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1528,7 +1586,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 97);
+        assert_eq!(super::registered_tools().len(), 102);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1603,7 +1661,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 97);
+        assert_eq!(names(serve_flags(false)).len(), 102);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1708,6 +1766,7 @@ mod catalog_tests {
             "bitbucket_pr_comment_resolve",
             "bitbucket_pr_comment_reopen",
             "bitbucket_repo_branch_delete",
+            "bitbucket_deploy_key_remove",
             "linear_document_update",
             "linear_project_milestone_update",
             "linear_project_update",
@@ -1726,7 +1785,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 97);
+        assert_eq!(tools.len(), 102);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1773,6 +1832,8 @@ mod catalog_tests {
             "jira_query_save",
             "jira_query_delete",
             "bitbucket_pr_create",
+            "bitbucket_deploy_key_add",
+            "bitbucket_deploy_key_remove",
             "bitbucket_pr_comment_add",
             "bitbucket_pr_comment_update",
             "bitbucket_pr_comment_delete",
@@ -1792,6 +1853,7 @@ mod catalog_tests {
             "linear_issue_create",
             "linear_issue_update",
             "linear_issue_delete",
+            "linear_issue_restore",
             "linear_comment_create",
             "linear_comment_update",
             "linear_comment_delete",
@@ -1823,6 +1885,7 @@ mod catalog_tests {
             "jira_link_list",
             "jira_link_type_list",
             "jira_comment_list",
+            "jira_board_list",
             "jira_sprint_list",
             "jira_attachment_list",
             "jira_attachment_download",
@@ -1834,6 +1897,7 @@ mod catalog_tests {
             "bitbucket_workspace_list",
             "bitbucket_repo_list",
             "bitbucket_repo_branches",
+            "bitbucket_deploy_key_list",
             "ui_annotations_list",
             "ui_annotations_get",
             "pdf_toc",
@@ -1868,7 +1932,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 97);
+        assert_eq!(union.len(), 102);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

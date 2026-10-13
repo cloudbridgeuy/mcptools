@@ -1226,7 +1226,7 @@ pub struct BitbucketDeployKeyLinks {
 // =============================================================================
 
 /// Simplified deploy key info for display
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
 pub struct DeployKeyItem {
     pub id: u64,
     pub label: String,
@@ -1236,7 +1236,7 @@ pub struct DeployKeyItem {
 }
 
 /// Output structure for deploy key list command
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
 pub struct DeployKeyListOutput {
     pub keys: Vec<DeployKeyItem>,
     pub next_page: Option<String>,
@@ -1244,7 +1244,7 @@ pub struct DeployKeyListOutput {
 }
 
 /// Output structure for adding a deploy key
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
 pub struct DeployKeyAddOutput {
     pub repo_name: String,
     pub key_id: u64,
@@ -1252,7 +1252,7 @@ pub struct DeployKeyAddOutput {
 }
 
 /// Output structure for removing a deploy key
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, JsonSchema)]
 pub struct DeployKeyRemoveOutput {
     pub repo_name: String,
     pub key_id: u64,

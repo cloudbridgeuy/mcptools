@@ -1530,6 +1530,170 @@ pub struct SprintListOutput {
     pub has_more: bool,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum JiraBoardType {
+    Scrum,
+    Kanban,
+}
+
+impl std::fmt::Display for JiraBoardType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Scrum => "scrum",
+            Self::Kanban => "kanban",
+        })
+    }
+}
+
+impl std::str::FromStr for JiraBoardType {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "scrum" => Ok(Self::Scrum),
+            "kanban" => Ok(Self::Kanban),
+            _ => Err("board type must be scrum or kanban".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoardListRequest {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BoardListFilter {
+    pub project: Option<String>,
+    pub name: Option<String>,
+    pub board_type: Option<JiraBoardType>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JiraBoardLocationResponse {
+    #[serde(rename = "projectId", default)]
+    pub project_id: Option<u64>,
+    #[serde(rename = "projectKey", default)]
+    pub project_key: Option<String>,
+    #[serde(rename = "projectName", default)]
+    pub project_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JiraBoardResponse {
+    pub id: u64,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub board_type: String,
+    #[serde(default)]
+    pub location: Option<JiraBoardLocationResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JiraBoardListResponse {
+    #[serde(rename = "maxResults")]
+    pub max_results: u64,
+    #[serde(rename = "startAt")]
+    pub start_at: u64,
+    #[serde(rename = "isLast")]
+    pub is_last: bool,
+    pub total: u64,
+    pub values: Vec<JiraBoardResponse>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct BoardOutput {
+    pub id: u64,
+    pub name: String,
+    pub board_type: String,
+    pub project_id: Option<u64>,
+    pub project_key: Option<String>,
+    pub project_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
+pub struct BoardListOutput {
+    pub boards: Vec<BoardOutput>,
+    pub total: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoardListPage {
+    pub boards: Vec<BoardOutput>,
+    pub total: u64,
+    pub next_start_at: Option<u64>,
+}
+
+pub fn build_board_list_request(
+    base_url: &str,
+    filter: &BoardListFilter,
+    start_at: u64,
+    max_results: u64,
+) -> Result<BoardListRequest, JiraRequestError> {
+    let mut url = build_jira_agile_url(base_url, &["board"])?;
+    let mut parsed = reqwest::Url::parse(&url)
+        .map_err(|error| JiraRequestError::InvalidBaseUrl(error.to_string()))?;
+    {
+        let mut query = parsed.query_pairs_mut();
+        query.append_pair("startAt", &start_at.to_string());
+        query.append_pair("maxResults", &max_results.to_string());
+        if let Some(board_type) = filter.board_type {
+            query.append_pair("type", &board_type.to_string());
+        }
+        if let Some(name) = filter.name.as_deref() {
+            query.append_pair("name", nonblank("board name", name)?);
+        }
+        if let Some(project) = filter.project.as_deref() {
+            query.append_pair("projectKeyOrId", nonblank("project", project)?);
+        }
+    }
+    url = parsed.into();
+    Ok(BoardListRequest { url })
+}
+
+pub fn parse_board_list_response(response: &str) -> Result<BoardListPage, JiraRequestError> {
+    let response: JiraBoardListResponse = serde_json::from_str(response)
+        .map_err(|error| JiraRequestError::InvalidResponse(error.to_string()))?;
+    let next_start_at = if response.is_last {
+        None
+    } else {
+        Some(
+            response
+                .start_at
+                .checked_add(response.max_results)
+                .filter(|next| *next > response.start_at)
+                .ok_or_else(|| {
+                    JiraRequestError::InvalidResponse(
+                        "Jira board pagination did not advance".to_string(),
+                    )
+                })?,
+        )
+    };
+    let boards = response
+        .values
+        .into_iter()
+        .map(|board| {
+            let location = board.location;
+            BoardOutput {
+                id: board.id,
+                name: board.name,
+                board_type: board.board_type,
+                project_id: location.as_ref().and_then(|value| value.project_id),
+                project_key: location
+                    .as_ref()
+                    .and_then(|value| value.project_key.clone()),
+                project_name: location.and_then(|value| value.project_name),
+            }
+        })
+        .collect();
+    Ok(BoardListPage {
+        boards,
+        total: response.total,
+        next_start_at,
+    })
+}
+
 /// Convert raw sprint list response to the clean domain model.
 pub fn transform_sprint_list_response(response: JiraSprintListResponse) -> SprintListOutput {
     let sprints: Vec<SprintOutput> = response
@@ -1561,6 +1725,25 @@ pub fn find_sprint_by_name(sprints: &[JiraSprintResponse], target_name: &str) ->
         .iter()
         .find(|s| s.name.eq_ignore_ascii_case(target_name))
         .map(|s| s.id)
+}
+
+fn build_jira_agile_url(base_url: &str, segments: &[&str]) -> Result<String, JiraRequestError> {
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|error| JiraRequestError::InvalidBaseUrl(error.to_string()))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(JiraRequestError::InvalidBaseUrl(base_url.to_string()));
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    {
+        let mut path = url
+            .path_segments_mut()
+            .map_err(|_| JiraRequestError::InvalidBaseUrl(base_url.to_string()))?;
+        path.pop_if_empty();
+        path.extend(["rest", "agile", "1.0"]);
+        path.extend(segments.iter().copied());
+    }
+    Ok(url.into())
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize, PartialEq, JsonSchema)]
@@ -3110,6 +3293,80 @@ mod tests {
         let output = transform_sprint_list_response(response);
         assert!(output.has_more);
         assert_eq!(output.total, 1);
+    }
+
+    #[test]
+    fn board_list_request_encodes_pagination_and_filters() {
+        let request = build_board_list_request(
+            "https://example.atlassian.net/",
+            &BoardListFilter {
+                project: Some("PROJ".to_string()),
+                name: Some("Delivery board".to_string()),
+                board_type: Some(JiraBoardType::Scrum),
+            },
+            50,
+            50,
+        )
+        .unwrap();
+        let url = reqwest::Url::parse(&request.url).unwrap();
+        assert_eq!(url.path(), "/rest/agile/1.0/board");
+        let query = url
+            .query_pairs()
+            .into_owned()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(query["startAt"], "50");
+        assert_eq!(query["maxResults"], "50");
+        assert_eq!(query["type"], "scrum");
+        assert_eq!(query["name"], "Delivery board");
+        assert_eq!(query["projectKeyOrId"], "PROJ");
+    }
+
+    #[test]
+    fn board_list_request_rejects_blank_filter() {
+        let error = build_board_list_request(
+            "https://example.atlassian.net",
+            &BoardListFilter {
+                project: Some("  ".to_string()),
+                ..BoardListFilter::default()
+            },
+            0,
+            50,
+        )
+        .unwrap_err();
+        assert_eq!(error, JiraRequestError::BlankValue("project"));
+    }
+
+    #[test]
+    fn board_list_parser_flattens_project_location_and_next_page() {
+        let page = parse_board_list_response(
+            r#"{"maxResults":50,"startAt":0,"isLast":false,"total":51,"values":[{"id":7,"name":"Delivery","type":"scrum","location":{"projectId":10001,"projectKey":"PROJ","projectName":"Project"}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(page.total, 51);
+        assert_eq!(page.next_start_at, Some(50));
+        assert_eq!(page.boards.len(), 1);
+        assert_eq!(page.boards[0].id, 7);
+        assert_eq!(page.boards[0].project_key.as_deref(), Some("PROJ"));
+    }
+
+    #[test]
+    fn board_list_parser_handles_board_without_project_location() {
+        let page = parse_board_list_response(
+            r#"{"maxResults":50,"startAt":0,"isLast":true,"total":1,"values":[{"id":8,"name":"Personal","type":"kanban"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(page.next_start_at, None);
+        assert_eq!(page.boards[0].project_id, None);
+        assert_eq!(page.boards[0].project_name, None);
+    }
+
+    #[test]
+    fn board_list_parser_rejects_non_advancing_page() {
+        let error = parse_board_list_response(
+            r#"{"maxResults":0,"startAt":0,"isLast":false,"total":1,"values":[]}"#,
+        )
+        .unwrap_err();
+        assert!(matches!(error, JiraRequestError::InvalidResponse(_)));
     }
 
     #[test]

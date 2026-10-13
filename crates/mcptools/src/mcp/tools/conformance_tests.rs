@@ -58,6 +58,7 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
             roundtrip::<mcptools_core::atlassian::jira::CommentDeleteOutput>(value)
         }
         "jira_sprint_list" => roundtrip::<mcptools_core::atlassian::jira::SprintListOutput>(value),
+        "jira_board_list" => roundtrip::<mcptools_core::atlassian::jira::BoardListOutput>(value),
         "jira_attachment_list" => {
             roundtrip::<mcptools_core::atlassian::jira::AttachmentListOutput>(value)
         }
@@ -110,6 +111,15 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "bitbucket_repo_branch_delete" => {
             roundtrip::<mcptools_core::atlassian::bitbucket::RepoBranchDeleteOutput>(value)
         }
+        "bitbucket_deploy_key_list" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::DeployKeyListOutput>(value)
+        }
+        "bitbucket_deploy_key_add" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::DeployKeyAddOutput>(value)
+        }
+        "bitbucket_deploy_key_remove" => {
+            roundtrip::<mcptools_core::atlassian::bitbucket::DeployKeyRemoveOutput>(value)
+        }
         "ui_annotations_list" => {
             roundtrip::<mcptools_core::annotations::ListAnnotationsResponse>(value)
         }
@@ -128,6 +138,7 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "linear_auth_status" => roundtrip::<mcptools_core::linear::Viewer>(value),
         "linear_issue_get" => roundtrip::<mcptools_core::linear::IssueGetOutput>(value),
         "linear_issue_delete" => roundtrip::<super::linear::IssueDeleteOutput>(value),
+        "linear_issue_restore" => roundtrip::<mcptools_core::linear::RestoredIssue>(value),
         "linear_issue_list" => roundtrip::<mcptools_core::linear::IssueListOutput>(value),
         "linear_issue_graph" => roundtrip::<mcptools_core::linear::IssueGraphOutput>(value),
         "linear_comment_list" => roundtrip::<mcptools_core::linear::CommentListOutput>(value),
