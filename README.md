@@ -7,7 +7,7 @@ Useful MCP Tools to use with LLM Coding Agents
 `mcptools` is a Model Context Protocol (MCP) server that exposes various tools for LLM agents to interact with external services. Currently provides tools for:
 
 - **Atlassian Jira**: Search, create, update, inspect transitions, and manage issue links and saved queries (`jira_search`, `jira_create`, `jira_get`, `jira_update`, `jira_transition_list`, `jira_link_list`, `jira_link_type_list`, `jira_link_create`, `jira_link_delete`)
-- **Atlassian Confluence**: Search pages and read one page by ID or URL (`confluence_search`, `confluence_page_get`)
+- **Atlassian Confluence**: Search, read, create, and update pages (`confluence_search`, `confluence_page_get`, `confluence_page_create`, `confluence_page_update`)
 - **Atlassian Bitbucket**: List and read pull requests with diff support; add, list, update, delete, resolve, and reopen comments; create and delete repository branches. See [Bitbucket](.claude/context/bitbucket.md).
 - **Linear**: Read a bounded issue dependency graph and ready-to-start frontier (`linear_issue_graph`); see [Linear](.claude/context/linear.md) for all Linear tools.
 - **Lanes**: Read Git worktrees, assess cleanup eligibility, and create guarded Worktrunk lanes (`lane_list`, `lane_cleanup_plan`, `lane_create`). Disabled until the server operator sets `MCPTOOLS_LANE_REPOS`. Plans are advisory, not removal permission. No deletion, cleanup execution, merge, or push. See [Lane security and contracts](.claude/context/lanes.md).
@@ -316,6 +316,27 @@ Read one Confluence page by numeric ID or by a URL containing its page ID. Retur
   }
 }
 ```
+
+#### confluence_page_create
+
+Create a published Confluence page from storage-format XHTML. The optional parent accepts a numeric page ID or page URL. Requires `allowWrites`.
+
+**Parameters:**
+
+- `spaceId` (string, required) - Numeric Confluence space ID
+- `title` (string, required) - Page title
+- `body` (string, required) - Confluence storage-format XHTML
+- `parentIdOrUrl` (string, optional) - Parent page ID or URL
+
+#### confluence_page_update
+
+Update a page title, storage-format XHTML body, or both. The tool reads the current page, preserves omitted content, and increments the version. Requires `allowWrites`.
+
+**Parameters:**
+
+- `idOrUrl` (string, required) - Numeric page ID or Confluence page URL
+- `title` (string, optional) - Replacement title
+- `body` (string, optional) - Replacement Confluence storage-format XHTML
 
 #### bitbucket_pr_list
 
@@ -1172,6 +1193,10 @@ mcptools atlassian confluence search "text ~ 'guide'" --json
 # Read one page by ID or URL; read is an alias for get
 mcptools atlassian confluence get 123456
 mcptools atlassian confluence read 'https://example.atlassian.net/wiki/spaces/ENG/pages/123456/Runbook' --json
+
+# Create and update published pages with Confluence storage-format XHTML
+mcptools atlassian confluence create --space-id 9988 --title 'Runbook' --body '<p>Deploy</p>' --parent 123456 --json
+mcptools atlassian confluence update 123456 --title 'Deployment Runbook' --body '<p>Deploy and verify</p>' --json
 ```
 
 #### Bitbucket Pull Requests

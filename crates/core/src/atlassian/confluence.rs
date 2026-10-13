@@ -110,6 +110,220 @@ pub enum GetPageError {
     InvalidResponse(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WritePageRequest {
+    pub url: String,
+    pub body: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdatePageSource {
+    pub id: String,
+    pub title: String,
+    pub space_id: String,
+    pub version: i32,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdatePageChanges {
+    title: Option<String>,
+    body: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct WritePageOutput {
+    pub id: String,
+    pub title: String,
+    pub space_id: String,
+    pub version: i32,
+    pub url: String,
+}
+
+#[derive(Debug, Error, PartialEq)]
+pub enum WritePageError {
+    #[error("Confluence page must be a numeric ID or a URL containing a page ID")]
+    InvalidPageReference,
+    #[error("{0} must not be empty")]
+    EmptyField(&'static str),
+    #[error("title or body is required")]
+    NoChanges,
+    #[error("page response ID does not match requested page")]
+    PageIdMismatch,
+    #[error("page version cannot be incremented")]
+    VersionOverflow,
+    #[error("invalid Confluence base URL: {0}")]
+    InvalidBaseUrl(String),
+    #[error("invalid Confluence page response: {0}")]
+    InvalidResponse(String),
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdatePageResponse {
+    id: String,
+    title: String,
+    #[serde(rename = "spaceId")]
+    space_id: String,
+    version: GetPageVersion,
+    body: UpdatePageBody,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdatePageBody {
+    storage: Option<GetPageBodyValue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WritePageResponse {
+    id: String,
+    title: String,
+    #[serde(rename = "spaceId")]
+    space_id: String,
+    version: GetPageVersion,
+    #[serde(default, rename = "_links")]
+    links: Option<GetPageLinks>,
+}
+
+pub fn update_page_changes(
+    title: Option<String>,
+    body: Option<String>,
+) -> Result<UpdatePageChanges, WritePageError> {
+    if title.as_ref().is_some_and(|value| value.trim().is_empty()) {
+        return Err(WritePageError::EmptyField("title"));
+    }
+    if title.is_none() && body.is_none() {
+        return Err(WritePageError::NoChanges);
+    }
+    Ok(UpdatePageChanges { title, body })
+}
+
+pub fn build_create_page_request(
+    base_url: &str,
+    space_id: &str,
+    title: &str,
+    body: &str,
+    parent: Option<&str>,
+) -> Result<WritePageRequest, WritePageError> {
+    if space_id.trim().is_empty() {
+        return Err(WritePageError::EmptyField("space ID"));
+    }
+    if title.trim().is_empty() {
+        return Err(WritePageError::EmptyField("title"));
+    }
+    let url = confluence_api_url(base_url, "pages")?;
+    let mut payload = serde_json::json!({
+        "spaceId": space_id,
+        "status": "current",
+        "title": title,
+        "body": {"representation": "storage", "value": body}
+    });
+    if let Some(parent) = parent {
+        let parent_id =
+            page_id_from_reference(parent).map_err(|_| WritePageError::InvalidPageReference)?;
+        payload["parentId"] = serde_json::Value::String(parent_id);
+    }
+    Ok(WritePageRequest { url, body: payload })
+}
+
+pub fn build_update_page_source_request(
+    base_url: &str,
+    id_or_url: &str,
+) -> Result<GetPageRequest, WritePageError> {
+    let page_id =
+        page_id_from_reference(id_or_url).map_err(|_| WritePageError::InvalidPageReference)?;
+    let url = format!(
+        "{}?body-format=storage",
+        confluence_api_url(base_url, &format!("pages/{page_id}"))?
+    );
+    Ok(GetPageRequest { page_id, url })
+}
+
+pub fn parse_update_page_source(response: &str) -> Result<UpdatePageSource, WritePageError> {
+    let page: UpdatePageResponse = serde_json::from_str(response)
+        .map_err(|error| WritePageError::InvalidResponse(error.to_string()))?;
+    let body = page
+        .body
+        .storage
+        .ok_or_else(|| WritePageError::InvalidResponse("missing storage body".to_string()))?;
+    Ok(UpdatePageSource {
+        id: page.id,
+        title: page.title,
+        space_id: page.space_id,
+        version: page.version.number,
+        body: body.value,
+    })
+}
+
+pub fn build_update_page_request(
+    base_url: &str,
+    requested_page_id: &str,
+    source: &UpdatePageSource,
+    changes: &UpdatePageChanges,
+) -> Result<WritePageRequest, WritePageError> {
+    if source.id != requested_page_id {
+        return Err(WritePageError::PageIdMismatch);
+    }
+    let version = source
+        .version
+        .checked_add(1)
+        .ok_or(WritePageError::VersionOverflow)?;
+    let title = changes.title.as_deref().unwrap_or(&source.title);
+    let body = changes.body.as_deref().unwrap_or(&source.body);
+    let url = confluence_api_url(base_url, &format!("pages/{}", source.id))?;
+    Ok(WritePageRequest {
+        url,
+        body: serde_json::json!({
+            "id": source.id,
+            "status": "current",
+            "title": title,
+            "body": {"representation": "storage", "value": body},
+            "version": {"number": version}
+        }),
+    })
+}
+
+pub fn parse_write_page_response(
+    response: &str,
+    base_url: &str,
+) -> Result<WritePageOutput, WritePageError> {
+    let page: WritePageResponse = serde_json::from_str(response)
+        .map_err(|error| WritePageError::InvalidResponse(error.to_string()))?;
+    let links = page.links.as_ref();
+    let wiki_base = wiki_base_url(base_url, links.and_then(|value| value.base.as_deref()))
+        .map_err(|error| WritePageError::InvalidBaseUrl(error.to_string()))?;
+    let url = page_url(
+        &wiki_base,
+        links.and_then(|value| value.webui.as_deref()),
+        &page.id,
+    )
+    .map_err(|error| WritePageError::InvalidResponse(error.to_string()))?;
+    Ok(WritePageOutput {
+        id: page.id,
+        title: page.title,
+        space_id: page.space_id,
+        version: page.version.number,
+        url,
+    })
+}
+
+fn confluence_api_url(base_url: &str, resource: &str) -> Result<String, WritePageError> {
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|error| WritePageError::InvalidBaseUrl(error.to_string()))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(WritePageError::InvalidBaseUrl(base_url.to_string()));
+    }
+    let base_path = url.path().trim_end_matches('/');
+    let path = if base_path.ends_with("/wiki") {
+        format!("{base_path}/api/v2/{resource}")
+    } else {
+        format!("{base_path}/wiki/api/v2/{resource}")
+    };
+    url.set_path(&path);
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url.into())
+}
+
 pub fn build_search_request(
     base_url: &str,
     query: &str,
@@ -244,7 +458,7 @@ pub fn parse_get_page_response(
     })
 }
 
-fn page_id_from_reference(id_or_url: &str) -> Result<String, GetPageError> {
+pub fn page_id_from_reference(id_or_url: &str) -> Result<String, GetPageError> {
     let reference = id_or_url.trim();
     if is_page_id(reference) {
         return Ok(reference.to_string());
@@ -626,5 +840,110 @@ mod tests {
         assert!(output.body.contains("(https://x.test/a)"));
         assert!(output.body.contains("(#top)"));
         assert!(!output.body.contains("](/wiki"));
+    }
+
+    #[test]
+    fn build_create_page_request_uses_v2_storage_body_and_parent_id() {
+        let request = build_create_page_request(
+            "https://example.atlassian.net/wiki/",
+            "9988",
+            "Runbook",
+            "<p>Deploy</p>",
+            Some("https://example.atlassian.net/wiki/spaces/ENG/pages/42/Parent"),
+        )
+        .unwrap();
+        assert_eq!(
+            request.url,
+            "https://example.atlassian.net/wiki/api/v2/pages"
+        );
+        assert_eq!(
+            request.body,
+            serde_json::json!({
+                "spaceId": "9988",
+                "status": "current",
+                "title": "Runbook",
+                "body": {"representation": "storage", "value": "<p>Deploy</p>"},
+                "parentId": "42"
+            })
+        );
+    }
+
+    #[test]
+    fn build_update_page_request_increments_version_and_preserves_unchanged_body() {
+        let source_response = r#"{
+            "id": "12345",
+            "title": "Old title",
+            "spaceId": "9988",
+            "version": {"number": 7},
+            "body": {"storage": {"value": "<p>Existing</p>"}}
+        }"#;
+        let source = parse_update_page_source(source_response).unwrap();
+        let changes = update_page_changes(Some("New title".to_string()), None).unwrap();
+        let request =
+            build_update_page_request("https://example.atlassian.net", "12345", &source, &changes)
+                .unwrap();
+        assert_eq!(
+            request.url,
+            "https://example.atlassian.net/wiki/api/v2/pages/12345"
+        );
+        assert_eq!(
+            request.body,
+            serde_json::json!({
+                "id": "12345",
+                "status": "current",
+                "title": "New title",
+                "body": {"representation": "storage", "value": "<p>Existing</p>"},
+                "version": {"number": 8}
+            })
+        );
+    }
+
+    #[test]
+    fn build_update_page_source_request_accepts_url_and_requests_storage() {
+        let request = build_update_page_source_request(
+            "https://example.atlassian.net",
+            "https://example.atlassian.net/wiki/pages/viewpage.action?pageId=24680",
+        )
+        .unwrap();
+        assert_eq!(request.page_id, "24680");
+        assert_eq!(
+            request.url,
+            "https://example.atlassian.net/wiki/api/v2/pages/24680?body-format=storage"
+        );
+    }
+
+    #[test]
+    fn update_page_changes_requires_title_or_body() {
+        assert_eq!(
+            update_page_changes(None, None),
+            Err(WritePageError::NoChanges)
+        );
+        assert!(update_page_changes(None, Some(String::new())).is_ok());
+    }
+
+    #[test]
+    fn parse_write_page_response_builds_web_url() {
+        let response = r#"{
+            "id": "12345",
+            "title": "Runbook",
+            "spaceId": "9988",
+            "version": {"number": 8},
+            "_links": {
+                "base": "https://example.atlassian.net/wiki",
+                "webui": "/spaces/ENG/pages/12345/Runbook"
+            }
+        }"#;
+        let output = parse_write_page_response(response, "https://example.atlassian.net").unwrap();
+        assert_eq!(
+            output,
+            WritePageOutput {
+                id: "12345".to_string(),
+                title: "Runbook".to_string(),
+                space_id: "9988".to_string(),
+                version: 8,
+                url: "https://example.atlassian.net/wiki/spaces/ENG/pages/12345/Runbook"
+                    .to_string(),
+            }
+        );
     }
 }

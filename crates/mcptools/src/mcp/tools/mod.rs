@@ -216,6 +216,24 @@ pub fn registered_tools() -> Vec<Tool> {
             destructive: false,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::confluence::WritePageOutput>(),
+            name: "confluence_page_create".to_string(),
+            description: "Create a published Confluence page in a space from storage-format XHTML, optionally below a parent page given by numeric ID or page URL. Returns the page ID, title, space ID, version, and web URL. Requires allowWrites plus CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, and CONFLUENCE_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::ConfluencePageCreateArgs>(),
+            summary: "Publish Confluence storage XHTML in a space",
+            kind: ToolKind::Write,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::confluence::WritePageOutput>(),
+            name: "confluence_page_update".to_string(),
+            description: "Update the title and/or storage-format XHTML body of a published Confluence page given by numeric ID or page URL. Reads the current page, preserves omitted content, and increments its version. Returns the page ID, title, space ID, version, and web URL. Requires allowWrites plus CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, and CONFLUENCE_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
+            input_schema: schema::input_schema_for::<atlassian::ConfluencePageUpdateArgs>(),
+            summary: "Edit Confluence storage XHTML and increment its version",
+            kind: ToolKind::Write,
+            destructive: true,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::hn::PostOutput>(),
             name: "hn_read_item".to_string(),
             description: "Read a HackerNews post and its comments. Accepts HackerNews item ID (e.g., '8863') or full URL (e.g., 'https://news.ycombinator.com/item?id=8863'). Returns post details with paginated comments.".to_string(),
@@ -247,7 +265,7 @@ pub fn registered_tools() -> Vec<Tool> {
             name: "md_toc".to_string(),
             description: "Extract table of contents from a web page by parsing markdown headings (H1-H6). Fetches the page using headless Chrome, converts to markdown, and extracts all heading levels with their character offsets and limits. Each TOC entry includes char_offset and char_limit values that can be used with md_fetch to extract specific sections. Sections are defined as heading + content until the next same-or-higher-level heading. Supports CSS selector filtering to extract TOC from specific page elements.".to_string(),
             input_schema: schema::input_schema_for::<md::MdTocArgs>(),
-            summary: "List the headings of a web page as a table of contents",
+            summary: "Show a web page URL's structure as headings and a table of contents",
             kind: ToolKind::Read,
             destructive: false,
         },
@@ -1319,6 +1337,12 @@ pub async fn dispatch_tool_call(
         "confluence_page_get" => {
             atlassian::handle_confluence_page_get(params.arguments, global).await
         }
+        "confluence_page_create" => {
+            atlassian::handle_confluence_page_create(params.arguments, global).await
+        }
+        "confluence_page_update" => {
+            atlassian::handle_confluence_page_update(params.arguments, global).await
+        }
         "bitbucket_pr_list" => atlassian::handle_bitbucket_pr_list(params.arguments, global).await,
         "bitbucket_pr_read" => atlassian::handle_bitbucket_pr_read(params.arguments, global).await,
         "bitbucket_pr_create" => {
@@ -1521,7 +1545,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 99);
+        assert_eq!(catalog.len(), 101);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1586,7 +1610,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 102);
+        assert_eq!(super::registered_tools().len(), 104);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1661,7 +1685,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 102);
+        assert_eq!(names(serve_flags(false)).len(), 104);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1768,6 +1792,7 @@ mod catalog_tests {
             "bitbucket_repo_branch_delete",
             "bitbucket_deploy_key_remove",
             "linear_document_update",
+            "confluence_page_update",
             "linear_project_milestone_update",
             "linear_project_update",
             "linear_issue_update",
@@ -1785,7 +1810,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 102);
+        assert_eq!(tools.len(), 104);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1821,6 +1846,8 @@ mod catalog_tests {
     fn registered_names_match_oracle_sets() {
         let write: std::collections::BTreeSet<&str> = [
             "lane_create",
+            "confluence_page_create",
+            "confluence_page_update",
             "jira_create",
             "jira_update",
             "jira_comment_add",
@@ -1932,7 +1959,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 102);
+        assert_eq!(union.len(), 104);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

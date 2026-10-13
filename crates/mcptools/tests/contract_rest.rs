@@ -245,7 +245,7 @@ fn recorded_annotation() -> serde_json::Value {
 fn mcp_contract_rest() {
     let response = tools_list();
     let all = tools(&response);
-    assert_eq!(all.len(), 102, "unexpected tools/list length");
+    assert_eq!(all.len(), 104, "unexpected tools/list length");
     for tool in &all {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();
         let output = tool
@@ -311,6 +311,26 @@ fn mcp_contract_rest() {
     assert_eq!(
         required(
             find(&all, "confluence_page_get")
+                .get("inputSchema")
+                .unwrap()
+        ),
+        vec!["idOrUrl".to_string()]
+    );
+    assert_eq!(
+        required(
+            find(&all, "confluence_page_create")
+                .get("inputSchema")
+                .unwrap()
+        ),
+        vec![
+            "body".to_string(),
+            "spaceId".to_string(),
+            "title".to_string()
+        ]
+    );
+    assert_eq!(
+        required(
+            find(&all, "confluence_page_update")
                 .get("inputSchema")
                 .unwrap()
         ),

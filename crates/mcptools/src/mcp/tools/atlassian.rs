@@ -25,6 +25,24 @@ pub(crate) struct ConfluencePageGetArgs {
     id_or_url: String,
 }
 #[derive(Deserialize, JsonSchema)]
+pub(crate) struct ConfluencePageCreateArgs {
+    #[serde(rename = "spaceId")]
+    space_id: String,
+    title: String,
+    #[schemars(description = "Confluence storage-format XHTML")]
+    body: String,
+    #[serde(rename = "parentIdOrUrl")]
+    parent_id_or_url: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
+pub(crate) struct ConfluencePageUpdateArgs {
+    #[serde(rename = "idOrUrl")]
+    id_or_url: String,
+    title: Option<String>,
+    #[schemars(description = "Replacement Confluence storage-format XHTML")]
+    body: Option<String>,
+}
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct JiraGetArgs {
     #[serde(rename = "issueKey")]
     issue_key: String,
@@ -434,6 +452,80 @@ pub async fn handle_confluence_page_get(
             message: format!("Tool execution error: {error}"),
             data: None,
         })?;
+    super::to_dual_result(page)
+}
+
+pub async fn handle_confluence_page_create(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: ConfluencePageCreateArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|error| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {error}"),
+                data: None,
+            }
+        })?;
+    if global.verbose {
+        eprintln!(
+            "Calling confluence_page_create: spaceId={}, title={}",
+            args.space_id, args.title
+        );
+    }
+    let config = crate::atlassian::ConfluenceConfig::from_env().map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {error}"),
+        data: None,
+    })?;
+    let page = crate::atlassian::confluence::create_page_data(
+        args.space_id,
+        args.title,
+        args.body,
+        args.parent_id_or_url,
+        &config,
+    )
+    .await
+    .map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {error}"),
+        data: None,
+    })?;
+    super::to_dual_result(page)
+}
+
+pub async fn handle_confluence_page_update(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: ConfluencePageUpdateArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|error| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {error}"),
+                data: None,
+            }
+        })?;
+    if global.verbose {
+        eprintln!("Calling confluence_page_update: idOrUrl={}", args.id_or_url);
+    }
+    let config = crate::atlassian::ConfluenceConfig::from_env().map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {error}"),
+        data: None,
+    })?;
+    let page = crate::atlassian::confluence::update_page_data(
+        args.id_or_url,
+        args.title,
+        args.body,
+        &config,
+    )
+    .await
+    .map_err(|error| JsonRpcError {
+        code: -32603,
+        message: format!("Tool execution error: {error}"),
+        data: None,
+    })?;
     super::to_dual_result(page)
 }
 

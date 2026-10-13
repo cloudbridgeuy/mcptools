@@ -20,6 +20,12 @@ mcptools atlassian confluence get 123456
 
 # Read one page by URL; read is an alias for get
 mcptools atlassian confluence read 'https://example.atlassian.net/wiki/spaces/WIKI/pages/123456/Runbook' --json
+
+# Create a published page from Confluence storage-format XHTML
+mcptools atlassian confluence create --space-id 9988 --title 'Runbook' --body '<p>Deploy</p>' --parent 123456 --json
+
+# Update the title, storage body, or both; the current version is read and incremented
+mcptools atlassian confluence update 123456 --title 'Deployment Runbook' --body '<p>Deploy and verify</p>' --json
 ```
 
 ## MCP Tool
@@ -54,6 +60,43 @@ mcptools atlassian confluence read 'https://example.atlassian.net/wiki/spaces/WI
 ```
 
 The page reader accepts a numeric page ID, a URL with a `pageId` query parameter, or a URL with a numeric ID after a `/pages/` path segment. It returns the title, space ID, current version number, Markdown body, and web URL.
+
+### confluence_page_create
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "confluence_page_create",
+    "arguments": {
+      "spaceId": "9988",
+      "title": "Runbook",
+      "body": "<p>Deploy</p>",
+      "parentIdOrUrl": "123456",
+      "allowWrites": true
+    }
+  }
+}
+```
+
+### confluence_page_update
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "confluence_page_update",
+    "arguments": {
+      "idOrUrl": "https://example.atlassian.net/wiki/spaces/WIKI/pages/123456/Runbook",
+      "title": "Deployment Runbook",
+      "body": "<p>Deploy and verify</p>",
+      "allowWrites": true
+    }
+  }
+}
+```
+
+Create and update bodies use Confluence storage-format XHTML. Update requires `title`, `body`, or both. It reads the current storage body and version, preserves omitted content, then sends the next version number. Both mutation tools require `allowWrites`.
 
 ## Environment Variables
 
