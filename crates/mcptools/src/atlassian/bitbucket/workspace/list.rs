@@ -65,7 +65,7 @@ pub async fn list_workspace_data(
 
     let url = match next_page {
         Some(page_url) => page_url,
-        None => format!("{}/workspaces?pagelen={}", base_url, pagelen),
+        None => format!("{}/user/workspaces?pagelen={}", base_url, pagelen),
     };
 
     if let Some(s) = spinner {

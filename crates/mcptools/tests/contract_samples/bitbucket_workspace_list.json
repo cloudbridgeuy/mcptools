@@ -1,5 +1,5 @@
 {
-  "next_page": "https://api.bitbucket.org/2.0/workspaces?page=2",
+  "next_page": "https://api.bitbucket.org/2.0/user/workspaces?page=2",
   "total_count": 2,
   "workspaces": [
     {

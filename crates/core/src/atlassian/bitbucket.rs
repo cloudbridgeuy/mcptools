@@ -914,7 +914,7 @@ pub fn transform_pr_list_response(response: BitbucketPRListResponse) -> PRListOu
 /// Paginated response from Bitbucket workspaces endpoint
 #[derive(Debug, Deserialize, Clone)]
 pub struct BitbucketWorkspaceListResponse {
-    pub values: Vec<BitbucketWorkspace>,
+    pub values: Vec<BitbucketWorkspaceAccess>,
     #[serde(default)]
     pub size: Option<u32>,
     #[serde(default)]
@@ -927,11 +927,16 @@ pub struct BitbucketWorkspaceListResponse {
     pub previous: Option<String>,
 }
 
-/// A single workspace in Bitbucket
+#[derive(Debug, Deserialize, Clone)]
+pub struct BitbucketWorkspaceAccess {
+    pub workspace: BitbucketWorkspace,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct BitbucketWorkspace {
     pub slug: String,
-    pub name: String,
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub uuid: Option<String>,
 }
@@ -949,22 +954,19 @@ pub struct WorkspaceItem {
     pub name: String,
 }
 
-/// Transform Bitbucket workspace list response to output domain model
-///
-/// # Arguments
-/// * `response` - The paginated workspace list response from Bitbucket API
-///
-/// # Returns
-/// * `WorkspaceListOutput` - Cleaned and transformed workspace list with pagination info
 pub fn transform_workspace_list_response(
     response: BitbucketWorkspaceListResponse,
 ) -> WorkspaceListOutput {
     let workspaces: Vec<WorkspaceItem> = response
         .values
         .into_iter()
-        .map(|w| WorkspaceItem {
-            slug: w.slug,
-            name: w.name,
+        .map(|access| {
+            let workspace = access.workspace;
+            let name = workspace.name.unwrap_or_else(|| workspace.slug.clone());
+            WorkspaceItem {
+                slug: workspace.slug,
+                name,
+            }
         })
         .collect();
 
@@ -1619,11 +1621,13 @@ mod tests {
         assert_eq!(output.description, None);
     }
 
-    fn sample_workspace(slug: &str, name: &str) -> BitbucketWorkspace {
-        BitbucketWorkspace {
-            slug: slug.to_string(),
-            name: name.to_string(),
-            uuid: None,
+    fn sample_workspace(slug: &str, name: Option<&str>) -> BitbucketWorkspaceAccess {
+        BitbucketWorkspaceAccess {
+            workspace: BitbucketWorkspace {
+                slug: slug.to_string(),
+                name: name.map(str::to_string),
+                uuid: None,
+            },
         }
     }
 
@@ -1631,8 +1635,8 @@ mod tests {
     fn test_transform_workspace_list_response_basic() {
         let response = BitbucketWorkspaceListResponse {
             values: vec![
-                sample_workspace("ws1", "Workspace One"),
-                sample_workspace("ws2", "Workspace Two"),
+                sample_workspace("ws1", Some("Workspace One")),
+                sample_workspace("ws2", Some("Workspace Two")),
             ],
             size: Some(2),
             page: Some(1),
@@ -1671,13 +1675,37 @@ mod tests {
     }
 
     #[test]
+    fn test_transform_workspace_list_response_uses_slug_when_name_is_absent() {
+        let response: BitbucketWorkspaceListResponse = serde_json::from_value(serde_json::json!({
+            "pagelen": 25,
+            "page": 1,
+            "size": 1,
+            "values": [{
+                "administrator": true,
+                "type": "workspace_access",
+                "workspace": {
+                    "slug": "bbworkspace1",
+                    "type": "workspace_base",
+                    "uuid": "{470c176d-3574-44ea-bb41-89e8638bcca4}"
+                }
+            }]
+        }))
+        .unwrap();
+
+        let output = transform_workspace_list_response(response);
+
+        assert_eq!(output.workspaces[0].slug, "bbworkspace1");
+        assert_eq!(output.workspaces[0].name, "bbworkspace1");
+    }
+
+    #[test]
     fn test_transform_workspace_list_response_pagination() {
         let response = BitbucketWorkspaceListResponse {
-            values: vec![sample_workspace("ws", "Name")],
+            values: vec![sample_workspace("ws", Some("Name"))],
             size: Some(10),
             page: Some(1),
             pagelen: Some(5),
-            next: Some("https://api.bitbucket.org/2.0/workspaces?page=2".to_string()),
+            next: Some("https://api.bitbucket.org/2.0/user/workspaces?page=2".to_string()),
             previous: None,
         };
 
@@ -1686,7 +1714,7 @@ mod tests {
         assert_eq!(output.total_count, Some(10));
         assert_eq!(
             output.next_page,
-            Some("https://api.bitbucket.org/2.0/workspaces?page=2".to_string())
+            Some("https://api.bitbucket.org/2.0/user/workspaces?page=2".to_string())
         );
     }
 
