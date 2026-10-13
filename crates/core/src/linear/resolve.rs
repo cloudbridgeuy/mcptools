@@ -1,4 +1,4 @@
-use super::types::{Label, Project, Team, WorkflowState};
+use super::types::{Cycle, Label, Project, Team, WorkflowState};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,6 +26,77 @@ pub enum ProjectResolution {
     Resolved(Project),
     Ambiguous(Vec<Project>),
     NotFound(String),
+}
+
+pub trait NamedId {
+    fn id(&self) -> &str;
+    fn name(&self) -> Option<&str>;
+}
+
+impl NamedId for Project {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn name(&self) -> Option<&str> {
+        Some(&self.name)
+    }
+}
+
+impl NamedId for Cycle {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum NamedIdError {
+    #[error("name not found: {input}")]
+    NotFound { input: String },
+    #[error("ambiguous name '{input}': {candidate_ids}", candidate_ids = .candidate_ids.join(", "))]
+    Ambiguous {
+        input: String,
+        candidate_ids: Vec<String>,
+    },
+}
+
+pub fn resolve_named_id<T: NamedId>(input: &str, candidates: &[T]) -> Result<String, NamedIdError> {
+    let input = input.trim();
+    if is_uuid(input) {
+        return Ok(input.to_string());
+    }
+    let exact: Vec<_> = candidates
+        .iter()
+        .filter(|candidate| candidate.name() == Some(input))
+        .collect();
+    let matches = match exact.len() {
+        0 => candidates
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .name()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(input))
+            })
+            .collect(),
+        _ => exact,
+    };
+    match matches.as_slice() {
+        [candidate] => Ok(candidate.id().to_string()),
+        [] => Err(NamedIdError::NotFound {
+            input: input.to_string(),
+        }),
+        _ => Err(NamedIdError::Ambiguous {
+            input: input.to_string(),
+            candidate_ids: matches
+                .into_iter()
+                .map(|candidate| candidate.id().to_string())
+                .collect(),
+        }),
+    }
 }
 
 pub fn parse_team_selector(input: &str) -> Option<TeamSelector> {
@@ -341,6 +412,49 @@ mod tests {
         assert!(matches!(by_name, ProjectResolution::Resolved(_)));
         let missing = match_projects(&ProjectSelector::Name("nope".to_string()), &items);
         assert!(matches!(missing, ProjectResolution::NotFound(_)));
+    }
+
+    #[test]
+    fn resolves_named_ids_with_exact_case_precedence_and_case_fallback() {
+        let items = vec![
+            Project {
+                id: "p1".to_string(),
+                name: "MCPTools".to_string(),
+            },
+            Project {
+                id: "p2".to_string(),
+                name: "mcptools".to_string(),
+            },
+        ];
+        assert_eq!(resolve_named_id("MCPTools", &items), Ok("p1".to_string()));
+        assert_eq!(
+            resolve_named_id("McpTools", &items),
+            Err(NamedIdError::Ambiguous {
+                input: "McpTools".to_string(),
+                candidate_ids: vec!["p1".to_string(), "p2".to_string()],
+            })
+        );
+        assert_eq!(
+            resolve_named_id("other", &items),
+            Err(NamedIdError::NotFound {
+                input: "other".to_string(),
+            })
+        );
+        let cycles = vec![Cycle {
+            id: "c1".to_string(),
+            number: 1,
+            name: Some("Sprint One".to_string()),
+        }];
+        assert_eq!(
+            resolve_named_id("sprint one", &cycles),
+            Ok("c1".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_named_id_passes_uuid_through_without_candidates() {
+        let id = "e3b567ba-bcd1-42d8-8ae8-129fd11c97ab";
+        assert_eq!(resolve_named_id(id, &[] as &[Project]), Ok(id.to_string()));
     }
 
     #[test]

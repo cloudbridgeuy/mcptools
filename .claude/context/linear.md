@@ -43,12 +43,15 @@ mcptools linear issue list --json
 # Create one issue (labels repeatable or comma-separated)
 mcptools linear issue create --team GUZ --title "Wire the thing" --label docs
 mcptools linear issue create --team GUZ --title "Wire the thing" --label docs,api --label urgent
+mcptools linear issue create --team GUZ --title "Plan release" --priority 2 --estimate 5 --due-date 2026-10-31 --cycle "Sprint 1" --project MCPTools
 
-# Update fields. State and label names use the identifier team; --team overrides
+# Update fields. Named selectors use the identifier team; --team overrides
 mcptools linear issue update GUZ-22 --state Done
 mcptools linear issue update GUZ-22 --state Done --team GUZ
 mcptools linear issue update GUZ-22 --label docs,api
 mcptools linear issue update GUZ-22 --clear-labels
+mcptools linear issue update GUZ-22 --priority 1 --estimate 3 --due-date 2026-11-07 --cycle "Sprint 2" --project MCPTools
+mcptools linear issue update GUZ-22 --clear-estimate --clear-due-date --clear-cycle --clear-project
 
 # Move an issue to Linear trash; this never permanently deletes it
 mcptools linear issue delete GUZ-22
@@ -58,13 +61,14 @@ mcptools linear issue delete GUZ-22 --json
 Selector rules:
 
 - `--team` accepts id, key, or name.
-- `--project` accepts id or name. Names need `--team`.
+- `--project` and issue create/update `--cycle` accept UUID or name. Create names resolve against `--team`; update names use the issue identifier team or `--team`.
 - `--assignee` accepts a user UUID or `me` (current viewer). Find UUIDs with `linear users list --query NAME`.
-- `--state` and `--label` match by name (labels also accept UUIDs). `--cycle` accepts a cycle number or id.
+- `--state` and `--label` match by name (labels also accept UUIDs). Issue list `--cycle` accepts a cycle number or id.
 - `--query` matches a title substring. `--updated-after` needs RFC3339 and is rejected before any request when malformed.
 - `--sort` accepts `priority` or `updatedAt`. Omitted, the order stays newest-first.
-- Issue update `--state` and `--label` names resolve from the issue identifier team (`GUZ-22` → `GUZ`). `--team` overrides. UUID issue ids still need `--team` or a state/label UUID.
+- Issue update state, label, project, and cycle names resolve from the issue identifier team (`GUZ-22` → `GUZ`). `--team` overrides. UUID issue ids need `--team` for name resolution.
 - Issue update `--label` replaces the full label set; `--clear-labels` (alias `--clear-label`) empties it. The two flags reject when combined.
+- Issue priority is integer 0–4. Due dates must be valid `YYYY-MM-DD` calendar dates. Update clear flags set estimate, due date, cycle, or project to null and reject with the matching set flag.
 - Issue delete accepts an issue UUID or identifier and moves it to Linear trash. It never permanently deletes the issue.
 
 ### Comment edits and deletion
@@ -151,14 +155,16 @@ linear_project_milestone_update (needs milestone UUID; partial update with expli
 linear_project_create (needs team, name; accepts description and Markdown content)
 linear_project_update (project UUID, or name with team; partial property updates and explicit clear flags)
 linear_project_update_create (needs project, nonblank Markdown body; names require team; optional health)
-linear_issue_create (needs team, title; accepts labels string-or-array)
-linear_issue_update (needs id plus one of title, description, state, assignee, parent, clearParent, labels, clearLabels; state and label names resolve from the issue identifier team, or team; labels replaces, clearLabels empties, the two reject when combined)
+linear_issue_create (needs team, title; accepts priority 0–4, estimate, dueDate, cycle, project, and labels string-or-array)
+linear_issue_update (needs id plus one changed field; supports priority, estimate, dueDate, cycle, project, clearEstimate, clearDueDate, clearCycle, clearProject, and existing issue fields; names resolve from the issue identifier team or team)
 linear_issue_delete (needs id; moves the issue to trash, never permanently deletes it; requires allowWrites)
 linear_comment_create (needs id, body; body trims, empty rejects)
 linear_comment_update (needs comment id, body; body trims, empty rejects; requires allowWrites)
 linear_comment_delete (needs comment id; requires allowWrites)
 linear_relation_add / linear_relation_remove (source, related, type triple; type is blocks or related)
 ```
+
+Linear issue mutation field names were verified on 2026-10-13 against the public Linear SDK GraphQL schema. `IssueCreateInput` and `IssueUpdateInput` both define `priority: Int`, `estimate: Int`, `dueDate: TimelessDate`, `cycleId: String`, and `projectId: String`. No authenticated live mutation was used.
 
 ### Project progress reports (MCP only)
 

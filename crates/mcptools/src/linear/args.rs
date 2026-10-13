@@ -379,6 +379,8 @@ pub struct CycleListArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename_all = "camelCase")]
 pub struct IssueCreateArgs {
     #[schemars(description = "Team id, key, or name")]
     pub team: String,
@@ -390,6 +392,18 @@ pub struct IssueCreateArgs {
     pub state: Option<String>,
     #[schemars(description = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,
+    #[schemars(
+        range(min = 0, max = 4),
+        description = "Priority 0-4; 0 removes priority"
+    )]
+    pub priority: Option<u8>,
+    #[schemars(description = "Issue estimate")]
+    pub estimate: Option<i32>,
+    #[serde(alias = "due_date")]
+    #[schemars(description = "Due date as a valid YYYY-MM-DD calendar date")]
+    pub due_date: Option<String>,
+    #[schemars(description = "Cycle UUID or name (names resolve against team)")]
+    pub cycle: Option<String>,
     #[schemars(description = "Project id or name (names resolve against team)")]
     pub project: Option<String>,
     #[schemars(description = "Parent issue id or identifier")]
@@ -421,6 +435,32 @@ pub struct IssueUpdateArgs {
     pub team: Option<String>,
     #[schemars(description = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,
+    #[schemars(
+        range(min = 0, max = 4),
+        description = "Priority 0-4; 0 removes priority"
+    )]
+    pub priority: Option<u8>,
+    #[schemars(description = "Issue estimate; clearEstimate sets null")]
+    pub estimate: Option<i32>,
+    #[serde(alias = "due_date")]
+    #[schemars(description = "Due date YYYY-MM-DD; clearDueDate sets null")]
+    pub due_date: Option<String>,
+    #[schemars(description = "Cycle UUID or name; clearCycle sets null")]
+    pub cycle: Option<String>,
+    #[schemars(description = "Project UUID or name; clearProject sets null")]
+    pub project: Option<String>,
+    #[serde(default, alias = "clear_estimate")]
+    #[schemars(description = "Clear estimate (cannot combine with estimate)")]
+    pub clear_estimate: Option<bool>,
+    #[serde(default, alias = "clear_due_date")]
+    #[schemars(description = "Clear due date (cannot combine with dueDate)")]
+    pub clear_due_date: Option<bool>,
+    #[serde(default, alias = "clear_cycle")]
+    #[schemars(description = "Clear cycle (cannot combine with cycle)")]
+    pub clear_cycle: Option<bool>,
+    #[serde(default, alias = "clear_project")]
+    #[schemars(description = "Clear project (cannot combine with project)")]
+    pub clear_project: Option<bool>,
     #[schemars(description = "Parent issue id or identifier")]
     pub parent: Option<String>,
     #[serde(default, alias = "clear_parent")]
@@ -538,9 +578,34 @@ mod tests {
         )
         .unwrap();
         assert_eq!(from_alias.labels, Some(vec!["docs".to_string()]));
-        let cleared: IssueUpdateArgs =
-            serde_json::from_value(serde_json::json!({"id": "GUZ-1", "clear_labels": true}))
-                .unwrap();
+        let cleared: IssueUpdateArgs = serde_json::from_value(serde_json::json!({
+            "id": "GUZ-1",
+            "clear_labels": true,
+            "clear_estimate": true,
+            "clear_due_date": true,
+            "clear_cycle": true,
+            "clear_project": true
+        }))
+        .unwrap();
         assert_eq!(cleared.clear_labels, Some(true));
+        assert_eq!(cleared.clear_estimate, Some(true));
+        assert_eq!(cleared.clear_due_date, Some(true));
+        assert_eq!(cleared.clear_cycle, Some(true));
+        assert_eq!(cleared.clear_project, Some(true));
+        let planning: IssueCreateArgs = serde_json::from_value(serde_json::json!({
+            "team": "GUZ",
+            "title": "T",
+            "priority": 2,
+            "estimate": 5,
+            "dueDate": "2026-10-31",
+            "cycle": "Sprint 1",
+            "project": "MCPTools"
+        }))
+        .unwrap();
+        assert_eq!(planning.priority, Some(2));
+        assert_eq!(planning.estimate, Some(5));
+        assert_eq!(planning.due_date.as_deref(), Some("2026-10-31"));
+        assert_eq!(planning.cycle.as_deref(), Some("Sprint 1"));
+        assert_eq!(planning.project.as_deref(), Some("MCPTools"));
     }
 }

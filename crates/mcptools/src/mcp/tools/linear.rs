@@ -718,6 +718,10 @@ pub async fn handle_linear_issue_create(
         args.description.as_deref(),
         args.state.as_deref(),
         args.assignee.as_deref(),
+        args.priority,
+        args.estimate,
+        args.due_date.as_deref(),
+        args.cycle.as_deref(),
         args.project.as_deref(),
         args.parent.as_deref(),
         &labels,
@@ -744,6 +748,29 @@ pub async fn handle_linear_issue_update(
             "Linear issue update accepts only one of labels or clearLabels"
         )));
     }
+    let clear_estimate = args.clear_estimate.unwrap_or(false);
+    let clear_due_date = args.clear_due_date.unwrap_or(false);
+    let clear_cycle = args.clear_cycle.unwrap_or(false);
+    let clear_project = args.clear_project.unwrap_or(false);
+    for (field, supplied, clear) in [
+        ("estimate", args.estimate.is_some(), clear_estimate),
+        ("dueDate", args.due_date.is_some(), clear_due_date),
+        ("cycle", args.cycle.is_some(), clear_cycle),
+        ("project", args.project.is_some(), clear_project),
+    ] {
+        if supplied && clear {
+            return Err(exec(color_eyre::eyre::eyre!(
+                "Linear issue update accepts only one of {} or clear{}",
+                field,
+                match field {
+                    "dueDate" => "DueDate",
+                    "estimate" => "Estimate",
+                    "cycle" => "Cycle",
+                    _ => "Project",
+                }
+            )));
+        }
+    }
     if global.verbose {
         eprintln!("Calling linear_issue_update: id={}", args.id);
     }
@@ -751,6 +778,22 @@ pub async fn handle_linear_issue_update(
         Some(None)
     } else {
         args.parent.map(Some)
+    };
+    let estimate = match clear_estimate {
+        true => Some(None),
+        false => args.estimate.map(Some),
+    };
+    let due_date = match clear_due_date {
+        true => Some(None),
+        false => args.due_date.map(Some),
+    };
+    let cycle = match clear_cycle {
+        true => Some(None),
+        false => args.cycle.map(Some),
+    };
+    let project = match clear_project {
+        true => Some(None),
+        false => args.project.map(Some),
     };
     let client = linear_client()?;
     let updated = crate::linear::issue::issue_update_data(
@@ -761,6 +804,11 @@ pub async fn handle_linear_issue_update(
         args.state.as_deref(),
         args.team.as_deref(),
         args.assignee.as_deref(),
+        args.priority,
+        estimate,
+        due_date,
+        cycle,
+        project,
         parent,
         args.labels.as_deref(),
         clear_labels,

@@ -3,9 +3,10 @@ use crate::prelude::*;
 use mcptools_core::linear::{
     format_label_candidates, is_uuid, issue_create_input, issue_delete_request, issue_filter_value,
     issue_sort_value, issue_update_input, match_label, match_state, parse_label_selector,
-    parse_state_selector, team_key_from_identifier, transform_issue_create, transform_issue_delete,
-    transform_issue_update, Activity, DeletedIssue, IssueGetOutput, IssueListFilter, IssueMini,
-    IssueSort, LabelResolution, StateResolution,
+    parse_state_selector, resolve_named_id, team_key_from_identifier, transform_issue_create,
+    transform_issue_delete, transform_issue_update, valid_timeless_date, Activity, Cycle,
+    DeletedIssue, IssueGetOutput, IssueListFilter, IssueMini, IssueSort, LabelResolution,
+    NamedIdError, Project, StateResolution,
 };
 
 pub const ISSUE_QUERY: &str =
@@ -187,6 +188,10 @@ pub async fn issue_create_data(
     description: Option<&str>,
     state: Option<&str>,
     assignee: Option<&str>,
+    priority: Option<u8>,
+    estimate: Option<i32>,
+    due_date: Option<&str>,
+    cycle: Option<&str>,
     project: Option<&str>,
     parent: Option<&str>,
     labels: &[String],
@@ -201,6 +206,8 @@ pub async fn issue_create_data(
         ("--description", description),
         ("--state", state),
         ("--assignee", assignee),
+        ("--due-date", due_date),
+        ("--cycle", cycle),
         ("--project", project),
         ("--parent", parent),
     ] {
@@ -216,18 +223,21 @@ pub async fn issue_create_data(
             ));
         }
     }
+    if priority.is_some_and(|value| value > 4) {
+        return Err(eyre!(
+            "Linear issue create --priority must be between 0 and 4"
+        ));
+    }
+    if due_date.is_some_and(|value| !valid_timeless_date(value.trim())) {
+        return Err(eyre!(
+            "Linear issue create --due-date must be a valid YYYY-MM-DD calendar date"
+        ));
+    }
     let team_id = super::discover::teams_get_data(client, team.trim())
         .await?
         .id;
-    let project_id = match project.map(str::trim).filter(|text| !text.is_empty()) {
-        None => None,
-        Some(selector) if is_uuid(selector) => Some(selector.to_string()),
-        Some(selector) => Some(
-            super::discover::projects_get_data(client, selector, team.trim())
-                .await?
-                .id,
-        ),
-    };
+    let project_id = resolve_project_id(client, project, Some(team.trim()), "create").await?;
+    let cycle_id = resolve_cycle_id(client, cycle, Some(team.trim()), "create").await?;
     let state_id = resolve_state_id(client, state, Some(team.trim()), "create").await?;
     let assignee_id = resolve_assignee_id(client, assignee, "create").await?;
     let label_ids = resolve_label_ids(client, labels, Some(team.trim()), "create").await?;
@@ -237,6 +247,10 @@ pub async fn issue_create_data(
         description.map(str::trim),
         state_id.as_deref(),
         assignee_id.as_deref(),
+        priority,
+        estimate,
+        due_date.map(str::trim),
+        cycle_id.as_deref(),
         project_id.as_deref(),
         parent.map(str::trim),
         label_ids.as_deref(),
@@ -264,6 +278,11 @@ pub async fn issue_update_data(
     state: Option<&str>,
     team: Option<&str>,
     assignee: Option<&str>,
+    priority: Option<u8>,
+    estimate: Option<Option<i32>>,
+    due_date: Option<Option<String>>,
+    cycle: Option<Option<String>>,
+    project: Option<Option<String>>,
     parent: Option<Option<String>>,
     labels: Option<&[String]>,
     clear_labels: bool,
@@ -289,15 +308,41 @@ pub async fn issue_update_data(
     {
         return Err(eyre!("Linear parent issue id must not be empty"));
     }
+    for (flag, value) in [("--cycle", &cycle), ("--project", &project)] {
+        if value
+            .as_ref()
+            .is_some_and(|slot| slot.as_ref().is_some_and(|text| text.trim().is_empty()))
+        {
+            return Err(eyre!("Linear issue update {} must not be empty", flag));
+        }
+    }
+    if priority.is_some_and(|value| value > 4) {
+        return Err(eyre!(
+            "Linear issue update --priority must be between 0 and 4"
+        ));
+    }
+    if due_date.as_ref().is_some_and(|slot| {
+        slot.as_ref()
+            .is_some_and(|value| !valid_timeless_date(value.trim()))
+    }) {
+        return Err(eyre!(
+            "Linear issue update --due-date must be a valid YYYY-MM-DD calendar date"
+        ));
+    }
     let has_field = [title, description, state, assignee]
         .iter()
         .any(|value| value.map(str::trim).is_some_and(|text| !text.is_empty()))
+        || priority.is_some()
+        || estimate.is_some()
+        || due_date.is_some()
+        || cycle.is_some()
+        || project.is_some()
         || parent.is_some()
         || labels.is_some()
         || clear_labels;
     if !has_field {
         return Err(eyre!(
-            "Linear issue update needs at least one of --title, --description, --state, --assignee, --parent, --clear-parent, --label, --clear-labels"
+            "Linear issue update needs at least one changed field"
         ));
     }
     if let Some(value) = assignee.map(str::trim).filter(|text| !text.is_empty()) {
@@ -308,16 +353,34 @@ pub async fn issue_update_data(
             ));
         }
     }
-    let team_for_state = team
+    let team_context = team
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .or_else(|| team_key_from_identifier(selector));
-    let state_id = resolve_state_id(client, state, team_for_state, "update").await?;
+    let state_id = resolve_state_id(client, state, team_context, "update").await?;
     let assignee_id = resolve_assignee_id(client, assignee, "update").await?;
+    let cycle_id = match cycle {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(value)) => Some(Some(
+            resolve_cycle_id(client, Some(&value), team_context, "update")
+                .await?
+                .ok_or_else(|| eyre!("Linear cycle resolution returned no id"))?,
+        )),
+    };
+    let project_id = match project {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(value)) => Some(Some(
+            resolve_project_id(client, Some(&value), team_context, "update")
+                .await?
+                .ok_or_else(|| eyre!("Linear project resolution returned no id"))?,
+        )),
+    };
     let label_ids = match (labels, clear_labels) {
         (_, true) => Some(None),
         (Some(items), false) => Some(Some(
-            resolve_label_ids(client, items, team_for_state, "update")
+            resolve_label_ids(client, items, team_context, "update")
                 .await?
                 .unwrap_or_default(),
         )),
@@ -328,6 +391,11 @@ pub async fn issue_update_data(
         description.map(str::trim),
         state_id.as_deref(),
         assignee_id.as_deref(),
+        priority,
+        estimate,
+        due_date.map(|slot| slot.map(|value| value.trim().to_string())),
+        cycle_id,
+        project_id,
         parent,
         label_ids.as_ref().map(|slot| slot.as_deref()),
     );
@@ -343,6 +411,75 @@ pub async fn issue_update_data(
         }
         other => eyre!("{}", other),
     })
+}
+
+async fn resolve_project_id(
+    client: &reqwest::Client,
+    project: Option<&str>,
+    team: Option<&str>,
+    op: &str,
+) -> Result<Option<String>> {
+    let selector = match project.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    if let Ok(id) = resolve_named_id(selector, &[] as &[Project]) {
+        return Ok(Some(id));
+    }
+    let team = team.ok_or_else(|| {
+        eyre!(
+            "Linear issue {} --project '{}' needs --team to resolve the project name. Pass a project UUID to skip team resolution",
+            op,
+            selector
+        )
+    })?;
+    let candidates = super::discover::projects_list_data(client, team, 50, None)
+        .await?
+        .nodes;
+    resolve_named_id(selector, &candidates)
+        .map(Some)
+        .map_err(|error| named_id_error("project", error))
+}
+
+async fn resolve_cycle_id(
+    client: &reqwest::Client,
+    cycle: Option<&str>,
+    team: Option<&str>,
+    op: &str,
+) -> Result<Option<String>> {
+    let selector = match cycle.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    if let Ok(id) = resolve_named_id(selector, &[] as &[Cycle]) {
+        return Ok(Some(id));
+    }
+    let team = team.ok_or_else(|| {
+        eyre!(
+            "Linear issue {} --cycle '{}' needs --team to resolve the cycle name. Pass a cycle UUID to skip team resolution",
+            op,
+            selector
+        )
+    })?;
+    let candidates = super::discover::cycles_list_data(client, team).await?.nodes;
+    resolve_named_id(selector, &candidates)
+        .map(Some)
+        .map_err(|error| named_id_error("cycle", error))
+}
+
+fn named_id_error(kind: &str, error: NamedIdError) -> color_eyre::eyre::Report {
+    match error {
+        NamedIdError::NotFound { input } => eyre!("Linear {} not found: {}", kind, input),
+        NamedIdError::Ambiguous {
+            input,
+            candidate_ids,
+        } => eyre!(
+            "Ambiguous Linear {} '{}'. Candidate IDs: {}",
+            kind,
+            input,
+            candidate_ids.join(", ")
+        ),
+    }
 }
 
 async fn resolve_label_ids(
@@ -492,6 +629,11 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 Some(None),
                 None,
                 false,
@@ -503,6 +645,11 @@ mod tests {
         let err = issue_update_data(
             &client,
             "GUZ-81",
+            None,
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -589,10 +736,68 @@ mod tests {
             api_key: "test-key".to_string(),
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
-        let err = issue_create_data(&client, "GUZ", "   ", None, None, None, None, None, &[])
-            .await
-            .unwrap_err();
+        let err = issue_create_data(
+            &client,
+            "GUZ",
+            "   ",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("--title"));
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_create_priority_and_due_date_before_io() {
+        let cfg = LinearConfig {
+            api_key: "test-key".to_string(),
+        };
+        let client = crate::linear::client::build_client(&cfg).unwrap();
+        let priority = issue_create_data(
+            &client,
+            "GUZ",
+            "T",
+            None,
+            None,
+            None,
+            Some(5),
+            None,
+            None,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await
+        .unwrap_err();
+        assert!(priority.to_string().contains("--priority"));
+        let due_date = issue_create_data(
+            &client,
+            "GUZ",
+            "T",
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("2026-02-29"),
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await
+        .unwrap_err();
+        assert!(due_date.to_string().contains("--due-date"));
     }
 
     #[tokio::test]
@@ -605,6 +810,11 @@ mod tests {
             &client,
             "   ",
             Some("T"),
+            None,
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -625,7 +835,8 @@ mod tests {
         };
         let client = crate::linear::client::build_client(&cfg).unwrap();
         let err = issue_update_data(
-            &client, "i1", None, None, None, None, None, None, None, false,
+            &client, "i1", None, None, None, None, None, None, None, None, None, None, None, None,
+            false,
         )
         .await
         .unwrap_err();
@@ -644,6 +855,11 @@ mod tests {
             None,
             None,
             Some("Todo"),
+            None,
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,

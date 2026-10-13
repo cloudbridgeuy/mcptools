@@ -881,7 +881,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueMini>(),
             name: "linear_issue_create".to_string(),
-            description: "Create a Linear issue in a team. Accepts labels (label names or UUIDs). Returns id, identifier, title, URL, state, priority, project, parent, labels. Requires LINEAR_API_KEY environment variable.".to_string(),
+            description: "Create a Linear issue in a team. Accepts priority 0-4, estimate, dueDate (YYYY-MM-DD), cycle and project UUIDs or names, parent, and labels. Cycle and project names resolve against team. Returns id, identifier, title, URL, state, priority, project, parent, labels. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueCreateArgs>(),
             summary: "Create a Linear issue in a team",
             kind: ToolKind::Write,
@@ -890,7 +890,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueMini>(),
             name: "linear_issue_update".to_string(),
-            description: "Update a Linear issue by id or identifier. Needs at least one of title, description, state, assignee, parent, clearParent, labels, clearLabels. Labels replace the full set; clearLabels empties it. Returns the updated issue with its priority label, project, and labels. Requires LINEAR_API_KEY environment variable.".to_string(),
+            description: "Update a Linear issue by id or identifier. Supports priority 0-4, estimate, dueDate (YYYY-MM-DD), cycle and project UUIDs or names, with clearEstimate, clearDueDate, clearCycle, and clearProject. Names resolve from the issue identifier team or team. Labels replace the full set; clearLabels empties it. Returns the updated issue with its priority label, project, and labels. Requires LINEAR_API_KEY environment variable.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::IssueUpdateArgs>(),
             summary: "Update a Linear issue: state (close, reopen), title, assignee, parent",
             kind: ToolKind::Write,
@@ -1936,6 +1936,32 @@ mod declaration_tests {
         let want =
             format!("{head}/** {} */\ndeclare function linear_issue_list(input: LinearIssueListInput): Promise<LinearIssueListOutput>;\n", tool.description);
         assert_eq!(super::declaration(&tool), want);
+    }
+
+    #[test]
+    fn linear_issue_mutation_declarations_include_planning_fields() {
+        for name in ["linear_issue_create", "linear_issue_update"] {
+            let declaration = super::declaration(&named(name));
+            for field in [
+                "priority?: number;",
+                "estimate?: number;",
+                "dueDate?: string;",
+                "cycle?: string;",
+                "project?: string;",
+            ] {
+                assert!(declaration.contains(field), "missing {name}.{field}");
+            }
+            if name == "linear_issue_update" {
+                for field in [
+                    "clearEstimate?: boolean;",
+                    "clearDueDate?: boolean;",
+                    "clearCycle?: boolean;",
+                    "clearProject?: boolean;",
+                ] {
+                    assert!(declaration.contains(field), "missing {name}.{field}");
+                }
+            }
+        }
     }
 
     #[test]

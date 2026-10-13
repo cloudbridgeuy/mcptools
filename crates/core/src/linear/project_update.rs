@@ -1,4 +1,6 @@
-use super::{is_uuid, parse_project_selector, ProjectSelector, ProjectStatus, User};
+use super::{
+    is_uuid, parse_project_selector, valid_timeless_date, ProjectSelector, ProjectStatus, User,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
@@ -126,7 +128,7 @@ pub fn project_update_input(args: &ProjectUpdateArgs) -> Result<Value, String> {
             return Err(format!("{field} cannot be set and cleared together"));
         }
         if let Some(value) = value {
-            if ["startDate", "targetDate"].contains(&field) && !valid_project_date(value) {
+            if ["startDate", "targetDate"].contains(&field) && !valid_timeless_date(value) {
                 return Err(format!("{field} must be a valid YYYY-MM-DD calendar date"));
             }
             input[field] = json!(if field == "content" {
@@ -158,19 +160,6 @@ fn validate_project_selector(value: &str) -> Result<(), String> {
         return Err("Malformed project, team, or status selector".into());
     }
     Ok(())
-}
-
-fn valid_project_date(value: &str) -> bool {
-    value.len() == 10
-        && value.bytes().enumerate().all(|(index, byte)| {
-            if [4, 7].contains(&index) {
-                byte == b'-'
-            } else {
-                byte.is_ascii_digit()
-            }
-        })
-        && !value.starts_with("0000")
-        && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
 }
 
 pub fn resolve_project_status(
@@ -269,7 +258,7 @@ pub fn transform_project_update(data: Value) -> Result<ProjectUpdateOutput, Stri
         || [&output.start_date, &output.target_date]
             .into_iter()
             .flatten()
-            .any(|value| !valid_project_date(value))
+            .any(|value| !valid_timeless_date(value))
         || output
             .lead
             .as_ref()

@@ -318,6 +318,18 @@ pub struct IssueCreateOptions {
     pub state: Option<String>,
     #[arg(long, help = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,
+    #[arg(
+        long,
+        value_parser = clap::value_parser!(u8).range(0..=4),
+        help = "Priority 0-4 (0 = no priority, 1 = urgent, 4 = low)"
+    )]
+    pub priority: Option<u8>,
+    #[arg(long, help = "Issue estimate")]
+    pub estimate: Option<i32>,
+    #[arg(long, help = "Due date in YYYY-MM-DD format")]
+    pub due_date: Option<String>,
+    #[arg(long, help = "Cycle UUID or name (names resolve against --team)")]
+    pub cycle: Option<String>,
     #[arg(long, help = "Project id or name (names resolve against --team)")]
     pub project: Option<String>,
     #[arg(long, help = "Parent issue id or identifier")]
@@ -347,11 +359,45 @@ pub struct IssueUpdateOptions {
     pub state: Option<String>,
     #[arg(
         long,
-        help = "Team id, key, or name for state lookup (optional override; defaults from issue identifier)"
+        help = "Team id, key, or name for state, cycle, project, or label lookup (defaults from issue identifier)"
     )]
     pub team: Option<String>,
     #[arg(long, help = "Assignee user UUID or 'me'")]
     pub assignee: Option<String>,
+    #[arg(
+        long,
+        value_parser = clap::value_parser!(u8).range(0..=4),
+        help = "Priority 0-4 (0 = no priority, 1 = urgent, 4 = low)"
+    )]
+    pub priority: Option<u8>,
+    #[arg(long, conflicts_with = "clear_estimate", help = "Issue estimate")]
+    pub estimate: Option<i32>,
+    #[arg(
+        long,
+        conflicts_with = "clear_due_date",
+        help = "Due date in YYYY-MM-DD format"
+    )]
+    pub due_date: Option<String>,
+    #[arg(
+        long,
+        conflicts_with = "clear_cycle",
+        help = "Cycle UUID or name (names use issue team or --team)"
+    )]
+    pub cycle: Option<String>,
+    #[arg(
+        long,
+        conflicts_with = "clear_project",
+        help = "Project UUID or name (names use issue team or --team)"
+    )]
+    pub project: Option<String>,
+    #[arg(long, help = "Clear the estimate")]
+    pub clear_estimate: bool,
+    #[arg(long, help = "Clear the due date")]
+    pub clear_due_date: bool,
+    #[arg(long, help = "Clear the cycle")]
+    pub clear_cycle: bool,
+    #[arg(long, help = "Clear the project")]
+    pub clear_project: bool,
     #[arg(long, help = "Parent issue id or identifier")]
     pub parent: Option<String>,
     #[arg(long, help = "Clear the parent issue")]
@@ -798,6 +844,10 @@ async fn issue_create_handler(options: IssueCreateOptions) -> Result<()> {
         options.description.as_deref(),
         options.state.as_deref(),
         options.assignee.as_deref(),
+        options.priority,
+        options.estimate,
+        options.due_date.as_deref(),
+        options.cycle.as_deref(),
         options.project.as_deref(),
         options.parent.as_deref(),
         &options.label,
@@ -852,6 +902,22 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
         true => None,
         false => Some(options.label.as_slice()),
     };
+    let estimate = match options.clear_estimate {
+        true => Some(None),
+        false => options.estimate.map(Some),
+    };
+    let due_date = match options.clear_due_date {
+        true => Some(None),
+        false => options.due_date.map(Some),
+    };
+    let cycle = match options.clear_cycle {
+        true => Some(None),
+        false => options.cycle.map(Some),
+    };
+    let project = match options.clear_project {
+        true => Some(None),
+        false => options.project.map(Some),
+    };
     let cfg = config::LinearConfig::from_env()?;
     let client = client::build_client(&cfg)?;
     let found = issue::issue_update_data(
@@ -862,6 +928,11 @@ async fn issue_update_handler(options: IssueUpdateOptions) -> Result<()> {
         options.state.as_deref(),
         options.team.as_deref(),
         options.assignee.as_deref(),
+        options.priority,
+        estimate,
+        due_date,
+        cycle,
+        project,
         parent,
         labels,
         options.clear_labels,
@@ -1464,5 +1535,80 @@ mod tests {
         assert_eq!(list_sort(&[]).unwrap(), None);
         let error = list_sort(&["--sort", "bogus"]).unwrap_err();
         assert!(error.contains("priority") && error.contains("updatedAt"));
+    }
+
+    #[test]
+    fn issue_planning_fields_parse_and_reject_set_clear_conflicts() {
+        let app = App::try_parse_from([
+            "linear",
+            "issue",
+            "create",
+            "--team",
+            "GUZ",
+            "--title",
+            "Plan",
+            "--priority",
+            "2",
+            "--estimate",
+            "5",
+            "--due-date",
+            "2026-10-31",
+            "--cycle",
+            "Sprint 1",
+            "--project",
+            "MCPTools",
+        ])
+        .unwrap();
+        let Commands::Issue(IssueCommands::Create(options)) = app.command else {
+            panic!("expected issue create");
+        };
+        assert_eq!(options.priority, Some(2));
+        assert_eq!(options.estimate, Some(5));
+        assert_eq!(options.due_date.as_deref(), Some("2026-10-31"));
+        assert_eq!(options.cycle.as_deref(), Some("Sprint 1"));
+        assert_eq!(options.project.as_deref(), Some("MCPTools"));
+        for (set, clear) in [
+            ("--estimate", "--clear-estimate"),
+            ("--due-date", "--clear-due-date"),
+            ("--cycle", "--clear-cycle"),
+            ("--project", "--clear-project"),
+        ] {
+            assert!(
+                App::try_parse_from(["linear", "issue", "update", "GUZ-1", set, "1", clear,])
+                    .is_err()
+            );
+        }
+        let app = App::try_parse_from([
+            "linear",
+            "issue",
+            "update",
+            "GUZ-1",
+            "--clear-estimate",
+            "--clear-due-date",
+            "--clear-cycle",
+            "--clear-project",
+        ])
+        .unwrap();
+        let Commands::Issue(IssueCommands::Update(options)) = app.command else {
+            panic!("expected issue update");
+        };
+        assert!(
+            options.clear_estimate
+                && options.clear_due_date
+                && options.clear_cycle
+                && options.clear_project
+        );
+        assert!(App::try_parse_from([
+            "linear",
+            "issue",
+            "create",
+            "--team",
+            "GUZ",
+            "--title",
+            "Plan",
+            "--priority",
+            "5",
+        ])
+        .is_err());
     }
 }

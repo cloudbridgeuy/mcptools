@@ -128,7 +128,10 @@ mcptools atlassian confluence read 'https://example.atlassian.net/wiki/spaces/EN
 ```bash
 mcptools linear auth status
 mcptools linear issue get GUZ-79
+mcptools linear issue create --team GUZ --title "Plan release" --priority 2 --estimate 5 --due-date 2026-10-31 --cycle "Sprint 1" --project MCPTools
 mcptools linear issue update GUZ-22 --state Done
+mcptools linear issue update GUZ-22 --priority 1 --estimate 3 --due-date 2026-11-07 --cycle "Sprint 2" --project MCPTools
+mcptools linear issue update GUZ-22 --clear-estimate --clear-due-date --clear-cycle --clear-project
 mcptools linear issue delete GUZ-22                 # moves to Linear trash; add --json
 mcptools linear comment update COMMENT_ID "Updated note" --json
 mcptools linear comment delete COMMENT_ID --json

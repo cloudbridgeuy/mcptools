@@ -1875,6 +1875,10 @@ pub fn issue_create_input(
     description: Option<&str>,
     state_id: Option<&str>,
     assignee_id: Option<&str>,
+    priority: Option<u8>,
+    estimate: Option<i32>,
+    due_date: Option<&str>,
+    cycle_id: Option<&str>,
     project_id: Option<&str>,
     parent_id: Option<&str>,
     label_ids: Option<&[String]>,
@@ -1906,6 +1910,24 @@ pub fn issue_create_input(
             serde_json::Value::String(value.to_string()),
         );
     }
+    if let Some(value) = priority {
+        out.insert("priority".to_string(), serde_json::json!(value));
+    }
+    if let Some(value) = estimate {
+        out.insert("estimate".to_string(), serde_json::json!(value));
+    }
+    if let Some(value) = due_date.and_then(non_blank) {
+        out.insert(
+            "dueDate".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = cycle_id.and_then(non_blank) {
+        out.insert(
+            "cycleId".to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
     if let Some(value) = project_id.and_then(non_blank) {
         out.insert(
             "projectId".to_string(),
@@ -1931,11 +1953,17 @@ pub fn issue_create_input(
     serde_json::Value::Object(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn issue_update_input(
     title: Option<&str>,
     description: Option<&str>,
     state_id: Option<&str>,
     assignee_id: Option<&str>,
+    priority: Option<u8>,
+    estimate: Option<Option<i32>>,
+    due_date: Option<Option<String>>,
+    cycle_id: Option<Option<String>>,
+    project_id: Option<Option<String>>,
     parent: Option<Option<String>>,
     label_ids: Option<Option<&[String]>>,
 ) -> serde_json::Value {
@@ -1963,6 +1991,29 @@ pub fn issue_update_input(
             "assigneeId".to_string(),
             serde_json::Value::String(value.to_string()),
         );
+    }
+    if let Some(value) = priority {
+        out.insert("priority".to_string(), serde_json::json!(value));
+    }
+    if let Some(slot) = estimate {
+        out.insert(
+            "estimate".to_string(),
+            slot.map_or(serde_json::Value::Null, |value| serde_json::json!(value)),
+        );
+    }
+    for (field, slot) in [
+        ("dueDate", due_date),
+        ("cycleId", cycle_id),
+        ("projectId", project_id),
+    ] {
+        if let Some(slot) = slot {
+            out.insert(
+                field.to_string(),
+                slot.map_or(serde_json::Value::Null, |value| {
+                    serde_json::Value::String(value.trim().to_string())
+                }),
+            );
+        }
     }
     if let Some(slot) = parent {
         out.insert(
@@ -2067,6 +2118,19 @@ fn non_blank(value: &str) -> Option<&str> {
     } else {
         Some(trimmed)
     }
+}
+
+pub fn valid_timeless_date(value: &str) -> bool {
+    value.len() == 10
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if [4, 7].contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+        && !value.starts_with("0000")
+        && chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
 }
 
 #[derive(Deserialize)]
@@ -3051,7 +3115,7 @@ mod tests {
     #[test]
     fn issue_update_input_omits_key_without_parent() {
         assert_eq!(
-            issue_update_input(None, None, None, None, None, None),
+            issue_update_input(None, None, None, None, None, None, None, None, None, None, None,),
             serde_json::json!({})
         );
     }
@@ -3059,6 +3123,11 @@ mod tests {
     #[test]
     fn issue_update_input_sets_parent_id_trimmed() {
         let value = issue_update_input(
+            None,
+            None,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -3071,7 +3140,19 @@ mod tests {
 
     #[test]
     fn issue_update_input_clears_parent_with_null() {
-        let value = issue_update_input(None, None, None, None, Some(None), None);
+        let value = issue_update_input(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(None),
+            None,
+        );
         assert_eq!(value, serde_json::json!({"parentId": null}));
     }
 
@@ -3232,6 +3313,10 @@ mod tests {
             Some("desc"),
             Some("s1"),
             Some("u1"),
+            Some(2),
+            Some(5),
+            Some("2026-10-31"),
+            Some("c1"),
             Some("p1"),
             Some("GUZ-78"),
             Some(&labels),
@@ -3241,6 +3326,10 @@ mod tests {
         assert_eq!(value.get("description"), Some(&serde_json::json!("desc")));
         assert_eq!(value.get("stateId"), Some(&serde_json::json!("s1")));
         assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
+        assert_eq!(value.get("priority"), Some(&serde_json::json!(2)));
+        assert_eq!(value.get("estimate"), Some(&serde_json::json!(5)));
+        assert_eq!(value.get("dueDate"), Some(&serde_json::json!("2026-10-31")));
+        assert_eq!(value.get("cycleId"), Some(&serde_json::json!("c1")));
         assert_eq!(value.get("projectId"), Some(&serde_json::json!("p1")));
         assert_eq!(value.get("parentId"), Some(&serde_json::json!("GUZ-78")));
         assert_eq!(value.get("labelIds"), Some(&serde_json::json!(["l1"])));
@@ -3250,6 +3339,10 @@ mod tests {
             Some("   "),
             None,
             Some(""),
+            None,
+            None,
+            Some("   "),
+            Some("  "),
             Some("  "),
             Some("   "),
             None,
@@ -3257,6 +3350,10 @@ mod tests {
         assert!(minimal.get("description").is_none());
         assert!(minimal.get("stateId").is_none());
         assert!(minimal.get("assigneeId").is_none());
+        assert!(minimal.get("priority").is_none());
+        assert!(minimal.get("estimate").is_none());
+        assert!(minimal.get("dueDate").is_none());
+        assert!(minimal.get("cycleId").is_none());
         assert!(minimal.get("projectId").is_none());
         assert!(minimal.get("parentId").is_none());
         assert!(minimal.get("labelIds").is_none());
@@ -3264,13 +3361,58 @@ mod tests {
 
     #[test]
     fn issue_update_input_skips_blank_values() {
-        let value = issue_update_input(Some("  T  "), None, Some("   "), Some("u1"), None, None);
+        let value = issue_update_input(
+            Some("  T  "),
+            None,
+            Some("   "),
+            Some("u1"),
+            Some(4),
+            Some(Some(3)),
+            Some(Some(" 2026-11-01 ".to_string())),
+            Some(Some(" c1 ".to_string())),
+            Some(Some(" p1 ".to_string())),
+            None,
+            None,
+        );
         assert_eq!(value.get("title"), Some(&serde_json::json!("T")));
         assert!(value.get("description").is_none());
         assert!(value.get("stateId").is_none());
         assert_eq!(value.get("assigneeId"), Some(&serde_json::json!("u1")));
-        let empty = issue_update_input(None, None, None, None, None, None);
+        assert_eq!(value.get("priority"), Some(&serde_json::json!(4)));
+        assert_eq!(value.get("estimate"), Some(&serde_json::json!(3)));
+        assert_eq!(value.get("dueDate"), Some(&serde_json::json!("2026-11-01")));
+        assert_eq!(value.get("cycleId"), Some(&serde_json::json!("c1")));
+        assert_eq!(value.get("projectId"), Some(&serde_json::json!("p1")));
+        let empty = issue_update_input(
+            None, None, None, None, None, None, None, None, None, None, None,
+        );
         assert_eq!(empty, serde_json::json!({}));
+    }
+
+    #[test]
+    fn issue_update_input_clears_optional_metadata() {
+        let value = issue_update_input(
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(None),
+            Some(None),
+            Some(None),
+            Some(None),
+            None,
+            None,
+        );
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "estimate": null,
+                "dueDate": null,
+                "cycleId": null,
+                "projectId": null
+            })
+        );
     }
 
     #[test]

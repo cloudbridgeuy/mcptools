@@ -147,6 +147,24 @@ fn mcp_contract_linear() {
         );
     }
 
+    for name in ["linear_issue_create", "linear_issue_update"] {
+        let tool = linear.iter().find(|tool| tool["name"] == name).unwrap();
+        let props = tool["inputSchema"]["properties"].as_object().unwrap();
+        for field in ["priority", "estimate", "dueDate", "cycle", "project"] {
+            assert!(props.contains_key(field), "missing {name}.{field}");
+        }
+        if name == "linear_issue_update" {
+            for field in [
+                "clearEstimate",
+                "clearDueDate",
+                "clearCycle",
+                "clearProject",
+            ] {
+                assert!(props.contains_key(field), "missing {name}.{field}");
+            }
+        }
+    }
+
     let issue_list = linear
         .iter()
         .find(|t| t.get("name").and_then(|v| v.as_str()) == Some("linear_issue_list"))
