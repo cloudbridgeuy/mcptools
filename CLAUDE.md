@@ -180,7 +180,7 @@ mcptools atlassian bitbucket repo deploy-key remove -w "my-workspace" -r "my-rep
 
 ```bash
 mcptools hn read 8863
-mcptools hn list --story-type top
+mcptools hn list top
 ```
 
 ### PDF
