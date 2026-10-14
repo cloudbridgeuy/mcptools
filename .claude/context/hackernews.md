@@ -2,6 +2,8 @@
 
 ## CLI Commands
 
+For `hn list` and `hn read`, `page` and `limit` must be greater than zero. Invalid values return an error before any API request.
+
 ### Read Posts and Comments
 
 ```bash
@@ -28,11 +30,11 @@ mcptools hn read 8863 --json
 mcptools hn list
 
 # List different story types
-mcptools hn list --story-type new
-mcptools hn list --story-type best
-mcptools hn list --story-type ask
-mcptools hn list --story-type show
-mcptools hn list --story-type job
+mcptools hn list new
+mcptools hn list best
+mcptools hn list ask
+mcptools hn list show
+mcptools hn list job
 
 # Pagination
 mcptools hn list --limit 10 --page 2
@@ -45,6 +47,8 @@ mcptools hn list --json
 
 ## MCP Tools
 
+Both tools reject `page: 0` and `limit: 0` with invalid params (`-32602`) before any API request.
+
 ### hn_read_item
 
 ```json
@@ -55,8 +59,7 @@ mcptools hn list --json
     "arguments": {
       "item": "8863",
       "limit": 5,
-      "page": 1,
-      "thread": "9224"
+      "page": 1
     }
   }
 }
@@ -66,7 +69,7 @@ mcptools hn list --json
 - `item` (required): HackerNews item ID or full URL
 - `limit` (optional): Number of comments per page (default: 10)
 - `page` (optional): Page number, 1-indexed (default: 1)
-- `thread` (optional): Comment thread ID to read
+- `thread` (optional): Not supported in MCP data mode; use CLI `--thread` instead
 
 ### hn_list_items
 
@@ -91,4 +94,4 @@ mcptools hn list --json
 
 ## Environment Variables
 
-No environment variables required. HackerNews API is public.
+No environment variables required. HackerNews API is public. CLI defaults can use `HN_ITEM` (item ID or URL) and `HN_LIMIT` (items per page).

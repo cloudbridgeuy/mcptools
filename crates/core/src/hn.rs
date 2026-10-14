@@ -108,20 +108,28 @@ pub fn format_timestamp(timestamp: Option<u64>) -> Option<String> {
     })
 }
 
-/// Calculate pagination bounds for a given page
-///
-/// Returns (start_index, end_index) for slicing the items array.
-/// Returns an error if the page is out of range or if there are no items.
+pub fn validate_pagination(limit: usize, page: usize) -> Result<(), String> {
+    if limit == 0 {
+        return Err("limit must be greater than 0".to_string());
+    }
+    if page == 0 {
+        return Err("page must be greater than 0 (1-indexed)".to_string());
+    }
+    Ok(())
+}
+
 pub fn calculate_pagination(
     total_items: usize,
     page: usize,
     limit: usize,
 ) -> Result<(usize, usize), String> {
+    validate_pagination(limit, page)?;
+
     if total_items == 0 {
         return Err("No items available for pagination".to_string());
     }
 
-    let start = (page - 1) * limit;
+    let start = (page - 1).saturating_mul(limit);
 
     if start >= total_items {
         let total_pages = total_items.div_ceil(limit);
@@ -130,7 +138,7 @@ pub fn calculate_pagination(
         ));
     }
 
-    let end = (start + limit).min(total_items);
+    let end = start.saturating_add(limit).min(total_items);
     Ok((start, end))
 }
 
@@ -401,6 +409,42 @@ mod tests {
         let (start, end) = calculate_pagination(100, 2, 10).unwrap();
         assert_eq!(start, 10);
         assert_eq!(end, 20);
+    }
+
+    #[test]
+    fn test_validate_pagination() {
+        assert_eq!(validate_pagination(10, 1), Ok(()));
+        assert_eq!(validate_pagination(usize::MAX, usize::MAX), Ok(()));
+        assert_eq!(
+            validate_pagination(0, 1),
+            Err("limit must be greater than 0".to_string())
+        );
+        assert_eq!(
+            validate_pagination(10, 0),
+            Err("page must be greater than 0 (1-indexed)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_calculate_pagination_rejects_zero_before_arithmetic() {
+        for total in [0, 100] {
+            for (limit, page) in [(0, 1), (10, 0), (0, 0)] {
+                assert_eq!(
+                    calculate_pagination(total, page, limit).unwrap_err(),
+                    validate_pagination(limit, page).unwrap_err()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_calculate_pagination_overflow() {
+        let error = calculate_pagination(usize::MAX, usize::MAX, 2).unwrap_err();
+        assert!(error.contains("is out of range"));
+        assert_eq!(
+            calculate_pagination(usize::MAX, 2, usize::MAX - 1),
+            Ok((usize::MAX - 1, usize::MAX))
+        );
     }
 
     #[test]

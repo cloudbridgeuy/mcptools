@@ -30,6 +30,13 @@ pub async fn handle_hn_read_item(
             data: None,
         })?;
 
+    mcptools_core::hn::validate_pagination(args.limit.unwrap_or(10), args.page.unwrap_or(1))
+        .map_err(|message| JsonRpcError {
+            code: -32602,
+            message,
+            data: None,
+        })?;
+
     if global.verbose {
         eprintln!(
             "Calling hn_read_item: item={}, limit={:?}, page={:?}",
@@ -66,6 +73,13 @@ pub async fn handle_hn_list_items(
             }
         })?;
 
+    mcptools_core::hn::validate_pagination(args.limit.unwrap_or(30), args.page.unwrap_or(1))
+        .map_err(|message| JsonRpcError {
+            code: -32602,
+            message,
+            data: None,
+        })?;
+
     if global.verbose {
         eprintln!(
             "Calling hn_list_items: story_type={:?}, limit={:?}, page={:?}",
@@ -86,4 +100,62 @@ pub async fn handle_hn_list_items(
     })?;
 
     super::to_dual_result(list_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn read_rejects_zero_pagination_as_invalid_params() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for (field, message) in [
+            ("page", "page must be greater than 0 (1-indexed)"),
+            ("limit", "limit must be greater than 0"),
+        ] {
+            for thread in [None, Some("9224")] {
+                let mut args = json!({"item": "8863", "thread": thread});
+                args[field] = json!(0);
+                let error = handle_hn_read_item(Some(args), &global).await.unwrap_err();
+                assert_eq!(error.code, -32602);
+                assert_eq!(error.message, message);
+            }
+        }
+        let error = handle_hn_read_item(Some(json!({"item": "invalid"})), &global)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, -32603);
+        assert!(error.message.contains("Invalid item ID or URL"));
+    }
+
+    #[tokio::test]
+    async fn list_rejects_zero_pagination_as_invalid_params() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for (field, message) in [
+            ("page", "page must be greater than 0 (1-indexed)"),
+            ("limit", "limit must be greater than 0"),
+        ] {
+            let mut args = json!({});
+            args[field] = json!(0);
+            let error = handle_hn_list_items(Some(args), &global).await.unwrap_err();
+            assert_eq!(error.code, -32602);
+            assert_eq!(error.message, message);
+        }
+        let error = handle_hn_list_items(Some(json!({"story_type": "invalid"})), &global)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, -32603);
+        assert!(error.message.contains("Invalid story type"));
+    }
 }

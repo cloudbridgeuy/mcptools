@@ -2,7 +2,8 @@ use crate::prelude::{println, *};
 use colored::Colorize;
 use futures::future::join_all;
 use mcptools_core::hn::{
-    calculate_pagination, transform_hn_items, HnItem, ListItem, ListOutput, ListPaginationInfo,
+    calculate_pagination, transform_hn_items, validate_pagination, HnItem, ListItem, ListOutput,
+    ListPaginationInfo,
 };
 
 use super::{fetch_item, get_api_base};
@@ -47,9 +48,9 @@ pub async fn run(options: ListOptions, global: crate::Global) -> Result<()> {
     Ok(())
 }
 
-/// Fetches HackerNews story list data and returns it as a structured ListOutput
 pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> Result<ListOutput> {
-    // Determine API endpoint based on story type
+    validate_pagination(limit, page).map_err(|e| eyre!(e))?;
+
     let endpoint = match story_type.as_str() {
         "top" => "topstories",
         "new" => "newstories",
@@ -65,7 +66,6 @@ pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> R
         }
     };
 
-    // Fetch story IDs
     let client = reqwest::Client::new();
     let url = format!("{}/{endpoint}.json", get_api_base());
     let story_ids: Vec<u64> = client.get(&url).send().await?.json().await?;
@@ -74,14 +74,12 @@ pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> R
         return Err(eyre!("No stories found"));
     }
 
-    // Calculate pagination
     let total_items = story_ids.len();
     let (start, end) =
         calculate_pagination(total_items, page, limit).map_err(|e| eyre!("{}", e))?;
 
     let paginated_ids: Vec<u64> = story_ids[start..end].to_vec();
 
-    // Fetch story details in parallel
     let item_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
     let items: Vec<HnItem> = join_all(item_futures)
         .await
@@ -89,7 +87,6 @@ pub async fn list_items_data(story_type: String, limit: usize, page: usize) -> R
         .filter_map(|r| r.ok())
         .collect();
 
-    // Transform to output format
     Ok(transform_hn_items(
         items,
         story_type,
@@ -281,6 +278,35 @@ fn output_formatted(items: &[ListItem], options: &ListOptions, total_items: usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[tokio::test]
+    async fn list_rejects_zero_pagination_before_fetching() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for (limit, page, message) in [
+            ("10", "0", "page must be greater than 0 (1-indexed)"),
+            ("0", "1", "limit must be greater than 0"),
+        ] {
+            let app =
+                crate::hn::App::try_parse_from(["hn", "list", "--limit", limit, "--page", page])
+                    .unwrap();
+            let error = crate::hn::run(app, global.clone()).await.unwrap_err();
+            assert_eq!(error.to_string(), message);
+            let error = list_items_data(
+                "top".to_string(),
+                limit.parse().unwrap(),
+                page.parse().unwrap(),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.to_string(), message);
+        }
+    }
 
     fn create_test_item(id: u64, title: &str) -> ListItem {
         ListItem {

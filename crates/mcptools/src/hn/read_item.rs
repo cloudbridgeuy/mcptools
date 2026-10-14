@@ -3,8 +3,8 @@ use colored::Colorize;
 use futures::future::join_all;
 use mcptools_core::hn::{
     build_comment_tree, build_post_output, count_tree_comments, flatten_comment_tree,
-    format_timestamp, strip_html, transform_comments, CommentOutput, HnItem, PaginationInfo,
-    PostOutput, ThreadedCommentOutput,
+    format_timestamp, strip_html, transform_comments, validate_pagination, CommentOutput, HnItem,
+    PaginationInfo, PostOutput, ThreadedCommentOutput,
 };
 use serde::Serialize;
 
@@ -34,22 +34,20 @@ pub struct ReadOptions {
 }
 
 pub async fn run(options: ReadOptions, global: crate::Global) -> Result<()> {
+    validate_pagination(options.limit, options.page).map_err(|e| eyre!(e))?;
     let item_id = extract_item_id(&options.item)?;
 
     if global.verbose {
         println!("Fetching item ID: {}", item_id);
     }
 
-    // If thread option is provided, read the comment thread instead
     if let Some(thread_id) = &options.thread {
         return read_thread(thread_id, &item_id.to_string(), &options, global).await;
     }
 
-    // Fetch the main item
     let client = reqwest::Client::new();
     let item = fetch_item(&client, item_id).await?;
 
-    // Validate it's a story
     if item.item_type != "story" {
         return Err(eyre!(
             "Item {} is not a story (type: {})",
@@ -58,13 +56,10 @@ pub async fn run(options: ReadOptions, global: crate::Global) -> Result<()> {
         ));
     }
 
-    // Get top-level comment IDs
     let comment_ids = item.kids.clone().unwrap_or_default();
     let total_comments = comment_ids.len();
 
-    // Calculate pagination
-    let start = (options.page - 1) * options.limit;
-    let end = start + options.limit;
+    let start = (options.page - 1).saturating_mul(options.limit);
     let paginated_ids: Vec<u64> = comment_ids
         .iter()
         .skip(start)
@@ -72,7 +67,6 @@ pub async fn run(options: ReadOptions, global: crate::Global) -> Result<()> {
         .copied()
         .collect();
 
-    // Fetch comments for this page
     let comment_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
     let comments: Vec<HnItem> = join_all(comment_futures)
         .await
@@ -629,24 +623,22 @@ fn output_thread_formatted(
     Ok(())
 }
 
-/// Fetches HackerNews item data and returns it as a structured PostOutput
 pub async fn read_item_data(
     item: String,
     limit: usize,
     page: usize,
     thread: Option<String>,
 ) -> Result<PostOutput> {
+    validate_pagination(limit, page).map_err(|e| eyre!(e))?;
     let item_id = extract_item_id(&item)?;
 
     if thread.is_some() {
         return Err(eyre!("Thread reading not supported in data mode yet"));
     }
 
-    // Fetch the main item (I/O)
     let client = reqwest::Client::new();
     let hn_item = fetch_item(&client, item_id).await?;
 
-    // Validate it's a story
     if hn_item.item_type != "story" {
         return Err(eyre!(
             "Item {} is not a story (type: {})",
@@ -655,10 +647,9 @@ pub async fn read_item_data(
         ));
     }
 
-    // Get top-level comment IDs and calculate pagination bounds
     let comment_ids = hn_item.kids.clone().unwrap_or_default();
     let total_comments = comment_ids.len();
-    let start = (page - 1) * limit;
+    let start = (page - 1).saturating_mul(limit);
     let paginated_ids: Vec<u64> = comment_ids
         .iter()
         .skip(start)
@@ -666,7 +657,6 @@ pub async fn read_item_data(
         .copied()
         .collect();
 
-    // Fetch comments for this page (I/O)
     let comment_futures = paginated_ids.iter().map(|id| fetch_item(&client, *id));
     let comments: Vec<HnItem> = join_all(comment_futures)
         .await
@@ -674,7 +664,6 @@ pub async fn read_item_data(
         .filter_map(|r| r.ok())
         .collect();
 
-    // Transform comments and build output using core functions
     let comment_outputs = transform_comments(comments);
     Ok(build_post_output(
         hn_item,
@@ -688,6 +677,42 @@ pub async fn read_item_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[tokio::test]
+    async fn read_rejects_zero_pagination_before_fetching() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for (limit, page, message) in [
+            ("10", "0", "page must be greater than 0 (1-indexed)"),
+            ("0", "1", "limit must be greater than 0"),
+        ] {
+            for thread in [None, Some("9224".to_string())] {
+                let mut app = crate::hn::App::try_parse_from([
+                    "hn", "read", "8863", "--limit", limit, "--page", page,
+                ])
+                .unwrap();
+                if let crate::hn::Commands::Read(options) = &mut app.command {
+                    options.thread = thread.clone();
+                }
+                let error = crate::hn::run(app, global.clone()).await.unwrap_err();
+                assert_eq!(error.to_string(), message);
+                let error = read_item_data(
+                    "8863".to_string(),
+                    limit.parse().unwrap(),
+                    page.parse().unwrap(),
+                    thread,
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(error.to_string(), message);
+            }
+        }
+    }
 
     fn create_test_item() -> HnItem {
         HnItem {

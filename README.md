@@ -398,6 +398,8 @@ Read details of a specific Bitbucket pull request including diff, diffstat, and 
 
 ### HackerNews Tools
 
+Both tools require `page` and `limit` greater than zero. Zero values return invalid params (`-32602`) before any API request.
+
 #### hn_read_item
 
 Read HackerNews posts and comments with pagination support.
@@ -407,7 +409,7 @@ Read HackerNews posts and comments with pagination support.
 - `item` (string, required) - HackerNews item ID (e.g., "8863") or full URL (e.g., "https://news.ycombinator.com/item?id=8863")
 - `limit` (number, optional) - Number of comments per page (default: 10)
 - `page` (number, optional) - Page number, 1-indexed (default: 1)
-- `thread` (string, optional) - Comment thread ID to read a specific comment thread
+- `thread` (string, optional) - Not supported in MCP data mode; use CLI `--thread` instead
 
 **Example Usage:**
 
@@ -1229,6 +1231,8 @@ mcptools atlassian bitbucket pr read --repo "myworkspace/myrepo" 123 --diff-only
 
 ### HackerNews (hn)
 
+`--page` and `--limit` must be greater than zero. Invalid values return an error before any API request.
+
 ```bash
 # Read a post with default settings (10 comments)
 mcptools hn read 8863
@@ -1249,7 +1253,7 @@ mcptools hn read 8863 --json
 mcptools hn read "https://news.ycombinator.com/item?id=8863"
 
 # List stories
-mcptools hn list --story-type top --limit 20
+mcptools hn list top --limit 20
 ```
 
 ### Web Scraping (md)
