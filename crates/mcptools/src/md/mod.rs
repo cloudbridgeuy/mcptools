@@ -118,8 +118,10 @@ pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
 
     let html_length = html.len();
 
+    let page_url = tab.get_url();
     let processed = process_html_content(
         html,
+        &page_url,
         config.selector,
         config.strategy.into(),
         config.index,

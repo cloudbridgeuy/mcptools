@@ -1,7 +1,10 @@
+use html2md::{Handle, NodeData, StructuredPrinter, TagHandler, TagHandlerFactory};
 use regex::Regex;
+use reqwest::Url;
 use schemars::JsonSchema;
 use scraper::{Html, Selector as CssSelector};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownHeading {
@@ -179,9 +182,108 @@ pub fn apply_selector(
     Ok((selected_html, count))
 }
 
-/// Process HTML content with optional CSS selector filtering and conversion to markdown
+fn code_language(tag: &Handle) -> Option<String> {
+    html2md::common::get_tag_attr(tag, "class").and_then(|classes| {
+        classes.split_ascii_whitespace().find_map(|class| {
+            class
+                .strip_prefix("language-")
+                .or_else(|| class.strip_prefix("lang-"))
+                .filter(|language| {
+                    !language.is_empty()
+                        && language.chars().all(|c| {
+                            c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '#')
+                        })
+                })
+                .map(str::to_string)
+        })
+    })
+}
+
+fn normalize_code_language(tag: &Handle) {
+    let source = tag
+        .children
+        .borrow()
+        .iter()
+        .filter(|child| {
+            matches!(&child.data, NodeData::Element { name, .. } if name.local.as_ref() == "code")
+        })
+        .find_map(|child| code_language(child).map(|language| (child.clone(), language)))
+        .or_else(|| code_language(tag).map(|language| (tag.clone(), language)));
+    let mut data = tag.data.clone();
+    if let NodeData::Element { name, attrs, .. } = &mut data {
+        name.local = "code".into();
+        let class = source.and_then(|(source, language)| {
+            let NodeData::Element { attrs, .. } = &source.data else {
+                return None;
+            };
+            attrs
+                .borrow()
+                .iter()
+                .find(|attr| attr.name.local.as_ref() == "class")
+                .cloned()
+                .map(|mut attr| {
+                    attr.value = format!("language-{language}").into();
+                    attr
+                })
+        });
+        *attrs.get_mut() = class.into_iter().collect();
+    }
+    let code = <Handle as std::ops::Deref>::Target::new(data);
+    *code.children.borrow_mut() = std::mem::take(&mut *tag.children.borrow_mut());
+    tag.children.borrow_mut().push(code);
+}
+
+fn html_to_markdown(html: &str, page_url: &str) -> Result<String, String> {
+    let base_url = Url::parse(page_url).map_err(|e| format!("Invalid page URL: {e}"))?;
+    let mut handlers: HashMap<String, Box<dyn TagHandlerFactory>> = HashMap::new();
+    handlers.insert(
+        "html".to_string(),
+        Box::new(move || PageDocumentHandler {
+            base_url: base_url.clone(),
+        }),
+    );
+    Ok(html2md::parse_html_custom(html, &handlers))
+}
+
+fn prepare_html(tag: &Handle, base_url: &Url) {
+    if let NodeData::Element { name, attrs, .. } = &tag.data {
+        if name.local.as_ref() == "pre" {
+            normalize_code_language(tag);
+            return;
+        }
+        let attribute = match name.local.as_ref() {
+            "a" => Some("href"),
+            "img" => Some("src"),
+            _ => None,
+        };
+        for attr in attrs.borrow_mut().iter_mut() {
+            if attribute == Some(attr.name.local.as_ref()) && Url::parse(&attr.value).is_err() {
+                if let Ok(url) = base_url.join(&attr.value) {
+                    attr.value = url.as_str().into();
+                }
+            }
+        }
+    }
+    for child in tag.children.borrow().iter() {
+        prepare_html(child, base_url);
+    }
+}
+
+struct PageDocumentHandler {
+    base_url: Url,
+}
+
+impl TagHandler for PageDocumentHandler {
+    fn handle(&mut self, tag: &Handle, _printer: &mut StructuredPrinter) {
+        prepare_html(tag, &self.base_url);
+    }
+
+    fn after_handle(&mut self, _printer: &mut StructuredPrinter) {}
+}
+
 pub fn process_html_content(
     html: String,
+    page_url: &str,
     selector: Option<String>,
     strategy: SelectionStrategy,
     index: Option<usize>,
@@ -211,7 +313,7 @@ pub fn process_html_content(
     let content = if raw_html {
         cleaned_html
     } else {
-        html2md::parse_html(&cleaned_html)
+        html_to_markdown(&cleaned_html, page_url)?
     };
 
     Ok(ProcessedContent {
@@ -502,10 +604,197 @@ mod tests {
     }
 
     #[test]
+    fn process_resolves_links_and_images_against_page_url() {
+        let page_url = "https://example.com/docs/guide/page?old=1#old";
+        for (target, expected) in [
+            ("next", "https://example.com/docs/guide/next"),
+            ("/root", "https://example.com/root"),
+            ("../next", "https://example.com/docs/next"),
+            ("//cdn.example.com/a", "https://cdn.example.com/a"),
+            (
+                "#section",
+                "https://example.com/docs/guide/page?old=1#section",
+            ),
+            (
+                "?new=2&amp;x=3",
+                "https://example.com/docs/guide/page?new=2&x=3",
+            ),
+            ("", "https://example.com/docs/guide/page?old=1"),
+            ("https://other.example/a", "https://other.example/a"),
+            ("mailto:user@example.com", "mailto:user@example.com"),
+            ("data:image/png;base64,AAAA", "data:image/png;base64,AAAA"),
+            ("http://[invalid", "http://[invalid"),
+        ] {
+            let html =
+                format!(r#"<p><a href="{target}">Link</a><img src="{target}" alt="Image"></p>"#);
+            let result =
+                process_html_content(html, page_url, None, SelectionStrategy::First, None, false)
+                    .unwrap();
+            assert!(
+                result.content.contains(&format!("[Link]({expected})")),
+                "{}",
+                result.content
+            );
+            assert!(
+                result.content.contains(&format!("![Image]({expected})")),
+                "{}",
+                result.content
+            );
+        }
+        let result = html_to_markdown(
+            r#"<table><tr><th>Header</th></tr><tr><td><a href="../next">Link</a><img src="image.png" alt="Image"></td></tr></table>"#,
+            page_url,
+        )
+        .unwrap();
+        assert!(result.contains("[Link](https://example.com/docs/next)"));
+        assert!(result.contains("![Image](https://example.com/docs/guide/image.png)"));
+    }
+
+    #[test]
+    fn process_preserves_code_languages_and_heading_boundaries() {
+        for (pre_class, code_class, language) in [
+            ("", "highlight language-rust", "rust"),
+            ("language-python", "", "python"),
+            ("lang-shell", "", "shell"),
+            ("", "highlight\tlang-c++\nother", "c++"),
+            ("language-python", "language-rust", "rust"),
+            ("language-", "highlight", ""),
+            ("", "language-bad`fence", ""),
+            ("", "", ""),
+        ] {
+            let html = format!(
+                r#"<h1>Before</h1><pre class="{pre_class}"><code class="{code_class}"># Hidden
+Title
+===
+&lt;tag&gt;  indented
+[literal](../path)</code></pre><h2>After</h2><p><code class="language-rust">inline</code></p>"#
+            );
+            let result = process_html_content(
+                html,
+                "https://example.com",
+                None,
+                SelectionStrategy::First,
+                None,
+                false,
+            )
+            .unwrap();
+            assert!(result.content.contains(&format!(
+                "```{language}\n# Hidden\nTitle\n===\n<tag>  indented\n[literal](../path)\n```"
+            )));
+            assert!(result.content.contains("`inline`"));
+            assert_eq!(
+                extract_headings(&result.content)
+                    .iter()
+                    .map(|h| h.text.as_str())
+                    .collect::<Vec<_>>(),
+                ["Before", "After"]
+            );
+            let table = format!(
+                r#"<table><tr><th>Code</th></tr><tr><td><pre class="{pre_class}"><code class="{code_class}">value</code></pre></td></tr></table>"#
+            );
+            let table = html_to_markdown(&table, "https://example.com").unwrap();
+            assert!(
+                table.contains(&format!("```{language}<br/>value<br/>```")),
+                "{table}"
+            );
+        }
+        let result = html_to_markdown(
+            "<pre class=language-rust>plain code</pre>",
+            "https://example.com",
+        )
+        .unwrap();
+        assert_eq!(result, "```rust\nplain code\n```");
+        let result = html_to_markdown(
+            "<table><tr><td><pre class=lang-rust>plain code</pre></td></tr></table>",
+            "https://example.com",
+        )
+        .unwrap();
+        assert!(result.contains("```rust<br/>plain code<br/>```"));
+    }
+
+    #[test]
+    fn process_selected_content_keeps_metadata_and_raw_html() {
+        let html = r##"<div class="item"><a href="other">Other</a></div><div class="item"><a href="#section">Selected</a><pre class="language-rust">code</pre><script>hidden</script></div>"##;
+        for raw_html in [false, true] {
+            let result = process_html_content(
+                html.to_string(),
+                "https://example.com/docs/page",
+                Some(".item".to_string()),
+                SelectionStrategy::N,
+                Some(1),
+                raw_html,
+            )
+            .unwrap();
+            assert_eq!(result.selector_used.as_deref(), Some(".item"));
+            assert_eq!(result.elements_found, Some(2));
+            assert_eq!(result.strategy_applied.as_deref(), Some("nth (index: 1)"));
+            assert!(!result.content.contains("Other"));
+            assert!(!result.content.contains("hidden"));
+            if raw_html {
+                assert_eq!(
+                    result.content,
+                    r##"<div class="item"><a href="#section">Selected</a><pre class="language-rust">code</pre></div>"##
+                );
+            } else {
+                assert!(result
+                    .content
+                    .contains("[Selected](https://example.com/docs/page#section)"));
+                assert!(result.content.contains("```rust\ncode\n```"));
+            }
+        }
+    }
+
+    #[test]
+    fn conversion_keeps_ordinary_markdown_stable() {
+        let html = r#"<h1>Title</h1><p>Hello <strong>world</strong> and <em>friends</em>.</p><ul><li>One</li><li>Two</li></ul><pre><code>plain code</code></pre><p><a href="https://example.com/a">Link</a><img src="https://example.com/image.png" alt="Image"></p>"#;
+        let result = process_html_content(
+            html.to_string(),
+            "https://example.com/docs/page",
+            None,
+            SelectionStrategy::First,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(result.content, html2md::parse_html(html));
+        for html in [
+            "<pre>\n\n\ncode</pre>",
+            "<pre><code>\n\ncode</code></pre>",
+            "<pre>code\n</pre><p>after</p>",
+            "<blockquote><pre>code</pre></blockquote>",
+            "<ul><li>before<pre>code</pre>after</li></ul>",
+            "<table><tr><td><pre>code</pre></td></tr></table>",
+            "<pre><code class=language-rust>code</code></pre>",
+        ] {
+            assert_eq!(
+                html_to_markdown(html, "https://example.com").unwrap(),
+                html2md::parse_html(html)
+            );
+        }
+        assert!(process_html_content(
+            html.to_string(),
+            "not a URL",
+            None,
+            SelectionStrategy::First,
+            None,
+            false,
+        )
+        .unwrap_err()
+        .contains("Invalid page URL"));
+    }
+
+    #[test]
     fn test_process_html_content_without_selector() {
         let html = r#"<div>Content</div>"#.to_string();
-        let result =
-            process_html_content(html, None, SelectionStrategy::First, None, false).unwrap();
+        let result = process_html_content(
+            html,
+            "https://example.com",
+            None,
+            SelectionStrategy::First,
+            None,
+            false,
+        )
+        .unwrap();
 
         assert!(result.content.contains("Content"));
         assert!(result.selector_used.is_none());
@@ -518,6 +807,7 @@ mod tests {
         let html = r#"<div class="content">Main</div><div>Other</div>"#.to_string();
         let result = process_html_content(
             html,
+            "https://example.com",
             Some(".content".to_string()),
             SelectionStrategy::First,
             None,
@@ -534,8 +824,15 @@ mod tests {
     #[test]
     fn test_process_html_content_raw_html() {
         let html = r#"<div><p>Content</p></div>"#.to_string();
-        let result =
-            process_html_content(html, None, SelectionStrategy::First, None, true).unwrap();
+        let result = process_html_content(
+            html,
+            "https://example.com",
+            None,
+            SelectionStrategy::First,
+            None,
+            true,
+        )
+        .unwrap();
 
         assert!(result.content.contains("<p>Content</p>"));
     }
@@ -543,8 +840,15 @@ mod tests {
     #[test]
     fn test_process_html_content_removes_scripts() {
         let html = r#"<div>Content</div><script>alert('hi');</script>"#.to_string();
-        let result =
-            process_html_content(html, None, SelectionStrategy::First, None, false).unwrap();
+        let result = process_html_content(
+            html,
+            "https://example.com",
+            None,
+            SelectionStrategy::First,
+            None,
+            false,
+        )
+        .unwrap();
 
         assert!(!result.content.contains("alert"));
         assert!(result.content.contains("Content"));
