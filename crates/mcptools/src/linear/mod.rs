@@ -28,6 +28,8 @@ pub enum Commands {
     /// Issue operations
     #[command(subcommand)]
     Issue(IssueCommands),
+    #[command(subcommand, about = "Document operations")]
+    Document(DocumentCommands),
     /// Team operations
     #[command(subcommand)]
     Teams(TeamsCommands),
@@ -104,6 +106,86 @@ pub enum IssueCommands {
     /// Relation operations
     #[command(subcommand)]
     Relations(IssueRelationsCommands),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum DocumentCommands {
+    #[command(about = "Get one document by UUID or Linear URL")]
+    Get(DocumentGetOptions),
+    #[command(about = "List documents with filters")]
+    List(DocumentListOptions),
+    #[command(about = "Create a project document")]
+    Create(DocumentCreateOptions),
+    #[command(about = "Update a document")]
+    Update(DocumentUpdateOptions),
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct DocumentGetOptions {
+    #[arg(value_name = "ID|URL", help = "Document UUID or Linear document URL")]
+    pub id: String,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct DocumentListOptions {
+    #[arg(long, help = "Project UUID or name (names need --team)")]
+    pub project: Option<String>,
+    #[arg(long, help = "Team UUID, key, or name for project name resolution")]
+    pub team: Option<String>,
+    #[arg(long, help = "Issue UUID or identifier (e.g. GUZ-1)")]
+    pub issue: Option<String>,
+    #[arg(long, help = "Case-insensitive substring in title")]
+    pub query: Option<String>,
+    #[arg(long, default_value = "25", help = "Items per page (1–250)")]
+    pub limit: u32,
+    #[arg(
+        long,
+        help = "Continue after the returned endCursor with the same filters"
+    )]
+    pub cursor: Option<String>,
+    #[arg(long, help = "Fetch all remaining pages; can produce large output")]
+    pub all: bool,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct DocumentCreateOptions {
+    #[arg(
+        long,
+        required_unless_present = "issue",
+        conflicts_with = "issue",
+        help = "Project UUID or name (names need --team)"
+    )]
+    pub project: Option<String>,
+    #[arg(long, help = "Document title")]
+    pub title: String,
+    #[arg(long, help = "Team UUID, key, or name for project name resolution")]
+    pub team: Option<String>,
+    #[arg(long, help = "Markdown content")]
+    pub content: Option<String>,
+    #[arg(
+        long,
+        conflicts_with = "team",
+        help = "Issue UUID or identifier (e.g. GUZ-1) to attach (instead of --project)"
+    )]
+    pub issue: Option<String>,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct DocumentUpdateOptions {
+    #[arg(value_name = "ID", help = "Document UUID")]
+    pub id: String,
+    #[arg(long, help = "Replacement title")]
+    pub title: Option<String>,
+    #[arg(long, help = "Replacement Markdown; empty clears content")]
+    pub content: Option<String>,
+    #[arg(long, help = "Output as JSON")]
+    pub json: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -596,6 +678,12 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
                 IssueRelationsCommands::Remove(options) => relations_remove_handler(options).await,
             },
         },
+        Commands::Document(cmd) => match cmd {
+            DocumentCommands::Get(options) => document_get_handler(options).await,
+            DocumentCommands::List(options) => documents_list_handler(options).await,
+            DocumentCommands::Create(options) => document_create_handler(options).await,
+            DocumentCommands::Update(options) => document_update_handler(options).await,
+        },
         Commands::Teams(cmd) => match cmd {
             TeamsCommands::List(options) => teams_list_handler(options).await,
             TeamsCommands::Get(options) => teams_get_handler(options).await,
@@ -843,6 +931,180 @@ async fn issues_list_handler(options: IssueListOptions) -> Result<()> {
             page_info.has_next,
             page_info.end_cursor.as_deref().unwrap_or("")
         );
+    }
+    Ok(())
+}
+
+async fn document_get_handler(options: DocumentGetOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let output = discover::document_get_data(
+        &client,
+        args::DocumentGetArgs {
+            id: options.id.clone(),
+        },
+    )
+    .await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Title", "Project", "Issue", "URL"]);
+        let issue = output
+            .issue
+            .as_ref()
+            .map(|issue| format!("{} — {} — {}", issue.identifier, issue.title, issue.url))
+            .unwrap_or_default();
+        table.add_row(prettytable::row![
+            output.id,
+            output.title,
+            output
+                .project
+                .as_ref()
+                .map(|project| project.name.as_str())
+                .unwrap_or(""),
+            issue,
+            output.url
+        ]);
+        table.printstd();
+        if let Some(content) = output.content {
+            println!();
+            println!("{}", content);
+        }
+    }
+    Ok(())
+}
+
+async fn documents_list_handler(options: DocumentListOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let filter = discover::resolve_document_filter(
+        &client,
+        options.project.as_deref(),
+        options.team.as_deref(),
+        options.issue.as_deref(),
+        options.query.as_deref(),
+    )
+    .await?;
+    let mut nodes = Vec::new();
+    let mut cursor = options.cursor.clone();
+    let mut seen = cursor.iter().cloned().collect::<Vec<_>>();
+    let mut page_info = mcptools_core::linear::PageInfo {
+        has_next: false,
+        end_cursor: None,
+    };
+    loop {
+        let page =
+            discover::documents_list_data(&client, &filter, options.limit, cursor.clone()).await?;
+        page_info = page.page_info;
+        nodes.extend(page.nodes);
+        let next = mcptools_core::linear::document_list_continuation(&page_info, &seen)
+            .map_err(|error| eyre!(error))?;
+        if !options.all || !page_info.has_next {
+            break;
+        }
+        cursor = next;
+        seen.extend(cursor.iter().cloned());
+    }
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"nodes": nodes, "pageInfo": page_info})
+            )?
+        );
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row![
+            "ID", "Title", "Project", "Issue", "Updated"
+        ]);
+        for document in &nodes {
+            table.add_row(prettytable::row![
+                document.id,
+                document.title,
+                document
+                    .project
+                    .as_ref()
+                    .map(|project| project.name.as_str())
+                    .unwrap_or(""),
+                document
+                    .issue
+                    .as_ref()
+                    .map(|issue| issue.identifier.as_str())
+                    .unwrap_or(""),
+                document.updated_at
+            ]);
+        }
+        table.printstd();
+        println!(
+            "hasMore: {} endCursor: {}",
+            page_info.has_next,
+            page_info.end_cursor.as_deref().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
+async fn document_create_handler(options: DocumentCreateOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let args = args::DocumentCreateArgs {
+        project: options.project,
+        title: options.title,
+        team: options.team,
+        content: options.content,
+        issue: options.issue,
+    };
+    let output = discover::document_create_data(&client, &args).await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Title", "Parent", "URL"]);
+        let parent = match (&output.project, &output.issue) {
+            (Some(project), _) => project.name.clone(),
+            (None, Some(issue)) => issue.identifier.clone(),
+            (None, None) => "-".into(),
+        };
+        table.add_row(prettytable::row![
+            output.id,
+            output.title,
+            parent,
+            output.url
+        ]);
+        table.printstd();
+    }
+    Ok(())
+}
+
+async fn document_update_handler(options: DocumentUpdateOptions) -> Result<()> {
+    let cfg = config::LinearConfig::from_env()?;
+    let client = client::build_client(&cfg)?;
+    let output = discover::document_update_data(
+        &client,
+        &args::DocumentUpdateArgs {
+            id: options.id,
+            title: options.title,
+            content: options.content,
+        },
+    )
+    .await?;
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let mut table = new_table();
+        table.add_row(prettytable::row!["ID", "Title", "Project", "URL"]);
+        table.add_row(prettytable::row![
+            output.id,
+            output.title,
+            output
+                .project
+                .as_ref()
+                .map(|project| project.name.as_str())
+                .unwrap_or(""),
+            output.url
+        ]);
+        table.printstd();
     }
     Ok(())
 }
@@ -1563,6 +1825,90 @@ mod tests {
         assert_eq!(list_sort(&[]).unwrap(), None);
         let error = list_sort(&["--sort", "bogus"]).unwrap_err();
         assert!(error.contains("priority") && error.contains("updatedAt"));
+    }
+
+    #[test]
+    fn document_list_and_create_cli_contract() {
+        let get = App::try_parse_from([
+            "linear",
+            "document",
+            "get",
+            "https://linear.app/guzmonne/document/delivery-plan-98601970e466",
+            "--json",
+        ])
+        .unwrap();
+        let Commands::Document(DocumentCommands::Get(options)) = get.command else {
+            panic!("expected document get");
+        };
+        assert!(options.id.ends_with("delivery-plan-98601970e466"));
+        assert!(options.json);
+
+        let list = App::try_parse_from([
+            "linear",
+            "document",
+            "list",
+            "--project",
+            "MCPTools",
+            "--team",
+            "GUZ",
+            "--issue",
+            "GUZ-551",
+            "--query",
+            "document",
+            "--all",
+            "--json",
+        ])
+        .unwrap();
+        let Commands::Document(DocumentCommands::List(options)) = list.command else {
+            panic!("expected document list");
+        };
+        assert_eq!(options.project.as_deref(), Some("MCPTools"));
+        assert_eq!(options.issue.as_deref(), Some("GUZ-551"));
+        assert!(options.all && options.json);
+
+        let create = App::try_parse_from([
+            "linear", "document", "create", "--title", "Plan", "--issue", "GUZ-551",
+        ])
+        .unwrap();
+        let Commands::Document(DocumentCommands::Create(options)) = create.command else {
+            panic!("expected document create");
+        };
+        assert_eq!(options.issue.as_deref(), Some("GUZ-551"));
+        assert!(options.project.is_none());
+
+        let update = App::try_parse_from([
+            "linear",
+            "document",
+            "update",
+            "9d1a2b3c-0000-4000-8000-000000000001",
+            "--content",
+            "~ a ~/path",
+            "--json",
+        ])
+        .unwrap();
+        let Commands::Document(DocumentCommands::Update(options)) = update.command else {
+            panic!("expected document update");
+        };
+        assert_eq!(options.content.as_deref(), Some("~ a ~/path"));
+        assert!(options.json);
+        for argv in [
+            &[
+                "linear",
+                "document",
+                "create",
+                "--project",
+                "MCPTools",
+                "--team",
+                "GUZ",
+                "--title",
+                "Plan",
+                "--issue",
+                "GUZ-551",
+            ][..],
+            &["linear", "document", "create", "--title", "Plan"][..],
+        ] {
+            assert!(App::try_parse_from(argv).is_err());
+        }
     }
 
     #[test]

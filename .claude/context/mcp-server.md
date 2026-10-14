@@ -136,8 +136,9 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `linear_project_status_list` | List workspace project statuses; limit 1–250, cursor, all |
 | `linear_initiative_list` | List workspace initiatives with case-sensitive name query; nullable description, targetDate and owner; limit 1–250, cursor, all (1000 pages maximum); MCP-only Read |
 | `linear_initiative_get` | Get initiative by required UUID; nullable metadata and Markdown content; every directly linked project including archived projects; 250 projects/page, 1000-page cap, no silent truncation; MCP-only Read |
+| `linear_document_list` | List documents by project, issue, or title; limit 1–250, cursor, all; Read |
 | `linear_document_get` | Get document by required UUID; title, nullable verbatim Markdown, timestamps, URL, nullable owner and project; MCP-only Read |
-| `linear_document_create` | Create a document attached to an existing project UUID or name with team; nonblank title, optional verbatim Markdown; complete document and project identity; MCP-only Write, requires `allowWrites` |
+| `linear_document_create` | Create a document attached to exactly one existing project or issue; nonblank title, optional verbatim Markdown; Write, requires `allowWrites` |
 | `linear_document_update` | Update document UUID with partial nonblank title or verbatim Markdown; empty content clears body, omitted fields unchanged; nullable project identity; MCP-only Write, requires `allowWrites` |
 | `linear_initiative_project_add` | Link existing initiative UUID to existing project UUID or name with team; returns association id and initiative/project identities; duplicate links and hierarchy conflicts fail without mutation retry; MCP-only Write (`allowWrites` required) |
 | `linear_project_milestone_list` | List milestones scoped to project UUID or name with team; nullable description/date; limit 1–250, cursor, all; Read |

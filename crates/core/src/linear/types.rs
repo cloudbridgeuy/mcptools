@@ -576,29 +576,108 @@ pub struct DocumentGetOutput {
     pub updated_at: String,
     pub owner: Option<User>,
     pub project: Option<Project>,
+    pub issue: Option<DocumentGetIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DocumentGetIssue {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DocumentIssue {
+    pub id: String,
+    pub identifier: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentListItem {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub project: Option<Project>,
+    pub issue: Option<DocumentIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DocumentListOutput {
+    pub nodes: Vec<DocumentListItem>,
+    #[serde(rename = "pageInfo", alias = "page_info")]
+    pub page_info: PageInfo,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DocumentListFilter {
+    pub project_id: Option<String>,
+    pub issue_id: Option<String>,
+    pub query: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DocumentCreateArgs {
-    #[schemars(description = "Project UUID or project name; names require team")]
-    pub project: String,
+    #[schemars(
+        description = "Project UUID or project name; names require team. Exactly one of project or issue"
+    )]
+    pub project: Option<String>,
     #[schemars(description = "Document title; must not be blank")]
     pub title: String,
     #[schemars(description = "Team UUID, key, or name for project name resolution")]
     pub team: Option<String>,
     #[schemars(description = "Markdown content; exact whitespace preserved")]
     pub content: Option<String>,
+    #[schemars(
+        description = "Issue UUID or identifier (e.g. GUZ-1) to attach; Linear rejects combining it with project"
+    )]
+    pub issue: Option<String>,
 }
 
 pub fn document_create_input(args: &DocumentCreateArgs) -> Result<serde_json::Value, String> {
-    validate_project_create_selector(&args.project, args.team.as_deref())?;
+    match (args.project.as_deref(), args.issue.as_deref()) {
+        (Some(project), None) => validate_project_create_selector(project, args.team.as_deref())?,
+        (None, Some(issue)) => {
+            if issue.trim().is_empty() {
+                return Err("Document issue must not be blank".into());
+            }
+            if args.team.is_some() {
+                return Err("team only applies to project name resolution".into());
+            }
+        }
+        (Some(_), Some(_)) => {
+            return Err("Use exactly one of project or issue; Linear rejects both".into())
+        }
+        (None, None) => return Err("One of project or issue is required".into()),
+    }
     if args.title.trim().is_empty() {
         return Err("Document title must not be blank".into());
     }
     let mut input = serde_json::json!({"title": args.title.trim()});
     if let Some(content) = &args.content {
-        input["content"] = serde_json::json!(content);
+        input["content"] = serde_json::json!(super::prepare_document_markdown(content));
+    }
+    Ok(input)
+}
+
+pub fn document_create_resolved_input(
+    args: &DocumentCreateArgs,
+    project_id: Option<&str>,
+    issue_id: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let mut input = document_create_input(args)?;
+    match (project_id, issue_id) {
+        (Some(id), None) if args.project.is_some() && super::is_uuid(id) => {
+            input["projectId"] = serde_json::json!(id);
+        }
+        (None, Some(id)) if args.issue.is_some() && super::is_uuid(id) => {
+            input["issueId"] = serde_json::json!(id);
+        }
+        _ => return Err("Malformed document association identity".into()),
     }
     Ok(input)
 }
@@ -612,12 +691,19 @@ pub struct DocumentCreateOutput {
     pub url: String,
     pub created_at: String,
     pub updated_at: String,
-    pub project: Project,
+    pub project: Option<Project>,
+    pub issue: Option<DocumentIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DocumentParent {
+    Project(Project),
+    Issue(DocumentIssue),
 }
 
 pub fn transform_document_create(
     data: serde_json::Value,
-    expected_project: &Project,
+    expected_parent: &DocumentParent,
 ) -> Result<DocumentCreateOutput, String> {
     let payload = &data["documentCreate"];
     if payload["success"].as_bool() != Some(true) {
@@ -627,22 +713,30 @@ pub fn transform_document_create(
     if raw.get("content").is_none() {
         return Err("Malformed created document: missing content".into());
     }
-    let document: DocumentCreateOutput = serde_json::from_value(raw.clone())
+    let mut document: DocumentCreateOutput = serde_json::from_value(raw.clone())
         .map_err(|error| format!("Malformed created document: {error}"))?;
     if !super::is_uuid(&document.id)
         || document.title.trim().is_empty()
-        || !document
-            .project
-            .id
-            .eq_ignore_ascii_case(&expected_project.id)
-        || document.project.name != expected_project.name
+        || !match (expected_parent, &document.project, &document.issue) {
+            (DocumentParent::Project(expected), Some(project), _) => {
+                project.id.eq_ignore_ascii_case(&expected.id) && project.name == expected.name
+            }
+            (DocumentParent::Issue(expected), _, Some(issue)) => {
+                issue.id.eq_ignore_ascii_case(&expected.id)
+                    && issue.identifier == expected.identifier
+            }
+            _ => false,
+        }
         || chrono::DateTime::parse_from_rfc3339(&document.created_at).is_err()
         || chrono::DateTime::parse_from_rfc3339(&document.updated_at).is_err()
         || !reqwest::Url::parse(&document.url)
             .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
     {
-        return Err("Malformed document fields or mismatched project identity".into());
+        return Err("Malformed document fields or mismatched parent identity".into());
     }
+    document.content = document
+        .content
+        .map(|content| super::restore_document_markdown(&content));
     Ok(document)
 }
 
@@ -674,7 +768,7 @@ pub fn document_update_input(args: &DocumentUpdateArgs) -> Result<serde_json::Va
         input["title"] = serde_json::json!(title.trim());
     }
     if let Some(content) = &args.content {
-        input["content"] = serde_json::json!(content);
+        input["content"] = serde_json::json!(super::prepare_document_markdown(content));
     }
     Ok(input)
 }
@@ -709,7 +803,7 @@ pub fn transform_document_update(
     {
         return Err("Malformed updated document: missing nullable field".into());
     }
-    let document: DocumentUpdateOutput = serde_json::from_value(raw.clone())
+    let mut document: DocumentUpdateOutput = serde_json::from_value(raw.clone())
         .map_err(|error| format!("Malformed updated document: {error}"))?;
     if !super::is_uuid(&document.id)
         || !document.id.eq_ignore_ascii_case(expected_id)
@@ -724,6 +818,9 @@ pub fn transform_document_update(
     {
         return Err("Malformed updated document fields or mismatched identity".into());
     }
+    document.content = document
+        .content
+        .map(|content| super::restore_document_markdown(&content));
     Ok(document)
 }
 
@@ -737,16 +834,23 @@ pub fn transform_document(
     if raw.is_null() {
         return Err(format!("Document not found: {expected_id}"));
     }
-    if ["content", "owner", "project"]
+    if ["content", "owner", "project", "issue"]
         .iter()
         .any(|field| raw.get(field).is_none())
     {
         return Err("Malformed document response: missing nullable field".into());
     }
-    let document: DocumentGetOutput = serde_json::from_value(raw.clone())
+    let mut document: DocumentGetOutput = serde_json::from_value(raw.clone())
         .map_err(|error| format!("Malformed document: {error}"))?;
+    let identity_matches = match super::document_lookup_id(expected_id) {
+        Ok(selector) if super::resolve::is_uuid(&selector) => {
+            document.id.eq_ignore_ascii_case(&selector)
+        }
+        Ok(selector) => super::document_lookup_id(&document.url).is_ok_and(|id| id == selector),
+        Err(_) => false,
+    };
     if !super::resolve::is_uuid(&document.id)
-        || !document.id.eq_ignore_ascii_case(expected_id)
+        || !identity_matches
         || chrono::DateTime::parse_from_rfc3339(&document.created_at).is_err()
         || chrono::DateTime::parse_from_rfc3339(&document.updated_at).is_err()
         || !reqwest::Url::parse(&document.url)
@@ -759,9 +863,20 @@ pub fn transform_document(
         || document.project.as_ref().is_some_and(|project| {
             !super::resolve::is_uuid(&project.id) || project.name.trim().is_empty()
         })
+        || document.issue.as_ref().is_some_and(|issue| {
+            !super::resolve::is_uuid(&issue.id)
+                || issue.identifier.trim().is_empty()
+                || issue.title.trim().is_empty()
+                || !reqwest::Url::parse(&issue.url).is_ok_and(|url| {
+                    matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+                })
+        })
     {
         return Err("Malformed document fields or mismatched identity".into());
     }
+    document.content = document
+        .content
+        .map(|content| super::restore_document_markdown(&content));
     Ok(document)
 }
 

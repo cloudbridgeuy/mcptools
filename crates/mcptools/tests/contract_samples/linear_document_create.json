@@ -5,5 +5,6 @@
   "url": "https://linear.app/example/document/delivery-plan",
   "createdAt": "2026-10-01T12:00:00.000Z",
   "updatedAt": "2026-10-08T14:30:00.000Z",
-  "project": {"id": "32345678-1234-1234-1234-123456789abc", "name": "Delivery"}
+  "project": {"id": "32345678-1234-1234-1234-123456789abc", "name": "Delivery"},
+  "issue": {"id": "52345678-1234-1234-1234-123456789abc", "identifier": "GUZ-551"}
 }

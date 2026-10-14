@@ -872,10 +872,19 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             kind: ToolKind::Read,
             destructive: false,
+            output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentListOutput>(),
+            name: "linear_document_list".to_string(),
+            summary: "List Linear documents by project, issue, or title",
+            description: "List Linear documents with optional project, issue, and case-insensitive title substring filters. Project names require team; project UUIDs do not. Issue accepts a UUID or identifier. Returns document metadata with nullable project and issue plus pageInfo; excludes document content. limit defaults to 25 (1–250); cursor continues a page and all fetches all remaining pages with cursor progress checks. Read-only; requires LINEAR_API_KEY.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::DocumentListArgs>(),
+        },
+        Tool {
+            kind: ToolKind::Read,
+            destructive: false,
             output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentGetOutput>(),
             name: "linear_document_get".to_string(),
-            summary: "Get a Linear document with Markdown and parent project",
-            description: "Get one Linear document by required UUID, not slug. Returns id, title, nullable verbatim Markdown content, url, createdAt, updatedAt, nullable owner {id, name, email}, and nullable project {id, name}. Documents outside projects return project: null. Missing documents, malformed output, and mismatched identities fail. MCP-only Read; requires LINEAR_API_KEY.".to_string(),
+            summary: "Get a Linear document with Markdown and parent project or issue",
+            description: "Get one Linear document by UUID or Linear document URL. Returns id, title, nullable verbatim Markdown content, url, createdAt, updatedAt, nullable owner {id, name, email}, nullable project {id, name}, and nullable issue {id, identifier, title, url}. Missing documents, malformed output, and mismatched identities fail. Read-only; requires LINEAR_API_KEY.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::DocumentGetArgs>(),
         },
         Tool {
@@ -883,8 +892,8 @@ pub fn registered_tools() -> Vec<Tool> {
             destructive: false,
             output_schema: schema::output_schema_for::<mcptools_core::linear::DocumentCreateOutput>(),
             name: "linear_document_create".to_string(),
-            summary: "Create a Markdown document attached to an existing Linear project",
-            description: "Create a document attached to an existing project UUID, or project name with team context. Requires a nonblank title; optional Markdown content preserves exact whitespace and is omitted when absent or null. Returns id, title, nullable content, url, createdAt, updatedAt and project {id, name}. Missing or ambiguous projects fail before mutation; mutation success and complete output are checked. MCP-only Write; requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
+            summary: "Create a Markdown document attached to a Linear project or issue",
+            description: "Create a document attached to exactly one parent: an existing project (UUID, or name with team context) or an issue (UUID or identifier). Linear rejects project and issue together. Requires a nonblank title; optional Markdown content is sent verbatim and omitted when absent or null (Linear may normalize it server-side). Returns id, title, nullable content, url, createdAt, updatedAt, nullable project {id, name} and nullable issue {id, identifier}; the requested parent must match. Missing or ambiguous projects and missing issues fail before mutation; mutation success and complete output are checked. Write; requires LINEAR_API_KEY and allowWrites in direct tools/call, call_tool, and execute.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::DocumentCreateArgs>(),
         },
         Tool {
@@ -1446,6 +1455,9 @@ pub async fn dispatch_tool_call(
         "linear_initiative_get" => {
             linear::handle_linear_initiative_get(params.arguments, global).await
         }
+        "linear_document_list" => {
+            linear::handle_linear_document_list(params.arguments, global).await
+        }
         "linear_document_get" => linear::handle_linear_document_get(params.arguments, global).await,
         "linear_document_create" => {
             linear::handle_linear_document_create(params.arguments, global).await
@@ -1555,7 +1567,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 102);
+        assert_eq!(catalog.len(), 103);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1620,7 +1632,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 105);
+        assert_eq!(super::registered_tools().len(), 106);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1695,7 +1707,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 105);
+        assert_eq!(names(serve_flags(false)).len(), 106);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1821,7 +1833,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 105);
+        assert_eq!(tools.len(), 106);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1959,6 +1971,7 @@ mod catalog_tests {
             "linear_initiative_list",
             "linear_initiative_get",
             "linear_document_get",
+            "linear_document_list",
             "linear_project_milestone_list",
             "linear_project_update_list",
             "linear_user_list",
@@ -1971,7 +1984,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 105);
+        assert_eq!(union.len(), 106);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

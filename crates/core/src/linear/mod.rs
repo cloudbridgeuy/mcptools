@@ -1,6 +1,7 @@
 pub mod chart;
 pub mod comment_delete;
 pub mod comment_update;
+pub mod document_read;
 pub mod graph;
 pub mod issue_delete;
 pub mod issue_read;
@@ -12,6 +13,7 @@ pub mod types;
 pub use chart::*;
 pub use comment_delete::*;
 pub use comment_update::*;
+pub use document_read::*;
 pub use graph::*;
 pub use issue_delete::*;
 pub use issue_read::*;

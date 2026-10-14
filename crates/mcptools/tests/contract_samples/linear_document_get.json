@@ -6,5 +6,11 @@
   "createdAt": "2026-10-01T12:00:00.000Z",
   "updatedAt": "2026-10-08T14:30:00.000Z",
   "owner": {"id": "22345678-1234-1234-1234-123456789abc", "name": "Ada", "email": "ada@example.com"},
-  "project": {"id": "32345678-1234-1234-1234-123456789abc", "name": "Delivery"}
+  "project": {"id": "52345678-1234-1234-1234-123456789abc", "name": "Delivery"},
+  "issue": {
+    "id": "32345678-1234-1234-1234-123456789abc",
+    "identifier": "GUZ-551",
+    "title": "Add Linear document list and link documents to issues on create",
+    "url": "https://linear.app/guzmonne/issue/GUZ-551/add-linear-document-list-and-link-documents-to-issues-on-create"
+  }
 }

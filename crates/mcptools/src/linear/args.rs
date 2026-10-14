@@ -259,8 +259,28 @@ pub struct InitiativeGetArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DocumentGetArgs {
-    #[schemars(description = "Required document UUID; slugs are not accepted")]
+    #[schemars(description = "Required document UUID or Linear document URL")]
     pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename_all = "camelCase")]
+pub struct DocumentListArgs {
+    #[schemars(description = "Project UUID or name; names require team")]
+    pub project: Option<String>,
+    #[schemars(description = "Team UUID, key, or name for project name resolution")]
+    pub team: Option<String>,
+    #[schemars(description = "Issue UUID or identifier (e.g. GUZ-1)")]
+    pub issue: Option<String>,
+    #[schemars(description = "Case-insensitive substring in title")]
+    pub query: Option<String>,
+    #[schemars(description = "Items per page (default: 25, range 1–250)")]
+    pub limit: Option<u32>,
+    #[schemars(description = "Continue after pageInfo.endCursor with the same filters")]
+    pub cursor: Option<String>,
+    #[schemars(description = "Fetch all remaining pages; can produce large output")]
+    pub all: Option<bool>,
 }
 
 pub use mcptools_core::linear::DocumentCreateArgs;
@@ -268,10 +288,9 @@ pub use mcptools_core::linear::DocumentUpdateArgs;
 
 impl DocumentGetArgs {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if !mcptools_core::linear::is_uuid(&self.id) {
-            return Err("id must be a document UUID");
-        }
-        Ok(())
+        mcptools_core::linear::document_lookup_id(&self.id)
+            .map(|_| ())
+            .map_err(|_| "document must be a UUID or Linear document URL")
     }
 }
 

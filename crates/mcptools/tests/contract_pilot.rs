@@ -128,6 +128,7 @@ fn mcp_contract_pilot() {
             "linear_cycle_list",
             "linear_document_create",
             "linear_document_get",
+            "linear_document_list",
             "linear_document_update",
             "linear_initiative_get",
             "linear_initiative_list",

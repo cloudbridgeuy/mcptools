@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use super::JsonRpcError;
 use mcptools_core::linear::{
-    CommentListOutput, CycleListOutput, IssueListOutput, LabelListOutput, Paginated,
-    ProjectListOutput, RelationAddOutput, RelationListOutput, RelationRemoveOutput,
+    CommentListOutput, CycleListOutput, DocumentListOutput, IssueListOutput, LabelListOutput,
+    Paginated, ProjectListOutput, RelationAddOutput, RelationListOutput, RelationRemoveOutput,
     StateListOutput, TeamListOutput, UserListOutput,
 };
 
@@ -446,13 +446,66 @@ pub async fn handle_linear_document_create(
         data: None,
     })?;
     if global.verbose {
-        eprintln!("Calling linear_document_create: project={}", args.project);
+        eprintln!(
+            "Calling linear_document_create: project={:?} issue={:?}",
+            args.project, args.issue
+        );
     }
     let client = linear_client()?;
     let output = crate::linear::discover::document_create_data(&client, &args)
         .await
         .map_err(exec)?;
     super::to_dual_result(output)
+}
+
+pub async fn handle_linear_document_list(
+    arguments: Option<serde_json::Value>,
+    global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::DocumentListArgs = parse_args(arguments)?;
+    if global.verbose {
+        eprintln!(
+            "Calling linear_document_list: project={:?}, issue={:?}, limit={:?}",
+            args.project, args.issue, args.limit
+        );
+    }
+    let client = linear_client()?;
+    let filter = crate::linear::discover::resolve_document_filter(
+        &client,
+        args.project.as_deref(),
+        args.team.as_deref(),
+        args.issue.as_deref(),
+        args.query.as_deref(),
+    )
+    .await
+    .map_err(exec)?;
+    let mut nodes = Vec::new();
+    let mut cursor = args.cursor.clone();
+    let mut seen = cursor.iter().cloned().collect::<Vec<_>>();
+    let mut page_info = mcptools_core::linear::PageInfo {
+        has_next: false,
+        end_cursor: None,
+    };
+    loop {
+        let page = crate::linear::discover::documents_list_data(
+            &client,
+            &filter,
+            args.limit.unwrap_or(25),
+            cursor.clone(),
+        )
+        .await
+        .map_err(exec)?;
+        page_info = page.page_info;
+        nodes.extend(page.nodes);
+        let next = mcptools_core::linear::document_list_continuation(&page_info, &seen)
+            .map_err(|error| exec(error.into()))?;
+        if !args.all.unwrap_or(false) || !page_info.has_next {
+            break;
+        }
+        cursor = next;
+        seen.extend(cursor.iter().cloned());
+    }
+    super::to_dual_result(DocumentListOutput { nodes, page_info })
 }
 
 pub async fn handle_linear_document_get(
@@ -1685,7 +1738,8 @@ mod tests {
         let declaration = super::super::declaration(&tool);
         for field in [
             "declare function linear_document_create",
-            "project: string",
+            "project?: string",
+            "issue?: string",
             "title: string",
             "content?: string",
             "team?: string",
@@ -1706,7 +1760,11 @@ mod tests {
             serde_json::from_value(sample.clone()).unwrap();
         assert_eq!(serde_json::to_value(output).unwrap(), sample);
         sample["project"] = serde_json::Value::Null;
+        sample["issue"] = serde_json::json!({"id": id, "identifier": "GUZ-551"});
+        assert!(output_validator.is_valid(&sample));
+        sample["issue"] = serde_json::json!("GUZ-551");
         assert!(!output_validator.is_valid(&sample));
+        assert!(validator.is_valid(&serde_json::json!({"issue": "GUZ-551", "title": "Plan"})));
     }
 
     #[tokio::test(flavor = "multi_thread")]

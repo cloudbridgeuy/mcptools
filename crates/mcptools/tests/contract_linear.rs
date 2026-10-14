@@ -141,7 +141,7 @@ fn mcp_contract_linear() {
                 .is_some_and(|n| n.starts_with("linear_"))
         })
         .collect();
-    assert_eq!(linear.len(), 37, "unexpected linear tools: {linear:?}");
+    assert_eq!(linear.len(), 38, "unexpected linear tools: {linear:?}");
     for tool in &linear {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();
         let schema = tool.get("outputSchema").unwrap_or_else(|| {
@@ -171,6 +171,36 @@ fn mcp_contract_linear() {
             }
         }
     }
+
+    let document_create = linear
+        .iter()
+        .find(|tool| tool["name"] == "linear_document_create")
+        .unwrap();
+    assert!(document_create["inputSchema"]["properties"]
+        .as_object()
+        .unwrap()
+        .contains_key("issue"));
+
+    let document_list = linear
+        .iter()
+        .find(|tool| tool["name"] == "linear_document_list")
+        .unwrap();
+    let list_input = document_list["inputSchema"]["properties"]
+        .as_object()
+        .unwrap();
+    for field in [
+        "project", "team", "issue", "query", "limit", "cursor", "all",
+    ] {
+        assert!(
+            list_input.contains_key(field),
+            "missing document list {field}"
+        );
+    }
+    let list_output = document_list["outputSchema"]["properties"]
+        .as_object()
+        .unwrap();
+    assert!(list_output.contains_key("nodes"));
+    assert!(list_output.contains_key("pageInfo"));
 
     let issue_list = linear
         .iter()

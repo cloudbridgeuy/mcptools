@@ -146,6 +146,11 @@ mcptools linear issue list --assignee me --json
 mcptools linear issue list --query "auth" --limit 100 --json
 mcptools linear issue list --query "auth" --limit 100 --cursor <endCursor> --json
 mcptools linear issue list --query "auth" --all --json
+mcptools linear document list --project MCPTools --team GUZ --query "plan" --all --json
+mcptools linear document list --issue GUZ-551 --json
+mcptools linear document get https://linear.app/example/document/delivery-plan --json
+mcptools linear document create --project MCPTools --team GUZ --title "Delivery plan" --content "# Plan"
+mcptools linear document create --issue GUZ-551 --title "Delivery plan" --content "# Plan"
 mcptools linear teams list
 mcptools linear projects list --team GUZ
 mcptools linear users list --query "Ada"

@@ -5,6 +5,7 @@ use mcptools_core::linear::{
     transform_project_create, transform_team_cycles, transform_team_labels,
     transform_team_projects, transform_team_states, transform_teams, transform_users, Cycle, Label,
     Paginated, Project, ProjectResolution, Team, TeamResolution, User, WorkflowState,
+    DOCUMENT_GET_QUERY,
 };
 use mcptools_core::linear::{transform_project_statuses, ProjectStatusListOutput};
 
@@ -12,11 +13,83 @@ pub const TEAMS_QUERY: &str = "query ($first: Int!, $after: String) { teams(firs
 pub const INITIATIVES_QUERY: &str = "query ($first: Int!, $after: String, $filter: InitiativeFilter) { initiatives(first: $first, after: $after, filter: $filter, orderBy: createdAt) { nodes { id name description status targetDate owner { id name email } url } pageInfo { hasNextPage endCursor } } }";
 
 pub const INITIATIVE_GET_QUERY: &str = "query ($id: String!, $first: Int!, $after: String) { initiative(id: $id) { id name description content status targetDate owner { id name email } url projects(first: $first, after: $after, includeArchived: true, includeSubInitiatives: false, orderBy: createdAt) { nodes { id name } pageInfo { hasNextPage endCursor } } } }";
-pub const DOCUMENT_GET_QUERY: &str = "query ($id: String!) { document(id: $id) { id title content url createdAt updatedAt owner { id name email } project { id name } } }";
-
-pub const DOCUMENT_CREATE_MUTATION: &str = "mutation ($input: DocumentCreateInput!) { documentCreate(input: $input) { success document { id title content url createdAt updatedAt project { id name } } } }";
+pub const DOCUMENT_CREATE_MUTATION: &str = "mutation ($input: DocumentCreateInput!) { documentCreate(input: $input) { success document { id title content url createdAt updatedAt project { id name } issue { id identifier } } } }";
 
 pub const DOCUMENT_UPDATE_MUTATION: &str = "mutation ($id: String!, $input: DocumentUpdateInput!) { documentUpdate(id: $id, input: $input) { success document { id title content url createdAt updatedAt project { id name } } } }";
+
+pub async fn resolve_document_filter(
+    client: &reqwest::Client,
+    project: Option<&str>,
+    team: Option<&str>,
+    issue: Option<&str>,
+    query: Option<&str>,
+) -> Result<mcptools_core::linear::DocumentListFilter> {
+    resolve_document_filter_with_url(client, LINEAR_API_URL, project, team, issue, query).await
+}
+
+async fn resolve_document_filter_with_url(
+    client: &reqwest::Client,
+    url: &str,
+    project: Option<&str>,
+    team: Option<&str>,
+    issue: Option<&str>,
+    query: Option<&str>,
+) -> Result<mcptools_core::linear::DocumentListFilter> {
+    for (name, value) in [
+        ("project", project),
+        ("team", team),
+        ("issue", issue),
+        ("query", query),
+    ] {
+        if value.is_some_and(|text| text.trim().is_empty()) {
+            return Err(eyre!("Linear document list {} must not be empty", name));
+        }
+    }
+    let project_id = match project.map(str::trim) {
+        Some(selector) if mcptools_core::linear::is_uuid(selector) => Some(selector.to_string()),
+        Some(selector) => {
+            let team = team.ok_or_else(|| {
+                eyre!("Linear document list project names need --team; pass a project UUID to skip team resolution")
+            })?;
+            Some(
+                resolve_project_with_url(client, url, selector, Some(team))
+                    .await?
+                    .id,
+            )
+        }
+        None => None,
+    };
+    let issue_id = match issue.map(str::trim) {
+        Some(selector) if mcptools_core::linear::is_uuid(selector) => Some(selector.to_string()),
+        Some(selector) => {
+            let (request, variables) = mcptools_core::linear::issue_get_request(selector, 0)
+                .map_err(|error| eyre!(error))?;
+            let data = execute_with_url(client, url, request, variables).await?;
+            let (issue, _) =
+                mcptools_core::linear::parse_issue_get(data).map_err(|error| eyre!(error))?;
+            Some(issue.id)
+        }
+        None => None,
+    };
+    Ok(mcptools_core::linear::DocumentListFilter {
+        project_id,
+        issue_id,
+        query: query.map(str::trim).map(str::to_string),
+    })
+}
+
+pub async fn documents_list_data(
+    client: &reqwest::Client,
+    filter: &mcptools_core::linear::DocumentListFilter,
+    limit: u32,
+    cursor: Option<String>,
+) -> Result<mcptools_core::linear::DocumentListOutput> {
+    let (query, variables) =
+        mcptools_core::linear::documents_list_request(filter, limit, cursor.as_deref())
+            .map_err(|error| eyre!(error))?;
+    let data = execute(client, query, variables).await?;
+    mcptools_core::linear::parse_documents_list(data).map_err(|error| eyre!(error))
+}
 
 pub async fn document_update_data(
     client: &reqwest::Client,
@@ -53,14 +126,31 @@ async fn document_create_data_with_url(
     url: &str,
     args: &crate::linear::args::DocumentCreateArgs,
 ) -> Result<mcptools_core::linear::DocumentCreateOutput> {
-    let mut input =
-        mcptools_core::linear::document_create_input(args).map_err(|error| eyre!(error))?;
-    let project =
-        resolve_project_with_url(client, url, &args.project, args.team.as_deref()).await?;
-    if !mcptools_core::linear::is_uuid(&project.id) {
-        return Err(eyre!("Malformed project identity"));
-    }
-    input["projectId"] = serde_json::json!(project.id);
+    use mcptools_core::linear::{DocumentIssue, DocumentParent};
+    mcptools_core::linear::document_create_input(args).map_err(|error| eyre!(error))?;
+    let parent = match (args.project.as_deref(), args.issue.as_deref()) {
+        (Some(project), _) => DocumentParent::Project(
+            resolve_project_with_url(client, url, project, args.team.as_deref()).await?,
+        ),
+        (None, Some(selector)) => {
+            let (query, variables) = mcptools_core::linear::issue_get_request(selector, 0)
+                .map_err(|error| eyre!(error))?;
+            let data = execute_with_url(client, url, query, variables).await?;
+            let (issue, _) =
+                mcptools_core::linear::parse_issue_get(data).map_err(|error| eyre!(error))?;
+            DocumentParent::Issue(DocumentIssue {
+                id: issue.id,
+                identifier: issue.identifier,
+            })
+        }
+        (None, None) => return Err(eyre!("One of project or issue is required")),
+    };
+    let (project_id, issue_id) = match &parent {
+        DocumentParent::Project(project) => (Some(project.id.as_str()), None),
+        DocumentParent::Issue(issue) => (None, Some(issue.id.as_str())),
+    };
+    let input = mcptools_core::linear::document_create_resolved_input(args, project_id, issue_id)
+        .map_err(|error| eyre!(error))?;
     let data = execute_with_url(
         client,
         url,
@@ -68,7 +158,7 @@ async fn document_create_data_with_url(
         serde_json::json!({"input": input}),
     )
     .await?;
-    mcptools_core::linear::transform_document_create(data, &project).map_err(|error| eyre!(error))
+    mcptools_core::linear::transform_document_create(data, &parent).map_err(|error| eyre!(error))
 }
 
 pub async fn document_get_data(
@@ -83,14 +173,9 @@ async fn document_get_data_with_url(
     url: &str,
     args: crate::linear::args::DocumentGetArgs,
 ) -> Result<mcptools_core::linear::DocumentGetOutput> {
-    args.validate().map_err(|error| eyre!(error))?;
-    let data = execute_with_url(
-        client,
-        url,
-        DOCUMENT_GET_QUERY,
-        serde_json::json!({"id": args.id}),
-    )
-    .await?;
+    let (query, variables) =
+        mcptools_core::linear::document_get_request(&args.id).map_err(|error| eyre!(error))?;
+    let data = execute_with_url(client, url, query, variables).await?;
     mcptools_core::linear::transform_document(data, &args.id).map_err(|error| eyre!(error))
 }
 
@@ -1107,10 +1192,15 @@ mod tests {
         .unwrap();
         let id = sample["project"]["id"].as_str().unwrap();
         let project: Project = serde_json::from_value(sample["project"].clone()).unwrap();
+        let parent = mcptools_core::linear::DocumentParent::Project(project.clone());
         for content in [
             None,
             Some(serde_json::Value::Null),
             Some(serde_json::json!("    code\n\n# Heading\n")),
+            // Sent verbatim: no tilde escaping, link rewriting, or H1-to-title promotion.
+            Some(serde_json::json!(
+                "# Heading\n\nRoughly ~5 items; see crates/core/src/foo.rs:12\n"
+            )),
             Some(serde_json::json!("")),
         ] {
             let mut raw = serde_json::json!({"project": id, "title": " Delivery plan "});
@@ -1210,13 +1300,13 @@ mod tests {
             incomplete.as_object_mut().unwrap().remove(field);
             assert!(transform_document_create(
                 serde_json::json!({"documentCreate": {"success": true, "document": incomplete}}),
-                &project
+                &parent
             )
             .is_err());
             incomplete[field] = serde_json::json!(false);
             assert!(transform_document_create(
                 serde_json::json!({"documentCreate": {"success": true, "document": incomplete}}),
-                &project
+                &parent
             )
             .is_err());
         }
@@ -1236,7 +1326,7 @@ mod tests {
             malformed[field] = value;
             assert!(transform_document_create(
                 serde_json::json!({"documentCreate": {"success": true, "document": malformed}}),
-                &project
+                &parent
             )
             .is_err());
         }
@@ -1353,7 +1443,7 @@ mod tests {
             let mut document = sample.clone();
             if nullable {
                 document["title"] = serde_json::json!("");
-                for field in ["content", "owner", "project"] {
+                for field in ["content", "owner", "project", "issue"] {
                     document[field] = serde_json::Value::Null;
                 }
             }
@@ -1379,13 +1469,14 @@ mod tests {
             assert_eq!(value["updatedAt"], sample["updatedAt"]);
             if nullable {
                 assert_eq!(value["title"], "");
-                for field in ["content", "owner", "project"] {
+                for field in ["content", "owner", "project", "issue"] {
                     assert!(value[field].is_null(), "{field}");
                 }
             } else {
                 assert_eq!(value["content"], sample["content"]);
                 assert_eq!(value["owner"], sample["owner"]);
                 assert_eq!(value["project"], sample["project"]);
+                assert_eq!(value["issue"], sample["issue"]);
             }
             let result = crate::mcp::tools::to_dual_result(output).unwrap();
             let text: serde_json::Value =
@@ -1417,8 +1508,18 @@ mod tests {
             ("/document/owner/id", serde_json::json!("bad")),
             ("/document/owner/name", serde_json::json!(" ")),
             ("/document/owner/email", serde_json::Value::Null),
-            ("/document/project/id", serde_json::json!("bad")),
-            ("/document/project/name", serde_json::json!(" ")),
+            (
+                "/document/project",
+                serde_json::json!({"id": "bad", "name": "Delivery"}),
+            ),
+            (
+                "/document/project",
+                serde_json::json!({"id": "32345678-1234-1234-1234-123456789abc", "name": " "}),
+            ),
+            ("/document/issue/id", serde_json::json!("bad")),
+            ("/document/issue/identifier", serde_json::json!(" ")),
+            ("/document/issue/title", serde_json::json!(" ")),
+            ("/document/issue/url", serde_json::json!("file:///issue")),
         ] {
             let mut data = valid.clone();
             *data.pointer_mut(path).unwrap() = value;
@@ -1436,6 +1537,7 @@ mod tests {
             "updatedAt",
             "owner",
             "project",
+            "issue",
         ] {
             let mut data = valid.clone();
             data["document"].as_object_mut().unwrap().remove(field);
@@ -1515,7 +1617,7 @@ mod tests {
                     .await
                     .unwrap_err()
                     .to_string()
-                    .contains("UUID")
+                    .contains("UUID or Linear document URL")
             );
         }
         assert!(server.received_requests().await.unwrap().is_empty());
