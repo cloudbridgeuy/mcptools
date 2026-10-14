@@ -2,7 +2,7 @@ mod fetch;
 pub mod toc;
 
 use crate::prelude::{eprintln, println, *};
-use headless_chrome::Browser;
+use headless_chrome::{Browser, LaunchOptions};
 use std::time::Instant;
 
 pub use mcptools_core::md::{FetchOutput, MdPaginationInfo};
@@ -75,14 +75,25 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
     }
 }
 
-/// Public function for MCP reuse - fetch and convert web page to markdown/HTML
+fn browser_launch_options() -> LaunchOptions<'static> {
+    LaunchOptions {
+        ignore_certificate_errors: false,
+        ..LaunchOptions::default()
+    }
+}
+
 pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
-    use mcptools_core::md::{calculate_pagination, process_html_content, slice_content};
+    use mcptools_core::md::{
+        calculate_pagination, process_html_content, slice_content, validate_pagination,
+    };
+
+    if config.paginated {
+        validate_pagination(config.limit, config.page).map_err(|e| eyre!(e))?;
+    }
 
     let start = Instant::now();
 
-    // Step 1: Browser I/O - Launch headless Chrome
-    let browser = Browser::default().map_err(|e| {
+    let browser = Browser::new(browser_launch_options()).map_err(|e| {
         eyre!(
             "Failed to launch browser: {}. Make sure Chrome or Chromium is installed.",
             e
@@ -95,7 +106,6 @@ pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
 
     tab.set_default_timeout(std::time::Duration::from_secs(config.timeout));
 
-    // Step 2: Browser I/O - Navigate and extract HTML
     tab.navigate_to(&config.url)
         .map_err(|e| eyre!("Failed to navigate to {}: {}", config.url, e))?
         .wait_until_navigated()
@@ -108,7 +118,6 @@ pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
 
     let html_length = html.len();
 
-    // Step 3: Pure transformation - Process HTML content
     let processed = process_html_content(
         html,
         config.selector,
@@ -118,11 +127,11 @@ pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
     )
     .map_err(|e| eyre!("{}", e))?;
 
-    // Step 4: Pure transformation - Calculate pagination and slice content
     let total_characters = processed.content.chars().count();
     let (content, pagination) = if config.paginated {
         let pagination_result =
-            calculate_pagination(total_characters, config.offset, config.limit, config.page);
+            calculate_pagination(total_characters, config.offset, config.limit, config.page)
+                .map_err(|e| eyre!(e))?;
         let content = slice_content(
             processed.content,
             pagination_result.start_offset,
@@ -153,4 +162,18 @@ pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
         strategy_applied: processed.strategy_applied,
         pagination,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_verifies_tls_certificates() {
+        let options = browser_launch_options();
+        assert!(!options.ignore_certificate_errors);
+        assert!(options.headless);
+        assert!(options.sandbox);
+        assert!(options.args.is_empty());
+    }
 }

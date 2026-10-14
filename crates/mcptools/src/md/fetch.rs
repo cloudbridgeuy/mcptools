@@ -365,6 +365,29 @@ mod tests {
     use super::*;
     use mcptools_core::md::{FetchOutput as CoreFetchOutput, MdPaginationInfo};
 
+    #[tokio::test]
+    async fn cli_rejects_zero_pagination_before_browser_launch() {
+        use clap::Parser;
+
+        for (flag, message) in [
+            ("--limit", "limit must be greater than 0"),
+            ("--page", "page must be greater than 0 (1-indexed)"),
+        ] {
+            let app = crate::md::App::try_parse_from([
+                "md",
+                "fetch",
+                "https://invalid.invalid",
+                flag,
+                "0",
+            ])
+            .unwrap();
+            let crate::md::Commands::Fetch(options) = app.command else {
+                panic!("expected fetch command");
+            };
+            assert_eq!(fetch(options).await.unwrap_err().to_string(), message);
+        }
+    }
+
     fn create_test_output(paginated: bool) -> FetchOutput {
         FetchOutput {
             url: "https://example.com".to_string(),

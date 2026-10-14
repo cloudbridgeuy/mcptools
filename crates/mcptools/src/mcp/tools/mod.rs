@@ -272,7 +272,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<crate::md::toc::TocOutput>(),
             name: "md_toc".to_string(),
-            description: "Extract table of contents from a web page by parsing markdown headings (H1-H6). Fetches the page using headless Chrome, converts to markdown, and extracts all heading levels with their character offsets and limits. Each TOC entry includes char_offset and char_limit values that can be used with md_fetch to extract specific sections. Sections are defined as heading + content until the next same-or-higher-level heading. Supports CSS selector filtering to extract TOC from specific page elements.".to_string(),
+            description: "Extract table of contents from a web page by parsing markdown headings (H1-H6). Fetches the page using headless Chrome with TLS certificate checks enabled, converts to markdown, and extracts all heading levels with their character offsets and limits. Each TOC entry includes char_offset and char_limit values that can be used with md_fetch to extract specific sections. Sections are defined as heading + content until the next same-or-higher-level heading. Supports CSS selector filtering. Structured content always contains TOC data. Text content is JSON by default; output: indented, markdown, or json selects its format.".to_string(),
             input_schema: schema::input_schema_for::<md::MdTocArgs>(),
             summary: "Show a web page URL's structure as headings and a table of contents",
             kind: ToolKind::Read,

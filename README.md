@@ -478,6 +478,8 @@ List HackerNews stories with pagination support.
 
 Fetch web pages using headless Chrome and convert to Markdown. Supports CSS selector filtering to extract specific page elements, character-based pagination, and section extraction using offsets from `md_toc`.
 
+Both `md_fetch` and `md_toc` verify TLS certificates. Invalid or untrusted certificates are not bypassed; there is no insecure mode.
+
 **Parameters:**
 
 - `url` (string, required) - URL of the web page to fetch
@@ -486,9 +488,11 @@ Fetch web pages using headless Chrome and convert to Markdown. Supports CSS sele
 - `selector` (string, optional) - CSS selector to filter content (e.g., "article", "main", "div.content")
 - `strategy` (string, optional) - Selection strategy when multiple elements match: "first", "last", "all", "n" (default: "first")
 - `index` (number, optional) - Index for "n" strategy (0-indexed)
-- `offset` (number, optional) - Character offset to start from (default: 0). When provided, takes precedence over `page`. Use with values from `md_toc` to extract specific sections
-- `limit` (number, optional) - Characters per page for pagination (default: 1000)
-- `page` (number, optional) - Page number, 1-indexed (default: 1). Ignored if `offset` is provided
+- `offset` (number, optional) - Character offset to start from (default: 0). A positive value takes precedence over `page`. Use with values from `md_toc` to extract specific sections
+- `limit` (number, optional) - Characters per page for pagination, must be greater than 0 (default: 1000)
+- `page` (number, optional) - Page number, must be greater than 0 (default: 1). A positive `offset` takes precedence, but `page` must still be valid
+
+CLI and MCP reject zero `limit` or `page` before launching Chrome. Pages beyond the last page clamp to the last page; offsets beyond the content return empty content.
 
 **Example Usage:**
 
@@ -568,7 +572,7 @@ Setext titles use only the nonblank text line immediately before the underline, 
 - `selector` (string, optional) - CSS selector to filter content (e.g., "article", "main")
 - `strategy` (string, optional) - Selection strategy when multiple elements match: "first", "last", "all", "n" (default: "first")
 - `index` (number, optional) - Index for "n" strategy (0-indexed)
-- `output` (string, optional) - Output format: "indented", "markdown", "json" (default: "indented")
+- `output` (string, optional) - Text content format: "indented", "markdown", "json". Omitted or "json" returns JSON text; explicit "indented" or "markdown" returns formatted headings with offsets and limits. `structuredContent` always retains the full TOC object. CLI `md toc` defaults to indented text
 
 **Example Usage:**
 

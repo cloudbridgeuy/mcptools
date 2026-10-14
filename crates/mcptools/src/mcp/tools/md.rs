@@ -78,6 +78,12 @@ pub async fn handle_md_fetch(
         return Err(invalid_strategy_index());
     }
     let fields = args.fields;
+    mcptools_core::md::validate_pagination(args.limit.unwrap_or(1000), args.page.unwrap_or(1))
+        .map_err(|message| JsonRpcError {
+            code: -32602,
+            message,
+            data: None,
+        })?;
 
     let fetch_data = tokio::task::spawn_blocking(move || {
         crate::md::fetch_and_convert_data(crate::md::FetchConfig {
@@ -145,7 +151,7 @@ pub async fn handle_md_toc(
         selector: args.selector,
         strategy,
         index: args.index,
-        output: output_format,
+        output: output_format.clone(),
         json: false,
     };
 
@@ -163,5 +169,90 @@ pub async fn handle_md_toc(
                 data: None,
             })?;
 
-    super::to_dual_result(toc_data)
+    toc_result(toc_data, args.output.as_ref().map(|_| &output_format))
+}
+
+fn toc_result(
+    toc_data: crate::md::toc::TocOutput,
+    format: Option<&crate::md::toc::OutputFormat>,
+) -> Result<serde_json::Value, JsonRpcError> {
+    use crate::md::toc::{format_toc_indented, format_toc_markdown, OutputFormat};
+
+    let text = match format {
+        Some(OutputFormat::Indented) => Some(format_toc_indented(&toc_data.entries)),
+        Some(OutputFormat::Markdown) => Some(format_toc_markdown(&toc_data.entries)),
+        Some(OutputFormat::Json) | None => None,
+    };
+    let mut result = super::to_dual_result(toc_data)?;
+    if let Some(text) = text {
+        result["content"][0]["text"] = serde_json::Value::String(text);
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::md::toc::{OutputFormat, TocOutput};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn fetch_rejects_zero_pagination_as_invalid_arguments() {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        for (field, message) in [
+            ("limit", "limit must be greater than 0"),
+            ("page", "page must be greater than 0 (1-indexed)"),
+        ] {
+            let mut args = json!({"url": "https://invalid.invalid", "offset": 100});
+            args[field] = json!(0);
+            let error = handle_md_fetch(Some(args), &global).await.unwrap_err();
+            assert_eq!(error.code, -32602);
+            assert_eq!(error.message, message);
+        }
+    }
+
+    #[test]
+    fn toc_formats_text_without_changing_structured_output() {
+        let data = json!({
+            "url": "https://example.com",
+            "title": null,
+            "entries": [
+                {"level": 1, "text": "First", "char_offset": 0, "char_limit": 20},
+                {"level": 2, "text": "Child", "char_offset": 10, "char_limit": 10}
+            ],
+            "fetch_time_ms": 0
+        });
+        for format in [
+            None,
+            Some(OutputFormat::Json),
+            Some(OutputFormat::Indented),
+            Some(OutputFormat::Markdown),
+        ] {
+            let output: TocOutput = serde_json::from_value(data.clone()).unwrap();
+            let result = toc_result(output, format.as_ref()).unwrap();
+            assert_eq!(result["structuredContent"], data);
+            let text = result["content"][0]["text"].as_str().unwrap();
+            match format {
+                None | Some(OutputFormat::Json) => {
+                    assert_eq!(
+                        serde_json::from_str::<serde_json::Value>(text).unwrap(),
+                        data
+                    );
+                }
+                Some(OutputFormat::Indented) => assert_eq!(
+                    text,
+                    "First  [--offset 0 --limit 20]\n  Child  [--offset 10 --limit 10]"
+                ),
+                Some(OutputFormat::Markdown) => assert_eq!(
+                    text,
+                    "* First  [--offset 0 --limit 20]\n  * Child  [--offset 10 --limit 10]"
+                ),
+            }
+        }
+    }
 }

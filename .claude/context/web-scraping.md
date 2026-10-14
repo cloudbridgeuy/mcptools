@@ -2,6 +2,8 @@
 
 Uses headless Chrome to fetch web pages and convert to Markdown.
 
+CLI and MCP fetch/TOC paths verify TLS certificates. Invalid or untrusted certificates are not bypassed. No insecure mode is available.
+
 ## CLI Commands
 
 ### Fetch Web Pages
@@ -55,6 +57,8 @@ mcptools md fetch https://example.com --json
 | `--page` | `MD_PAGE` | 1 | Page number (1-indexed) |
 
 **Note:** Pagination is auto-enabled when `--offset`, `--limit`, or `--page` are set.
+
+`limit` and `page` must be greater than 0. CLI and MCP reject zero values before launching Chrome, including `page: 0` with an offset. A positive offset takes precedence over the page number. Pages beyond the last page clamp to the last page; offsets beyond the content return empty content.
 
 ### Extract Table of Contents
 
@@ -146,7 +150,7 @@ Setext titles use only the nonblank text line immediately before the underline, 
 - `selector` (optional): CSS selector to filter content
 - `strategy` (optional): Selection strategy
 - `index` (optional): Index for 'n' strategy
-- `output` (optional): Output format (indented, markdown, json)
+- `output` (optional): Text content format (indented, markdown, json). Omitted or `json` returns JSON text. Explicit `indented` or `markdown` returns formatted headings with offsets and limits. `structuredContent` always retains the full TOC object. CLI defaults to indented text.
 
 ## Site-Specific Tips
 

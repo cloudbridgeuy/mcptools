@@ -154,8 +154,7 @@ fn extract_toc(markdown: &str) -> Result<Vec<TocEntry>> {
     Ok(entries)
 }
 
-/// Format TOC as indented text (2 spaces per level) with fetch parameters
-fn format_toc_indented(entries: &[TocEntry]) -> String {
+pub(crate) fn format_toc_indented(entries: &[TocEntry]) -> String {
     entries
         .iter()
         .map(|entry| {
@@ -169,8 +168,7 @@ fn format_toc_indented(entries: &[TocEntry]) -> String {
         .join("\n")
 }
 
-/// Format TOC as markdown nested list with fetch parameters
-fn format_toc_markdown(entries: &[TocEntry]) -> String {
+pub(crate) fn format_toc_markdown(entries: &[TocEntry]) -> String {
     entries
         .iter()
         .map(|entry| {

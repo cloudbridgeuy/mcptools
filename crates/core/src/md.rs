@@ -222,33 +222,41 @@ pub fn process_html_content(
     })
 }
 
-/// Calculate pagination for content based on offset, limit, and page parameters
+pub fn validate_pagination(limit: usize, page: usize) -> Result<(), String> {
+    if limit == 0 {
+        return Err("limit must be greater than 0".to_string());
+    }
+    if page == 0 {
+        return Err("page must be greater than 0 (1-indexed)".to_string());
+    }
+    Ok(())
+}
+
 pub fn calculate_pagination(
     total_characters: usize,
     offset: usize,
     limit: usize,
     page: usize,
-) -> PaginationResult {
+) -> Result<PaginationResult, String> {
+    validate_pagination(limit, page)?;
+
     let (total_pages, start_offset, end_offset, current_page) = if offset > 0 {
-        // Offset-based: ignore page parameter
         let start_offset = offset.min(total_characters);
-        let end_offset = (start_offset + limit).min(total_characters);
+        let end_offset = start_offset.saturating_add(limit).min(total_characters);
         let total_pages = if limit >= total_characters {
             1
         } else {
             total_characters.div_ceil(limit)
         };
-        let current_page = offset.checked_div(limit).map(|d| d + 1).unwrap_or(1);
+        let current_page = (offset / limit).saturating_add(1);
         (total_pages, start_offset, end_offset, current_page)
     } else if limit >= total_characters {
-        // Single page case
         (1, 0, total_characters, 1)
     } else {
-        // Multi-page case
         let total_pages = total_characters.div_ceil(limit);
         let current_page = page.min(total_pages.max(1));
         let start_offset = (current_page - 1) * limit;
-        let end_offset = (start_offset + limit).min(total_characters);
+        let end_offset = start_offset.saturating_add(limit).min(total_characters);
         (total_pages, start_offset, end_offset, current_page)
     };
 
@@ -262,12 +270,12 @@ pub fn calculate_pagination(
         has_more,
     };
 
-    PaginationResult {
+    Ok(PaginationResult {
         start_offset,
         end_offset,
         current_page,
         pagination_info,
-    }
+    })
 }
 
 /// Extract paginated content from full content using character offsets
@@ -543,8 +551,30 @@ mod tests {
     }
 
     #[test]
+    fn pagination_rejects_zero_limit_and_page_in_all_modes() {
+        for (total, offset) in [(0, 0), (100, 0), (1000, 0), (1000, 250)] {
+            assert_eq!(
+                calculate_pagination(total, offset, 0, 1).unwrap_err(),
+                "limit must be greater than 0"
+            );
+            assert_eq!(
+                calculate_pagination(total, offset, 100, 0).unwrap_err(),
+                "page must be greater than 0 (1-indexed)"
+            );
+        }
+    }
+
+    #[test]
+    fn pagination_handles_maximum_offsets_and_limits() {
+        let result = calculate_pagination(100, 50, usize::MAX, 1).unwrap();
+        assert_eq!((result.start_offset, result.end_offset), (50, 100));
+        let result = calculate_pagination(100, usize::MAX, 1, 1).unwrap();
+        assert_eq!((result.start_offset, result.end_offset), (100, 100));
+    }
+
+    #[test]
     fn test_calculate_pagination_single_page() {
-        let result = calculate_pagination(100, 0, 1000, 1);
+        let result = calculate_pagination(100, 0, 1000, 1).unwrap();
         assert_eq!(result.start_offset, 0);
         assert_eq!(result.end_offset, 100);
         assert_eq!(result.current_page, 1);
@@ -554,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_calculate_pagination_multi_page_first() {
-        let result = calculate_pagination(1000, 0, 100, 1);
+        let result = calculate_pagination(1000, 0, 100, 1).unwrap();
         assert_eq!(result.start_offset, 0);
         assert_eq!(result.end_offset, 100);
         assert_eq!(result.current_page, 1);
@@ -564,7 +594,7 @@ mod tests {
 
     #[test]
     fn test_calculate_pagination_multi_page_middle() {
-        let result = calculate_pagination(1000, 0, 100, 5);
+        let result = calculate_pagination(1000, 0, 100, 5).unwrap();
         assert_eq!(result.start_offset, 400);
         assert_eq!(result.end_offset, 500);
         assert_eq!(result.current_page, 5);
@@ -574,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_calculate_pagination_multi_page_last() {
-        let result = calculate_pagination(1000, 0, 100, 10);
+        let result = calculate_pagination(1000, 0, 100, 10).unwrap();
         assert_eq!(result.start_offset, 900);
         assert_eq!(result.end_offset, 1000);
         assert_eq!(result.current_page, 10);
@@ -584,7 +614,7 @@ mod tests {
 
     #[test]
     fn test_calculate_pagination_offset_based() {
-        let result = calculate_pagination(1000, 250, 100, 999);
+        let result = calculate_pagination(1000, 250, 100, 999).unwrap();
         assert_eq!(result.start_offset, 250);
         assert_eq!(result.end_offset, 350);
         assert_eq!(result.current_page, 3);
@@ -593,7 +623,7 @@ mod tests {
 
     #[test]
     fn test_calculate_pagination_offset_beyond_end() {
-        let result = calculate_pagination(100, 150, 50, 1);
+        let result = calculate_pagination(100, 150, 50, 1).unwrap();
         assert_eq!(result.start_offset, 100);
         assert_eq!(result.end_offset, 100);
         assert_eq!(result.pagination_info.total_characters, 100);
@@ -601,7 +631,7 @@ mod tests {
 
     #[test]
     fn test_calculate_pagination_empty_content() {
-        let result = calculate_pagination(0, 0, 100, 1);
+        let result = calculate_pagination(0, 0, 100, 1).unwrap();
         assert_eq!(result.start_offset, 0);
         assert_eq!(result.end_offset, 0);
         assert_eq!(result.current_page, 1);
@@ -610,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_calculate_pagination_page_out_of_bounds() {
-        let result = calculate_pagination(1000, 0, 100, 999);
+        let result = calculate_pagination(1000, 0, 100, 999).unwrap();
         assert_eq!(result.current_page, 10);
         assert_eq!(result.start_offset, 900);
         assert_eq!(result.end_offset, 1000);
