@@ -565,6 +565,19 @@ mod tests {
     }
 
     #[test]
+    fn zero_page_on_multi_page_content_errors_instead_of_underflowing() {
+        for offset in [0, 1, 250, usize::MAX] {
+            let result = calculate_pagination(1000, offset, 100, 0);
+            assert_eq!(
+                result.unwrap_err(),
+                "page must be greater than 0 (1-indexed)"
+            );
+        }
+        assert!(validate_pagination(100, 0).is_err());
+        assert!(validate_pagination(0, 1).is_err());
+    }
+
+    #[test]
     fn pagination_handles_maximum_offsets_and_limits() {
         let result = calculate_pagination(100, 50, usize::MAX, 1).unwrap();
         assert_eq!((result.start_offset, result.end_offset), (50, 100));

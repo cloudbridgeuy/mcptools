@@ -176,4 +176,29 @@ mod tests {
         assert!(options.sandbox);
         assert!(options.args.is_empty());
     }
+
+    #[test]
+    fn paginated_fetch_rejects_zero_page_and_limit_before_browser_work() {
+        for (offset, limit, page, message) in [
+            (0, 100, 0, "page must be greater than 0 (1-indexed)"),
+            (250, 100, 0, "page must be greater than 0 (1-indexed)"),
+            (0, 0, 1, "limit must be greater than 0"),
+            (250, 0, 1, "limit must be greater than 0"),
+        ] {
+            let error = fetch_and_convert_data(FetchConfig {
+                url: "http://invalid.invalid".to_string(),
+                timeout: 1,
+                raw_html: false,
+                selector: None,
+                strategy: SelectionStrategy::First,
+                index: None,
+                offset,
+                limit,
+                page,
+                paginated: true,
+            })
+            .unwrap_err();
+            assert_eq!(error.to_string(), message);
+        }
+    }
 }

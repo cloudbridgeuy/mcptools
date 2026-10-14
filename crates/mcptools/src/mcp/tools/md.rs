@@ -208,11 +208,13 @@ mod tests {
             ("limit", "limit must be greater than 0"),
             ("page", "page must be greater than 0 (1-indexed)"),
         ] {
-            let mut args = json!({"url": "https://invalid.invalid", "offset": 100});
-            args[field] = json!(0);
-            let error = handle_md_fetch(Some(args), &global).await.unwrap_err();
-            assert_eq!(error.code, -32602);
-            assert_eq!(error.message, message);
+            for offset in [0, 100] {
+                let mut args = json!({"url": "https://invalid.invalid", "offset": offset});
+                args[field] = json!(0);
+                let error = handle_md_fetch(Some(args), &global).await.unwrap_err();
+                assert_eq!(error.code, -32602);
+                assert_eq!(error.message, message);
+            }
         }
     }
 
