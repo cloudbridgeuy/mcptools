@@ -1,6 +1,6 @@
 use crate::prelude::{eprintln, println, *};
 use colored::Colorize;
-use regex::Regex;
+use mcptools_core::md::extract_headings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::IsTerminal;
@@ -128,49 +128,18 @@ pub fn extract_toc_data(options: TocOptions) -> Result<TocOutput> {
     })
 }
 
-/// Parse markdown content and extract headings with character offsets
 fn extract_toc(markdown: &str) -> Result<Vec<TocEntry>> {
-    let heading_regex = Regex::new(r"^(#{1,6})\s+(.+)$").unwrap();
     let mut entries = Vec::new();
-    let mut char_position = 0;
-
-    // First pass: collect all headings with their positions
-    #[derive(Debug)]
-    struct HeadingInfo {
-        level: usize,
-        text: String,
-        char_offset: usize,
-    }
-
-    let mut headings = Vec::new();
-
-    for line in markdown.lines() {
-        if let Some(caps) = heading_regex.captures(line) {
-            let level = caps.get(1).unwrap().as_str().len();
-            let text = caps.get(2).unwrap().as_str().trim().to_string();
-
-            headings.push(HeadingInfo {
-                level,
-                text,
-                char_offset: char_position,
-            });
-        }
-
-        // Move position forward by line length + newline character
-        char_position += line.chars().count() + 1;
-    }
-
-    // Second pass: calculate section lengths
+    let headings = extract_headings(markdown);
     let total_chars = markdown.chars().count();
 
     for (i, heading) in headings.iter().enumerate() {
-        // Find the next heading at the same or higher level (lower level number)
         let next_section_start = headings
             .iter()
             .skip(i + 1)
             .find(|h| h.level <= heading.level)
             .map(|h| h.char_offset)
-            .unwrap_or(total_chars); // If no next heading, extend to end
+            .unwrap_or(total_chars);
 
         let char_limit = next_section_start - heading.char_offset;
 
@@ -603,6 +572,29 @@ mod tests {
     }
 
     // Tests for extract_toc function
+
+    #[test]
+    fn test_extract_toc_mixed_heading_section_limits() {
+        let markdown = "日本語\r\n===\r\nBody\r\n## ATX\r\n```rust\r\n# Hidden\r\n```\r\nSetext\r\n---\r\nChild\r\n# Next\r\nEnd";
+        let entries = extract_toc(markdown).unwrap();
+        assert_eq!(entries.len(), 4);
+        assert_eq!(
+            entries.iter().map(|e| e.level).collect::<Vec<_>>(),
+            [1, 2, 2, 1]
+        );
+        let positions = ["日本語", "## ATX", "Setext", "# Next"]
+            .map(|text| markdown[..markdown.find(text).unwrap()].chars().count());
+        for (entry, position) in entries.iter().zip(positions) {
+            assert_eq!(entry.char_offset, position);
+        }
+        assert_eq!(entries[0].char_limit, positions[3]);
+        assert_eq!(entries[1].char_limit, positions[2] - positions[1]);
+        assert_eq!(entries[2].char_limit, positions[3] - positions[2]);
+        assert_eq!(
+            entries[3].char_limit,
+            markdown.chars().count() - positions[3]
+        );
+    }
 
     #[test]
     fn test_extract_toc_single_heading() {

@@ -74,6 +74,10 @@ mcptools md toc https://docs.example.com --selector "main"
 
 **Output Formats:** `indented`, `markdown`, `json`
 
+CLI `md toc` and MCP `md_toc` recognize ATX headings (H1–H6) and Setext headings (`=` for H1, `-` for H2). Headings inside backtick or tilde fenced code blocks are skipped. Offsets and section limits count Unicode characters, not bytes; each section ends at the next same-or-higher-level heading or document end.
+
+Setext titles use only the nonblank text line immediately before the underline, with surrounding whitespace removed. The offset points to the first title character. This is a line-based extractor, not a full CommonMark parser.
+
 ## Best Practice Workflow
 
 1. **Get page structure first:**

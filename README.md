@@ -557,7 +557,9 @@ Fetch web pages using headless Chrome and convert to Markdown. Supports CSS sele
 
 #### md_toc
 
-Extract table of contents from web pages by parsing markdown headings (H1-H6). Returns character offsets and limits for each section, enabling precise section extraction with `md_fetch`. Sections are defined as: heading + all content until the next same-or-higher-level heading.
+Extract table of contents from web pages by parsing ATX headings (H1-H6) and Setext headings (H1-H2), skipping backtick and tilde fenced code blocks. Returns character offsets and limits for each section, enabling precise section extraction with `md_fetch`. Sections are defined as: heading + all content until the next same-or-higher-level heading.
+
+Setext titles use only the nonblank text line immediately before the underline, with surrounding whitespace removed; their offsets point to the first title character. This line-based extractor does not implement full CommonMark parsing.
 
 **Parameters:**
 

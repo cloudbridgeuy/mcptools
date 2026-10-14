@@ -3,6 +3,74 @@ use schemars::JsonSchema;
 use scraper::{Html, Selector as CssSelector};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownHeading {
+    pub level: usize,
+    pub text: String,
+    pub char_offset: usize,
+}
+
+pub fn extract_headings(markdown: &str) -> Vec<MarkdownHeading> {
+    let atx = Regex::new(r"^(#{1,6})\s+(.+)$").unwrap();
+    let fence_line = Regex::new(r"^ {0,3}(`{3,}|~{3,})(.*)$").unwrap();
+    let underline = Regex::new(r"^ {0,3}(=+|-+)\s*$").unwrap();
+    let mut headings = Vec::new();
+    let mut fence = None;
+    let mut candidate: Option<(&str, usize)> = None;
+    let mut char_position = 0;
+
+    for chunk in markdown.split_inclusive('\n') {
+        let offset = char_position;
+        char_position += chunk.chars().count();
+        let line = chunk
+            .strip_suffix('\n')
+            .map_or(chunk, |line| line.strip_suffix('\r').unwrap_or(line));
+        let fence_match = fence_line.captures(line);
+
+        if let Some((opening_char, opening_length)) = fence {
+            if fence_match.is_some_and(|caps| {
+                let run = &caps[1];
+                run.as_bytes()[0] == opening_char
+                    && run.len() >= opening_length
+                    && caps[2].trim().is_empty()
+            }) {
+                fence = None;
+            }
+            continue;
+        }
+
+        if let Some(caps) = fence_match {
+            let run = &caps[1];
+            fence = Some((run.as_bytes()[0], run.len()));
+            candidate = None;
+        } else if let Some(caps) = atx.captures(line) {
+            headings.push(MarkdownHeading {
+                level: caps[1].len(),
+                text: caps[2].trim().to_string(),
+                char_offset: offset,
+            });
+            candidate = None;
+        } else if let Some(caps) = underline.captures(line) {
+            if let Some((text, char_offset)) = candidate.take() {
+                headings.push(MarkdownHeading {
+                    level: if caps[1].starts_with('=') { 1 } else { 2 },
+                    text: text.to_string(),
+                    char_offset,
+                });
+            }
+        } else if line.trim().is_empty() {
+            candidate = None;
+        } else {
+            candidate = Some((
+                line.trim(),
+                offset + line.chars().take_while(|c| c.is_whitespace()).count(),
+            ));
+        }
+    }
+
+    headings
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SelectionStrategy {
@@ -214,6 +282,115 @@ pub fn slice_content(content: String, start_offset: usize, end_offset: usize) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headings_preserve_atx_matching() {
+        let markdown = "# First ###  \n ## Indented\n#No space\n####### Too deep\n##\tSecond\t\n###\n###### Last";
+        let headings = extract_headings(markdown);
+        assert_eq!(headings.len(), 3);
+        assert_eq!(
+            (headings[0].level, headings[0].text.as_str()),
+            (1, "First ###")
+        );
+        assert_eq!(
+            (headings[1].level, headings[1].text.as_str()),
+            (2, "Second")
+        );
+        assert_eq!((headings[2].level, headings[2].text.as_str()), (6, "Last"));
+        assert_eq!(headings[0].char_offset, 0);
+        assert_eq!(headings[1].char_offset, markdown.find("##\t").unwrap());
+    }
+
+    #[test]
+    fn headings_recognize_setext_levels_and_single_character_underlines() {
+        let headings = extract_headings("  Title  \n   ===  \nSection\n-\nLast\n=\n");
+        assert_eq!(
+            headings,
+            vec![
+                MarkdownHeading {
+                    level: 1,
+                    text: "Title".into(),
+                    char_offset: 2
+                },
+                MarkdownHeading {
+                    level: 2,
+                    text: "Section".into(),
+                    char_offset: 19
+                },
+                MarkdownHeading {
+                    level: 1,
+                    text: "Last".into(),
+                    char_offset: 29
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn headings_use_only_the_line_before_a_setext_underline() {
+        let headings = extract_headings("Paragraph\n  Last line  \n===");
+        assert_eq!(
+            headings,
+            vec![MarkdownHeading {
+                level: 1,
+                text: "Last line".into(),
+                char_offset: 12,
+            }]
+        );
+    }
+
+    #[test]
+    fn headings_skip_both_fence_types_with_info_strings() {
+        for fence in ["```", "~~~"] {
+            let markdown = format!(
+                "# Before\n   {fence}rust\n# Hidden\nHidden Setext\n===\n  {fence} \t\n# After"
+            );
+            let headings = extract_headings(&markdown);
+            assert_eq!(
+                headings.iter().map(|h| h.text.as_str()).collect::<Vec<_>>(),
+                ["Before", "After"]
+            );
+        }
+    }
+
+    #[test]
+    fn headings_require_matching_fence_closers() {
+        for (opening, wrong, short) in [("````", "~~~~", "```"), ("~~~~", "````", "~~~")] {
+            let markdown = format!("{opening}lang\n{wrong}\n# Hidden 1\n{short}\n# Hidden 2\n{opening}text\n# Hidden 3\n{opening}{opening}\n# Visible");
+            let headings = extract_headings(&markdown);
+            assert_eq!(headings.len(), 1);
+            assert_eq!(headings[0].text, "Visible");
+        }
+    }
+
+    #[test]
+    fn headings_skip_unclosed_fences_and_reset_setext_candidate() {
+        assert!(extract_headings("Text\n```rust\n# Hidden\nTitle\n===").is_empty());
+        assert!(extract_headings("Text\n~~~lang\n# Hidden").is_empty());
+        let headings = extract_headings("Text\n\n---\n===\n# Visible\n---\n");
+        assert_eq!(headings.len(), 1);
+        assert_eq!(headings[0].text, "Visible");
+        assert!(extract_headings("Text\n    ===\n\nOther\n=-=\n").is_empty());
+        assert!(extract_headings("Text\n```\n```\n===").is_empty());
+    }
+
+    #[test]
+    fn headings_count_unicode_and_crlf_offsets() {
+        for newline in ["\n", "\r\n"] {
+            let prefix = format!("🚀 préface{newline}");
+            let title = format!("日本語{newline}==={newline}");
+            let markdown = format!("{prefix}{title}## Café");
+            let headings = extract_headings(&markdown);
+            assert_eq!(headings.len(), 2);
+            assert_eq!(headings[0].text, "日本語");
+            assert_eq!(headings[0].char_offset, prefix.chars().count());
+            assert_eq!(headings[1].text, "Café");
+            assert_eq!(
+                headings[1].char_offset,
+                prefix.chars().count() + title.chars().count()
+            );
+        }
+    }
 
     #[test]
     fn test_clean_html_removes_script_tags() {
