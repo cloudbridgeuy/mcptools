@@ -14,3 +14,6 @@ color-eyre = "0.6.5"
 chrono = { workspace = true }
 regex = { workspace = true }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

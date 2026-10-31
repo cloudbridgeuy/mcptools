@@ -2,6 +2,17 @@
 members = ["xtask/", "crates/*"]
 resolver = "2"
 
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+rc_buffer = "warn"
+todo = "warn"
+unimplemented = "warn"
+dbg_macro = "warn"
+mem_forget = "warn"
+panic_in_result_fn = "warn"
+
 [workspace.package]
 edition = "2021"
 license = "MIT"
