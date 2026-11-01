@@ -73,13 +73,11 @@ fn laid_out_snapshot(input: &Value) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "GUZ-1130: same short form produces byte-identical laid-out snapshots"]
 fn layout_is_byte_deterministic() {
     assert_eq!(laid_out_snapshot(&plan()), laid_out_snapshot(&plan()));
 }
 
 #[test]
-#[ignore = "GUZ-1130: laid-out nodes have positive bounds and never overlap"]
 fn layout_nodes_do_not_overlap() {
     let input = plan();
     let positions = layout_plan(&input, &BTreeMap::new()).expect("layout valid plan");
@@ -100,7 +98,6 @@ fn layout_nodes_do_not_overlap() {
 }
 
 #[test]
-#[ignore = "GUZ-1130: updates preserve existing node positions"]
 fn updates_keep_existing_positions() {
     let existing = spike_positions();
     let mut updated = plan();

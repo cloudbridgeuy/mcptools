@@ -182,10 +182,112 @@ fn schema() -> Value {
 }
 
 pub fn layout_plan(
-    _plan: &Value,
-    _existing: &BTreeMap<String, Bounds>,
+    plan: &Value,
+    existing: &BTreeMap<String, Bounds>,
 ) -> Result<BTreeMap<String, Bounds>, String> {
-    Err("GUZ-1130: deterministic incremental layout is not implemented".into())
+    let plan = parse_plan(plan)?;
+    let layers = dependency_layers(&plan);
+    let mut positions = BTreeMap::new();
+    for id in layers.keys() {
+        if let Some(&bounds) = existing.get(*id) {
+            if ![
+                bounds.x,
+                bounds.y,
+                bounds.w,
+                bounds.h,
+                bounds.x + bounds.w,
+                bounds.y + bounds.h,
+            ]
+            .into_iter()
+            .all(f64::is_finite)
+                || bounds.w <= 0.0
+                || bounds.h <= 0.0
+                || bounds.x + bounds.w <= bounds.x
+                || bounds.y + bounds.h <= bounds.y
+            {
+                return Err(format!("invalid bounds for node: {id}"));
+            }
+            for (other_id, other) in &positions {
+                if bounds_overlap(&bounds, other) {
+                    return Err(format!("existing nodes overlap: {other_id} and {id}"));
+                }
+            }
+            positions.insert((*id).to_owned(), bounds);
+        }
+    }
+    let mut ordered: Vec<_> = layers.into_iter().map(|(id, layer)| (layer, id)).collect();
+    ordered.sort_unstable();
+    for (layer, id) in ordered {
+        if positions.contains_key(id) {
+            continue;
+        }
+        let mut bounds = Bounds {
+            x: layer as f64 * 340.0,
+            y: 0.0,
+            w: 260.0,
+            h: 80.0,
+        };
+        loop {
+            let next_y = positions
+                .values()
+                .filter(|other| bounds_overlap(&bounds, other))
+                .map(|other| other.y + other.h + 60.0)
+                .reduce(f64::max);
+            let Some(next_y) = next_y else {
+                break;
+            };
+            if !next_y.is_finite() || next_y <= bounds.y || next_y + bounds.h <= next_y {
+                return Err(format!("layout coordinate overflow for node: {id}"));
+            }
+            bounds.y = next_y;
+        }
+        positions.insert(id.to_owned(), bounds);
+    }
+    Ok(positions)
+}
+
+fn bounds_overlap(a: &Bounds, b: &Bounds) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+
+fn dependency_layers(plan: &ShortPlan) -> BTreeMap<&str, usize> {
+    let mut outgoing: BTreeMap<_, BTreeSet<_>> = plan
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), BTreeSet::new()))
+        .collect();
+    for edge in &plan.edges {
+        outgoing
+            .get_mut(edge.from.as_str())
+            .unwrap()
+            .insert(edge.to.as_str());
+    }
+    let mut visited = BTreeSet::new();
+    let mut finished = Vec::new();
+    for &root in outgoing.keys() {
+        let mut stack = vec![(root, false)];
+        while let Some((id, exiting)) = stack.pop() {
+            if exiting {
+                finished.push(id);
+            } else if visited.insert(id) {
+                stack.push((id, true));
+                stack.extend(outgoing[id].iter().rev().map(|&next| (next, false)));
+            }
+        }
+    }
+    let mut layers = BTreeMap::new();
+    let mut placed = BTreeSet::new();
+    for id in finished.into_iter().rev() {
+        let layer = *layers.entry(id).or_insert(0);
+        placed.insert(id);
+        for &next in &outgoing[id] {
+            if !placed.contains(next) {
+                let next_layer = layers.entry(next).or_insert(0);
+                *next_layer = (*next_layer).max(layer + 1);
+            }
+        }
+    }
+    layers
 }
 
 #[cfg(test)]
@@ -206,6 +308,188 @@ mod tests {
                 h: 5.0,
             },
         )])
+    }
+
+    fn assert_no_layout_overlap(positions: &BTreeMap<String, Bounds>) {
+        let bounds: Vec<_> = positions.values().collect();
+        for (index, a) in bounds.iter().enumerate() {
+            assert!(a.x.is_finite() && a.y.is_finite());
+            assert!(a.w.is_finite() && a.h.is_finite() && a.w > 0.0 && a.h > 0.0);
+            for b in &bounds[index + 1..] {
+                assert!(
+                    a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y,
+                    "overlap: {a:?} and {b:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn layout_uses_longest_dependency_layers_independent_of_input_order() {
+        let mut input = json!({"id":"layers","nodes":[
+            {"id":"d","text":"D"},{"id":"c","text":"C"},
+            {"id":"b","text":"B"},{"id":"a","text":"A"}
+        ],"edges":[{"from":"a","to":"d"},{"from":"a","to":"b"},
+            {"from":"b","to":"c"},{"from":"c","to":"d"},
+            {"from":"a","to":"b"}]});
+        let positions = layout_plan(&input, &BTreeMap::new()).unwrap();
+        for (from, to) in [("a", "b"), ("b", "c"), ("c", "d")] {
+            assert!(positions[from].x + positions[from].w < positions[to].x);
+        }
+        input["nodes"].as_array_mut().unwrap().reverse();
+        input["edges"].as_array_mut().unwrap().reverse();
+        assert_eq!(positions, layout_plan(&input, &BTreeMap::new()).unwrap());
+        assert_no_layout_overlap(&positions);
+    }
+
+    #[test]
+    fn cyclic_layout_is_deterministic_and_non_overlapping() {
+        let mut input = json!({"id":"cycles","nodes":[
+            {"id":"a","text":"A"},{"id":"b","text":"B"},
+            {"id":"0","text":"Downstream"},{"id":"self","text":"Self"}
+        ],"edges":[{"from":"a","to":"b"},{"from":"b","to":"a"},
+            {"from":"b","to":"0"},{"from":"self","to":"self"}]});
+        let positions = layout_plan(&input, &BTreeMap::new()).unwrap();
+        assert_eq!(positions.len(), 4);
+        assert!(positions["b"].x + positions["b"].w < positions["0"].x);
+        assert_no_layout_overlap(&positions);
+        input["nodes"].as_array_mut().unwrap().reverse();
+        input["edges"].as_array_mut().unwrap().reverse();
+        assert_eq!(
+            serde_json::to_vec(&positions).unwrap(),
+            serde_json::to_vec(&layout_plan(&input, &BTreeMap::new()).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn disconnected_nodes_share_a_layer_without_overlapping() {
+        let input = json!({"id":"disconnected","nodes":[
+            {"id":"c","text":"C"},{"id":"a","text":"A"},{"id":"b","text":"B"}
+        ],"edges":[]});
+        let positions = layout_plan(&input, &BTreeMap::new()).unwrap();
+        assert_eq!(positions.len(), 3);
+        assert_eq!(positions["a"].x, positions["b"].x);
+        assert_eq!(positions["b"].x, positions["c"].x);
+        assert!(positions["a"].y < positions["b"].y);
+        assert!(positions["b"].y < positions["c"].y);
+        assert_no_layout_overlap(&positions);
+    }
+
+    #[test]
+    fn empty_layout_discards_previous_positions() {
+        let input = json!({"id":"empty","nodes":[],"edges":[]});
+        assert!(layout_plan(&input, &positions()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn new_nodes_avoid_all_preserved_bounds_and_removed_nodes_are_dropped() {
+        let input = json!({"id":"update","nodes":[
+            {"id":"a","text":"Changed"},{"id":"b","text":"B"},{"id":"new","text":"New"}
+        ],"edges":[{"from":"a","to":"new"}]});
+        let existing = BTreeMap::from([
+            (
+                "a".into(),
+                Bounds {
+                    x: -10.5,
+                    y: -20.25,
+                    w: 1000.0,
+                    h: 300.0,
+                },
+            ),
+            (
+                "b".into(),
+                Bounds {
+                    x: 300.0,
+                    y: 300.0,
+                    w: 900.0,
+                    h: 500.0,
+                },
+            ),
+            (
+                "removed".into(),
+                Bounds {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 10.0,
+                    h: 10.0,
+                },
+            ),
+        ]);
+        let positions = layout_plan(&input, &existing).unwrap();
+        assert_eq!(positions.len(), 3);
+        for id in ["a", "b"] {
+            assert_eq!(positions[id], existing[id]);
+        }
+        assert!(!positions.contains_key("removed"));
+        assert_no_layout_overlap(&positions);
+        assert_eq!(positions, layout_plan(&input, &positions).unwrap());
+    }
+
+    #[test]
+    fn layout_reuses_short_form_validation() {
+        for input in [
+            Value::Null,
+            json!({"id":"plan","nodes":[{"id":"a","text":""}],"edges":[]}),
+            json!({"id":"plan","nodes":[],"edges":[{"from":"a","to":"b"}]}),
+        ] {
+            assert_eq!(
+                layout_plan(&input, &BTreeMap::new()).unwrap_err(),
+                validate_plan(&input).unwrap_err()
+            );
+        }
+    }
+
+    #[test]
+    fn layout_rejects_invalid_or_unrepresentable_preserved_bounds() {
+        for bounds in [
+            Bounds {
+                x: f64::NAN,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            },
+            Bounds {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 1.0,
+            },
+            Bounds {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: -1.0,
+            },
+            Bounds {
+                x: f64::MAX,
+                y: 0.0,
+                w: f64::MAX,
+                h: 1.0,
+            },
+            Bounds {
+                x: 0.0,
+                y: f64::MAX,
+                w: 1.0,
+                h: 1.0,
+            },
+        ] {
+            let existing = BTreeMap::from([("a".into(), bounds)]);
+            assert!(layout_plan(&single_node(), &existing)
+                .unwrap_err()
+                .contains("invalid bounds for node: a"));
+        }
+    }
+
+    #[test]
+    fn overlapping_preserved_nodes_are_rejected_instead_of_moved() {
+        let input = json!({"id":"overlap","nodes":[
+            {"id":"a","text":"A"},{"id":"b","text":"B"}
+        ],"edges":[]});
+        let bounds = positions()["a"];
+        let existing = BTreeMap::from([("a".into(), bounds), ("b".into(), bounds)]);
+        assert!(layout_plan(&input, &existing)
+            .unwrap_err()
+            .contains("overlap"));
     }
 
     #[test]
