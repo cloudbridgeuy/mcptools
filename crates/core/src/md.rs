@@ -6,6 +6,43 @@ use scraper::{Html, Selector as CssSelector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub const MIN_CHROME_MAJOR: u32 = 156;
+
+pub fn parse_chrome_major(version: &str) -> Result<u32, String> {
+    let version = [
+        "Google Chrome for Testing ",
+        "Google Chrome ",
+        "Chromium ",
+        "HeadlessChrome/",
+        "Chrome/",
+    ]
+    .into_iter()
+    .find_map(|prefix| version.trim().strip_prefix(prefix))
+    .and_then(|version| version.split_ascii_whitespace().next())
+    .ok_or_else(|| "Cannot parse Chrome version".to_string())?;
+    let parts = version.split('.').collect::<Vec<_>>();
+    if parts.len() != 4
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return Err("Cannot parse Chrome version".to_string());
+    }
+    parts[0]
+        .parse()
+        .map_err(|_| "Cannot parse Chrome version".to_string())
+}
+
+pub fn validate_chrome_major(major: u32) -> Result<(), String> {
+    if major < MIN_CHROME_MAJOR {
+        Err(format!(
+            "Chrome {major} is unsupported. Upgrade Chrome to current stable (Chrome {MIN_CHROME_MAJOR} or newer). CHROME=<path> selects a binary."
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownHeading {
     pub level: usize,
@@ -407,6 +444,50 @@ pub fn slice_content(content: String, start_offset: usize, end_offset: usize) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chrome_version_parses_supported_product_names() {
+        for version in [
+            "Google Chrome 156.0.8078.80\n",
+            "Chromium 156.0.8078.0 (Developer Build)",
+            "Google Chrome for Testing 156.0.8078.0",
+            "HeadlessChrome/156.0.8078.0",
+            "Chrome/156.0.8078.0",
+        ] {
+            assert_eq!(parse_chrome_major(version), Ok(156));
+        }
+        assert_eq!(parse_chrome_major("Google Chrome 125.0.6422.112"), Ok(125));
+    }
+
+    #[test]
+    fn chrome_version_rejects_malformed_output() {
+        for version in [
+            "",
+            "156.0.0.0",
+            "Firefox 156.0.0.0",
+            "Chromium 156",
+            "Chrome/156.0.0",
+            "Chrome/156..0.0",
+            "Chrome/-156.0.0.0",
+            "Chrome/156.0.0.x",
+            "Chrome/4294967296.0.0.0",
+            "Chrome/156.0.0.0.1",
+        ] {
+            assert!(parse_chrome_major(version).is_err(), "{version}");
+        }
+    }
+
+    #[test]
+    fn chrome_minimum_rejects_old_and_accepts_current_or_newer() {
+        for major in [0, 125, MIN_CHROME_MAJOR - 1] {
+            let error = validate_chrome_major(major).unwrap_err();
+            assert!(error.contains("Upgrade Chrome"));
+            assert!(error.contains("CHROME=<path>"));
+        }
+        for major in [MIN_CHROME_MAJOR, MIN_CHROME_MAJOR + 1, u32::MAX] {
+            assert!(validate_chrome_major(major).is_ok());
+        }
+    }
 
     #[test]
     fn headings_preserve_atx_matching() {

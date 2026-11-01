@@ -2,9 +2,13 @@
 
 Uses headless Chrome to fetch web pages and convert to Markdown.
 
+Requires current stable Chrome/Chromium (major version 156 or newer). This minimum is pinned to the stable milestone when the policy was introduced; it is not a live update check. The binary version is checked before launch. Older or unrecognized versions fail with upgrade instructions. Set `CHROME=/path/to/chrome` to select a binary. Only `--headless=new` is used; there is no old-headless fallback.
+
+One browser is reused per process, including across MCP fetch and TOC calls. Each request uses a separate tab, closed on success or failure. Requests run through one bounded browser queue; queue wait, version detection, startup, navigation, and conversion share the same request deadline. Idle keepalive tabs prevent the browser dependency from disconnecting between calls. A dead browser is replaced on the next request, not on page errors. CLI/MCP runtime shutdown releases the browser owner.
+
 CLI and MCP fetch/TOC paths verify TLS certificates. Invalid or untrusted certificates are not bypassed. No insecure mode is available.
 
-Fetch and TOC wait for the main document's network-idle event. The timeout covers browser startup, navigation, and conversion; a timeout returns an error. HTTP 4xx and 5xx main-document responses fail before waiting for network idle. Browser-computed visibility is the source of truth: `display: none` removes entire subtrees; `visibility: hidden` or `collapse` removes hidden content but preserves visible descendants. Scripts and styles are removed before selection and conversion, including raw HTML output. Core HTML cleanup consumes browser visibility markers and does not interpret CSS. Transport calls use the configured timeout, but the browser dependency has fixed startup waits; background work can outlive the caller's timeout.
+Fetch and TOC wait for the main document's network-idle event. The timeout covers browser startup, navigation, and conversion; a timeout returns an error. HTTP 4xx and 5xx main-document responses fail before waiting for network idle. Browser-computed visibility is the source of truth: `display: none` removes entire subtrees; `visibility: hidden` or `collapse` removes hidden content but preserves visible descendants. Scripts and styles are removed before selection and conversion, including raw HTML output. Core HTML cleanup consumes browser visibility markers and does not interpret CSS. The caller waits only until its shared deadline. The browser dependency retains its default transport timeout and fixed startup waits; background work can outlive the caller's timeout and delay queued requests, whose own deadlines still apply.
 
 ## CLI Commands
 
@@ -175,4 +179,4 @@ All CLI flags can be set via environment variables for scripting/testing:
 | `MD_LIMIT` | Characters per page |
 | `MD_PAGE` | Page number |
 
-Requires Chrome/Chromium installed on the system.
+Requires current stable Chrome/Chromium (156+). `CHROME` selects the executable.

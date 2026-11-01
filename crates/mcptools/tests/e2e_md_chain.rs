@@ -10,8 +10,39 @@ const section = await md_fetch({ url: PAGE_URL, offset: beta.char_offset, limit:
 console.log(toc.title, toc.entries.length, section.content.includes("BETA MARKER"), section.content.includes("ALPHA MARKER"));
 "#;
 
+/// Returns why browser tests must skip: no Chrome at `CHROME` or the default
+/// location, or a Chrome older than `MIN_CHROME_MAJOR`.
+fn unsupported_chrome() -> Option<String> {
+    use mcptools_core::md::{parse_chrome_major, validate_chrome_major};
+
+    let path = match std::env::var_os("CHROME") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => match headless_chrome::browser::default_executable() {
+            Ok(path) => path,
+            Err(error) => return Some(format!("Chrome not found: {error}")),
+        },
+    };
+    let output = match std::process::Command::new(&path).arg("--version").output() {
+        Ok(output) => output,
+        Err(error) => return Some(format!("cannot run {}: {error}", path.display())),
+    };
+    parse_chrome_major(&String::from_utf8_lossy(&output.stdout))
+        .and_then(validate_chrome_major)
+        .err()
+}
+
+macro_rules! skip_without_chrome {
+    ($name:literal) => {
+        if let Some(reason) = unsupported_chrome() {
+            eprintln!("skipping {}: {reason}", $name);
+            return;
+        }
+    };
+}
+
 #[tokio::test]
 async fn md_chain_fetches_the_section_marked_by_toc() {
+    skip_without_chrome!("md_chain_fetches_the_section_marked_by_toc");
     let stub = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(
@@ -45,6 +76,7 @@ async fn md_chain_fetches_the_section_marked_by_toc() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn md_uses_computed_visibility_and_waits_for_delayed_fetch() {
+    skip_without_chrome!("md_uses_computed_visibility_and_waits_for_delayed_fetch");
     let stub = MockServer::start().await;
     Mock::given(path("/"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(
@@ -119,6 +151,7 @@ async fn md_uses_computed_visibility_and_waits_for_delayed_fetch() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn md_rejects_http_errors_before_network_idle() {
+    skip_without_chrome!("md_rejects_http_errors_before_network_idle");
     let stub = MockServer::start().await;
     Mock::given(path("/slow"))
         .respond_with(
@@ -155,7 +188,7 @@ fn md_nonzero_deadline_includes_browser_startup() {
     use std::os::unix::fs::PermissionsExt;
     let directory = tempfile::tempdir().expect("temporary directory");
     let browser = directory.path().join("slow-chrome");
-    std::fs::write(&browser, "#!/bin/sh\nexec sleep 3\n").expect("write browser");
+    std::fs::write(&browser, format!("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Chromium {}.0.0.0'; else exec sleep 3; fi\n", mcptools_core::md::MIN_CHROME_MAJOR)).expect("write browser");
     std::fs::set_permissions(&browser, std::fs::Permissions::from_mode(0o700))
         .expect("executable browser");
     let start = std::time::Instant::now();
@@ -167,4 +200,145 @@ fn md_nonzero_deadline_includes_browser_startup() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Fetch timed out after 1 seconds"));
     assert!(start.elapsed() < std::time::Duration::from_secs(2));
+}
+
+#[cfg(unix)]
+#[test]
+fn md_deadline_includes_chrome_version_detection() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let browser = directory.path().join("slow-version");
+    executable_script(&browser, "#!/bin/sh\nexec sleep 3\n");
+    let start = std::time::Instant::now();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mcptools"))
+        .env("CHROME", &browser)
+        .args(["md", "fetch", "http://invalid.invalid", "--timeout", "1"])
+        .output()
+        .expect("run fetch");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Fetch timed out after 1 seconds"));
+    assert!(start.elapsed() < std::time::Duration::from_secs(2));
+}
+
+#[cfg(unix)]
+fn executable_script(path: &std::path::Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, script).expect("write script");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .expect("executable script");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn md_rejects_old_chrome_before_launch_for_cli_and_mcp() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let browser = directory.path().join("old-chrome");
+    executable_script(
+        &browser,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Google Chrome 125.0.6422.112'; else exit 99; fi\n",
+    );
+    for command in ["fetch", "toc"] {
+        let start = std::time::Instant::now();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_mcptools"))
+            .env("CHROME", &browser)
+            .args(["md", command, "http://invalid.invalid"])
+            .output()
+            .expect("run md");
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("Chrome 125 is unsupported"), "{error}");
+        assert!(error.contains("Upgrade Chrome"), "{error}");
+        assert!(error.contains("CHROME=<path>"), "{error}");
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+    let mut server =
+        common::spawn_server(&[("CHROME", browser.to_str().unwrap())]).expect("spawn server");
+    for (id, tool) in [(1, "md_fetch"), (2, "md_toc")] {
+        let start = std::time::Instant::now();
+        let result = server.request(serde_json::json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": tool, "arguments": {"url": "http://invalid.invalid"}}})).await;
+        let error = result.to_string();
+        assert!(error.contains("Chrome 125 is unsupported"), "{error}");
+        assert!(error.contains("Upgrade Chrome"), "{error}");
+        assert!(error.contains("CHROME=<path>"), "{error}");
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn md_reuses_browser_across_calls_and_idle_then_relaunches_after_death() {
+    skip_without_chrome!("md_reuses_browser_across_calls_and_idle_then_relaunches_after_death");
+    let binary = headless_chrome::browser::default_executable().expect("Chrome installed");
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let wrapper = directory.path().join("chrome");
+    let launches = directory.path().join("launches");
+    executable_script(&wrapper, "#!/bin/sh\nif [ \"$1\" != \"--version\" ]; then echo \"$$ $*\" >> \"$MD_BROWSER_LAUNCH_LOG\"; fi\nexec \"$MD_BROWSER_BINARY\" \"$@\"\n");
+    let stub = MockServer::start().await;
+    Mock::given(path("/error"))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_raw("<html><body>Error</body></html>", "text/html"),
+        )
+        .with_priority(1)
+        .mount(&stub)
+        .await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_raw(include_str!("fixtures/md_chain.html"), "text/html"),
+        )
+        .mount(&stub)
+        .await;
+    let mut server = common::spawn_server(&[
+        ("CHROME", wrapper.to_str().unwrap()),
+        ("MD_BROWSER_BINARY", binary.to_str().unwrap()),
+        ("MD_BROWSER_LAUNCH_LOG", launches.to_str().unwrap()),
+    ])
+    .expect("spawn server");
+    for tool in ["md_toc", "md_fetch", "md_fetch"] {
+        let result = server
+            .tools_call(tool, serde_json::json!({"url": stub.uri(), "timeout": 8}))
+            .await;
+        assert!(result["structuredContent"].is_object(), "{result}");
+    }
+    let error = server.request(serde_json::json!({"jsonrpc": "2.0", "id": 900, "method": "tools/call", "params": {"name": "md_fetch", "arguments": {"url": format!("{}/error", stub.uri()), "timeout": 8}}})).await;
+    assert!(error.to_string().contains("HTTP 500"), "{error}");
+    let result = server
+        .tools_call(
+            "md_fetch",
+            serde_json::json!({"url": stub.uri(), "timeout": 8}),
+        )
+        .await;
+    assert!(result["structuredContent"].is_object(), "{result}");
+    let log = std::fs::read_to_string(&launches).expect("launch log");
+    assert_eq!(log.lines().count(), 1, "{log}");
+    assert!(log.contains("--headless=new"), "{log}");
+    assert!(!log
+        .split_ascii_whitespace()
+        .any(|arg| arg == "--headless" || arg == "--headless=old"));
+    tokio::time::sleep(std::time::Duration::from_secs(32)).await;
+    let result = server
+        .tools_call(
+            "md_fetch",
+            serde_json::json!({"url": stub.uri(), "timeout": 8}),
+        )
+        .await;
+    assert!(result["structuredContent"].is_object(), "{result}");
+    assert_eq!(std::fs::read_to_string(&launches).unwrap(), log);
+    let pid = log.split_ascii_whitespace().next().expect("browser pid");
+    assert!(std::process::Command::new("kill")
+        .args(["-KILL", pid])
+        .status()
+        .unwrap()
+        .success());
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let result = server
+        .tools_call(
+            "md_toc",
+            serde_json::json!({"url": stub.uri(), "timeout": 15}),
+        )
+        .await;
+    assert!(result["structuredContent"].is_object(), "{result}");
+    assert_eq!(
+        std::fs::read_to_string(&launches).unwrap().lines().count(),
+        2
+    );
 }

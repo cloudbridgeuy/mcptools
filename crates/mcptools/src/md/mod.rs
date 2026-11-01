@@ -1,9 +1,10 @@
+mod browser;
 mod fetch;
 pub mod toc;
 
 use crate::prelude::{eprintln, println, *};
 use headless_chrome::protocol::cdp::{types::Event, Network, Page};
-use headless_chrome::{Browser, LaunchOptions};
+use headless_chrome::Tab;
 use std::{
     sync::{mpsc, Arc},
     time::{Duration, Instant},
@@ -35,7 +36,6 @@ impl From<SelectionStrategy> for mcptools_core::md::SelectionStrategy {
     }
 }
 
-// Re-export command modules
 pub use fetch::FetchOptions;
 pub use toc::{extract_toc_data, OutputFormat, TocOptions};
 
@@ -79,14 +79,6 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
     }
 }
 
-fn browser_launch_options(timeout: Duration) -> LaunchOptions<'static> {
-    LaunchOptions {
-        ignore_certificate_errors: false,
-        idle_browser_timeout: timeout,
-        ..LaunchOptions::default()
-    }
-}
-
 pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
     if config.paginated {
         mcptools_core::md::validate_pagination(config.limit, config.page).map_err(|e| eyre!(e))?;
@@ -99,19 +91,14 @@ pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
     let deadline = start
         .checked_add(timeout)
         .ok_or_else(|| eyre!("Fetch timeout is too large"))?;
-    let (sender, receiver) = mpsc::sync_channel(1);
-    std::thread::spawn(move || {
-        let _ = sender.send(fetch_with_browser(config, start, deadline));
-    });
-    receiver
-        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-        .map_err(|_| eyre!("Fetch timed out after {} seconds", timeout.as_secs()))?
+    browser::fetch(config, start, deadline)
 }
 
 fn fetch_with_browser(
     config: FetchConfig,
     start: Instant,
     deadline: Instant,
+    tab: &Tab,
 ) -> Result<FetchOutput> {
     use mcptools_core::md::{
         calculate_pagination, process_html_content, slice_content, validate_document_status,
@@ -123,17 +110,6 @@ fn fetch_with_browser(
             .ok_or_else(|| eyre!("Fetch timed out after {} seconds", config.timeout))
     };
 
-    let browser = Browser::new(browser_launch_options(remaining()?)).map_err(|e| {
-        eyre!(
-            "Failed to launch browser: {}. Make sure Chrome or Chromium is installed.",
-            e
-        )
-    })?;
-
-    remaining()?;
-    let tab = browser
-        .new_tab()
-        .map_err(|e| eyre!("Failed to create new tab: {}", e))?;
     tab.set_default_timeout(remaining()?);
 
     tab.call_method(Network::Enable {
@@ -287,13 +263,11 @@ mod tests {
 
     #[test]
     fn browser_verifies_tls_certificates() {
-        let timeout = Duration::from_secs(3);
-        let options = browser_launch_options(timeout);
-        assert_eq!(options.idle_browser_timeout, timeout);
+        let options = browser::launch_options();
         assert!(!options.ignore_certificate_errors);
-        assert!(options.headless);
+        assert!(!options.headless);
         assert!(options.sandbox);
-        assert!(options.args.is_empty());
+        assert_eq!(options.args, [std::ffi::OsStr::new("--headless=new")]);
     }
 
     #[test]

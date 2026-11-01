@@ -480,6 +480,8 @@ List HackerNews stories with pagination support.
 
 Fetch web pages using headless Chrome and convert to Markdown. Supports CSS selector filtering to extract specific page elements, character-based pagination, and section extraction using offsets from `md_toc`.
 
+Requires current stable Chrome/Chromium (156+; the stable milestone pinned when this policy was introduced). Versions are checked before launch; older versions fail with upgrade instructions. `CHROME=/path/to/chrome` selects a binary. Only new headless mode is used. One browser is reused across process-local fetch/TOC calls and replaced if it dies; request tabs close on success or failure. Queue wait and version detection share the fetch deadline with startup, navigation, and conversion.
+
 Both `md_fetch` and `md_toc` verify TLS certificates. Invalid or untrusted certificates are not bypassed; there is no insecure mode.
 
 **Parameters:**
