@@ -18,7 +18,6 @@ fn spike_positions() -> BTreeMap<String, Bounds> {
 }
 
 #[test]
-#[ignore = "GUZ-1129: short-form expansion into a valid tldraw 5.x snapshot"]
 fn short_form_matches_spike_snapshot() {
     let expected: Value =
         serde_json::from_str(include_str!("../../../tests/fixtures/plan/spike.tldr"))
@@ -28,13 +27,11 @@ fn short_form_matches_spike_snapshot() {
 }
 
 #[test]
-#[ignore = "GUZ-1129: accept valid short-form plans"]
 fn valid_short_form_is_accepted() {
     validate_plan(&plan()).expect("valid spike plan");
 }
 
 #[test]
-#[ignore = "GUZ-1129: reject duplicate node ids with a clear error"]
 fn duplicate_ids_are_rejected() {
     let input =
         json!({"id":"bad", "nodes":[{"id":"a","text":"One"},{"id":"a","text":"Two"}],"edges":[]});
@@ -46,7 +43,6 @@ fn duplicate_ids_are_rejected() {
 }
 
 #[test]
-#[ignore = "GUZ-1129: reject edges with unknown endpoints with a clear error"]
 fn unknown_edge_endpoints_are_rejected() {
     for edge in [
         json!({"from":"a","to":"missing"}),
@@ -62,7 +58,6 @@ fn unknown_edge_endpoints_are_rejected() {
 }
 
 #[test]
-#[ignore = "GUZ-1129: reject empty node text with a clear error"]
 fn empty_text_is_rejected() {
     for text in ["", " \t\n"] {
         let input = json!({"id":"bad","nodes":[{"id":"a","text":text}],"edges":[]});

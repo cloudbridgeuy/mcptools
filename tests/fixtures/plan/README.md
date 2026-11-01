@@ -1,6 +1,12 @@
 # Plan acceptance fixtures
 
-`spike.tldr` is an unchanged copy of `/tmp/diagram-spike/plan.tldr`.
+`spike.tldr` was regenerated in `/tmp/diagram-spike` with
+`NODE_ENV=test node gen.mjs /private/var/folders/g9/4b8tv1yj0tnfsp21spqtx5zr0000gp/T/opencode/GUZ-1129-first.tldr`.
+The same command with output `GUZ-1129-second.tldr` produced byte-identical
+output (`cmp` succeeded). Both runs validated all 26 records with the spike's
+`createTLSchema` and `Store.put`, with zero validator errors. `gen.mjs` was
+not changed. `NODE_ENV=test` disables random index jitter, yielding deterministic
+fractional indexes (`a1`, `a2`, ..., `aC`). Positions did not change.
 `spike.short.json` transcribes the six nodes and six edges in that spike's
 `gen.mjs`. `spike.positions.json` transcribes its coordinates and dimensions.
 These are spike-derived fixtures, not synthesized fallback fixtures.
