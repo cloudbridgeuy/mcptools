@@ -166,6 +166,8 @@ fn mcp_contract_pilot() {
             "pdf_peek",
             "pdf_read",
             "pdf_toc",
+            "plan_url",
+            "plan_write",
             "ui_annotations_clear",
             "ui_annotations_get",
             "ui_annotations_list",

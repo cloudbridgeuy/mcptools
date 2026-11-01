@@ -2,6 +2,10 @@
 
 mcptools can run as an MCP (Model Context Protocol) server.
 
+The full registry has 108 tools: 105 catalog tools and 3 meta tools.
+`plan_write` stores a diagram (Write; requires `allowWrites: true`);
+`plan_url` reads its persisted URL (Read). See [Plan diagrams](diagram.md).
+
 ## Transport Modes
 
 ### stdio (Local Agents)

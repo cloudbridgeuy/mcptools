@@ -10,6 +10,7 @@ mod lane;
 mod linear;
 mod md;
 mod pdf;
+mod plan;
 pub mod schema;
 
 #[cfg(test)]
@@ -161,6 +162,24 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 
 pub fn registered_tools() -> Vec<Tool> {
     vec![
+        Tool {
+            name: "plan_write".into(),
+            description: "Validate, lay out and store a short-form plan as a tldraw snapshot. Updates preserve existing node positions and the per-plan URL token, and increment the revision. Invalid input writes nothing. Requires allowWrites. URL host and port use MCPTOOLS_DIAGRAM_HOST and MCPTOOLS_DIAGRAM_PORT, defaulting to 127.0.0.1:5199.".into(),
+            summary: "Store a laid-out plan diagram and return its URL and revision",
+            kind: ToolKind::Write,
+            destructive: true,
+            input_schema: schema::input_schema_for::<mcptools_core::plan_store::WriteArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::plan_store::WriteOutput>(),
+        },
+        Tool {
+            name: "plan_url".into(),
+            description: "Return the URL for an existing stored plan using its persisted 128-bit token. Read-only; unknown plans fail. URL host and port use MCPTOOLS_DIAGRAM_HOST and MCPTOOLS_DIAGRAM_PORT, defaulting to 127.0.0.1:5199.".into(),
+            summary: "Get the URL of a stored plan diagram",
+            kind: ToolKind::Read,
+            destructive: false,
+            input_schema: schema::input_schema_for::<mcptools_core::plan_store::UrlArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::plan_store::UrlOutput>(),
+        },
         Tool {
             name: "lane_list".into(),
             description: "List Git worktrees of an exact repository root permitted by server environment MCPTOOLS_LANE_REPOS. Denied when unset or empty. Native Git avoids Worktrunk cache writes. Missing HEAD is null; unavailable status is unknown. Only unchanged registered identities are managed. Cleanup planning is read-only; cleanup apply can remove eligible managed lanes. No merge or push tools exist.".into(),
@@ -1312,6 +1331,8 @@ pub async fn dispatch_tool_call(
     let tools = registered_tools();
     let name = aliases::resolve(&params.name, &tools)?;
     match name {
+        "plan_write" => plan::handle_plan_write(params.arguments).await,
+        "plan_url" => plan::handle_plan_url(params.arguments).await,
         "lane_list" => lane::list(params.arguments).await,
         "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
         "lane_cleanup_apply" => lane::cleanup_apply(params.arguments).await,
@@ -1567,7 +1588,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 103);
+        assert_eq!(catalog.len(), 105);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1605,6 +1626,7 @@ mod catalog_tests {
                 "linear",
                 "md",
                 "pdf",
+                "plan",
                 "ui"
             ])
         );
@@ -1632,7 +1654,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 106);
+        assert_eq!(super::registered_tools().len(), 108);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1707,7 +1729,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 106);
+        assert_eq!(names(serve_flags(false)).len(), 108);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1799,6 +1821,7 @@ mod catalog_tests {
     #[test]
     fn full_table_matches_oracle_annotations() {
         let destructive: std::collections::BTreeSet<&str> = [
+            "plan_write",
             "lane_cleanup_apply",
             "lane_create",
             "jira_update",
@@ -1833,7 +1856,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 106);
+        assert_eq!(tools.len(), 108);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1868,6 +1891,7 @@ mod catalog_tests {
     #[test]
     fn registered_names_match_oracle_sets() {
         let write: std::collections::BTreeSet<&str> = [
+            "plan_write",
             "lane_cleanup_apply",
             "lane_create",
             "confluence_page_create",
@@ -1922,6 +1946,7 @@ mod catalog_tests {
                 .into_iter()
                 .collect();
         let read: std::collections::BTreeSet<&str> = [
+            "plan_url",
             "lane_list",
             "lane_cleanup_plan",
             "jira_search",
@@ -1984,7 +2009,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 106);
+        assert_eq!(union.len(), 108);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

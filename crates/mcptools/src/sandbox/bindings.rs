@@ -233,7 +233,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn read_only_set_has_expected_names_and_no_writes() {
         let read = bound_names(&registered_tools(), &[ToolKind::Read]);
-        assert_eq!(read.len(), 57);
+        assert_eq!(read.len(), 58);
+        assert!(read.contains(&"plan_url".to_string()));
+        assert!(!read.contains(&"plan_write".to_string()));
         assert!(read.contains(&"lane_list".to_string()));
         assert!(read.contains(&"lane_cleanup_plan".to_string()));
         assert!(!read.contains(&"lane_cleanup_apply".to_string()));
@@ -277,7 +279,8 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 104);
+        assert_eq!(all.len(), 106);
+        assert!(all.contains(&"plan_write".to_string()));
         assert!(all.contains(&"lane_cleanup_apply".to_string()));
         assert!(all.contains(&"linear_document_create".to_string()));
         assert!(all.contains(&"linear_document_update".to_string()));

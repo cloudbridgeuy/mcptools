@@ -62,7 +62,6 @@ async fn rejects_without_writing(input: Value, expected: &[&str]) {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1131: plan_write rejects duplicate ids without writing"]
 async fn duplicate_ids_write_nothing() {
     let mut input = plan();
     input["nodes"][1]["id"] = json!("s1");
@@ -70,7 +69,6 @@ async fn duplicate_ids_write_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1131: plan_write rejects unknown edge endpoints without writing"]
 async fn unknown_edge_writes_nothing() {
     let mut input = plan();
     input["edges"][0]["to"] = json!("missing");
@@ -78,7 +76,6 @@ async fn unknown_edge_writes_nothing() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1131: plan_write rejects empty text without writing"]
 async fn empty_text_writes_nothing() {
     let mut input = plan();
     input["nodes"][0]["text"] = json!("");
@@ -110,10 +107,23 @@ fn token(url: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1131: persist plan_write and return stable per-plan 128-bit plan_url"]
 async fn write_and_url_share_persisted_token() {
     let home = tempfile::tempdir().expect("isolated home");
     let mut mcp = server(home.path());
+    let before = files(home.path());
+    let mut denied = plan();
+    denied.as_object_mut().unwrap().remove("allowWrites");
+    let denied = mcp.tools_call("plan_write", denied).await;
+    assert_eq!(denied["isError"], true);
+    assert_eq!(files(home.path()), before);
+    let unknown = mcp
+        .request(json!({
+            "jsonrpc":"2.0", "id":20, "method":"tools/call",
+            "params":{"name":"plan_url","arguments":{"id":"missing"}}
+        }))
+        .await;
+    assert!(unknown["error"].is_object());
+    assert_eq!(files(home.path()), before);
     let written = mcp.tools_call("plan_write", plan()).await;
     let written = structured(&written);
     let url = written["url"].as_str().expect("plan URL").to_owned();
@@ -130,6 +140,13 @@ async fn write_and_url_share_persisted_token() {
         &std::fs::read(directory.join("meta.json")).expect("stored metadata"),
     )
     .unwrap();
+    assert_eq!(meta["id"], "spike");
+    assert_eq!(meta["rev"], rev);
+    let stored_token = meta["token"].as_str().unwrap();
+    assert_eq!(stored_token.len(), 32);
+    assert!(stored_token
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
     assert_eq!(
         token(&format!(
             "http://localhost/d/{}",
@@ -146,6 +163,24 @@ async fn write_and_url_share_persisted_token() {
     let updated = mcp.tools_call("plan_write", updated).await;
     assert_eq!(structured(&updated)["url"], url);
     assert!(structured(&updated)["rev"].as_u64().unwrap() > rev);
+    let updated_snapshot: Value =
+        serde_json::from_slice(&std::fs::read(directory.join("plan.tldr")).unwrap()).unwrap();
+    let positions = mcptools_core::plan_store::previous_positions;
+    assert_eq!(
+        positions(Some(&snapshot)).unwrap(),
+        positions(Some(&updated_snapshot)).unwrap()
+    );
+    let before = files(home.path());
+    let mut invalid = plan();
+    invalid["nodes"][0]["text"] = json!("");
+    let rejected = mcp
+        .request(json!({
+            "jsonrpc":"2.0", "id":22, "method":"tools/call",
+            "params":{"name":"plan_write","arguments":invalid}
+        }))
+        .await;
+    assert!(rejected["error"].is_object());
+    assert_eq!(files(home.path()), before);
     let mut other = plan();
     other["id"] = json!("other");
     let other = mcp.tools_call("plan_write", other).await;

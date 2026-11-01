@@ -19,6 +19,7 @@ mod mcp;
 mod md;
 mod open;
 mod pdf;
+mod plan_store;
 mod prelude;
 mod sandbox;
 mod upgrade;
