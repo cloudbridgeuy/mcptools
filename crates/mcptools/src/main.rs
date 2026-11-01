@@ -7,6 +7,7 @@ use std::time::Duration;
 
 mod agent;
 mod atlassian;
+mod diagram;
 mod error;
 mod find_tools;
 mod hn;
@@ -88,6 +89,7 @@ impl Global {
 
 #[derive(Debug, clap::Parser)]
 pub enum SubCommands {
+    Diagram(crate::diagram::App),
     /// Agent setup, status, and uninstall
     Agent(crate::agent::App),
 
@@ -128,6 +130,7 @@ async fn main() -> Result<()> {
     let app = App::parse();
 
     match app.command {
+        SubCommands::Diagram(sub_app) => crate::diagram::run(sub_app).await,
         SubCommands::Agent(sub_app) => crate::agent::run(sub_app, app.global).await,
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(*sub_app, app.global).await,
         SubCommands::FindTools(sub_app) => crate::find_tools::run(sub_app, app.global).await,

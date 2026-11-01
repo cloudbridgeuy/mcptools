@@ -1,3 +1,6 @@
+[files]
+extend-exclude = ["diagram-page/dist/**", "diagram-page/package-lock.json"]
+
 [default.extend-words]
 parms = "parms"
 Parms = "Parms"

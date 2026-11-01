@@ -219,7 +219,6 @@ fn daemon(home: &Path, host: &str, port: u16) -> Daemon {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1132: serve known token page and snapshot with 200; unknown token with 404"]
 async fn token_routes_serve_only_known_plans() {
     let home = tempfile::tempdir().expect("isolated home");
     let mut mcp = server(home.path());
@@ -285,7 +284,6 @@ async fn token_routes_serve_only_known_plans() {
 }
 
 #[test]
-#[ignore = "GUZ-1132: diagram serve explicitly refuses the wildcard host 0.0.0.0"]
 fn serve_refuses_wildcard_host() {
     use std::io::Read;
 
