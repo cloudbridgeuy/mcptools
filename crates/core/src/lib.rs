@@ -77,6 +77,7 @@ pub mod agent;
 pub mod annotations;
 pub mod atlassian;
 pub mod catalog;
+pub mod diagram;
 pub mod find_tools;
 pub mod hn;
 pub mod images;

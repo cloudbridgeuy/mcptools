@@ -1,0 +1,19 @@
+{
+  "id": "spike",
+  "nodes": [
+    {"id": "s1", "text": "Add [workspace.lints] to root Cargo.toml"},
+    {"id": "s2", "text": "Add [lints] workspace = true to each crate"},
+    {"id": "s3", "text": "Fix new clippy warnings in core"},
+    {"id": "s4", "text": "Fix new clippy warnings in cli"},
+    {"id": "s5", "text": "Add clippy -D warnings to CI"},
+    {"id": "s6", "text": "Document lint policy in CLAUDE.md"}
+  ],
+  "edges": [
+    {"from": "s1", "to": "s2"},
+    {"from": "s2", "to": "s3"},
+    {"from": "s2", "to": "s4"},
+    {"from": "s3", "to": "s5"},
+    {"from": "s4", "to": "s5"},
+    {"from": "s5", "to": "s6"}
+  ]
+}
