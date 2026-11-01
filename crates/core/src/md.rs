@@ -124,15 +124,31 @@ pub struct PaginationResult {
     pub pagination_info: MdPaginationInfo,
 }
 
-/// Remove script and style tags from HTML
 pub fn clean_html(html: &str) -> String {
-    let script_regex = Regex::new(r"(?is)<script\b[^>]*>.*?</script>").unwrap();
-    let html = script_regex.replace_all(html, "");
+    let mut document = Html::parse_document(html);
+    let selector = CssSelector::parse("*").expect("universal CSS selector");
+    let removed: Vec<_> = document
+        .select(&selector)
+        .filter(|element| {
+            let node = element.value();
+            matches!(node.name(), "script" | "style") || node.attr("data-mcptools-hidden").is_some()
+        })
+        .map(|element| element.id())
+        .collect();
+    for id in removed {
+        if let Some(mut node) = document.tree.get_mut(id) {
+            node.detach();
+        }
+    }
+    document.html()
+}
 
-    let style_regex = Regex::new(r"(?is)<style\b[^>]*>.*?</style>").unwrap();
-    let html = style_regex.replace_all(&html, "");
-
-    html.to_string()
+pub fn validate_document_status(status: u16) -> Result<(), String> {
+    if (400..600).contains(&status) {
+        Err(format!("Document request failed with HTTP {status}"))
+    } else {
+        Ok(())
+    }
 }
 
 /// Apply CSS selector to HTML and return filtered HTML and count of elements found
@@ -289,6 +305,7 @@ pub fn process_html_content(
     index: Option<usize>,
     raw_html: bool,
 ) -> Result<ProcessedContent, String> {
+    let html = clean_html(&html);
     let (filtered_html, selector_used, elements_found, strategy_applied) =
         if let Some(ref sel) = selector {
             let (filtered, count) = apply_selector(&html, sel, &strategy, index)?;
@@ -308,12 +325,10 @@ pub fn process_html_content(
             (html, None, None, None)
         };
 
-    let cleaned_html = clean_html(&filtered_html);
-
     let content = if raw_html {
-        cleaned_html
+        filtered_html
     } else {
-        html_to_markdown(&cleaned_html, page_url)?
+        html_to_markdown(&filtered_html, page_url)?
     };
 
     Ok(ProcessedContent {
@@ -530,6 +545,38 @@ mod tests {
         assert!(!cleaned.contains("<style"));
         assert!(cleaned.contains("<div>Content</div>"));
         assert!(cleaned.contains("<p>More</p>"));
+    }
+
+    #[test]
+    fn hidden_elements_and_descendants_are_removed() {
+        let html = r#"<main><p>visible</p><div data-mcptools-hidden><b>inline hidden</b></div><div data-mcptools-hidden><p>stylesheet hidden</p></div><p style="display: block">shown</p></main>"#;
+        let cleaned = clean_html(html);
+        assert!(cleaned.contains("visible"));
+        assert!(cleaned.contains("shown"));
+        assert!(!cleaned.contains(" hidden"));
+    }
+
+    #[test]
+    fn unmarked_visibility_is_not_inferred_from_css_or_attributes() {
+        let html = r#"<div hidden style="display:block">attribute override</div><p style="display:none;display:block">display override</p><div style="visibility:hidden"><p style="visibility:visible">visible descendant</p></div>"#;
+        let cleaned = clean_html(html);
+        for text in [
+            "attribute override",
+            "display override",
+            "visible descendant",
+        ] {
+            assert!(cleaned.contains(text));
+        }
+    }
+
+    #[test]
+    fn document_error_statuses_are_rejected() {
+        for status in [400, 404, 500, 599] {
+            assert!(validate_document_status(status).is_err());
+        }
+        for status in [200, 301, 399, 600] {
+            assert!(validate_document_status(status).is_ok());
+        }
     }
 
     #[test]

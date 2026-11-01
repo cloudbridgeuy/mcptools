@@ -4,6 +4,8 @@ Uses headless Chrome to fetch web pages and convert to Markdown.
 
 CLI and MCP fetch/TOC paths verify TLS certificates. Invalid or untrusted certificates are not bypassed. No insecure mode is available.
 
+Fetch and TOC wait for the main document's network-idle event. The timeout covers browser startup, navigation, and conversion; a timeout returns an error. HTTP 4xx and 5xx main-document responses fail before waiting for network idle. Browser-computed visibility is the source of truth: `display: none` removes entire subtrees; `visibility: hidden` or `collapse` removes hidden content but preserves visible descendants. Scripts and styles are removed before selection and conversion, including raw HTML output. Core HTML cleanup consumes browser visibility markers and does not interpret CSS. Transport calls use the configured timeout, but the browser dependency has fixed startup waits; background work can outlive the caller's timeout.
+
 ## CLI Commands
 
 ### Fetch Web Pages

@@ -2,8 +2,12 @@ mod fetch;
 pub mod toc;
 
 use crate::prelude::{eprintln, println, *};
+use headless_chrome::protocol::cdp::{types::Event, Network, Page};
 use headless_chrome::{Browser, LaunchOptions};
-use std::time::Instant;
+use std::{
+    sync::{mpsc, Arc},
+    time::{Duration, Instant},
+};
 
 pub use mcptools_core::md::{FetchOutput, MdPaginationInfo};
 
@@ -75,49 +79,160 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
     }
 }
 
-fn browser_launch_options() -> LaunchOptions<'static> {
+fn browser_launch_options(timeout: Duration) -> LaunchOptions<'static> {
     LaunchOptions {
         ignore_certificate_errors: false,
+        idle_browser_timeout: timeout,
         ..LaunchOptions::default()
     }
 }
 
 pub fn fetch_and_convert_data(config: FetchConfig) -> Result<FetchOutput> {
+    if config.paginated {
+        mcptools_core::md::validate_pagination(config.limit, config.page).map_err(|e| eyre!(e))?;
+    }
+    let timeout = Duration::from_secs(config.timeout);
+    if timeout.is_zero() {
+        return Err(eyre!("Fetch timed out after 0 seconds"));
+    }
+    let start = Instant::now();
+    let deadline = start
+        .checked_add(timeout)
+        .ok_or_else(|| eyre!("Fetch timeout is too large"))?;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = sender.send(fetch_with_browser(config, start, deadline));
+    });
+    receiver
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .map_err(|_| eyre!("Fetch timed out after {} seconds", timeout.as_secs()))?
+}
+
+fn fetch_with_browser(
+    config: FetchConfig,
+    start: Instant,
+    deadline: Instant,
+) -> Result<FetchOutput> {
     use mcptools_core::md::{
-        calculate_pagination, process_html_content, slice_content, validate_pagination,
+        calculate_pagination, process_html_content, slice_content, validate_document_status,
     };
 
-    if config.paginated {
-        validate_pagination(config.limit, config.page).map_err(|e| eyre!(e))?;
-    }
+    let remaining = || {
+        deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| eyre!("Fetch timed out after {} seconds", config.timeout))
+    };
 
-    let start = Instant::now();
-
-    let browser = Browser::new(browser_launch_options()).map_err(|e| {
+    let browser = Browser::new(browser_launch_options(remaining()?)).map_err(|e| {
         eyre!(
             "Failed to launch browser: {}. Make sure Chrome or Chromium is installed.",
             e
         )
     })?;
 
+    remaining()?;
     let tab = browser
         .new_tab()
         .map_err(|e| eyre!("Failed to create new tab: {}", e))?;
+    tab.set_default_timeout(remaining()?);
 
-    tab.set_default_timeout(std::time::Duration::from_secs(config.timeout));
+    tab.call_method(Network::Enable {
+        max_total_buffer_size: None,
+        max_resource_buffer_size: None,
+        max_post_data_size: None,
+        report_direct_socket_traffic: None,
+        enable_durable_messages: None,
+    })
+    .map_err(|e| eyre!("Failed to enable network events: {e}"))?;
+    let (events_tx, events_rx) = mpsc::sync_channel(64);
+    tab.add_event_listener(Arc::new(move |event: &Event| {
+        let relevant = match event {
+            Event::NetworkResponseReceived(event) => {
+                event.params.Type == Network::ResourceType::Document
+            }
+            Event::PageLifecycleEvent(event) => event.params.name == "networkIdle",
+            _ => false,
+        };
+        if relevant {
+            let _ = events_tx.try_send(event.clone());
+        }
+    }))
+    .map_err(|e| eyre!("Failed to listen for page events: {e}"))?;
+    let navigation = tab
+        .call_method(Page::Navigate {
+            url: config.url.clone(),
+            referrer: None,
+            transition_Type: None,
+            frame_id: None,
+            referrer_policy: None,
+        })
+        .map_err(|e| eyre!("Failed to navigate to {}: {e}", config.url))?;
+    if let Some(error) = navigation.error_text {
+        return Err(eyre!("Failed to navigate to {}: {error}", config.url));
+    }
+    let frame = navigation.frame_id;
+    let loader = navigation
+        .loader_id
+        .ok_or_else(|| eyre!("Navigation did not load a document"))?;
+    let mut status = None;
+    loop {
+        let event = events_rx
+            .recv_timeout(remaining()?)
+            .map_err(|_| eyre!("Fetch timed out after {} seconds", config.timeout))?;
+        match event {
+            Event::NetworkResponseReceived(event)
+                if event.params.frame_id.as_ref() == Some(&frame)
+                    && event.params.loader_id == loader =>
+            {
+                let code = u16::try_from(event.params.response.status)
+                    .map_err(|_| eyre!("Invalid document response status"))?;
+                validate_document_status(code).map_err(|e| eyre!(e))?;
+                status = Some(code);
+            }
+            Event::PageLifecycleEvent(event)
+                if event.params.frame_id == frame && event.params.loader_id == loader =>
+            {
+                break
+            }
+            _ => {}
+        }
+    }
+    status.ok_or_else(|| eyre!("Document response status unavailable"))?;
 
-    tab.navigate_to(&config.url)
-        .map_err(|e| eyre!("Failed to navigate to {}: {}", config.url, e))?
-        .wait_until_navigated()
-        .map_err(|e| eyre!("Failed to wait for navigation: {}", e))?;
-
+    remaining()?;
     let title = tab.get_title().ok().filter(|t| !t.is_empty());
     let html = tab
-        .get_content()
-        .map_err(|e| eyre!("Failed to get page content: {}", e))?;
+        .evaluate(
+            r#"(() => {
+        const source = document.documentElement;
+        const clone = source.cloneNode(true);
+        const originals = [source, ...source.querySelectorAll('*')];
+        const copies = [clone, ...clone.querySelectorAll('*')];
+        originals.forEach((element, index) => {
+            const style = getComputedStyle(element);
+            const copy = copies[index];
+            copy.removeAttribute('data-mcptools-hidden');
+            if (style.display === 'none') {
+                copy.setAttribute('data-mcptools-hidden', '');
+            } else if (style.visibility === 'hidden' || style.visibility === 'collapse') {
+                for (const child of [...copy.childNodes]) {
+                    if (child.nodeType === Node.TEXT_NODE) child.remove();
+                }
+                copy.replaceWith(...copy.childNodes);
+            }
+        });
+        return clone.outerHTML;
+    })()"#,
+            false,
+        )
+        .map_err(|e| eyre!("Failed to get page content: {e}"))?
+        .value
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .ok_or_else(|| eyre!("Failed to get page content"))?;
 
     let html_length = html.len();
 
+    remaining()?;
     let page_url = tab.get_url();
     let processed = process_html_content(
         html,
@@ -172,11 +287,31 @@ mod tests {
 
     #[test]
     fn browser_verifies_tls_certificates() {
-        let options = browser_launch_options();
+        let timeout = Duration::from_secs(3);
+        let options = browser_launch_options(timeout);
+        assert_eq!(options.idle_browser_timeout, timeout);
         assert!(!options.ignore_certificate_errors);
         assert!(options.headless);
         assert!(options.sandbox);
         assert!(options.args.is_empty());
+    }
+
+    #[test]
+    fn zero_timeout_fails_before_browser_launch() {
+        let error = fetch_and_convert_data(FetchConfig {
+            url: "http://invalid.invalid".to_string(),
+            timeout: 0,
+            raw_html: false,
+            selector: None,
+            strategy: SelectionStrategy::First,
+            index: None,
+            offset: 0,
+            limit: 1000,
+            page: 1,
+            paginated: false,
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "Fetch timed out after 0 seconds");
     }
 
     #[test]
