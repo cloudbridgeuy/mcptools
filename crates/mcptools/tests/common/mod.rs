@@ -17,7 +17,7 @@ const CLEARED_ENV: [&str; 10] = [
 
 pub struct McpServer {
     child: Child,
-    input: ChildStdin,
+    input: Option<ChildStdin>,
     output: BufReader<ChildStdout>,
 }
 
@@ -38,7 +38,7 @@ pub fn spawn_server(env: &[(&str, &str)]) -> std::io::Result<McpServer> {
     let output = BufReader::new(child.stdout.take().expect("piped stdout"));
     let mut server = McpServer {
         child,
-        input,
+        input: Some(input),
         output,
     };
     server.send(&envelope("initialize", serde_json::json!({})))?;
@@ -60,7 +60,7 @@ fn envelope(method: &str, params: serde_json::Value) -> serde_json::Value {
 
 impl McpServer {
     fn send(&mut self, message: &serde_json::Value) -> std::io::Result<()> {
-        writeln!(self.input, "{message}")
+        writeln!(self.input.as_mut().expect("open stdin"), "{message}")
     }
 
     fn receive(&mut self) -> std::io::Result<serde_json::Value> {
@@ -79,6 +79,11 @@ impl McpServer {
         self.receive().expect("read response from server stdout")
     }
 
+    #[allow(dead_code)]
+    pub fn send_request(&mut self, req: serde_json::Value) {
+        self.send(&req).expect("write request to server stdin");
+    }
+
     pub async fn tools_call(&mut self, name: &str, args: serde_json::Value) -> serde_json::Value {
         let response = self
             .request(envelope(
@@ -88,10 +93,41 @@ impl McpServer {
             .await;
         response["result"].clone()
     }
+
+    #[allow(dead_code)]
+    pub fn close_input(&mut self) {
+        self.input.take();
+    }
+
+    #[allow(dead_code)]
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    #[allow(dead_code)]
+    pub fn wait(&mut self) -> std::process::ExitStatus {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(status) = self.child.try_wait().expect("wait for server") {
+                return status;
+            }
+            assert!(std::time::Instant::now() < deadline, "server did not exit");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
 }
 
 impl Drop for McpServer {
     fn drop(&mut self) {
+        self.input.take();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return,
+                Err(_) => break,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

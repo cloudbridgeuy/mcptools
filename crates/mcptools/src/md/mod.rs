@@ -1,4 +1,5 @@
 mod browser;
+pub(crate) use browser::Shutdown as BrowserShutdown;
 mod fetch;
 pub mod toc;
 
@@ -152,9 +153,16 @@ fn fetch_with_browser(
         .ok_or_else(|| eyre!("Navigation did not load a document"))?;
     let mut status = None;
     loop {
-        let event = events_rx
-            .recv_timeout(remaining()?)
-            .map_err(|_| eyre!("Fetch timed out after {} seconds", config.timeout))?;
+        if browser::stopped() {
+            return Err(eyre!("Browser shutdown"));
+        }
+        let event = match events_rx.recv_timeout(remaining()?.min(Duration::from_millis(100))) {
+            Ok(event) => event,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(eyre!("Browser event stream closed"))
+            }
+        };
         match event {
             Event::NetworkResponseReceived(event)
                 if event.params.frame_id.as_ref() == Some(&frame)

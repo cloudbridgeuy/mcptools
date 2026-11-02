@@ -40,6 +40,166 @@ macro_rules! skip_without_chrome {
     };
 }
 
+#[cfg(unix)]
+struct CapturedBrowser {
+    log: std::path::PathBuf,
+    parent: u32,
+    identity: Option<(String, String)>,
+}
+
+#[cfg(unix)]
+fn process_identity(pid: &str) -> Option<String> {
+    let output = std::process::Command::new("ps")
+        .args(["-p", pid, "-o", "lstart=", "-o", "command="])
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+#[cfg(unix)]
+impl Drop for CapturedBrowser {
+    fn drop(&mut self) {
+        let captured = self.identity.take().or_else(|| {
+            let pid = std::fs::read_to_string(&self.log).ok()?.trim().to_owned();
+            let output = std::process::Command::new("ps")
+                .args(["-p", &pid, "-o", "ppid="])
+                .output()
+                .ok()?;
+            if String::from_utf8_lossy(&output.stdout).trim() != self.parent.to_string() {
+                return None;
+            }
+            Some((pid.clone(), process_identity(&pid)?))
+        });
+        if let Some((pid, _)) =
+            captured.filter(|(pid, identity)| process_identity(pid).as_ref() == Some(identity))
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", &pid])
+                .status();
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn browser_exits_on_shutdown(signal: Option<&str>, active: bool) {
+    skip_without_chrome!("browser_exits_on_shutdown");
+    let binary = std::env::var_os("CHROME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| headless_chrome::browser::default_executable().unwrap());
+    let directory = tempfile::tempdir().unwrap();
+    let wrapper = directory.path().join("chrome");
+    let log = directory.path().join("pid");
+    executable_script(&wrapper, "#!/bin/sh\nif [ \"$1\" != \"--version\" ]; then echo $$ > \"$MD_BROWSER_LAUNCH_LOG\"; fi\nexec \"$MD_BROWSER_BINARY\" \"$@\"\n");
+    let stub = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_raw("<html><body>ok</body></html>", "text/html"),
+        )
+        .mount(&stub)
+        .await;
+    let slow_started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed = slow_started.clone();
+    Mock::given(path("/slow"))
+        .respond_with(move |_: &wiremock::Request| {
+            observed.store(true, std::sync::atomic::Ordering::SeqCst);
+            ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(20))
+        })
+        .with_priority(1)
+        .mount(&stub)
+        .await;
+    let mut server = common::spawn_server(&[
+        ("CHROME", wrapper.to_str().unwrap()),
+        ("MD_BROWSER_BINARY", binary.to_str().unwrap()),
+        ("MD_BROWSER_LAUNCH_LOG", log.to_str().unwrap()),
+    ])
+    .unwrap();
+    let mut browser = CapturedBrowser {
+        log: log.clone(),
+        parent: server.pid(),
+        identity: None,
+    };
+    let result = server
+        .tools_call(
+            "md_fetch",
+            serde_json::json!({"url": stub.uri(), "timeout": 15}),
+        )
+        .await;
+    let pid = std::fs::read_to_string(log)
+        .expect("browser pid")
+        .trim()
+        .to_owned();
+    browser.identity = Some((
+        pid.clone(),
+        process_identity(&pid).expect("running browser"),
+    ));
+    assert!(result["structuredContent"].is_object(), "{result}");
+    if active {
+        server.send_request(serde_json::json!({"jsonrpc":"2.0", "id": 999, "method":"tools/call", "params":{"name":"md_fetch", "arguments":{"url":format!("{}/slow", stub.uri()), "timeout":30}}}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !slow_started.load(std::sync::atomic::Ordering::SeqCst) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "slow request did not start"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+    if let Some(signal) = signal {
+        assert!(std::process::Command::new("kill")
+            .args([signal, &server.pid().to_string()])
+            .status()
+            .unwrap()
+            .success());
+    } else {
+        server.close_input();
+    }
+    server.wait();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::process::Command::new("kill")
+        .args(["-0", &pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap()
+        .success()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Chrome {} survived shutdown",
+            pid
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    browser.identity.take();
+    std::fs::remove_file(&browser.log).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn browser_exits_on_eof() {
+    browser_exits_on_shutdown(None, false).await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn browser_exits_on_sigterm() {
+    browser_exits_on_shutdown(Some("-TERM"), false).await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn browser_exits_on_sigint() {
+    browser_exits_on_shutdown(Some("-INT"), false).await;
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn browser_exits_on_sigterm_during_request() {
+    browser_exits_on_shutdown(Some("-TERM"), true).await;
+}
+
 #[tokio::test]
 async fn md_chain_fetches_the_section_marked_by_toc() {
     skip_without_chrome!("md_chain_fetches_the_section_marked_by_toc");
@@ -216,7 +376,12 @@ fn md_deadline_includes_chrome_version_detection() {
         .expect("run fetch");
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Fetch timed out after 1 seconds"));
-    assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(2),
+        "elapsed: {:?}, stderr: {}",
+        start.elapsed(),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[cfg(unix)]

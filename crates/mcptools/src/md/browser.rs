@@ -3,7 +3,7 @@ use headless_chrome::{Browser, LaunchOptions, Tab};
 use std::{
     ffi::OsStr,
     process::{Command, Stdio},
-    sync::{mpsc, Arc, OnceLock, Weak},
+    sync::{mpsc, Arc, Condvar, Mutex, OnceLock, Weak},
     time::{Duration, Instant},
 };
 
@@ -75,9 +75,86 @@ fn launch(deadline: Instant, timeout: u64) -> Result<Browser> {
 
 struct RequestTab(Arc<Tab>);
 
+#[derive(Default)]
+struct Lifecycle {
+    stopped: bool,
+    stdio: bool,
+    busy: bool,
+    browser: Option<Arc<Browser>>,
+}
+
+fn lifecycle() -> &'static (Mutex<Lifecycle>, Condvar) {
+    static LIFECYCLE: OnceLock<(Mutex<Lifecycle>, Condvar)> = OnceLock::new();
+    LIFECYCLE.get_or_init(|| (Mutex::new(Lifecycle::default()), Condvar::new()))
+}
+
+pub(super) fn stopped() -> bool {
+    lifecycle()
+        .0
+        .lock()
+        .map(|state| state.stopped)
+        .unwrap_or(true)
+}
+
+pub(crate) struct Shutdown;
+
+struct Busy;
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        let (lock, changed) = lifecycle();
+        if let Ok(mut state) = lock.lock() {
+            state.busy = false;
+            changed.notify_all();
+        }
+    }
+}
+
+impl Shutdown {
+    pub(crate) fn new() -> Self {
+        lifecycle().0.lock().expect("browser lifecycle").stdio = true;
+        Self
+    }
+}
+
+impl Drop for Shutdown {
+    fn drop(&mut self) {
+        let (lock, changed) = lifecycle();
+        let Ok(mut state) = lock.lock() else { return };
+        state.stopped = true;
+        while state.busy && state.browser.is_none() {
+            state = changed.wait(state).expect("browser lifecycle");
+        }
+        let browser = state.browser.take();
+        drop(state);
+        if let Some(browser) = &browser {
+            if let Ok(url) = browser.get_ws_url().parse() {
+                if let Ok(transport) = headless_chrome::browser::transport::Transport::new(
+                    url,
+                    browser.get_process_id(),
+                    Duration::from_secs(2),
+                ) {
+                    let _ = transport.call_method_on_browser(
+                        headless_chrome::protocol::cdp::Browser::Close(None),
+                    );
+                    transport.shutdown();
+                }
+            }
+        }
+        let mut state = lock.lock().expect("browser lifecycle");
+        while state.busy {
+            state = changed.wait(state).expect("browser lifecycle");
+        }
+        drop(state);
+        drop(browser);
+    }
+}
+
 impl Drop for RequestTab {
     fn drop(&mut self) {
-        let _ = self.0.close(true);
+        if !stopped() {
+            let _ = self.0.close(true);
+        }
     }
 }
 
@@ -90,14 +167,33 @@ fn serve(receiver: mpsc::Receiver<Request>) {
             Ok(request) => request,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                let busy = {
+                    let mut state = lifecycle().0.lock().expect("browser lifecycle");
+                    if state.stopped {
+                        break;
+                    }
+                    state.busy = true;
+                    Busy
+                };
                 if let Some(browser) = browser.upgrade() {
                     if let Ok(tab) = browser.new_tab() {
                         let _ = tab.close(true);
                     }
                 }
+                drop(busy);
                 continue;
             }
         };
+        {
+            let (lock, _) = lifecycle();
+            let mut state = lock.lock().expect("browser lifecycle");
+            if state.stopped {
+                let _ = request.reply.send(Err(eyre!("Browser shutdown")));
+                continue;
+            }
+            state.busy = true;
+        }
+        let busy = Busy;
         let result = (|| {
             if Instant::now() >= request.deadline {
                 return Err(eyre!(
@@ -124,7 +220,17 @@ fn serve(receiver: mpsc::Receiver<Request>) {
                     let active = Arc::new(launch(request.deadline, request.config.timeout)?);
                     browser = Arc::downgrade(&active);
                     let owned = Arc::clone(&active);
-                    if let Some(runtime) = request.runtime {
+                    let (lock, changed) = lifecycle();
+                    let mut state = lock
+                        .lock()
+                        .map_err(|_| eyre!("Browser lifecycle unavailable"))?;
+                    if state.stopped {
+                        return Err(eyre!("Browser shutdown"));
+                    }
+                    if state.stdio {
+                        state.browser = Some(owned);
+                        changed.notify_all();
+                    } else if let Some(runtime) = request.runtime {
                         keeper = Some(runtime.spawn(async move {
                             std::future::pending::<()>().await;
                             drop(owned);
@@ -148,6 +254,7 @@ fn serve(receiver: mpsc::Receiver<Request>) {
             );
             fetch_with_browser(request.config, request.start, request.deadline, &tab.0)
         })();
+        drop(busy);
         let _ = request.reply.send(result);
     }
 }
@@ -174,4 +281,49 @@ pub(super) fn fetch(config: FetchConfig, start: Instant, deadline: Instant) -> R
     receiver
         .recv_timeout(deadline.saturating_duration_since(Instant::now()))
         .map_err(|_| eyre!("Fetch timed out after {timeout} seconds"))?
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unwind_closes_owned_browser() {
+        let path = match headless_chrome::browser::default_executable() {
+            Ok(path) => path,
+            Err(error) => {
+                std::eprintln!("skipping unwind_closes_owned_browser: Chrome not found: {error}");
+                return;
+            }
+        };
+        let output = Command::new(path)
+            .arg("--version")
+            .output()
+            .expect("Chrome version");
+        if let Err(error) =
+            mcptools_core::md::parse_chrome_major(&String::from_utf8_lossy(&output.stdout))
+                .and_then(mcptools_core::md::validate_chrome_major)
+        {
+            std::eprintln!("skipping unwind_closes_owned_browser: {error}");
+            return;
+        }
+        let browser =
+            Arc::new(launch(Instant::now() + Duration::from_secs(20), 20).expect("launch Chrome"));
+        let pid = browser
+            .get_process_id()
+            .expect("browser process")
+            .to_string();
+        lifecycle().0.lock().expect("browser lifecycle").browser = Some(browser);
+        let result = std::panic::catch_unwind(|| {
+            let _shutdown = Shutdown::new();
+            panic!("test unwind");
+        });
+        assert!(result.is_err());
+        assert!(!Command::new("kill")
+            .args(["-0", &pid])
+            .stderr(Stdio::null())
+            .status()
+            .expect("check Chrome")
+            .success());
+    }
 }
