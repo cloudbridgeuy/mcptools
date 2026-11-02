@@ -16,9 +16,12 @@ check in `typos.toml`; source remains checked. Cargo machete checks Rust
 dependencies and requires no bundle exclusion.
 
 The page fetches `/d/<token>/plan.tldr` from the same origin, converts `.tldr`
-records to a tldraw document store, loads it, and fits the camera. Load errors
-appear in an accessible alert. Edits are local to this tab and are not saved.
-Save routes belong to the next epic.
+records to a tldraw document store, loads it, and fits the camera. The response
+includes the matching revision in `X-Plan-Rev`. The Save button exports the current
+page to PNG and sends the document, PNG, and revision to the same-origin save
+route. There is no autosave. A successful save updates the revision. Errors are
+shown on the page. A conflict disables Save; reload to see the newer plan, which
+discards unsaved edits. Exports contain the current page, not all pages.
 
 tldraw 5.6.0 fonts, icons, and translations are bundled for same-origin use.
 The SDK retains its original license tracking request when applicable, at

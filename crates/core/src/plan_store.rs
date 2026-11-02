@@ -44,6 +44,10 @@ pub struct PlanMeta {
 
 pub const SAVE_BODY_LIMIT: usize = 10 * 1024 * 1024;
 
+pub fn revision_header(revision: u64) -> String {
+    revision.to_string()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SaveBody {
@@ -314,6 +318,12 @@ pub fn prepare_write(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn revision_header_is_decimal() {
+        assert_eq!(revision_header(1), "1");
+        assert_eq!(revision_header(u64::MAX), "18446744073709551615");
+    }
     use serde_json::json;
 
     #[test]

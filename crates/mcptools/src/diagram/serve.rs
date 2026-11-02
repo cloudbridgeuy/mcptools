@@ -154,14 +154,35 @@ async fn respond(config: &Config, request: Request) -> std::io::Result<Response>
         )
             .into_response(),
         ResponseKind::Snapshot => {
-            let bytes = match tokio::fs::read(plan.expect("authorized snapshot")).await {
-                Ok(bytes) => bytes,
+            let plan = plan.expect("authorized snapshot");
+            let saves = config.saves.clone();
+            let loaded = tokio::task::spawn_blocking(move || {
+                let _guard = saves
+                    .lock()
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+                let bytes = std::fs::read(&plan)?;
+                let metadata = std::fs::read(plan.with_file_name("meta.json"))?;
+                let meta: PlanMeta =
+                    serde_json::from_slice(&metadata).map_err(std::io::Error::other)?;
+                Ok::<_, std::io::Error>((bytes, meta.rev))
+            })
+            .await
+            .map_err(std::io::Error::other)?;
+            let (bytes, rev) = match loaded {
+                Ok(result) => result,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     return Ok(StatusCode::NOT_FOUND.into_response());
                 }
                 Err(error) => return Err(error),
             };
-            ([(header::CONTENT_TYPE, "application/json")], bytes).into_response()
+            (
+                [
+                    (header::CONTENT_TYPE.as_str(), "application/json".to_owned()),
+                    ("x-plan-rev", plan_store::revision_header(rev)),
+                ],
+                bytes,
+            )
+                .into_response()
         }
         ResponseKind::Asset => {
             let file = asset.expect("embedded asset");

@@ -446,3 +446,205 @@ async fn plan_png_returns_absolute_latest_png_path_without_writing() {
     assert_eq!(std::fs::read(path).unwrap(), png);
     assert_eq!(files(&directory), before, "PNG read changed storage");
 }
+
+#[tokio::test]
+async fn snapshot_revision_header_tracks_saved_snapshot() {
+    let home = tempfile::tempdir().unwrap();
+    let mut mcp = server(home.path());
+    let directory = seed(home.path(), &mut mcp).await;
+    let meta = read_json(&directory.join("meta.json"));
+    let (_daemon, client, url) = daemon(home.path(), meta["token"].as_str().unwrap()).await;
+    let snapshot_url = url.replace("/save", "/plan.tldr");
+    let response = client.get(&snapshot_url).send().await.unwrap();
+    assert_eq!(
+        response
+            .headers()
+            .get("x-plan-rev")
+            .and_then(|v| v.to_str().ok()),
+        Some("1")
+    );
+    let mut changed = snapshot();
+    relabel(&mut changed);
+    let result = client
+        .post(&url)
+        .json(&json!({"rev":1,"snapshot":changed,"png":PNG}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(result.status(), 200);
+    let response = client.get(&snapshot_url).send().await.unwrap();
+    assert_eq!(
+        response
+            .headers()
+            .get("x-plan-rev")
+            .and_then(|v| v.to_str().ok()),
+        Some("2")
+    );
+    assert_eq!(response.json::<Value>().await.unwrap(), changed);
+}
+
+fn chrome_path() -> Option<PathBuf> {
+    use mcptools_core::md::{parse_chrome_major, validate_chrome_major};
+    let path = match std::env::var_os("CHROME") {
+        Some(path) => PathBuf::from(path),
+        None => match headless_chrome::browser::default_executable() {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!("skipping browser save test: Chrome not found: {error}");
+                return None;
+            }
+        },
+    };
+    let version = match Command::new(&path).arg("--version").output() {
+        Ok(output) => parse_chrome_major(&String::from_utf8_lossy(&output.stdout))
+            .and_then(validate_chrome_major),
+        Err(error) => Err(format!("cannot run {}: {error}", path.display())),
+    };
+    if let Err(reason) = version {
+        eprintln!("skipping browser save test: {reason}");
+        return None;
+    }
+    Some(path)
+}
+
+fn touch_save(tab: &headless_chrome::Tab) {
+    use headless_chrome::protocol::cdp::Input;
+    let rect = tab.evaluate("JSON.stringify((() => { const button = document.getElementById('save'); const r = button.getBoundingClientRect(); return {x:r.x,y:r.y,width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight,hit:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2) === button}; })())", false).unwrap().value.unwrap();
+    let rect: Value = serde_json::from_str(rect.as_str().unwrap()).unwrap();
+    let x = rect["x"].as_f64().unwrap();
+    let y = rect["y"].as_f64().unwrap();
+    let width = rect["width"].as_f64().unwrap();
+    let height = rect["height"].as_f64().unwrap();
+    assert_eq!(rect["viewportWidth"], 390);
+    assert_eq!(rect["viewportHeight"], 844);
+    assert!(width >= 44.0 && height >= 44.0, "touch target: {rect}");
+    assert!(
+        x >= 0.0
+            && y >= 0.0
+            && x + width <= rect["viewportWidth"].as_f64().unwrap()
+            && y + height <= rect["viewportHeight"].as_f64().unwrap()
+            && rect["hit"] == true,
+        "Save must be visible and reachable: {rect}"
+    );
+    let start: Input::DispatchTouchEvent = serde_json::from_value(
+        json!({"type":"touchStart","touchPoints":[{"x":x+width/2.0,"y":y+height/2.0}]}),
+    )
+    .unwrap();
+    let end: Input::DispatchTouchEvent =
+        serde_json::from_value(json!({"type":"touchEnd","touchPoints":[]})).unwrap();
+    tab.call_method(start).unwrap();
+    tab.call_method(end).unwrap();
+}
+
+async fn browser_save(mode: u16) {
+    use headless_chrome::protocol::cdp::Emulation;
+    use headless_chrome::{Browser, LaunchOptions};
+    let Some(path) = chrome_path() else {
+        return;
+    };
+    let home = tempfile::tempdir().unwrap();
+    let mut mcp = server(home.path());
+    let directory = seed(home.path(), &mut mcp).await;
+    let meta = read_json(&directory.join("meta.json"));
+    let (_daemon, client, url) = daemon(home.path(), meta["token"].as_str().unwrap()).await;
+    let browser = Browser::new(LaunchOptions {
+        path: Some(path),
+        headless: false,
+        args: vec![std::ffi::OsStr::new("--headless=new")],
+        ignore_certificate_errors: false,
+        ..LaunchOptions::default()
+    })
+    .unwrap();
+    let tab = browser.new_tab().unwrap();
+    tab.set_default_timeout(Duration::from_secs(20));
+    let metrics: Emulation::SetDeviceMetricsOverride = serde_json::from_value(
+        json!({"width":390,"height":844,"deviceScaleFactor":1,"mobile":true}),
+    )
+    .unwrap();
+    tab.call_method(metrics).unwrap();
+    tab.call_method(Emulation::SetTouchEmulationEnabled {
+        enabled: true,
+        max_touch_points: Some(1),
+    })
+    .unwrap();
+    tab.navigate_to(url.strip_suffix("/save").unwrap()).unwrap();
+    tab.wait_for_element(".tl-canvas .tl-shape").unwrap();
+    tab.wait_for_element("#save:not([disabled])")
+        .expect("Save must be available after load");
+    if mode == 409 {
+        let response = client
+            .post(&url)
+            .json(&json!({"rev":1,"snapshot":snapshot(),"png":PNG}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let before = files(&directory);
+        touch_save(&tab);
+        tab.wait_for_element("#save-status[data-state='conflict']")
+            .expect("conflict must be visible");
+        assert_eq!(files(&directory), before, "conflict changed files");
+    } else if mode == 400 || mode == 413 {
+        tab.evaluate(
+            &format!("window.fetch = () => Promise.resolve(new Response('', {{status: {mode}}}))"),
+            false,
+        )
+        .unwrap();
+        let before = files(&directory);
+        touch_save(&tab);
+        tab.wait_for_element("#save-status[data-state='error']")
+            .expect("error must be visible");
+        let message = tab
+            .find_element("#save-status")
+            .unwrap()
+            .get_inner_text()
+            .unwrap();
+        assert!(
+            message.contains(if mode == 413 { "too large" } else { "rejected" }),
+            "{message}"
+        );
+        assert_eq!(files(&directory), before);
+    } else {
+        let before = files(&directory);
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(files(&directory), before, "page must not autosave");
+        for revision in [2, 3] {
+            touch_save(&tab);
+            tab.wait_for_element(&format!(
+                "#save-status[data-state='saved'][data-rev='{revision}']"
+            ))
+            .expect("save must succeed and advance revision");
+            assert_eq!(read_json(&directory.join("meta.json"))["rev"], revision);
+            let png = std::fs::read(directory.join("latest.png")).unwrap();
+            assert!(png.len() > 8 && png.starts_with(b"\x89PNG\r\n\x1a\n"));
+            if revision == 2 {
+                let plan_path = directory.join("plan.tldr");
+                let plan_bytes = std::fs::read(&plan_path).unwrap();
+                assert_ne!(plan_bytes, before[&plan_path]);
+                let plan: Value = serde_json::from_slice(&plan_bytes).unwrap();
+                assert_eq!(plan["tldrawFileFormatVersion"], 1);
+                assert!(plan["schema"].is_object());
+                let records = plan["records"].as_array().unwrap();
+                assert!(records.iter().any(|record| record["id"] == "shape:s1"));
+                assert!(records.iter().any(|record| record["id"] == "shape:s6"));
+                assert_ne!(before.get(&directory.join("latest.png")), Some(&png));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn browser_save_twice() {
+    browser_save(200).await;
+}
+
+#[tokio::test]
+async fn browser_save_conflict_preserves_files() {
+    browser_save(409).await;
+}
+
+#[tokio::test]
+async fn browser_save_errors_are_visible() {
+    browser_save(400).await;
+    browser_save(413).await;
+}

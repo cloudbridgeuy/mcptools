@@ -12,7 +12,7 @@ The daemon runs until interrupted; the operator supplies service supervision.
 Routes:
 
 - `GET /d/<token>`: embedded tldraw page for an existing plan token.
-- `GET /d/<token>/plan.tldr`: stored snapshot bytes, JSON content type.
+- `GET /d/<token>/plan.tldr`: stored snapshot bytes, JSON content type, and matching `X-Plan-Rev` header.
 - `POST /d/<token>/save`: save `{rev, snapshot, png}`; PNG is standard base64.
 - `GET /assets/<file>`: embedded build assets.
 
@@ -119,3 +119,12 @@ before final verification. No bundled asset or other worker's file was edited.
 Final foreground lint passed formatting, check, clippy, all tests, machete,
 and typos. Both new tests passed; the browser test ran (not skipped) with
 Chrome for Testing 156.0.8078.47 selected through `CHROME`.
+
+## Browser save (GUZ-1137)
+
+Snapshot and revision reads use the same daemon mutex as saves. This does not
+serialize `plan_write` in another process or other daemons. The page saves only
+on explicit user action; it exports the current page as PNG, posts the document
+and revision, and retains the returned revision. A conflict disables Save and
+requires a reload, which discards unsaved edits. The browser validates revision
+values, handles HTTP outcomes, and encodes the PNG; storage rules remain in core.
