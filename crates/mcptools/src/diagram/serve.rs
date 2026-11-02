@@ -2,6 +2,7 @@ use std::future::IntoFuture;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, FromRequest, Request, State};
@@ -27,7 +28,11 @@ pub async fn run(host: IpAddr, port: u16) -> Result<()> {
     diagram_serve::check_bind_host(host).map_err(|error| eyre!(error))?;
     let data_directory = crate::plan_store::data_dir()?;
     let directory = data_directory.join("diagrams");
-    let listener = tokio::net::TcpListener::bind(SocketAddr::new(host, port)).await?;
+    let listener = match tokio::net::TcpListener::bind(SocketAddr::new(host, port)).await {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
     let bound = listener.local_addr()?;
     std::fs::create_dir_all(&directory)?;
     let mut record = tempfile::NamedTempFile::new_in(&directory)?;
@@ -43,9 +48,13 @@ pub async fn run(host: IpAddr, port: u16) -> Result<()> {
             saves: Arc::default(),
         });
     println!("http://{bound}");
+    let idle_directory = data_directory.join("diagrams");
     let server = axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = idle(idle_directory) => {}
+            }
         })
         .into_future();
     tokio::pin!(server);
@@ -71,6 +80,62 @@ pub async fn run(host: IpAddr, port: u16) -> Result<()> {
     };
     result?;
     Ok(())
+}
+
+async fn idle(directory: PathBuf) {
+    let seconds = |name, default| {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(default)
+    };
+    let check = seconds("MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS", 60);
+    let grace = seconds("MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS", 120);
+    let mut since = None;
+    let mut interval = tokio::time::interval(Duration::from_secs(check));
+    loop {
+        interval.tick().await;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let windows = std::fs::read_dir(&directory)
+            .and_then(|entries| {
+                entries
+                    .filter_map(|entry| match entry {
+                        Ok(entry) if entry.path().is_dir() => {
+                            Some(std::fs::read(entry.path().join("share.json")))
+                        }
+                        Ok(_) => None,
+                        Err(error) => Some(Err(error)),
+                    })
+                    .filter_map(|result| match result {
+                        Ok(bytes) => serde_json::from_slice(&bytes).ok().map(Ok),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                        Err(error) => Some(Err(error)),
+                    })
+                    .collect::<std::io::Result<Vec<mcptools_core::plan_share::ShareWindow>>>()
+            })
+            .or_else(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    Ok(Vec::new())
+                } else {
+                    Err(error)
+                }
+            });
+        if let Ok(windows) = windows {
+            since = mcptools_core::plan_share::idle_since(now, since, &windows);
+            if since.is_some_and(|started| {
+                mcptools_core::plan_share::should_shutdown(now, started, grace, &windows)
+            }) {
+                return;
+            }
+        } else {
+            eprintln!("diagram idle: cannot inspect share windows");
+            since = None;
+        }
+    }
 }
 
 async fn find_plan(directory: &Path, token: &str) -> std::io::Result<Option<PathBuf>> {

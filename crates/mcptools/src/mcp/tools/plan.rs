@@ -24,7 +24,16 @@ pub async fn handle_plan_write(
     let args: WriteArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
     mcptools_core::plan_store::validate_write(&args).map_err(invalid)?;
-    super::to_dual_result(crate::plan_store::write(&args).map_err(failed)?)
+    let mut output =
+        serde_json::to_value(crate::plan_store::write(&args).map_err(failed)?).map_err(failed)?;
+    if crate::diagram::ensure_running().await {
+        output["url"] = crate::plan_store::current_url(&args.id)
+            .map_err(failed)?
+            .into();
+    } else {
+        output["warning"] = "diagram server unavailable".into();
+    }
+    super::to_dual_result(output)
 }
 
 pub async fn handle_plan_url(
@@ -33,7 +42,17 @@ pub async fn handle_plan_url(
     let args: ShareArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
     mcptools_core::plan_store::validate_id(&args.id).map_err(invalid)?;
-    super::to_dual_result(crate::plan_store::url(&args.id, args.share_seconds).map_err(failed)?)
+    let output = crate::plan_store::url(&args.id, args.share_seconds).map_err(failed)?;
+    let ready = crate::diagram::ensure_running().await;
+    let mut output = serde_json::to_value(output).map_err(failed)?;
+    if ready {
+        output["url"] = crate::plan_store::current_url(&args.id)
+            .map_err(failed)?
+            .into();
+    } else {
+        output["warning"] = "diagram server unavailable".into();
+    }
+    super::to_dual_result(output)
 }
 
 pub async fn handle_plan_close(

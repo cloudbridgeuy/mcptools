@@ -31,7 +31,16 @@ fn relabel(snapshot: &mut Value) {
 
 fn server(home: &Path) -> common::McpServer {
     let path = home.to_str().unwrap();
-    common::spawn_server(&[("HOME", path), ("XDG_DATA_HOME", path)]).unwrap()
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    drop(listener);
+    common::spawn_server(&[
+        ("HOME", path),
+        ("XDG_DATA_HOME", path),
+        ("PATH", path),
+        ("MCPTOOLS_DIAGRAM_PORT", &port),
+    ])
+    .unwrap()
 }
 
 fn structured(response: &Value) -> &Value {

@@ -2,6 +2,85 @@ pub mod retention;
 mod serve;
 
 use std::net::IpAddr;
+use std::time::Duration;
+
+async fn ready() -> bool {
+    let Ok((host, port)) = crate::plan_store::endpoint() else {
+        return false;
+    };
+    let address = format!(
+        "{}:{port}",
+        if host.contains(':') && !host.starts_with('[') {
+            format!("[{host}]")
+        } else {
+            host
+        }
+    );
+    let Ok(client) = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_millis(200))
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(format!("http://{address}/"))
+        .send()
+        .await
+        .is_ok_and(|response| {
+            response.status() == reqwest::StatusCode::NOT_FOUND
+                && response
+                    .headers()
+                    .get("x-content-type-options")
+                    .is_some_and(|value| value == "nosniff")
+                && response
+                    .headers()
+                    .get("referrer-policy")
+                    .is_some_and(|value| value == "no-referrer")
+        })
+}
+
+pub async fn ensure_running() -> bool {
+    if ready().await {
+        return true;
+    }
+    let result = (|| -> crate::prelude::Result<()> {
+        let directory = crate::plan_store::data_dir()?.join("diagrams");
+        std::fs::create_dir_all(&directory)?;
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(directory.join("daemon.log"))?;
+        let port = std::env::var("MCPTOOLS_DIAGRAM_PORT").unwrap_or_else(|_| "5199".into());
+        let mut command = std::process::Command::new(std::env::current_exe()?);
+        command
+            .args(["diagram", "serve", "--tailscale", "--port", &port])
+            .stdin(std::process::Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command.spawn()?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
+    })();
+    if result.is_err() {
+        return false;
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    while tokio::time::Instant::now() < deadline {
+        if ready().await {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    false
+}
 
 #[derive(Debug, clap::Parser)]
 #[command(about = "Serve stored plan diagrams")]

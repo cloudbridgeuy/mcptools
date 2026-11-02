@@ -105,7 +105,7 @@ pub fn save(
     Ok(Ok(meta))
 }
 
-fn endpoint() -> Result<(String, String)> {
+pub fn endpoint() -> Result<(String, String)> {
     let host = std::env::var("MCPTOOLS_DIAGRAM_HOST").ok();
     let port = std::env::var("MCPTOOLS_DIAGRAM_PORT").ok();
     let record = std::fs::read_to_string(data_dir()?.join("diagrams/.daemon-address!")).ok();
@@ -114,6 +114,14 @@ fn endpoint() -> Result<(String, String)> {
         port.as_deref(),
         record.as_deref(),
     ))
+}
+
+pub fn current_url(id: &str) -> Result<String> {
+    let directory = data_dir()?.join("diagrams").join(id);
+    let meta: PlanMeta =
+        read_optional(&directory.join("meta.json"))?.ok_or_else(|| eyre!("unknown plan: {id}"))?;
+    let (host, port) = endpoint()?;
+    plan_store::plan_url(&meta, Some(&host), Some(&port)).map_err(|error| eyre!(error))
 }
 
 pub fn write(args: &WriteArgs) -> Result<WriteOutput> {

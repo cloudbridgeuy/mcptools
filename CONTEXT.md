@@ -282,3 +282,5 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 - **THEN** the input schema shows `fields` as an optional array of strings
 - **AND** the description documents `fields`
 - **AND** the output schema contains no `required` key anywhere
+
+Diagram sharing starts the server on demand. Idle check and grace use `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` (60) and `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` (120). Remove an old user agent only after confirmation: `launchctl bootout gui/$(id -u)/com.mcptools.diagram`.

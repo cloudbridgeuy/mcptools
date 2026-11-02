@@ -109,21 +109,11 @@ presses **Save**. The agent can then read text changes and the saved PNG path.
 
 ### Server and phone flow
 
-```sh
-mcptools diagram serve --tailscale
-```
+`plan_write` and `plan_url` start the daemon on demand using Tailscale. A failed start returns the URL with a warning. Set `MCPTOOLS_DIAGRAM_PORT` to change the default port 5199. The daemon checks every `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` (default 60) and exits after `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` (default 120) when no shares remain. Its log is in `diagrams/daemon.log` under the user data directory.
 
-This foreground daemon selects a Tailscale IPv4 address and uses port 5199.
-For a specific interface instead, use `mcptools diagram serve --host 127.0.0.1
---port 5199`. The daemon and MCP process must use the same user data directory.
-Storage is `$XDG_DATA_HOME/mcptools` when nonempty, otherwise the platform user
-data directory plus `mcptools`. Plans live under `diagrams/<id>/`.
+Remove an old user agent manually with `launchctl bootout gui/$(id -u)/com.mcptools.diagram` after confirming its identity. The daemon and MCP process must use the same data directory.
 
-1. Start the daemon. For supervision, use the templates in
-   [`deploy/launchd/com.mcptools.diagram.plist`](deploy/launchd/com.mcptools.diagram.plist)
-   or [`deploy/systemd/mcptools-diagram.service`](deploy/systemd/mcptools-diagram.service).
-   Edit binary paths and service environment first; follow the
-   [service installation instructions](.claude/context/diagram-serve.md#supervised-diagram-server).
+1. Install mcptools and Tailscale.
 2. Call `plan_write` to create a plan, then `plan_diff` once to establish a baseline
    before editing. Use `plan_url` to retrieve the URL again.
 3. Connect the phone to the same tailnet and open the returned IP-based URL.
@@ -134,8 +124,7 @@ data directory plus `mcptools`. Plans live under `diagrams/<id>/`.
 
 URL host and port resolve independently: `MCPTOOLS_DIAGRAM_HOST` and
 `MCPTOOLS_DIAGRAM_PORT`, then the daemon's recorded address in
-`diagrams/.daemon-address!`, then `127.0.0.1:5199`. The record can be stale; it is
-not a health check. Use one daemon and avoid concurrent external plan writes.
+`diagrams/.daemon-address!`, then `127.0.0.1:5199`. The record can be stale; the endpoint is checked before use. Use one daemon and avoid concurrent external plan writes.
 
 ### Security model
 

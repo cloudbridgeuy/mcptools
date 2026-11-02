@@ -8,7 +8,7 @@ mcptools diagram serve --host 100.80.20.1 --port 5199
 Alternatively, `--tailscale` selects a Tailscale IPv4 address.
 IPv4, IPv6, and IPv4-mapped IPv6 wildcard addresses are refused. Port defaults
 to 5199; port 0 selects an ephemeral port. Startup prints the actual base URL.
-The daemon runs until interrupted. Service supervision is described below.
+The daemon exits after the idle grace period or when interrupted.
 
 Routes:
 
@@ -82,7 +82,7 @@ Replacement is atomic per file, not a multi-file transaction: a crash or rename
 failure can leave mixed versions. A daemon mutex serializes saves, including
 revision reads, on blocking workers. External `plan_write` processes and other
 daemons are not serialized; use one daemon and avoid simultaneous external writes.
-The existing retention task and shutdown selection are unchanged.
+Retention runs at startup and periodically until idle or signal shutdown.
 
 Failing-first: `cargo test -p mcptools --test plan_edit_acceptance save_ --
 --test-threads=1` ran the four newly un-ignored tests before implementation.
@@ -184,44 +184,10 @@ requires a reload, which discards unsaved edits. The browser validates revision
 values, handles HTTP outcomes, and encodes the PNG; storage rules remain in core.
 
 
-# Supervised diagram server
+# On-demand diagram server
 
-Run one server per user data directory. The service binds only the first valid Tailscale IPv4 address, on port 5199. It never binds a wildcard address. Connect the phone to the same tailnet. Tailscale access controls and the secret diagram URL still apply.
+`plan_write` and `plan_url` start `mcptools diagram serve --tailscale` when the discovered endpoint is unavailable. The daemon uses the MCP data directory, port `MCPTOOLS_DIAGRAM_PORT` (default 5199), and writes `diagrams/daemon.log`. A failed start returns the URL with a warning. The server checks for open shares every `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` (default 60) and exits when no shares have been open for `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` (default 120). Retention runs at startup and while the server runs.
 
-Install `mcptools` and Tailscale first. Edit the service file so its `/usr/local/bin/mcptools` is the absolute path to the installed binary. Set the service `PATH` to include the absolute directory containing the `tailscale` executable. The server runs `tailscale ip -4`; missing Tailscale, a missing address, or a failed bind causes an exit. Both supervisors retry startup failures, with a 10-second restart or throttle interval. Do not run another server against the same data directory.
+Remove an old user launchd agent manually with `launchctl bootout gui/$(id -u)/com.mcptools.diagram`; do not run this command without confirming that it is the intended agent. Disable an old systemd unit with `systemctl --user disable --now mcptools-diagram.service`.
 
-The service and MCP process must use the same user and data directory: `$XDG_DATA_HOME/mcptools` if set; otherwise `~/Library/Application Support/mcptools` on macOS or `~/.local/share/mcptools` on Linux. Set the same `XDG_DATA_HOME` in both environments if needed.
-
-## macOS
-
-Edit `deploy/launchd/com.mcptools.diagram.plist`: replace `PLAN_USER` in `UserName` with the plan owner's account name, and set `HOME` to that account's actual home directory. Edit the binary path and PATH. If the MCP process sets `XDG_DATA_HOME`, add the same absolute `XDG_DATA_HOME` value to `EnvironmentVariables`. The account must own and access the plan data. Install as a system LaunchDaemon, owned by root with mode 644, and load it in the system domain for startup at boot:
-
-```sh
-sudo install -o root -g wheel -m 644 deploy/launchd/com.mcptools.diagram.plist /Library/LaunchDaemons/com.mcptools.diagram.plist
-sudo launchctl bootstrap system /Library/LaunchDaemons/com.mcptools.diagram.plist
-sudo launchctl kickstart system/com.mcptools.diagram
-```
-
-Unload with:
-
-```sh
-sudo launchctl bootout system /Library/LaunchDaemons/com.mcptools.diagram.plist
-```
-
-## Linux
-
-Copy `deploy/systemd/mcptools-diagram.service` to `~/.config/systemd/user/`, edit the binary and PATH, and set `XDG_DATA_HOME` in the unit if the MCP process uses it. Enable user lingering: it is required for unattended startup at boot. Then enable the unit:
-
-```sh
-loginctl enable-linger "$USER"
-systemctl --user daemon-reload
-systemctl --user enable --now mcptools-diagram.service
-```
-
-Stop and disable with `systemctl --user disable --now mcptools-diagram.service`.
-
-## Address record
-
-After a successful bind, the server atomically writes its actual socket address to `diagrams/.daemon-address!` in the shared data directory. The `!` makes the record name an invalid plan ID. `plan_write` and `plan_url` use it unless their host or port environment override is set; each override takes precedence independently. Without a valid record, they use `127.0.0.1:5199`. Existing host and port validation still applies. The address record contains no diagram tokens; its staged file is private to the current user.
-
-The record is not a health check. It can remain stale after a crash, stop, or address change until a server binds again. Remove it manually if needed; do not treat an existing record as proof the server is running.
+The address record `diagrams/.daemon-address!` can be stale. Host and port environment overrides take precedence independently. The daemon and MCP process must use the same data directory.

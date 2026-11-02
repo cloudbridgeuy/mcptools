@@ -37,8 +37,7 @@ URLs are `http://<host>:<port>/d/<token>`. Host and port resolve independently:
 `MCPTOOLS_DIAGRAM_HOST` and `MCPTOOLS_DIAGRAM_PORT` override the recorded socket
 address in `<data_dir>/diagrams/.daemon-address!`; without a valid record, the
 fallback is `127.0.0.1:5199`. IPv6 hosts are bracketed in URLs. The record can be
-stale and is not a health check. For phone access, start the daemon with
-`mcptools diagram serve --tailscale` and use the same data directory for MCP.
+stale and is not a health check. The tools start the daemon on demand using Tailscale and the same data directory. Idle check and grace use `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` (60) and `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` (120). Remove an old user agent only after confirmation: `launchctl bootout gui/$(id -u)/com.mcptools.diagram`.
 
 Tokens contain 128 random bits and stay unchanged. `share.json` stores
 `{"expires_at_unix_secs":<u64>}` separately from strict `PlanMeta`. Missing,

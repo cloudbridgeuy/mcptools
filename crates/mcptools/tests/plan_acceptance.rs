@@ -18,8 +18,144 @@ fn plan() -> Value {
 
 fn server(home: &Path) -> common::McpServer {
     let path = home.to_str().expect("UTF-8 temp path");
-    common::spawn_server(&[("HOME", path), ("XDG_DATA_HOME", path)])
-        .expect("spawn isolated MCP server")
+    let port = test_port();
+    common::spawn_server(&[
+        ("HOME", path),
+        ("XDG_DATA_HOME", path),
+        ("PATH", path),
+        ("MCPTOOLS_DIAGRAM_PORT", port),
+    ])
+    .expect("spawn isolated MCP server")
+}
+
+fn test_port() -> &'static str {
+    static PORT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PORT.get_or_init(|| {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port()
+            .to_string()
+    })
+}
+
+struct OnDemandCleanup {
+    directory: PathBuf,
+    address: std::net::SocketAddr,
+}
+
+impl Drop for OnDemandCleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.directory);
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while std::net::TcpStream::connect_timeout(&self.address, Duration::from_millis(100))
+            .is_ok()
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+#[tokio::test]
+async fn on_demand_write_url_reuse_and_close() {
+    let Ok(output) = Command::new("tailscale").args(["ip", "-4"]).output() else {
+        return;
+    };
+    let Some(ip) =
+        mcptools_core::diagram_endpoint::tailscale_ip(&String::from_utf8_lossy(&output.stdout))
+    else {
+        return;
+    };
+    let Ok(listener) = std::net::TcpListener::bind((ip, 0)) else {
+        return;
+    };
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let port = address.port().to_string();
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().to_str().unwrap();
+    let _cleanup = OnDemandCleanup {
+        directory: home.path().join("mcptools/diagrams"),
+        address,
+    };
+    let mut mcp = common::spawn_server(&[
+        ("HOME", path),
+        ("XDG_DATA_HOME", path),
+        ("MCPTOOLS_DIAGRAM_PORT", &port),
+        ("MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS", "1"),
+        ("MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS", "1"),
+    ])
+    .unwrap();
+    let written = mcp.tools_call("plan_write", plan()).await;
+    let url = structured(&written)["url"].as_str().unwrap().to_owned();
+    assert!(
+        url.starts_with(&format!("http://{address}/d/")),
+        "{written}"
+    );
+    assert!(structured(&written).get("warning").is_none());
+    let record = home.path().join("mcptools/diagrams/.daemon-address!");
+    let modified = std::fs::metadata(&record).unwrap().modified().unwrap();
+    let found = mcp.tools_call("plan_url", json!({"id":"spike"})).await;
+    assert_eq!(structured(&found)["url"], url);
+    assert_eq!(
+        std::fs::metadata(&record).unwrap().modified().unwrap(),
+        modified
+    );
+    for reopen in [true, false] {
+        let closed = mcp
+            .tools_call("plan_close", json!({"id":"spike", "allowWrites":true}))
+            .await;
+        assert_eq!(structured(&closed)["closed"], true);
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while std::net::TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok() {
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if reopen {
+            let found = mcp.tools_call("plan_url", json!({"id":"spike"})).await;
+            assert_eq!(structured(&found)["url"], url);
+            assert!(structured(&found).get("warning").is_none());
+        }
+    }
+}
+
+#[tokio::test]
+async fn unavailable_start_returns_warning_for_write_and_url() {
+    let home = tempfile::tempdir().unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let other_port = other.local_addr().unwrap().port();
+    drop(listener);
+    drop(other);
+    let directory = home.path().join("mcptools/diagrams");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join(".daemon-address!"),
+        format!("127.0.0.2:{other_port}"),
+    )
+    .unwrap();
+    let path = home.path().to_str().unwrap();
+    let mut mcp = common::spawn_server(&[
+        ("HOME", path),
+        ("XDG_DATA_HOME", path),
+        ("PATH", path),
+        ("MCPTOOLS_DIAGRAM_HOST", "127.0.0.1"),
+        ("MCPTOOLS_DIAGRAM_PORT", &port),
+    ])
+    .unwrap();
+    let written = mcp.tools_call("plan_write", plan()).await;
+    assert!(structured(&written)["url"].is_string());
+    assert!(structured(&written)["url"]
+        .as_str()
+        .unwrap()
+        .starts_with(&format!("http://127.0.0.1:{port}/d/")));
+    assert!(structured(&written)["warning"].is_string());
+    let found = mcp.tools_call("plan_url", json!({"id":"spike"})).await;
+    assert_eq!(structured(&found)["url"], structured(&written)["url"]);
+    assert!(structured(&found)["warning"].is_string());
 }
 
 fn files(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
@@ -114,6 +250,8 @@ async fn share_ttl_input_overrides_environment_and_clamps() {
         ("HOME", path),
         ("XDG_DATA_HOME", path),
         ("MCPTOOLS_DIAGRAM_SHARE_SECONDS", "120"),
+        ("MCPTOOLS_DIAGRAM_PORT", test_port()),
+        ("PATH", path),
     ])
     .unwrap();
     let directory = home.path().join("mcptools/diagrams/spike");
