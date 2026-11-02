@@ -237,12 +237,23 @@ fn browser_renders_shapes_with_only_watermark_external() {
     .unwrap();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let observed = Arc::clone(&requests);
+    let sprites = Arc::new(Mutex::new(Vec::new()));
+    let observed_sprites = Arc::clone(&sprites);
     tab.add_event_listener(Arc::new(move |event: &Event| {
         if let Event::NetworkRequestWillBeSent(event) = event {
             observed
                 .lock()
                 .unwrap()
                 .push(event.params.request.url.clone());
+        }
+        if let Event::NetworkResponseReceived(event) = event {
+            let response = &event.params.response;
+            if response.url.contains("/assets/0_merged-") {
+                observed_sprites
+                    .lock()
+                    .unwrap()
+                    .push((response.status, response.mime_type.clone()));
+            }
         }
     }))
     .unwrap();
@@ -253,6 +264,45 @@ fn browser_renders_shapes_with_only_watermark_external() {
     tab.evaluate("document.fonts.ready.then(() => true)", true)
         .expect("canvas fonts must finish loading");
     std::thread::sleep(Duration::from_secs(2));
+    let icons = tab
+        .evaluate(
+            r#"(async () => {
+                const icons = [...document.querySelectorAll('.tlui-toolbar .tlui-icon')];
+                const visible = icons.filter(icon => {
+                    const bounds = icon.getBoundingClientRect();
+                    return bounds.width > 0 && bounds.height > 0;
+                });
+                const mask = visible.map(icon => getComputedStyle(icon).maskImage)
+                    .find(mask => mask.includes('/assets/0_merged-'));
+                if (!mask) return false;
+                const url = mask.match(/url\(["']?([^"')]+)/)?.[1];
+                if (!url) return false;
+                const image = new Image();
+                image.src = url;
+                try {
+                    await image.decode();
+                    return image.naturalWidth > 0 && image.naturalHeight > 0;
+                } catch {
+                    return false;
+                }
+            })()"#,
+            true,
+        )
+        .expect("inspect toolbar icon masks")
+        .value;
+    let sprites = sprites.lock().unwrap();
+    assert!(!sprites.is_empty(), "toolbar must request its icon sprite");
+    assert!(
+        sprites
+            .iter()
+            .all(|(status, mime)| *status == 200 && mime == "image/svg+xml"),
+        "toolbar sprite must load as image/svg+xml: {sprites:?}"
+    );
+    assert_eq!(
+        icons,
+        Some(serde_json::json!(true)),
+        "visible toolbar icons must have a decodable SVG mask with nonzero size"
+    );
     let requests = requests.lock().unwrap();
     assert!(
         !requests.is_empty(),

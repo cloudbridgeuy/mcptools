@@ -89,6 +89,10 @@ pub fn asset_content_type(path: &str) -> &'static str {
     match path.rsplit('.').next() {
         Some("js") => "text/javascript; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
+        Some("png") => "image/png",
+        Some("json") => "application/json",
         _ => "application/octet-stream",
     }
 }
@@ -96,6 +100,22 @@ pub fn asset_content_type(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagram_assets_have_browser_content_types() {
+        for (path, expected) in [
+            ("/assets/0_merged-hash.svg", "image/svg+xml"),
+            ("/assets/font-hash.woff2", "font/woff2"),
+            ("/assets/embed-hash.png", "image/png"),
+            ("/assets/en-hash.json", "application/json"),
+            ("/assets/index-hash.js", "text/javascript; charset=utf-8"),
+            ("/assets/index-hash.css", "text/css; charset=utf-8"),
+            ("/assets/unknown.bin", "application/octet-stream"),
+            ("/assets/missing", "application/octet-stream"),
+        ] {
+            assert_eq!(asset_content_type(path), expected, "asset {path}");
+        }
+    }
 
     #[test]
     fn wildcard_addresses_are_refused() {

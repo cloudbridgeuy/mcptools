@@ -120,6 +120,23 @@ Final foreground lint passed formatting, check, clippy, all tests, machete,
 and typos. Both new tests passed; the browser test ran (not skipped) with
 Chrome for Testing 156.0.8078.47 selected through `CHROME`.
 
+## Asset MIME regression (GUZ-1183)
+
+The bundled asset extensions checked were html, js, css, json, svg, and woff2;
+PNG is also covered for image assets. With nosniff, the SVG icon sprite served
+as application/octet-stream did not decode as an image in Chrome 156.
+
+Failing-first verification: `RUST_TEST_THREADS=1 cargo xtask lint`, with
+`CHROME` set to installed Chrome for Testing 156.0.8078.47, failed the existing
+offline browser test on sprite responses `(200, "application/octet-stream")`.
+The compiled core test binary separately failed
+`diagram_serve::tests::diagram_assets_have_browser_content_types`: SVG expected
+image/svg+xml, got application/octet-stream. After the pure core MIME change,
+the same full lint command passed both tests and all checks. The browser test
+ran, not skipped: it checks sprite MIME, visible toolbar icon dimensions, and
+decoding the actual SVG mask URL. No page assets were rebuilt or browser
+downloaded. A real phone was not tested.
+
 ## Browser save (GUZ-1137)
 
 Snapshot and revision reads use the same daemon mutex as saves. This does not
