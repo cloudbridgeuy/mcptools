@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'">
+<title>Fixture &lt;report&gt;</title>
+<style>test-css</style>
+</head>
+<body>
+<main>
+<h1 id="report">Report</h1>
+<table><thead><tr><th>Item</th><th>Status</th></tr></thead><tbody>
+<tr><td>Table</td><td>Ready</td></tr>
+</tbody></table>
+<pre><code class="language-rust">let value = "&lt;safe&gt;";
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox" checked=""/>
+Done</li>
+<li><input disabled="" type="checkbox"/>
+Pending</li>
+</ul>
+<pre class="mermaid">flowchart LR
+  A[Start] --&gt; B[End]
+</pre>
+<pre class="mermaid">sequenceDiagram
+  Alice-&gt;&gt;Bob: Hello &lt;friend&gt;
+</pre>
+<pre class="mermaid">not a valid diagram
+</pre>
+&lt;script&gt;alert('unsafe')&lt;/script&gt;
+<h2 id="end">End</h2>
+<p>Rest of page intact.</p>
+</main>
+<script>test-js</script>
+<script>mermaid.initialize({startOnLoad: true, securityLevel: 'strict'});</script>
+</body>
+</html>

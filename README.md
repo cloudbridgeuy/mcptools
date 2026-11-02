@@ -12,7 +12,7 @@ Useful MCP Tools to use with LLM Coding Agents
 - **Linear**: Read a bounded issue dependency graph and ready-to-start frontier (`linear_issue_graph`); see [Linear](.claude/context/linear.md) for all Linear tools.
 - **Lanes**: Read Git worktrees, assess and apply guarded cleanup, and create Worktrunk lanes (`lane_list`, `lane_cleanup_plan`, `lane_cleanup_apply`, `lane_create`; CLI `lane cleanup`). Disabled until the operator sets `MCPTOOLS_LANE_REPOS`. Apply replans and uses non-force worktree and merged-branch deletion. No merge or push. See [Lane security and contracts](.claude/context/lanes.md).
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
-- **Web Scraping**: Fetch web pages and convert to Markdown with CSS selector filtering, section extraction, and pagination (`md_fetch`, `md_toc`)
+- **Web Scraping**: Fetch pages as Markdown with CSS selection and pagination (`md_fetch`, `md_toc`); render Markdown as self-contained offline HTML with Mermaid (`md_render`)
 - **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)
 - **Images**: Generate, edit, and vary images with ChatGPT Images 2.5 via subscription or API key (`images_generate`, `images_edit`, `images_vary`)
 - **UI Annotations**: Query and manage UI annotations from a calendsync dev server (`ui_annotations_list`, `ui_annotations_get`, `ui_annotations_resolve`, `ui_annotations_clear`)
@@ -559,6 +559,19 @@ List HackerNews stories with pagination support.
 ```
 
 ### Web Scraping Tools
+
+#### md_render
+
+Render Markdown to a self-contained HTML file with inline CSS and vendored Mermaid 11.12.0 (2,748,992 bytes). Supports CommonMark, tables, task lists, strikethrough, footnotes, heading anchors, and fenced code. Raw HTML is escaped; Mermaid uses strict security. Network resources, including remote images, are blocked. Invalid diagrams show an in-place error without breaking the page.
+
+Input: `{markdown, path?, title?, allowWrites: true}`. Output: `{path, url}`. This Write tool replaces the output atomically. Default: `<mcptools data dir>/renders/<slug>-<hash>.html`. Chrome is not needed to render the file.
+
+```bash
+mcptools md render report.md -o report.html --title "Report" --open
+cat report.md | mcptools md render - --json
+```
+
+See [Web Scraping context](.claude/context/web-scraping.md) for asset provenance, security policy, and offline browser verification.
 
 #### md_fetch
 

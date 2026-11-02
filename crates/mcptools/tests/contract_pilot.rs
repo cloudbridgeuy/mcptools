@@ -159,6 +159,7 @@ fn mcp_contract_pilot() {
             "linear_team_list",
             "linear_user_list",
             "md_fetch",
+            "md_render",
             "md_toc",
             "pdf_image",
             "pdf_images",

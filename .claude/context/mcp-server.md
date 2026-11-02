@@ -2,7 +2,7 @@
 
 mcptools can run as an MCP (Model Context Protocol) server.
 
-The full registry has 110 tools: 107 catalog tools and 3 meta tools.
+The full registry has 112 tools: 109 catalog tools and 3 meta tools.
 `plan_write` stores a diagram (Write; requires `allowWrites: true`);
 `plan_url` reads its persisted URL (Read). `plan_diff` reads changes and advances
 the baseline (destructive Write; requires `allowWrites: true`). `plan_png`
@@ -183,6 +183,7 @@ All four deny access when the operator-controlled server environment `MCPTOOLS_L
 |------|-------------|
 | `md_fetch` | Fetch page as Markdown or HTML with CSS selection and character pagination |
 | `md_toc` | Extract table of contents |
+| `md_render` | Write self-contained offline HTML with strict Mermaid diagrams; requires `allowWrites` |
 
 ### PDF
 

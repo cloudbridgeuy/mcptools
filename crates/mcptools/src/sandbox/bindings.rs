@@ -281,7 +281,9 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 109);
+        assert_eq!(all.len(), 110);
+        assert!(!read.contains(&"md_render".to_string()));
+        assert!(all.contains(&"md_render".to_string()));
         assert!(all.contains(&"plan_diff".to_string()));
         assert!(all.contains(&"plan_write".to_string()));
         assert!(all.contains(&"lane_cleanup_apply".to_string()));

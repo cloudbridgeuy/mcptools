@@ -31,6 +31,94 @@ fn unsupported_chrome() -> Option<String> {
         .err()
 }
 
+#[test]
+fn markdown_render_is_offline_and_diagrams_are_isolated() {
+    use headless_chrome::protocol::cdp::{types::Event, Network};
+    use headless_chrome::{Browser, LaunchOptions};
+    use std::sync::{Arc, Mutex};
+
+    if let Some(reason) = unsupported_chrome() {
+        eprintln!("skipping markdown_render_is_offline_and_diagrams_are_isolated: {reason}");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("render.html");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_mcptools"))
+        .args(["md", "render"])
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../core/tests/fixtures/render.md"
+        ))
+        .arg("-o")
+        .arg(&output)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let browser = Browser::new(LaunchOptions {
+        path: std::env::var_os("CHROME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| headless_chrome::browser::default_executable().ok()),
+        headless: false,
+        args: vec![std::ffi::OsStr::new("--headless=new")],
+        ignore_certificate_errors: false,
+        ..LaunchOptions::default()
+    })
+    .expect("launch supported Chrome");
+    let tab = browser.new_tab().unwrap();
+    tab.set_default_timeout(std::time::Duration::from_secs(20));
+    tab.call_method(Network::Enable {
+        max_total_buffer_size: None,
+        max_resource_buffer_size: None,
+        max_post_data_size: None,
+        report_direct_socket_traffic: None,
+        enable_durable_messages: None,
+    })
+    .unwrap();
+    tab.call_method(Network::SetBlockedURLs {
+        urls: vec![
+            "http://*".into(),
+            "https://*".into(),
+            "ws://*".into(),
+            "wss://*".into(),
+        ],
+    })
+    .unwrap();
+    let external = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&external);
+    tab.add_event_listener(Arc::new(move |event: &Event| {
+        if let Event::NetworkRequestWillBeSent(event) = event {
+            let url = &event.params.request.url;
+            if !url.starts_with("file:") && !url.starts_with("data:") {
+                observed.lock().unwrap().push(url.clone());
+            }
+        }
+    }))
+    .unwrap();
+    tab.navigate_to(reqwest::Url::from_file_path(output).unwrap().as_str())
+        .unwrap();
+    tab.wait_for_element("pre.mermaid svg .error-text")
+        .expect("invalid Mermaid must show its error in place");
+    let intact = tab.evaluate(r#"(() => {
+        const diagrams = [...document.querySelectorAll('pre.mermaid')];
+        return diagrams.length === 3
+            && diagrams.every(node => node.querySelector('svg'))
+            && diagrams.slice(0, 2).every(node => !node.querySelector('.error-text'))
+            && diagrams[2].querySelector('.error-text') !== null
+            && document.querySelector('h1#report').textContent === 'Report'
+            && document.querySelector('h2#end').nextElementSibling.textContent === 'Rest of page intact.'
+            && document.querySelector('table tbody td').textContent === 'Table'
+            && document.querySelector('code.language-rust').textContent.includes('<safe>')
+            && document.querySelectorAll('input[type=checkbox]').length === 2
+            && document.querySelector('main').textContent.includes("<script>alert('unsafe')</script>")
+            && document.querySelector('main script') === null;
+    })()"#, false).unwrap().value;
+    assert_eq!(intact, Some(serde_json::json!(true)));
+    assert!(
+        external.lock().unwrap().is_empty(),
+        "unexpected network requests: {external:?}"
+    );
+}
+
 macro_rules! skip_without_chrome {
     ($name:literal) => {
         if let Some(reason) = unsupported_chrome() {

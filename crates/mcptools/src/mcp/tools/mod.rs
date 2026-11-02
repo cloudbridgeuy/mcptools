@@ -316,6 +316,15 @@ pub fn registered_tools() -> Vec<Tool> {
             destructive: false,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::md::RenderOutput>(),
+            name: "md_render".to_string(),
+            description: "Render untrusted Markdown to a self-contained offline HTML file with Mermaid diagrams. Raw HTML is escaped; Mermaid uses strict security. Optional path selects the output file; otherwise saves under the mcptools data directory in renders/<slug>-<hash>.html. Returns an absolute path and file URL. Requires allowWrites; an existing output file is replaced atomically.".to_string(),
+            input_schema: schema::input_schema_for::<mcptools_core::md::RenderArgs>(),
+            summary: "Render Markdown with Mermaid diagrams to an offline HTML file",
+            kind: ToolKind::Write,
+            destructive: false,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<crate::md::toc::TocOutput>(),
             name: "md_toc".to_string(),
             description: "Extract table of contents from a web page by parsing markdown headings (H1-H6). Fetches the page using headless Chrome with TLS certificate checks enabled, converts to markdown, and extracts all heading levels with their character offsets and limits. Each TOC entry includes char_offset and char_limit values that can be used with md_fetch to extract specific sections. Sections are defined as heading + content until the next same-or-higher-level heading. Supports CSS selector filtering. Structured content always contains TOC data. Text content is JSON by default; output: indented, markdown, or json selects its format.".to_string(),
@@ -1466,6 +1475,7 @@ pub async fn dispatch_tool_call(
         "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
         "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
         "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
+        "md_render" => md::handle_md_render(params.arguments).await,
         "md_toc" => md::handle_md_toc(params.arguments, global).await,
         "images_generate" => images::handle_images_generate(params.arguments, global).await,
         "images_edit" => images::handle_images_edit(params.arguments, global).await,
@@ -1618,7 +1628,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 108);
+        assert_eq!(catalog.len(), 109);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1684,7 +1694,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 111);
+        assert_eq!(super::registered_tools().len(), 112);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1759,7 +1769,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 111);
+        assert_eq!(names(serve_flags(false)).len(), 112);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1888,7 +1898,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 111);
+        assert_eq!(tools.len(), 112);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1923,6 +1933,7 @@ mod catalog_tests {
     #[test]
     fn registered_names_match_oracle_sets() {
         let write: std::collections::BTreeSet<&str> = [
+            "md_render",
             "plan_close",
             "plan_diff",
             "plan_write",
@@ -2044,7 +2055,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 111);
+        assert_eq!(union.len(), 112);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

@@ -2,6 +2,25 @@ use super::JsonRpcError;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+pub async fn handle_md_render(
+    arguments: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: mcptools_core::md::RenderArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(|error| {
+            JsonRpcError {
+                code: -32602,
+                message: format!("Invalid arguments: {error}"),
+                data: None,
+            }
+        })?;
+    let output = crate::md::render::write(args).map_err(|error| JsonRpcError {
+        code: -32603,
+        message: error.to_string(),
+        data: None,
+    })?;
+    super::to_dual_result(output)
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct MdFetchArgs {
     #[serde(default)]

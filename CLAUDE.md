@@ -71,7 +71,7 @@ For detailed usage of each feature, see the context files:
 - **[Confluence](.claude/context/confluence.md)** - Search, read, create, and update pages; CQL queries
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
-- **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC
+- **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC; render offline HTML with Mermaid
 - **[Images](.claude/context/images.md)** - ChatGPT Images 2.5 generation, editing, variations; subscription or API key
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
@@ -214,6 +214,8 @@ mcptools pdf info document.pdf
 ```bash
 mcptools md toc https://docs.example.com
 mcptools md fetch https://docs.example.com --selector "main"
+mcptools md render report.md -o report.html --title "Report" --open
+cat report.md | mcptools md render - --json
 ```
 
 ### MCP Server

@@ -14,6 +14,23 @@ Fetch and TOC wait for the main document's network-idle event. The timeout cover
 
 ## CLI Commands
 
+### Render Markdown as Offline HTML
+
+```bash
+mcptools md render report.md -o report.html --title "Report" --open
+cat report.md | mcptools md render - --json
+```
+
+Rendering does not need Chrome. The pure core uses pinned `pulldown-cmark` 0.13.5 for CommonMark, GFM tables, task lists, strikethrough, footnotes, fenced code language classes, and unique heading anchors. Raw HTML is escaped and unsafe link schemes are disabled. CSS and Mermaid are inline. A restrictive CSP blocks network resources, including remote Markdown images; local renders make no network requests.
+
+`--json` returns `{path, url}` with an absolute output path and `file://` URL. Without `-o`, the output is `<mcptools data dir>/renders/<title-slug>-<12-hex-content-hash>.html`; default title is `Markdown`. The data directory follows `XDG_DATA_HOME` or the platform default. Writes replace the target atomically. `--open` uses the platform file opener.
+
+MCP `md_render` is a Write tool. Input: `{markdown, path?, title?, allowWrites: true}`. Output: `{path, url}` in structured and text content. Existing output files can be replaced; choose an explicit path only when replacement is intended.
+
+Mermaid **11.12.0** is vendored at `crates/mcptools/assets/mermaid-11.12.0/mermaid.min.js` and embedded with `include_str!`. It adds **2,748,992 bytes** of JavaScript to the binary (before linker/package compression). SHA-256: `07e37dfa97b337ccc85365d57eddf99b9706f09db3b59b260d0333b23b343c4b`. Source: `https://cdn.jsdelivr.net/npm/mermaid@11.12.0/dist/mermaid.min.js`; MIT license is stored beside it. Mermaid runs with `securityLevel: 'strict'` and `startOnLoad: true`; invalid diagrams show an error without stopping later diagrams or the page. The vendored bundle is excluded from spelling checks and must be updated deliberately.
+
+The golden fixture uses injected assets to keep expected HTML small. The offline browser acceptance test uses the existing Chrome version gate (156+), blocks HTTP/HTTPS, and checks valid SVGs, an in-place Mermaid error, escaped scripts, and intact document content. It reports a skip when suitable Chrome is not installed.
+
 ### Fetch Web Pages
 
 ```bash

@@ -41,6 +41,7 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "hn_read_item" => roundtrip::<mcptools_core::hn::PostOutput>(value),
         "hn_list_items" => roundtrip::<mcptools_core::hn::ListOutput>(value),
         "md_fetch" => roundtrip::<mcptools_core::md::FetchOutput>(value),
+        "md_render" => roundtrip::<mcptools_core::md::RenderOutput>(value),
         "md_toc" => roundtrip::<crate::md::toc::TocOutput>(value),
         "jira_create" => roundtrip::<mcptools_core::atlassian::jira::TicketOutput>(value),
         "jira_get" => roundtrip::<mcptools_core::atlassian::jira::TicketOutput>(value),

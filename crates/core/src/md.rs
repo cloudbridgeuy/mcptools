@@ -6,6 +6,9 @@ use scraper::{Html, Selector as CssSelector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod render;
+pub use render::{render_filename, render_markdown_html, RenderArgs, RenderAssets, RenderOutput};
+
 pub const MIN_CHROME_MAJOR: u32 = 156;
 
 pub fn parse_chrome_major(version: &str) -> Result<u32, String> {

@@ -28,6 +28,7 @@ scraper = { workspace = true }
 md5 = "0.7"
 thiserror = { workspace = true }
 urlencoding = { workspace = true }
+pulldown-cmark = { version = "=0.13.5", default-features = false, features = ["html"] }
 
 [dev-dependencies]
 tempfile = "3.8"

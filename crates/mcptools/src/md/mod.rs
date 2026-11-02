@@ -1,6 +1,7 @@
 mod browser;
 pub(crate) use browser::Shutdown as BrowserShutdown;
 mod fetch;
+pub mod render;
 pub mod toc;
 
 use crate::prelude::{eprintln, println, *};
@@ -42,7 +43,7 @@ pub use toc::{extract_toc_data, OutputFormat, TocOptions};
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "md")]
-#[command(about = "Convert web pages to Markdown using headless Chrome")]
+#[command(about = "Fetch web pages as Markdown or render Markdown as offline HTML")]
 pub struct App {
     #[command(subcommand)]
     pub command: Commands,
@@ -50,6 +51,8 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
+    #[command(about = "Render Markdown as self-contained offline HTML with Mermaid diagrams")]
+    Render(render::RenderOptions),
     /// Fetch a web page and convert to Markdown
     #[clap(name = "fetch")]
     Fetch(FetchOptions),
@@ -77,6 +80,7 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
     match app.command {
         Commands::Fetch(options) => fetch::fetch(options).await,
         Commands::Toc(options) => toc::toc(options).await,
+        Commands::Render(options) => render::run(options),
     }
 }
 
