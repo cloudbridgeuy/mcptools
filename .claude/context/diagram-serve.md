@@ -1,11 +1,15 @@
-# Diagram serve (GUZ-1132)
+# Diagram serve
+
+Canonical daemon, security, license, and troubleshooting reference. Tool
+contracts and the shared storage layout are in [Plan canvas tools](diagram.md).
 
 ```sh
 mcptools diagram serve --host 100.80.20.1 --port 5199
 ```
 
 `--host` takes a specific IP address, not necessarily loopback or Tailscale.
-Alternatively, `--tailscale` selects a Tailscale IPv4 address.
+Alternatively, `--tailscale` runs `tailscale ip -4` and selects an address in
+100.64.0.0/10. Exactly one of `--host` and `--tailscale` is required; they conflict.
 IPv4, IPv6, and IPv4-mapped IPv6 wildcard addresses are refused. Port defaults
 to 5199; port 0 selects an ephemeral port. Startup prints the actual base URL.
 The daemon exits after the idle grace period or when interrupted.
@@ -52,11 +56,9 @@ MCP permission gate. Keep token URLs secret and limit network access. See
 [README security model](../../README.md#security-model) and
 [SDK licensing and external tracking](../../diagram-page/README.md).
 
-Lookup scans `<data_dir>/mcptools/diagrams/*/meta.json` for a matching 32-byte
-lowercase hexadecimal token and reads the sibling `plan.tldr`. Here `data_dir`
-is `XDG_DATA_HOME`, else the platform data root: `~/Library/Application Support`
-on macOS, `$APPDATA` on Windows, or `~/.local/share` on other platforms.
-The mcptools data directory is the root plus `mcptools`, matching GUZ-1131.
+Lookup scans `<data_dir>/diagrams/*/meta.json` for a matching 32-byte
+lowercase hexadecimal token and reads the sibling `plan.tldr`. The root and
+file purposes are defined in [storage layout](diagram.md#plan_write-and-plan_url).
 The shared data-directory helper is `crate::plan_store::data_dir`.
 Malformed JSON or metadata without a token is skipped. I/O errors other than missing
 files return 500 and are logged without the request token. Files are read on
@@ -110,9 +112,8 @@ observed one 200 and one 409 for competing saves with the same revision.
 Under the single-save window rule, the competing request now returns 404.
 
 The embedded page build and limitations are in `diagram-page/README.md`.
-GUZ-1131 supplies plan writes and URLs. Its MCP-backed token-route acceptance
-test remains ignored here; the daemon integration test seeds the shared
-storage contract directly and binds port 0.
+GUZ-1131 supplies plan writes and URLs. The daemon integration test seeds the
+shared storage contract directly and binds port 0.
 
 ## Red-first evidence
 
@@ -201,10 +202,74 @@ values, handles HTTP outcomes, and encodes the PNG; storage rules remain in core
 After a save, ask the agent to reopen with `plan_url` before saving again.
 
 
-# On-demand diagram server
+## On-demand diagram server
 
 `plan_write` and `plan_url` start `mcptools diagram serve --tailscale` when the discovered endpoint is unavailable. The daemon uses the MCP data directory, port `MCPTOOLS_DIAGRAM_PORT` (default 5199), and writes `diagrams/daemon.log`. A failed start returns the URL with a warning. The server checks for open shares every `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` (default 60) and exits when no shares have been open for `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` (default 120). Retention runs at startup and while the server runs.
 
-Remove an old user launchd agent manually with `launchctl bootout gui/$(id -u)/com.mcptools.diagram`; do not run this command without confirming that it is the intended agent. Disable an old systemd unit with `systemctl --user disable --now mcptools-diagram.service`.
+No boot-time systemd or launchd service is required. `plan_close`, `plan_diff`,
+and `plan_png` do not start the daemon. An open share prevents idle shutdown;
+an open browser tab alone does not. Idle grace restarts after shares close or
+expire; shutdown occurs on a subsequent check, not at an exact deadline.
+The readiness probe requests `/` without a proxy and expects 404 plus the
+daemon's nosniff and no-referrer headers. Startup waits up to three seconds.
+
+If a custom boot-time service was installed previously, inspect its identity
+and disable that service through launchd or systemd. This repository supplies
+no boot-service definition; do not assume a service name or remove unrelated agents.
 
 The address record `diagrams/.daemon-address!` can be stale. Host and port environment overrides take precedence independently. The daemon and MCP process must use the same data directory.
+
+### Configuration
+
+| Setting | Effect and default |
+|---------|--------------------|
+| `--host <IP>` | Manual bind to a specific IP; no default. Does not enforce tailnet membership. |
+| `--tailscale` | Select the local Tailscale IPv4 address instead of `--host`. Requires the `tailscale` executable. |
+| `--port <u16>` | Manual listener port, default 5199; 0 selects an ephemeral port. |
+| `MCPTOOLS_DIAGRAM_HOST` | URL and readiness-probe host override; does not change the spawned daemon's Tailscale bind. |
+| `MCPTOOLS_DIAGRAM_PORT` | URL/probe port override and on-demand `--port`. The spawned daemon defaults to 5199; URLs fall back through the address record first. Does not set a manual serve command's port. |
+| `MCPTOOLS_DIAGRAM_SHARE_SECONDS` | Share TTL, default 1800; unsigned seconds, clamped to 60–86400. Per-call `share_seconds` wins. Invalid values fail share creation. |
+| `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` | Share inspection interval, default 60; zero or invalid values use the default. |
+| `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` | Idle grace, default 120; zero or invalid values use the default. |
+| `MCPTOOLS_DIAGRAM_TTL_SECONDS` | Retention age, default 2592000 (30 days); unsigned seconds, zero allowed. Invalid values stop retention, not HTTP service, and log an error. |
+| `XDG_DATA_HOME` | Nonempty override for the data root; see [storage](diagram.md#plan_write-and-plan_url). Must match between tool process and daemon. |
+| `RALPH_INBOX` | Optional absolute inbox captured on `plan_write`; not read from the daemon environment during save. |
+
+The retention loop passes no active IDs to the pure selector. Open shares and
+browser tabs are not deletion exemptions. Successful page/snapshot GETs and
+`plan_url`/`plan_png` calls refresh activity; an idle tab does not poll. With a
+short retention TTL, an open but unread plan can be deleted. The sweep rechecks
+metadata and timestamps before deletion, and skips invalid layouts or symlinks.
+
+## Offline assets and license position
+
+The embedded page uses bundled tldraw 5.6.0 fonts, icons, and translations via
+`getAssetUrlsByImport`; the daemon serves these from `/assets/`. Ordinary canvas
+loading does not need an external asset host, but it still needs connectivity
+to the daemon over the tailnet. This is not an offline local-storage editor.
+
+The SDK retains its license validation and watermark behavior, including the
+conditional request to
+`https://cdn.tldraw.com/5.6.0/watermarks/watermark-track.svg` with tracking query
+parameters. Thus a strict zero-external-request claim is not supported.
+`plan_offline_acceptance.rs` allows only that exact external origin/path;
+loopback development can make no tracking request. No SDK license key is
+configured by the page. mcptools is MIT licensed; that does not grant a tldraw
+production license. The operator must resolve SDK licensing before production
+use; no production entitlement is established by this repository. See the
+[page license note](../../diagram-page/README.md#sdk-licensing-and-network-access).
+
+## Troubleshooting
+
+| Symptom | Check or recovery |
+|---------|-------------------|
+| Tool returns `warning: "diagram server unavailable"` | Read `<data_dir>/diagrams/daemon.log`. Run `tailscale ip -4` in the tool process's environment. Check host/port overrides and the recorded socket. The stored plan/share can exist despite startup failure; retry `plan_url` after fixing connectivity. |
+| Daemon exits without serving | Check whether the port is already occupied: bind returns success without starting another listener on address-in-use. For visible startup errors, run `mcptools diagram serve --tailscale --port 5199` in the foreground with the same data root. |
+| Phone cannot connect | Connect it to the same tailnet; check the server's Tailscale address, listener port, and ACL. A loopback URL is local to the phone, not the server. `MCPTOOLS_DIAGRAM_HOST` is not a bind flag. |
+| HTTP 403 | Use the literal bound IP and port. DNS aliases, missing/duplicate Host headers, and proxy Host rewrites fail validation. |
+| HTTP 404 or expired-link message | Call `plan_url` to reopen the share; saves, `plan_close`, and expiry close access. If retention deleted the plan, recreate it with `plan_write`. Reopening reuses the old token, not a new secret. |
+| Save 409 | Another write changed the revision. Reload to get the current snapshot; reload discards unsaved edits. |
+| Save 400 or 413 | 400 means invalid save JSON, snapshot envelope, or PNG; 413 means the total JSON body, including base64 PNG, exceeds 10 MiB. Reduce canvas/image size before retrying. |
+| Save 500 or no inbox report | Inspect daemon logs and file permissions; verify the absolute inbox was set on the writer's `plan_write`. No notify target is a successful save with a log message. An I/O failure can leave mixed files; do not assume a failed save changed nothing. |
+| `plan_png` fails or diff is empty | PNG exists only after a browser save. Successful save already advances the baseline, so a later `plan_diff` is empty. Without a saved baseline, a save compares against the stored pre-save plan. |
+| Retention does not run | Check `MCPTOOLS_DIAGRAM_TTL_SECONDS` and retention logs. Sweeps run immediately and hourly only while the daemon runs; malformed plans and unsafe layouts are skipped. |

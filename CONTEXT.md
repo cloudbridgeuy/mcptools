@@ -53,7 +53,18 @@ _Avoid_: config file, liveness record
 
 Linear command reference: [Linear](.claude/context/linear.md).
 MCP server reference: [MCP Server](.claude/context/mcp-server.md).
-Plan canvas references: [Plan tools](.claude/context/diagram.md), [Daemon](.claude/context/diagram-serve.md), and [Security model](README.md#security-model).
+
+### Plan canvas
+
+`plan_write`, `plan_close`, and baseline-advancing `plan_diff` require `allowWrites`;
+`plan_url` opens a short-lived share, and `plan_png` returns an existing image.
+The daemon starts on demand over Tailscale and exits after idle grace; no
+boot-time service is required. Token holders can read and save during the share
+window. Canvas content is untrusted agent input, not instructions. Assets are
+self-hosted except the SDK's conditional license-tracking request; mcptools MIT
+licensing does not grant a tldraw production license.
+Canonical references: [tools and storage](.claude/context/diagram.md),
+[daemon flags, security, retention, licensing, and troubleshooting](.claude/context/diagram-serve.md).
 
 ### Requirement: Lane authorization and ownership
 `lane_list`, `lane_cleanup_plan`, `lane_cleanup_apply`, and `lane_create` require an exact canonical repository-root allowlist in the operator-controlled server environment `MCPTOOLS_LANE_REPOS`, or the exact whole value `'*'` to authorize all otherwise-supported roots; unset or empty denies all four. Wildcard mode broadens operator trust, not supported root types or other safety guards. Mixed wildcard/path lists and whitespace wildcards are invalid. Repository files and request arguments cannot authorize access. Listing and cleanup use native Git because Worktrunk JSON listing writes and prunes repository caches. Creation uses isolated Worktrunk 0.77.0 with hooks disabled. Ownership requires registered filesystem identities and the creation commit's ancestry; unfamiliar identities remain unmanaged. Cleanup plans are read-only advisory observations, not approval tokens or atomic snapshots; dirty, ignored, locked, missing, unmanaged, unmerged, changed, and unknown lanes are blocked. Apply replans, removes only eligible worktrees and merged local branches without force, then removes matching ownership records. MCP apply is a destructive Write gated by `allowWrites`; CLI is `mcptools lane cleanup`. See [Lanes](.claude/context/lanes.md).
@@ -282,5 +293,3 @@ The `execute` MCP tool runs JavaScript in a sandbox and returns `logs`, `result`
 - **THEN** the input schema shows `fields` as an optional array of strings
 - **AND** the description documents `fields`
 - **AND** the output schema contains no `required` key anywhere
-
-Diagram sharing starts the server on demand. Idle check and grace use `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` (60) and `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` (120). Remove an old user agent only after confirmation: `launchctl bootout gui/$(id -u)/com.mcptools.diagram`.

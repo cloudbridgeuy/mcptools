@@ -79,7 +79,7 @@ For detailed usage of each feature, see the context files:
 
 ### Infrastructure
 - **[Plan Canvas](.claude/context/diagram.md)** - `plan_write`, `plan_url`, `plan_close`, `plan_diff` (write tools require `allowWrites`), `plan_png`; canvas content is untrusted agent input (prompt injection)
-- **[Diagram Daemon](.claude/context/diagram-serve.md)** - Binding, token access, saves, retention, and on-demand lifecycle; [security and licensing](README.md#plan-canvas)
+- **[Diagram Daemon](.claude/context/diagram-serve.md)** - Flags, token access, saves, retention, on-demand lifecycle (no boot service), security, licensing, and troubleshooting
 - **[Lanes](.claude/context/lanes.md)** - Native Git read-only listing/cleanup planning and guarded Worktrunk creation; operator-only `MCPTOOLS_LANE_REPOS` authorization
 - **[MCP Server](.claude/context/mcp-server.md)** - Server configuration; available tools
 - **[Upgrade](.claude/context/upgrade.md)** - Self-update mechanism; platform support
@@ -235,5 +235,3 @@ Call find_tools (task, --domain, or --list-domains). A domain list is how you pr
 
 - [Atlassian Setup](docs/ATLASSIAN_SETUP.md) - Detailed setup instructions
 - [Atlassian Quick Start](docs/ATLASSIAN_QUICK_START.md) - Quick reference
-
-Diagram startup is on demand. `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` defaults to 60; `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` defaults to 120. Old user agent removal: `launchctl bootout gui/$(id -u)/com.mcptools.diagram` after identity confirmation.

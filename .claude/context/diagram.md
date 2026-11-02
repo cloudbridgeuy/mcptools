@@ -1,15 +1,18 @@
-# Plan diagrams
+# Plan canvas tools and storage
+
+Canonical tool and storage reference. For daemon flags, security, licensing,
+retention, and troubleshooting, see [Diagram serve](diagram-serve.md).
 
 ## plan_write and plan_url
 
 `plan_write {id, nodes: [{id, text}], edges: [{from, to}], share_seconds?}` is a destructive
 Write tool; direct calls, `call_tool`, and `execute` require `allowWrites: true`.
-It returns `{url, rev}`. Duplicate node IDs, unknown edge endpoints, and blank
+It returns `{url, rev}`, with an optional startup `warning`. Duplicate node IDs, unknown edge endpoints, and blank
 text fail before any storage writes. Plan IDs are single ASCII names using
 letters, digits, `-`, `_`, and `.`; `.` and `..` are rejected.
 
 `plan_url {id, share_seconds?}` stays a Read tool and returns
-`{url}`. Missing plans fail without writes. `plan_write` also accepts optional
+`{url}`, with an optional startup `warning`. Missing plans fail without writes. `plan_write` also accepts optional
 `share_seconds`. Both open or extend `share.json` to now plus the TTL: default
 1800 seconds, `MCPTOOLS_DIAGRAM_SHARE_SECONDS` environment override, per-call
 override takes precedence, clamped to 60–86400 seconds.
@@ -18,11 +21,24 @@ window and refreshes last-access, without changing plan content.
 `plan_close {id}` is a destructive Write tool requiring `allowWrites: true`;
 it returns `{closed: true}` and writes an immediately closed window. Call it at
 turn end. Ralph turn-end integration is separate work (GUZ-1140).
-Both tools use the same persisted token. Updates retain existing node positions,
-retain the token, and increment `rev` from its initial value of 1. Revision
+`plan_write` and `plan_url` use the same persisted token. `plan_write` updates
+retain existing node positions and the token, and increment `rev` from its initial value of 1. Revision
 overflow or invalid stored metadata fails without replacing the plan.
 
-Storage is `<data_dir>/diagrams/<id>/{plan.tldr, baseline.tldr, latest.png, meta.json, share.json, notify.json}`. `notify.json` is optional. `data_dir` is
+Storage is `<data_dir>/diagrams/<id>/`. Files are:
+
+| File | Purpose |
+|------|---------|
+| `plan.tldr` | Current tldraw document snapshot. |
+| `meta.json` | Plan ID, persisted token, and revision. |
+| `share.json` | Share-window expiry; missing or invalid means closed. |
+| `baseline.tldr` | Optional diff baseline, created by `plan_diff` or a successful save. |
+| `latest.png` | Optional image from the latest browser save; not rendered by `plan_write`. |
+| `notify.json` | Optional absolute Ralph inbox captured by `plan_write`. |
+| `last-access` | Best-effort retention activity marker; not a share expiry. |
+
+`diagrams/.daemon-address!` and `diagrams/daemon.log` are daemon-wide files,
+not plan files. `data_dir` is
 `$XDG_DATA_HOME/mcptools` when set and nonempty; otherwise it is
 `~/Library/Application Support/mcptools` on macOS, `$APPDATA/mcptools` on
 Windows, or `~/.local/share/mcptools` on other platforms. The shared helper is
@@ -37,7 +53,10 @@ URLs are `http://<host>:<port>/d/<token>`. Host and port resolve independently:
 `MCPTOOLS_DIAGRAM_HOST` and `MCPTOOLS_DIAGRAM_PORT` override the recorded socket
 address in `<data_dir>/diagrams/.daemon-address!`; without a valid record, the
 fallback is `127.0.0.1:5199`. IPv6 hosts are bracketed in URLs. The record can be
-stale and is not a health check. The tools start the daemon on demand using Tailscale and the same data directory. Idle check and grace use `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` (60) and `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` (120). Remove an old user agent only after confirmation: `launchctl bootout gui/$(id -u)/com.mcptools.diagram`.
+stale and is not a health check. `plan_write` and `plan_url` check the endpoint
+and start the daemon on demand using Tailscale and the same data directory.
+Startup failure adds `warning: "diagram server unavailable"` to the result;
+it does not undo the stored plan or share window. See [lifecycle](diagram-serve.md#on-demand-diagram-server).
 
 Tokens contain 128 random bits and stay unchanged. `share.json` stores
 `{"expires_at_unix_secs":<u64>}` separately from strict `PlanMeta`. Missing,
@@ -74,8 +93,7 @@ returns an empty diff, because the save already advanced the baseline.
 Before implementation, the four GUZ-1131 acceptance tests were un-ignored and
 run through `RUST_TEST_THREADS=1 cargo xtask lint --no-fmt --no-check
 --no-clippy --no-machete --no-typos`. All four failed because `plan_write`
-was unknown (the success case lacked structured content). The two GUZ-1132
-daemon tests remain ignored and unchanged.
+was unknown (the success case lacked structured content).
 
 After implementation, `RUST_TEST_THREADS=1 cargo xtask lint` passed: all four
 GUZ-1131 acceptance tests and four pure plan-store unit tests passed, and Clippy
@@ -95,7 +113,8 @@ snapshot is changed. Diff formatting uses the existing pure core diff engine;
 baseline defaults and PNG path rules also live in pure core.
 
 `plan_png {id}` is Read and returns `{path}`, the absolute path of an existing
-`latest.png`. It does not render, create, or change any file. A missing PNG or
+`latest.png`. It does not render or change the image, but refreshes `last-access`
+on success. A missing PNG or
 a directory at that path fails. Relative data-directory configuration is made
 absolute by the shell before the core builds the path.
 

@@ -113,11 +113,13 @@ the link until `plan_url` reopens it.
 
 `plan_write` and `plan_url` start the daemon on demand using Tailscale. A failed start returns the URL with a warning. Set `MCPTOOLS_DIAGRAM_PORT` to change the default port 5199. The daemon checks every `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` (default 60) and exits after `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` (default 120) when no shares remain. Its log is in `diagrams/daemon.log` under the user data directory.
 
-Remove an old user agent manually with `launchctl bootout gui/$(id -u)/com.mcptools.diagram` after confirming its identity. The daemon and MCP process must use the same data directory.
+No boot-time systemd or launchd service is required. The daemon and MCP process
+must use the same data directory. See [daemon configuration and troubleshooting](.claude/context/diagram-serve.md#configuration), including legacy service removal.
 
 1. Install mcptools and Tailscale.
-2. Call `plan_write` to create a plan, then `plan_diff` once to establish a baseline
-   before editing. Use `plan_url` to retrieve the URL again.
+2. Call `plan_write` to create a plan. Optionally call `plan_diff` to establish
+   a baseline; without one, the first save compares against the stored plan.
+   Use `plan_url` to retrieve the URL again.
 3. Connect the phone to the same tailnet and open the returned IP-based URL.
    Edit, then press **Save**; there is no autosave. A revision conflict requires
    reload and discards unsaved edits.
@@ -161,8 +163,9 @@ set a Tailscale ACL to allow port 5199 only from the user's devices.
   TTL is 30 days, overridden by `MCPTOOLS_DIAGRAM_TTL_SECONDS`. Age uses the newest
   modification time of the plan directory, snapshot, metadata, and `last-access`
   marker. Page and snapshot GETs, `plan_url`, and `plan_png` refresh that marker;
-  access-marker errors are logged without failing the read. Viewing a canvas
-  keeps it alive when the marker update succeeds. Retention removes the plan,
+  access-marker errors are logged without failing the read. An open share or idle
+  browser tab is not a retention exemption; only actual access refreshes activity.
+  Retention removes the plan,
   not just its token. Close the share with `plan_close` at turn end; automatic
   Ralph turn-end integration is separate work (GUZ-1140).
 - **Canvas content is untrusted input that flows back to agents**, including text
