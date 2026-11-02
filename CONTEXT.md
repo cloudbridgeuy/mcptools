@@ -25,7 +25,7 @@ Named local tldraw document created from nodes and edges, editable in the canvas
 _Avoid_: Linear project, issue plan
 
 **Token URL**:
-Secret `/d/<token>` address for a **Plan**, with a persisted 128-bit random token that permits reading and saving by any holder with network access and has no expiry while the plan exists.
+Secret `/d/<token>` address for a **Plan**, with a persisted 128-bit random token that permits reading and saving by any holder with network access only during an open share window; `plan_write` and `plan_url` open or extend the window, and `plan_close` closes it without rotating the token.
 _Avoid_: read-only link, temporary link
 
 **Baseline**:

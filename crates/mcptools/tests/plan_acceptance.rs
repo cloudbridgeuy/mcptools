@@ -107,6 +107,52 @@ fn token(url: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn share_ttl_input_overrides_environment_and_clamps() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().to_str().unwrap();
+    let mut mcp = common::spawn_server(&[
+        ("HOME", path),
+        ("XDG_DATA_HOME", path),
+        ("MCPTOOLS_DIAGRAM_SHARE_SECONDS", "120"),
+    ])
+    .unwrap();
+    let directory = home.path().join("mcptools/diagrams/spike");
+    for (input, expected) in [(None, 120), (Some(0), 60), (Some(u64::MAX), 86400)] {
+        let mut args = plan();
+        if let Some(seconds) = input {
+            args["share_seconds"] = json!(seconds);
+        }
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let written = mcp.tools_call("plan_write", args).await;
+        structured(&written);
+        let share: Value =
+            serde_json::from_slice(&std::fs::read(directory.join("share.json")).unwrap()).unwrap();
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let expires = share["expires_at_unix_secs"].as_u64().unwrap();
+        assert!((before + expected..=after + expected).contains(&expires));
+        let found = mcp
+            .tools_call("plan_url", json!({"id":"spike", "share_seconds":61}))
+            .await;
+        structured(&found);
+        let share: Value =
+            serde_json::from_slice(&std::fs::read(directory.join("share.json")).unwrap()).unwrap();
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(
+            (before + 61..=after + 61).contains(&share["expires_at_unix_secs"].as_u64().unwrap())
+        );
+    }
+}
+
+#[tokio::test]
 async fn write_and_url_share_persisted_token() {
     let home = tempfile::tempdir().expect("isolated home");
     let mut mcp = server(home.path());

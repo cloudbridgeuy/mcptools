@@ -43,5 +43,5 @@ async fn diff_permissions_and_failed_reads_leave_storage_unchanged() {
             if id == "../escape" { -32602 } else { -32603 }
         );
     }
-    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 3);
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 4);
 }

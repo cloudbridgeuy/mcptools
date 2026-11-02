@@ -15,6 +15,11 @@ async fn seeded_token_routes_enforce_host_and_serve_embedded_page() {
     let home = tempfile::tempdir().unwrap();
     let directory = home.path().join("mcptools/diagrams/seed");
     std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("share.json"),
+        serde_json::json!({"expires_at_unix_secs":u64::MAX}).to_string(),
+    )
+    .unwrap();
     let token = "0123456789abcdef0123456789abcdef";
     let snapshot = include_bytes!("../../../tests/fixtures/plan/spike.tldr");
     std::fs::write(directory.join("plan.tldr"), snapshot).unwrap();

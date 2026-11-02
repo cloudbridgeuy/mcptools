@@ -1,6 +1,7 @@
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
+use mcptools_core::plan_share::{self, ShareWindow};
 use mcptools_core::plan_store::{self, PlanMeta, UrlOutput, WriteArgs, WriteOutput};
 use rand::RngCore;
 use serde::de::DeserializeOwned;
@@ -39,6 +40,36 @@ fn stage(directory: &Path, value: &impl serde::Serialize) -> Result<tempfile::Na
     file.flush()?;
     file.as_file().sync_all()?;
     Ok(file)
+}
+
+fn now() -> std::io::Result<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(std::io::Error::other)
+}
+
+fn share_window(seconds: Option<u64>) -> Result<ShareWindow> {
+    let seconds = match seconds {
+        Some(seconds) => Some(seconds),
+        None => std::env::var("MCPTOOLS_DIAGRAM_SHARE_SECONDS")
+            .ok()
+            .map(|value| value.parse::<u64>())
+            .transpose()
+            .wrap_err("MCPTOOLS_DIAGRAM_SHARE_SECONDS must be unsigned seconds")?,
+    };
+    Ok(ShareWindow {
+        expires_at_unix_secs: now()?.saturating_add(plan_share::clamp_ttl(seconds)),
+    })
+}
+
+pub fn share_is_open(directory: &Path) -> std::io::Result<bool> {
+    let window = match std::fs::read(directory.join("share.json")) {
+        Ok(bytes) => serde_json::from_slice::<ShareWindow>(&bytes).ok(),
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    Ok(plan_share::is_open(window.as_ref(), now()?))
 }
 
 pub fn touch_access(directory: &Path) {
@@ -87,6 +118,7 @@ fn endpoint() -> Result<(String, String)> {
 
 pub fn write(args: &WriteArgs) -> Result<WriteOutput> {
     let plan = plan_store::validate_write(args).map_err(|error| eyre!(error))?;
+    let window = share_window(args.share_seconds)?;
     let directory = data_dir()?.join("diagrams").join(&args.id);
     let meta: Option<PlanMeta> = read_optional(&directory.join("meta.json"))?;
     let previous = read_optional(&directory.join("plan.tldr"))?;
@@ -107,12 +139,14 @@ pub fn write(args: &WriteArgs) -> Result<WriteOutput> {
     std::fs::create_dir_all(&directory)?;
     let snapshot = stage(&directory, &write.snapshot)?;
     let meta = stage(&directory, &write.meta)?;
+    let share = stage(&directory, &window)?;
     snapshot.persist(directory.join("plan.tldr"))?;
     meta.persist(directory.join("meta.json"))?;
+    share.persist(directory.join("share.json"))?;
     Ok(write.output)
 }
 
-pub fn url(id: &str) -> Result<UrlOutput> {
+pub fn url(id: &str, seconds: Option<u64>) -> Result<UrlOutput> {
     plan_store::validate_id(id).map_err(|error| eyre!(error))?;
     let directory = data_dir()?.join("diagrams").join(id);
     let meta: PlanMeta =
@@ -122,8 +156,25 @@ pub fn url(id: &str) -> Result<UrlOutput> {
     let output = UrlOutput {
         url: plan_store::plan_url(&meta, Some(&host), Some(&port)).map_err(|error| eyre!(error))?,
     };
+    stage(&directory, &share_window(seconds)?)?.persist(directory.join("share.json"))?;
     touch_access(&directory);
     Ok(output)
+}
+
+pub fn close(id: &str) -> Result<plan_store::CloseOutput> {
+    plan_store::validate_id(id).map_err(|error| eyre!(error))?;
+    let directory = data_dir()?.join("diagrams").join(id);
+    let meta: PlanMeta =
+        read_optional(&directory.join("meta.json"))?.ok_or_else(|| eyre!("unknown plan: {id}"))?;
+    plan_store::validate_meta(id, &meta).map_err(|error| eyre!(error))?;
+    stage(
+        &directory,
+        &ShareWindow {
+            expires_at_unix_secs: 0,
+        },
+    )?
+    .persist(directory.join("share.json"))?;
+    Ok(plan_store::CloseOutput { closed: true })
 }
 
 pub fn diff(id: &str) -> Result<plan_store::DiffOutput> {

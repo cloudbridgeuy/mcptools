@@ -89,7 +89,13 @@ async fn find_plan(directory: &Path, token: &str) -> std::io::Result<Option<Path
             Err(error) => return Err(error),
         };
         if metadata.is_some_and(|meta| diagram_serve::token_matches(&meta.token, token)) {
-            return Ok(Some(entry.path().join("plan.tldr")));
+            let directory = entry.path();
+            return tokio::task::spawn_blocking(move || {
+                Ok(crate::plan_store::share_is_open(&directory)?
+                    .then(|| directory.join("plan.tldr")))
+            })
+            .await
+            .map_err(std::io::Error::other)?;
         }
     }
     Ok(None)
@@ -146,14 +152,9 @@ async fn respond(config: &Config, request: Request) -> std::io::Result<Response>
         Route::Page(token) | Route::Snapshot(token) => find_plan(&config.directory, token).await?,
         _ => None,
     };
-    if let Some(plan) = &plan {
-        let directory = plan.parent().expect("plan directory").to_owned();
-        if let Err(error) =
-            tokio::task::spawn_blocking(move || crate::plan_store::touch_access(&directory)).await
-        {
-            eprintln!("diagram last access task: {error}");
-        }
-    }
+    let accessed = plan
+        .as_ref()
+        .map(|plan| plan.parent().expect("plan directory").to_owned());
     let asset = match route {
         Route::Asset(path) => PAGE.get_file(format!("assets/{path}")),
         _ => None,
@@ -173,6 +174,9 @@ async fn respond(config: &Config, request: Request) -> std::io::Result<Response>
                 let _guard = saves
                     .lock()
                     .map_err(|error| std::io::Error::other(error.to_string()))?;
+                if !crate::plan_store::share_is_open(plan.parent().expect("plan directory"))? {
+                    return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+                }
                 let bytes = std::fs::read(&plan)?;
                 let metadata = std::fs::read(plan.with_file_name("meta.json"))?;
                 let meta: PlanMeta =
@@ -212,6 +216,16 @@ async fn respond(config: &Config, request: Request) -> std::io::Result<Response>
         ResponseKind::NotFound => StatusCode::NOT_FOUND.into_response(),
         ResponseKind::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED.into_response(),
     };
+    if response.status().is_success() {
+        if let Some(directory) = accessed {
+            if let Err(error) =
+                tokio::task::spawn_blocking(move || crate::plan_store::touch_access(&directory))
+                    .await
+            {
+                eprintln!("diagram last access task: {error}");
+            }
+        }
+    }
     Ok(response)
 }
 
@@ -252,13 +266,18 @@ async fn save(config: &Config, plan: PathBuf, request: Request) -> std::io::Resu
         let _guard = saves
             .lock()
             .map_err(|error| std::io::Error::other(error.to_string()))?;
+        if !crate::plan_store::share_is_open(plan.parent().expect("plan directory"))? {
+            return Ok(None);
+        }
         crate::plan_store::save(plan.parent().expect("plan directory"), &body, &png)
+            .map(Some)
             .map_err(|error| std::io::Error::other(error.to_string()))
     })
     .await
     .map_err(std::io::Error::other)??;
     Ok(match saved {
-        Ok(meta) => Json(serde_json::json!({"rev": meta.rev})).into_response(),
-        Err(error) => save_error(error),
+        Some(Ok(meta)) => Json(serde_json::json!({"rev": meta.rev})).into_response(),
+        Some(Err(error)) => save_error(error),
+        None => StatusCode::NOT_FOUND.into_response(),
     })
 }

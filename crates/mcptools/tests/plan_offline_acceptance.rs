@@ -43,6 +43,11 @@ fn seed(home: &Path, id: &str, modified: SystemTime) {
     let dir = home.join("mcptools/diagrams").join(id);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
+        dir.join("share.json"),
+        serde_json::json!({"expires_at_unix_secs":u64::MAX}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
         dir.join("plan.tldr"),
         include_bytes!("../../../tests/fixtures/plan/spike.tldr"),
     )

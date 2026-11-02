@@ -25,10 +25,22 @@ referrers and set nosniff.
 
 ## Security boundary
 
-The exposure policy is under review; these are current rules, not a future design.
+Keep the canvas tailnet-only; do not expose it through Cloudflare. Recommended
+operator step: Tailscale ACLs allow port 5199 only from the user's devices.
 Plan tokens are 128 OS-random bits encoded as 32 lowercase hexadecimal characters.
-They survive updates and have no expiry while the plan exists. Any token holder
-with network access can read and save a plan. There is no separate save login or
+They survive updates, but access requires an open `share.json` window in the
+plan directory (`expires_at_unix_secs`). No file, malformed data, closed or
+expired windows return 404 for page GET, snapshot GET, and save POST without
+touching last-access. Saves recheck the window after receiving the body, before
+writing. The page reports “Link expired, ask the agent for a new link” on save
+404. `plan_write` and `plan_url` open or extend the window to now plus the TTL;
+default 1800 seconds, environment `MCPTOOLS_DIAGRAM_SHARE_SECONDS`, optional
+per-call `share_seconds` override; TTLs clamp to 60–86400 seconds. `plan_close`
+closes access now, with no token rotation. `plan_write` and `plan_close` require
+`allowWrites: true`; `plan_url` stays Read but writes the share window.
+Existing plans need a fresh share; reopening enables the
+same token URL again. Any token holder with network access during the window
+can read and save a plan. There is no separate save login or
 write token; revision and body checks do not establish who the writer is. No CORS
 headers and Host validation do not prevent a token holder using a non-browser client.
 

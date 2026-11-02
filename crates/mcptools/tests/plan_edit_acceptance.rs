@@ -576,7 +576,27 @@ async fn browser_save(mode: u16) {
     tab.wait_for_element(".tl-canvas .tl-shape").unwrap();
     tab.wait_for_element("#save:not([disabled])")
         .expect("Save must be available after load");
-    if mode == 409 {
+    if mode == 404 {
+        std::fs::write(
+            directory.join("share.json"),
+            br#"{"expires_at_unix_secs":0}"#,
+        )
+        .unwrap();
+        let before = files(&directory);
+        touch_save(&tab);
+        tab.wait_for_element("#save-status[data-state='expired']")
+            .expect("expired link message must be visible");
+        let message = tab
+            .find_element("#save-status")
+            .unwrap()
+            .get_inner_text()
+            .unwrap();
+        assert!(
+            message.contains("Link expired") && message.contains("ask the agent for a new link"),
+            "{message}"
+        );
+        assert_eq!(files(&directory), before, "expired save changed files");
+    } else if mode == 409 {
         let response = client
             .post(&url)
             .json(&json!({"rev":1,"snapshot":snapshot(),"png":PNG}))
@@ -641,6 +661,176 @@ async fn browser_save(mode: u16) {
 #[tokio::test]
 async fn browser_save_twice() {
     browser_save(200).await;
+}
+
+#[tokio::test]
+async fn browser_save_after_expiry_shows_new_link_message() {
+    browser_save(404).await;
+}
+
+async fn share_routes(state: &str) {
+    let home = tempfile::tempdir().unwrap();
+    let mut mcp = server(home.path());
+    let directory = seed(home.path(), &mut mcp).await;
+    let meta = read_json(&directory.join("meta.json"));
+    let (_daemon, client, save_url) = daemon(home.path(), meta["token"].as_str().unwrap()).await;
+    let base = save_url.strip_suffix("/save").unwrap();
+    let body = json!({"rev":1,"snapshot":snapshot(),"png":PNG});
+    assert_eq!(client.get(base).send().await.unwrap().status(), 200);
+    assert_eq!(
+        client
+            .get(format!("{base}/plan.tldr"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    assert_eq!(
+        client
+            .post(&save_url)
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    if state == "closed" {
+        let denied = mcp.tools_call("plan_close", json!({"id":"spike"})).await;
+        assert_eq!(denied["isError"], true);
+        let closed = mcp
+            .tools_call("plan_close", json!({"id":"spike","allowWrites":true}))
+            .await;
+        assert_eq!(structured(&closed), &json!({"closed":true}));
+    } else if state == "missing" {
+        std::fs::remove_file(directory.join("share.json")).unwrap();
+    } else {
+        std::fs::write(
+            directory.join("share.json"),
+            if state == "expired" {
+                br#"{"expires_at_unix_secs":0}"#.as_slice()
+            } else {
+                b"{broken"
+            },
+        )
+        .unwrap();
+    }
+    let before = files(&directory);
+    let accessed = std::fs::metadata(directory.join("last-access"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    for suffix in ["", "/plan.tldr"] {
+        assert_eq!(
+            client
+                .get(format!("{base}{suffix}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            404,
+            "{state}: {suffix}"
+        );
+    }
+    assert_eq!(
+        client
+            .post(&save_url)
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404,
+        "{state}: save"
+    );
+    assert_eq!(files(&directory), before);
+    assert_eq!(
+        std::fs::metadata(directory.join("last-access"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        accessed
+    );
+    let reopened = mcp.tools_call("plan_url", json!({"id":"spike"})).await;
+    assert!(structured(&reopened)["url"]
+        .as_str()
+        .unwrap()
+        .ends_with(meta["token"].as_str().unwrap()));
+    assert_eq!(client.get(base).send().await.unwrap().status(), 200);
+    assert_eq!(
+        client
+            .get(format!("{base}/plan.tldr"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    let body = json!({"rev":read_json(&directory.join("meta.json"))["rev"],"snapshot":snapshot(),"png":PNG});
+    assert_eq!(
+        client
+            .post(&save_url)
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+}
+
+#[tokio::test]
+async fn expired_share_guards_all_routes_and_url_reopens() {
+    share_routes("expired").await;
+}
+
+#[tokio::test]
+async fn closed_share_guards_all_routes_and_url_reopens() {
+    share_routes("closed").await;
+}
+
+#[tokio::test]
+async fn missing_share_guards_all_routes_and_url_reopens() {
+    share_routes("missing").await;
+}
+
+#[tokio::test]
+async fn malformed_share_guards_all_routes_and_url_reopens() {
+    share_routes("malformed").await;
+}
+
+#[tokio::test]
+async fn save_rechecks_share_after_body_upload() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let home = tempfile::tempdir().unwrap();
+    let mut mcp = server(home.path());
+    let directory = seed(home.path(), &mut mcp).await;
+    let meta = read_json(&directory.join("meta.json"));
+    let (_daemon, _client, url) = daemon(home.path(), meta["token"].as_str().unwrap()).await;
+    let url = reqwest::Url::parse(&url).unwrap();
+    let mut stream = tokio::net::TcpStream::connect((url.host_str().unwrap(), url.port().unwrap()))
+        .await
+        .unwrap();
+    let body = serde_json::to_vec(&json!({"rev":1,"snapshot":snapshot(),"png":PNG})).unwrap();
+    let headers = format!("POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", url.path(), url.host_str().unwrap(), url.port().unwrap(), body.len());
+    stream.write_all(headers.as_bytes()).await.unwrap();
+    stream.write_all(&body[..body.len() / 2]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let closed = mcp
+        .tools_call("plan_close", json!({"id":"spike","allowWrites":true}))
+        .await;
+    structured(&closed);
+    let before = files(&directory);
+    stream.write_all(&body[body.len() / 2..]).await.unwrap();
+    let mut response = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), stream.read_to_end(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 404"));
+    assert_eq!(files(&directory), before);
 }
 
 #[tokio::test]
@@ -832,7 +1022,7 @@ async fn access_marker_replacement_and_failures_preserve_reads() {
     )
     .unwrap();
     let (_daemon, base) = retention_daemon(home.path(), "2592000");
-    let before = files(&directory);
+    let mut before = files(&directory);
     let marker = directory.join("last-access");
     let old = SystemTime::now() - Duration::from_secs(1000);
     for read in ["GET page", "GET snapshot", "plan_url", "plan_png"] {
@@ -850,6 +1040,12 @@ async fn access_marker_replacement_and_failures_preserve_reads() {
         std::fs::create_dir(&marker).unwrap();
         access_plan(&mut mcp, &directory, &base, read).await;
         std::fs::remove_dir(&marker).unwrap();
+        if read == "plan_url" {
+            before.insert(
+                directory.join("share.json"),
+                std::fs::read(directory.join("share.json")).unwrap(),
+            );
+        }
         assert_eq!(
             files(&directory),
             before,

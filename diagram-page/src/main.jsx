@@ -51,6 +51,10 @@ function App() {
         setStatus({ state: 'conflict', message: 'Save conflict: the plan changed elsewhere. Reload to see the latest version; your unsaved edits will be lost.' })
         return
       }
+      if (response.status === 404) {
+        setStatus({ state: 'expired', message: 'Link expired, ask the agent for a new link' })
+        return
+      }
       if (response.status === 413) throw new Error('Plan is too large to save (10 MiB limit)')
       if (response.status === 400) throw new Error('The server rejected the plan or image')
       if (!response.ok) throw new Error(`Save failed (${response.status})`)
@@ -69,7 +73,7 @@ function App() {
     <Tldraw assetUrls={assetUrls} onMount={editor => { void loadPlan(editor) }} />
     <div style={{ position: 'fixed', top: 'max(8px, env(safe-area-inset-top))', right: 'max(8px, env(safe-area-inset-right))', zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8, maxWidth: 'calc(100vw - 16px)' }}>
       <div id="save-status" role="status" aria-live="polite" data-state={status.state} data-rev={status.rev} style={{ background: 'white', color: '#222', borderRadius: 6, padding: status.message ? 8 : 0 }}>{status.message}</div>
-      <button id="save" type="button" onClick={save} disabled={!editor || saving || status.state === 'conflict'} style={{ minWidth: 64, minHeight: 44, padding: '0 16px', borderRadius: 8, border: '1px solid #777', background: 'white', color: '#111', fontWeight: 600 }}>Save</button>
+      <button id="save" type="button" onClick={save} disabled={!editor || saving || status.state === 'conflict' || status.state === 'expired'} style={{ minWidth: 64, minHeight: 44, padding: '0 16px', borderRadius: 8, border: '1px solid #777', background: 'white', color: '#111', fontWeight: 600 }}>Save</button>
     </div>
   </>
 }

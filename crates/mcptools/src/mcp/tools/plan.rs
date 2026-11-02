@@ -1,4 +1,4 @@
-use mcptools_core::plan_store::{UrlArgs, WriteArgs};
+use mcptools_core::plan_store::{ShareArgs, UrlArgs, WriteArgs};
 
 use super::JsonRpcError;
 
@@ -30,10 +30,19 @@ pub async fn handle_plan_write(
 pub async fn handle_plan_url(
     arguments: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, JsonRpcError> {
+    let args: ShareArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
+    mcptools_core::plan_store::validate_id(&args.id).map_err(invalid)?;
+    super::to_dual_result(crate::plan_store::url(&args.id, args.share_seconds).map_err(failed)?)
+}
+
+pub async fn handle_plan_close(
+    arguments: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsonRpcError> {
     let args: UrlArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
     mcptools_core::plan_store::validate_id(&args.id).map_err(invalid)?;
-    super::to_dual_result(crate::plan_store::url(&args.id).map_err(failed)?)
+    super::to_dual_result(crate::plan_store::close(&args.id).map_err(failed)?)
 }
 
 pub async fn handle_plan_diff(

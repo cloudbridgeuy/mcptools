@@ -16,7 +16,7 @@ Useful MCP Tools to use with LLM Coding Agents
 - **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)
 - **Images**: Generate, edit, and vary images with ChatGPT Images 2.5 via subscription or API key (`images_generate`, `images_edit`, `images_vary`)
 - **UI Annotations**: Query and manage UI annotations from a calendsync dev server (`ui_annotations_list`, `ui_annotations_get`, `ui_annotations_resolve`, `ui_annotations_clear`)
-- **Plan canvas**: Share an editable tldraw plan with a phone and return saved changes to an agent (`plan_write`, `plan_url`, `plan_diff`, `plan_png`). See [Plan canvas](#plan-canvas).
+- **Plan canvas**: Share an editable tldraw plan with a phone and return saved changes to an agent (`plan_write`, `plan_url`, `plan_close`, `plan_diff`, `plan_png`). See [Plan canvas](#plan-canvas).
 
 ## Installation
 
@@ -101,8 +101,9 @@ presses **Save**. The agent can then read text changes and the saved PNG path.
 
 | MCP tool | Input | Result and effect |
 |----------|-------|-------------------|
-| `plan_write` | `{id, nodes: [{id, text}], edges: [{from, to}]}` | `{url, rev}`; creates or replaces the plan, preserves existing node positions and token, increments revision. Requires `allowWrites: true`. |
-| `plan_url` | `{id}` | `{url}` for an existing plan; read-only. |
+| `plan_write` | `{id, nodes: [{id, text}], edges: [{from, to}], share_seconds?}` | `{url, rev}`; creates or replaces the plan, preserves existing node positions and token, increments revision, opens a share window. Requires `allowWrites: true`. |
+| `plan_url` | `{id, share_seconds?}` | `{url}` for an existing plan; opens or extends its share window. |
+| `plan_close` | `{id}` | `{closed: true}`; closes the share window without changing the token. Requires `allowWrites: true`. |
 | `plan_diff` | `{id}` | `{diff}` since the stored baseline, then replaces that baseline. Requires `allowWrites: true`, including direct calls, `call_tool`, and `execute`. A missing baseline starts at the current snapshot and returns an empty diff. |
 | `plan_png` | `{id}` | `{path}` to the existing `latest.png`, an absolute local path; does not render an image. Fails before a PNG has been saved. |
 
@@ -138,7 +139,8 @@ not a health check. Use one daemon and avoid concurrent external plan writes.
 
 ### Security model
 
-This describes current behavior; the exposure policy is under review.
+Keep the canvas tailnet-only; no Cloudflare exposure. Recommended operator step:
+set a Tailscale ACL to allow port 5199 only from the user's devices.
 
 - The daemon requires `--tailscale` or an explicit IP via `--host`. Explicit hosts
   are not restricted to Tailscale or loopback. Wildcard addresses, including
@@ -148,8 +150,13 @@ This describes current behavior; the exposure policy is under review.
   port. DNS aliases do not pass. The server adds no CORS headers; this is not
   authentication and does not stop a non-browser client with the token.
 - Token URLs contain 128 random bits (32 lowercase hexadecimal characters).
-  Tokens do not expire while the plan exists and survive updates. Any holder
-  with network access can read and save the plan; there is no separate save
+  Tokens survive updates, but a separate share window gates access. `plan_write`
+  and `plan_url` open or extend it to now plus 1800 seconds by default. Optional
+  `share_seconds` overrides `MCPTOOLS_DIAGRAM_SHARE_SECONDS`; both are clamped to
+  60–86400 seconds. `plan_close` revokes access at turn end. Missing, malformed,
+  closed, or expired windows return 404 on page, snapshot, and save routes without
+  refreshing last-access. Existing plans need a fresh share. Any holder
+  with network access during the window can read and save; there is no separate save
   authorization. Saves still require the current revision and a valid body.
   Treat the URL as a secret, not a read-only share link.
 - The daemon sweeps eligible stored plans at startup and hourly. Default retention
@@ -158,7 +165,8 @@ This describes current behavior; the exposure policy is under review.
   marker. Page and snapshot GETs, `plan_url`, and `plan_png` refresh that marker;
   access-marker errors are logged without failing the read. Viewing a canvas
   keeps it alive when the marker update succeeds. Retention removes the plan,
-  not just its token.
+  not just its token. Close the share with `plan_close` at turn end; automatic
+  Ralph turn-end integration is separate work (GUZ-1140).
 - **Canvas content is untrusted input that flows back to agents**, including text
   in `plan_diff` and saved images. It can carry prompt injection. Treat canvas
   instructions as data, not authority to run tools or change permissions.

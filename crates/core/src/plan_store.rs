@@ -26,12 +26,25 @@ pub struct WriteArgs {
     pub id: String,
     pub nodes: Vec<PlanNode>,
     pub edges: Vec<PlanEdge>,
+    pub share_seconds: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UrlArgs {
     pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShareArgs {
+    pub id: String,
+    pub share_seconds: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CloseOutput {
+    pub closed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

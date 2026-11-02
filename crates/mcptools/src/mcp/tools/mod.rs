@@ -163,6 +163,15 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 pub fn registered_tools() -> Vec<Tool> {
     vec![
         Tool {
+            name: "plan_close".into(),
+            description: "Close a plan share window immediately. The persisted token and plan remain unchanged. Page, snapshot and save requests return 404 until plan_url or plan_write opens a fresh window. Requires allowWrites.".into(),
+            summary: "Revoke access to a shared plan",
+            kind: ToolKind::Write,
+            destructive: true,
+            input_schema: schema::input_schema_for::<mcptools_core::plan_store::UrlArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::plan_store::CloseOutput>(),
+        },
+        Tool {
             name: "plan_diff".into(),
             description: "Return {diff}, the text changes since the last plan_diff call, then atomically replace baseline.tldr with the current snapshot. A missing baseline starts at the current snapshot and returns an empty diff. Unknown plans or malformed snapshots fail without advancing the baseline. Requires allowWrites because reading advances the baseline.".into(),
             summary: "Read plan changes and advance the stored baseline",
@@ -182,7 +191,7 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             name: "plan_write".into(),
-            description: "Validate, lay out and store a short-form plan as a tldraw snapshot. Updates preserve existing node positions and the per-plan URL token, and increment the revision. Invalid input writes nothing. Requires allowWrites. URL host and port use MCPTOOLS_DIAGRAM_HOST and MCPTOOLS_DIAGRAM_PORT, defaulting to 127.0.0.1:5199.".into(),
+            description: "Validate, lay out and store a short-form plan as a tldraw snapshot. Updates preserve existing node positions and the per-plan URL token, and increment the revision. Opens a share window to now plus share_seconds (60–86400, default MCPTOOLS_DIAGRAM_SHARE_SECONDS or 1800). Invalid input writes nothing. Requires allowWrites. URL host and port use MCPTOOLS_DIAGRAM_HOST and MCPTOOLS_DIAGRAM_PORT, defaulting to 127.0.0.1:5199.".into(),
             summary: "Store a laid-out plan diagram and return its URL and revision",
             kind: ToolKind::Write,
             destructive: true,
@@ -191,11 +200,11 @@ pub fn registered_tools() -> Vec<Tool> {
         },
         Tool {
             name: "plan_url".into(),
-            description: "Return the URL for an existing stored plan using its persisted 128-bit token. Read-only; unknown plans fail. URL host and port use MCPTOOLS_DIAGRAM_HOST and MCPTOOLS_DIAGRAM_PORT, defaulting to 127.0.0.1:5199.".into(),
-            summary: "Get the URL of a stored plan diagram",
+            description: "Return the URL for an existing stored plan using its persisted 128-bit token and open or extend its share window to now plus share_seconds (60–86400, default MCPTOOLS_DIAGRAM_SHARE_SECONDS or 1800). Unknown plans fail. URL host and port use MCPTOOLS_DIAGRAM_HOST and MCPTOOLS_DIAGRAM_PORT, defaulting to 127.0.0.1:5199.".into(),
+            summary: "Open a share window and get a stored plan URL",
             kind: ToolKind::Read,
             destructive: false,
-            input_schema: schema::input_schema_for::<mcptools_core::plan_store::UrlArgs>(),
+            input_schema: schema::input_schema_for::<mcptools_core::plan_store::ShareArgs>(),
             output_schema: schema::output_schema_for::<mcptools_core::plan_store::UrlOutput>(),
         },
         Tool {
@@ -1351,6 +1360,7 @@ pub async fn dispatch_tool_call(
     match name {
         "plan_write" => plan::handle_plan_write(params.arguments).await,
         "plan_url" => plan::handle_plan_url(params.arguments).await,
+        "plan_close" => plan::handle_plan_close(params.arguments).await,
         "plan_diff" => plan::handle_plan_diff(params.arguments).await,
         "plan_png" => plan::handle_plan_png(params.arguments).await,
         "lane_list" => lane::list(params.arguments).await,
@@ -1608,7 +1618,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 107);
+        assert_eq!(catalog.len(), 108);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1674,7 +1684,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 110);
+        assert_eq!(super::registered_tools().len(), 111);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1749,7 +1759,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 110);
+        assert_eq!(names(serve_flags(false)).len(), 111);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1841,6 +1851,7 @@ mod catalog_tests {
     #[test]
     fn full_table_matches_oracle_annotations() {
         let destructive: std::collections::BTreeSet<&str> = [
+            "plan_close",
             "plan_diff",
             "plan_write",
             "lane_cleanup_apply",
@@ -1877,7 +1888,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 110);
+        assert_eq!(tools.len(), 111);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1912,6 +1923,7 @@ mod catalog_tests {
     #[test]
     fn registered_names_match_oracle_sets() {
         let write: std::collections::BTreeSet<&str> = [
+            "plan_close",
             "plan_diff",
             "plan_write",
             "lane_cleanup_apply",
@@ -2032,7 +2044,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 110);
+        assert_eq!(union.len(), 111);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

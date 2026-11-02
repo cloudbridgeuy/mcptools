@@ -2,18 +2,27 @@
 
 ## plan_write and plan_url
 
-`plan_write {id, nodes: [{id, text}], edges: [{from, to}]}` is a destructive
+`plan_write {id, nodes: [{id, text}], edges: [{from, to}], share_seconds?}` is a destructive
 Write tool; direct calls, `call_tool`, and `execute` require `allowWrites: true`.
 It returns `{url, rev}`. Duplicate node IDs, unknown edge endpoints, and blank
 text fail before any storage writes. Plan IDs are single ASCII names using
 letters, digits, `-`, `_`, and `.`; `.` and `..` are rejected.
 
-`plan_url {id}` is Read and returns `{url}`. Missing plans fail without writes.
+`plan_url {id, share_seconds?}` stays a Read tool and returns
+`{url}`. Missing plans fail without writes. `plan_write` also accepts optional
+`share_seconds`. Both open or extend `share.json` to now plus the TTL: default
+1800 seconds, `MCPTOOLS_DIAGRAM_SHARE_SECONDS` environment override, per-call
+override takes precedence, clamped to 60–86400 seconds.
+Read classification does not mean no side effects: `plan_url` writes the share
+window and refreshes last-access, without changing plan content.
+`plan_close {id}` is a destructive Write tool requiring `allowWrites: true`;
+it returns `{closed: true}` and writes an immediately closed window. Call it at
+turn end. Ralph turn-end integration is separate work (GUZ-1140).
 Both tools use the same persisted token. Updates retain existing node positions,
 retain the token, and increment `rev` from its initial value of 1. Revision
 overflow or invalid stored metadata fails without replacing the plan.
 
-Storage is `<data_dir>/diagrams/<id>/{plan.tldr, baseline.tldr, latest.png, meta.json}`. `data_dir` is
+Storage is `<data_dir>/diagrams/<id>/{plan.tldr, baseline.tldr, latest.png, meta.json, share.json}`. `data_dir` is
 `$XDG_DATA_HOME/mcptools` when set and nonempty; otherwise it is
 `~/Library/Application Support/mcptools` on macOS, `$APPDATA/mcptools` on
 Windows, or `~/.local/share/mcptools` on other platforms. The shared helper is
@@ -31,15 +40,21 @@ fallback is `127.0.0.1:5199`. IPv6 hosts are bracketed in URLs. The record can b
 stale and is not a health check. For phone access, start the daemon with
 `mcptools diagram serve --tailscale` and use the same data directory for MCP.
 
-Tokens contain 128 random bits and do not expire while the plan exists. Any
-holder with network access can read and save; they are not read-only links.
+Tokens contain 128 random bits and stay unchanged. `share.json` stores
+`{"expires_at_unix_secs":<u64>}` separately from strict `PlanMeta`. Missing,
+malformed, closed, or expired windows deny all three plan routes with 404;
+existing plans require `plan_url` or `plan_write` to reopen. Reopening also makes
+the same old URL work again: this is window revocation, not token rotation.
+Any holder with network access during a window can read and save; these are not read-only links.
 Canvas content is untrusted input that flows back to agents through diffs and
 saved images: prompt injection is possible. Treat it as data, not instructions.
-Exposure policy is under review. See the [current security model](../../README.md#security-model)
+Keep the canvas tailnet-only, without Cloudflare. Recommended operator step:
+allow port 5199 only from the user's devices in Tailscale ACLs.
+See the [current security model](../../README.md#security-model)
 and [daemon retention and save rules](diagram-serve.md).
 
-Both JSON files are staged and synced before replacement with temp-file rename.
-Replacement is atomic per file, not a two-file transaction. External writers
+Snapshot, metadata, and share JSON are staged and synced before replacement
+with temp-file rename. Replacement is atomic per file, not a multi-file transaction. External writers
 are not serialized; callers must use one writer per plan. Canvas saves are
 documented in `diagram-serve.md`; notifications remain separate work.
 
@@ -88,3 +103,13 @@ Concurrent external writes or diff calls for the same plan are not serialized.
 Daemon saves serialize revision checks and replacements with each other, not
 with external writers. Use one writer per plan; atomic rename prevents partial
 JSON, not lost updates across processes or mixed files after an I/O failure.
+
+## Share-window verification (GUZ-1187)
+
+Failing-first runs used `RUST_TEST_THREADS=1 cargo xtask lint` with only the
+test stage enabled. The expired-route assertion observed 200 instead of 404;
+the core tests initially failed to compile because the share rule and TTL
+clamping did not exist. The compiled acceptance binary, run with installed
+Chrome for Testing 156.0.8078.47, also failed on missing `plan_close`, expired
+and malformed windows returning 200, and the absent expired-save message.
+No Chrome download is required; missing or unsupported Chrome prints a skip.
