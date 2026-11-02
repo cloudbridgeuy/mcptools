@@ -1,5 +1,5 @@
 [files]
-extend-exclude = ["diagram-page/dist/**", "diagram-page/package-lock.json"]
+extend-exclude = ["diagram-page/dist/**", "diagram-page/package-lock.json", "tests/fixtures/plan/ink-cluster/*.tldr"]
 
 [default.extend-words]
 parms = "parms"

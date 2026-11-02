@@ -463,7 +463,7 @@ async fn first_save_after_plan_write_reports_added_note_and_ink() {
         "id":"shape:ink1", "typeName":"shape", "type":"draw", "parentId":"page:page",
         "index":"aF", "isLocked":false, "opacity":1, "meta":{}, "x":20, "y":30,
         "rotation":0, "props":{"color":"black", "fill":"none", "dash":"draw",
-            "size":"m", "segments":[{"type":"free", "path":"AAAAAAAAgD8AAABAAACAPw=="}],
+            "size":"m", "segments":[{"type":"free", "dim":2, "path":"AAAAAAAAgD8AAABAAACAPw=="}],
             "isComplete":true, "isClosed":false, "isPen":false, "scale":1, "scaleX":1, "scaleY":1}
     }));
     assert_eq!(fixture.save(1, &added).await.status(), 200);
@@ -481,7 +481,7 @@ async fn first_save_after_plan_write_reports_added_note_and_ink() {
         &delivered[0],
         &fixture,
         2,
-        "+ draw ink1\n+ note n1 \"Check inbox\"",
+        "+ note \"Check inbox\" right of \"Add [workspace.lints] to root Cargo.toml\"\n+ ink #1 (1 stroke) inside \"Add [workspace.lints] to root Cargo.toml\" bbox [20.0, 31.0, 0.0, 3.9]",
     );
     assert_eq!(read_json(&fixture.directory.join("baseline.tldr")), added);
 }

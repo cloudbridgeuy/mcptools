@@ -100,7 +100,7 @@ async fn diff_golden(current: Value, expected: &str) {
 async fn diff_relabel_golden() {
     let mut current = snapshot();
     relabel(&mut current);
-    diff_golden(current, "~ s3 text: \"Fix new clippy warnings in core\" -> \"Fix clippy warnings in core (allow pedantic)\"").await;
+    diff_golden(current, "~ geo \"Fix new clippy warnings in core\" text: \"Fix new clippy warnings in core\" → \"Fix clippy warnings in core (allow pedantic)\" above \"Fix new clippy warnings in cli\"").await;
 }
 
 #[tokio::test]
@@ -130,7 +130,7 @@ async fn diff_add_golden() {
     current["records"].as_array_mut().unwrap().extend(bindings);
     diff_golden(
         current,
-        "+ arrow s2-s7 (s2 -> s7)\n+ geo s7 \"NEW: run cargo fmt check\"",
+        "+ arrow \"Add [lints] workspace = true to each crate\" → \"NEW: run cargo fmt check\" crossing \"Add clippy -D warnings to CI\"\n+ geo \"NEW: run cargo fmt check\" below \"Document lint policy in CLAUDE.md\"",
     )
     .await;
 }
@@ -149,7 +149,7 @@ async fn diff_delete_golden() {
     });
     diff_golden(
         current,
-        "- geo s6 \"Document lint policy in CLAUDE.md\"\n- arrow s5-s6 (s5 -> s6)",
+        "- arrow \"Add clippy -D warnings to CI\" → \"Document lint policy in CLAUDE.md\" right of \"Fix new clippy warnings in cli\"\n- geo \"Document lint policy in CLAUDE.md\" below \"Add clippy -D warnings to CI\"",
     )
     .await;
 }
@@ -158,7 +158,7 @@ async fn diff_delete_golden() {
 async fn diff_repoint_arrow_golden() {
     let mut current = snapshot();
     record(&mut current, "binding:s5-s6-end")["toId"] = json!("shape:s4");
-    diff_golden(current, "~ s5-s6 endpoints: (s5 -> s6) -> (s5 -> s4)").await;
+    diff_golden(current, "~ arrow \"Add clippy -D warnings to CI\" → \"Document lint policy in CLAUDE.md\" endpoints: arrow \"Add clippy -D warnings to CI\" → \"Document lint policy in CLAUDE.md\" → arrow \"Add clippy -D warnings to CI\" → \"Fix new clippy warnings in cli\" crossing \"Document lint policy in CLAUDE.md\"").await;
 }
 
 #[tokio::test]
@@ -168,7 +168,7 @@ async fn diff_move_golden() {
     assert_eq!((node["x"].clone(), node["y"].clone()), (json!(0), json!(0)));
     node["x"] = json!(42);
     node["y"] = json!(-17);
-    diff_golden(current, "~ s1 position: (0, 0) -> (42, -17)").await;
+    diff_golden(current, "~ geo \"Add [workspace.lints] to root Cargo.toml\" position: (0, 0) → (42, -17) left of \"Fix new clippy warnings in core\"").await;
 }
 
 #[tokio::test]
@@ -178,10 +178,10 @@ async fn diff_freehand_golden() {
         "id":"shape:ink1", "typeName":"shape", "type":"draw", "parentId":"page:page",
         "index":"aD", "isLocked":false, "opacity":1, "meta":{}, "x":20, "y":30,
         "rotation":0, "props":{"color":"black", "fill":"none", "dash":"draw",
-            "size":"m", "segments":[{"type":"free", "path":"AAAAAAAAgD8AAABAAACAPw=="}],
+            "size":"m", "segments":[{"type":"free", "dim":2, "path":"AAAAAAAAgD8AAABAAACAPw=="}],
             "isComplete":true, "isClosed":false, "isPen":false, "scale":1, "scaleX":1, "scaleY":1}
     }));
-    diff_golden(current, "+ draw ink1").await;
+    diff_golden(current, "+ ink #1 (1 stroke) inside \"Add [workspace.lints] to root Cargo.toml\" bbox [20.0, 31.0, 0.0, 3.9]").await;
 }
 
 struct Daemon(Child);
@@ -416,7 +416,7 @@ async fn plan_diff_advances_baseline_and_second_read_is_empty() {
     .unwrap();
     let before = files(&directory);
     let first = read_tool(&mut mcp, "plan_diff").await;
-    assert_eq!(structured(&first)["diff"], "~ s3 text: \"Fix new clippy warnings in core\" -> \"Fix clippy warnings in core (allow pedantic)\"");
+    assert_eq!(structured(&first)["diff"], "~ geo \"Fix new clippy warnings in core\" text: \"Fix new clippy warnings in core\" → \"Fix clippy warnings in core (allow pedantic)\" above \"Fix new clippy warnings in cli\"");
     assert_eq!(read_json(&directory.join("baseline.tldr")), current);
     for name in ["plan.tldr", "meta.json"] {
         assert_eq!(

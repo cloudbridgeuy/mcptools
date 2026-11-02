@@ -436,7 +436,7 @@ mod tests {
         }]});
         assert_eq!(
             prepare_save_diff(None, Some(&stored), &saved).unwrap().diff,
-            "+ draw ink1"
+            "+ ink #1 (1 stroke) bbox [0.0, 0.0, 0.0, 0.0]"
         );
         assert_eq!(
             prepare_save_diff(Some(&saved), Some(&stored), &saved)

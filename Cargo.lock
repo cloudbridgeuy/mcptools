@@ -2067,6 +2067,7 @@ dependencies = [
 name = "mcptools_core"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "html-escape",
  "html2md",
