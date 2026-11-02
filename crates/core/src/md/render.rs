@@ -132,7 +132,7 @@ pub fn render_markdown_html(markdown: &str, title: &str, assets: RenderAssets<'_
         .replace("</script", "<\\/script")
         .replace("</SCRIPT", "<\\/SCRIPT");
     format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'\">\n<title>{title}</title>\n<style>{css}</style>\n</head>\n<body>\n<main>\n{body}</main>\n<script>{js}</script>\n<script>mermaid.initialize({{startOnLoad: true, securityLevel: 'strict'}});</script>\n</body>\n</html>\n"
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'\">\n<title>{title}</title>\n<style>{css}</style>\n</head>\n<body>\n<main>\n{body}</main>\n<script>{js}</script>\n<script>mermaid.initialize({{startOnLoad: true, securityLevel: 'strict', theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'}});</script>\n</body>\n</html>\n"
     )
 }
 

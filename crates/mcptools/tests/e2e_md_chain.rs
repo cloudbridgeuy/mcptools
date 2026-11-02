@@ -32,8 +32,17 @@ fn unsupported_chrome() -> Option<String> {
 }
 
 #[test]
-fn markdown_render_is_offline_and_diagrams_are_isolated() {
-    use headless_chrome::protocol::cdp::{types::Event, Network};
+fn markdown_render_is_offline_and_diagrams_are_isolated_in_dark_mode() {
+    markdown_render_is_offline_and_diagrams_are_isolated("dark");
+}
+
+#[test]
+fn markdown_render_is_offline_and_diagrams_are_isolated_in_light_mode() {
+    markdown_render_is_offline_and_diagrams_are_isolated("light");
+}
+
+fn markdown_render_is_offline_and_diagrams_are_isolated(scheme: &str) {
+    use headless_chrome::protocol::cdp::{types::Event, Emulation, Network};
     use headless_chrome::{Browser, LaunchOptions};
     use std::sync::{Arc, Mutex};
 
@@ -66,6 +75,14 @@ fn markdown_render_is_offline_and_diagrams_are_isolated() {
     .expect("launch supported Chrome");
     let tab = browser.new_tab().unwrap();
     tab.set_default_timeout(std::time::Duration::from_secs(20));
+    tab.call_method(Emulation::SetEmulatedMedia {
+        media: None,
+        features: Some(vec![Emulation::MediaFeature {
+            name: "prefers-color-scheme".into(),
+            value: scheme.into(),
+        }]),
+    })
+    .unwrap();
     tab.call_method(Network::Enable {
         max_total_buffer_size: None,
         max_resource_buffer_size: None,
@@ -113,6 +130,38 @@ fn markdown_render_is_offline_and_diagrams_are_isolated() {
             && document.querySelector('main script') === null;
     })()"#, false).unwrap().value;
     assert_eq!(intact, Some(serde_json::json!(true)));
+    let theme = tab
+        .evaluate("mermaid.mermaidAPI.getConfig().theme", false)
+        .unwrap()
+        .value;
+    assert_eq!(
+        theme,
+        Some(serde_json::json!(if scheme == "dark" {
+            "dark"
+        } else {
+            "default"
+        }))
+    );
+    let readable = tab
+        .evaluate(
+            r#"(() => {
+        const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        return [
+            ['pre.mermaid svg .flowchart-link', 'stroke'],
+            ['pre.mermaid svg .messageText', 'fill'],
+            ['pre.mermaid svg .error-text', 'fill'],
+        ].every(([selector, property]) => {
+            const color = getComputedStyle(document.querySelector(selector))[property];
+            const channels = color.match(/[\d.]+/g).slice(0, 3).map(Number);
+            const brightness = channels.reduce((sum, channel) => sum + channel, 0) / 3;
+            return dark ? brightness > 128 : brightness < 128;
+        });
+    })()"#,
+            false,
+        )
+        .unwrap()
+        .value;
+    assert_eq!(readable, Some(serde_json::json!(true)), "{scheme} colors");
     assert!(
         external.lock().unwrap().is_empty(),
         "unexpected network requests: {external:?}"
