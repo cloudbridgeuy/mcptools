@@ -42,6 +42,68 @@ pub struct PlanMeta {
     pub rev: u64,
 }
 
+pub const SAVE_BODY_LIMIT: usize = 10 * 1024 * 1024;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveBody {
+    pub rev: u64,
+    pub snapshot: Value,
+    pub png: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveError {
+    BadBody,
+    StaleRevision,
+    TooLarge,
+}
+
+pub fn save_token<'a>(
+    bound: std::net::SocketAddr,
+    hosts: &[&str],
+    method: &str,
+    path: &'a str,
+) -> Option<&'a str> {
+    let token = path.strip_prefix("/d/")?.strip_suffix("/save")?;
+    (crate::diagram_serve::host_matches(bound, hosts)
+        && method == "POST"
+        && !token.is_empty()
+        && !token.contains('/'))
+    .then_some(token)
+}
+
+pub fn check_save_size(size: u64) -> Result<(), SaveError> {
+    if size > SAVE_BODY_LIMIT as u64 {
+        Err(SaveError::TooLarge)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn parse_save(body: &[u8]) -> Result<SaveBody, SaveError> {
+    check_save_size(body.len() as u64)?;
+    let body: SaveBody = serde_json::from_slice(body).map_err(|_| SaveError::BadBody)?;
+    if body.snapshot["tldrawFileFormatVersion"] != 1
+        || !body.snapshot["schema"].is_object()
+        || !body.snapshot["records"].is_array()
+        || body.png.is_empty()
+    {
+        return Err(SaveError::BadBody);
+    }
+    Ok(body)
+}
+
+pub fn prepare_save(body: &SaveBody, png: &[u8], meta: &PlanMeta) -> Result<PlanMeta, SaveError> {
+    if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(SaveError::BadBody);
+    }
+    if body.rev != meta.rev {
+        return Err(SaveError::StaleRevision);
+    }
+    next_meta(&meta.id, Some(meta), [0; 16]).map_err(|_| SaveError::BadBody)
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WriteOutput {
     pub url: String,
@@ -253,6 +315,75 @@ pub fn prepare_write(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn save_size_includes_the_boundary() {
+        assert_eq!(check_save_size(SAVE_BODY_LIMIT as u64), Ok(()));
+        assert_eq!(
+            check_save_size(SAVE_BODY_LIMIT as u64 + 1),
+            Err(SaveError::TooLarge)
+        );
+        assert_eq!(check_save_size(u64::MAX), Err(SaveError::TooLarge));
+    }
+
+    #[test]
+    fn save_routes_require_exact_host_method_and_path() {
+        let bound = "127.0.0.1:5199".parse().unwrap();
+        let hosts = ["127.0.0.1:5199"];
+        assert_eq!(
+            save_token(bound, &hosts, "POST", "/d/token/save"),
+            Some("token")
+        );
+        assert_eq!(save_token(bound, &[], "POST", "/d/token/save"), None);
+        assert_eq!(save_token(bound, &hosts, "GET", "/d/token/save"), None);
+        for path in ["/d//save", "/d/token/extra/save", "/d/token/save/"] {
+            assert_eq!(save_token(bound, &hosts, "POST", path), None);
+        }
+    }
+
+    #[test]
+    fn save_body_and_revision_decisions_are_pure() {
+        let value = json!({"rev":1,"snapshot":{"tldrawFileFormatVersion":1,"schema":{},"records":[]},"png":"encoded"});
+        let body = parse_save(&serde_json::to_vec(&value).unwrap()).unwrap();
+        let meta = next_meta("example", None, [1; 16]).unwrap();
+        let png = b"\x89PNG\r\n\x1a\n";
+        let next = prepare_save(&body, png, &meta).unwrap();
+        assert_eq!(next.rev, 2);
+        assert_eq!(next.token, meta.token);
+        assert_eq!(
+            prepare_save(&body, png, &next),
+            Err(SaveError::StaleRevision)
+        );
+        assert_eq!(
+            prepare_save(&body, b"not PNG", &meta),
+            Err(SaveError::BadBody)
+        );
+        assert_eq!(
+            prepare_save(
+                &SaveBody {
+                    rev: u64::MAX,
+                    ..body
+                },
+                png,
+                &PlanMeta {
+                    rev: u64::MAX,
+                    ..meta
+                }
+            ),
+            Err(SaveError::BadBody)
+        );
+        for invalid in [b"{broken".as_slice(), b"{}", b"null"] {
+            assert!(matches!(parse_save(invalid), Err(SaveError::BadBody)));
+        }
+        for field in ["rev", "snapshot", "png"] {
+            let mut invalid = value.clone();
+            invalid[field] = Value::Null;
+            assert!(matches!(
+                parse_save(&serde_json::to_vec(&invalid).unwrap()),
+                Err(SaveError::BadBody)
+            ));
+        }
+    }
 
     #[test]
     fn missing_baseline_starts_at_current_and_invalid_snapshots_fail() {

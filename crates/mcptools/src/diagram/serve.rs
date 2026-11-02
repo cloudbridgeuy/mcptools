@@ -1,15 +1,18 @@
 use std::future::IntoFuture;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-use axum::extract::{Request, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, FromRequest, Request, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Router;
+use axum::{Json, Router};
+use base64::Engine;
 use color_eyre::eyre::{eyre, Result};
 use include_dir::{include_dir, Dir};
 use mcptools_core::diagram_serve::{self, ResponseKind, Route};
-use mcptools_core::plan_store::PlanMeta;
+use mcptools_core::plan_store::{self, PlanMeta, SaveError};
 
 static PAGE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../diagram-page/dist");
 
@@ -17,6 +20,7 @@ static PAGE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../diagram-page/dist
 struct Config {
     bound: SocketAddr,
     directory: PathBuf,
+    saves: Arc<Mutex<()>>,
 }
 
 pub async fn run(host: IpAddr, port: u16) -> Result<()> {
@@ -27,7 +31,12 @@ pub async fn run(host: IpAddr, port: u16) -> Result<()> {
     let mut retention = tokio::spawn(super::retention::run(directory.clone()));
     let app = Router::new()
         .fallback(handler)
-        .with_state(Config { bound, directory });
+        .layer(DefaultBodyLimit::max(plan_store::SAVE_BODY_LIMIT))
+        .with_state(Config {
+            bound,
+            directory,
+            saves: Arc::default(),
+        });
     println!("http://{bound}");
     let server = axum::serve(listener, app)
         .with_graceful_shutdown(async {
@@ -111,6 +120,17 @@ async fn respond(config: &Config, request: Request) -> std::io::Result<Response>
         .iter()
         .map(|host| host.to_str().unwrap_or_default())
         .collect::<Vec<_>>();
+    if let Some(token) = plan_store::save_token(
+        config.bound,
+        &hosts,
+        request.method().as_str(),
+        request.uri().path(),
+    ) {
+        let Some(plan) = find_plan(&config.directory, token).await? else {
+            return Ok(StatusCode::NOT_FOUND.into_response());
+        };
+        return save(config, plan, request).await;
+    }
     let route = diagram_serve::request_route(
         config.bound,
         &hosts,
@@ -159,4 +179,52 @@ async fn respond(config: &Config, request: Request) -> std::io::Result<Response>
         ResponseKind::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED.into_response(),
     };
     Ok(response)
+}
+
+fn save_error(error: SaveError) -> Response {
+    match error {
+        SaveError::BadBody => StatusCode::BAD_REQUEST,
+        SaveError::StaleRevision => StatusCode::CONFLICT,
+        SaveError::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+    }
+    .into_response()
+}
+
+async fn save(config: &Config, plan: PathBuf, request: Request) -> std::io::Result<Response> {
+    if let Some(size) = request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
+    {
+        if let Err(error) = plan_store::check_save_size(size) {
+            return Ok(save_error(error));
+        }
+    }
+    let bytes = match Bytes::from_request(request, &()).await {
+        Ok(bytes) => bytes,
+        Err(error) => return Ok(error.into_response()),
+    };
+    let body = match plan_store::parse_save(&bytes) {
+        Ok(body) => body,
+        Err(error) => return Ok(save_error(error)),
+    };
+    let png = match base64::engine::general_purpose::STANDARD.decode(&body.png) {
+        Ok(png) => png,
+        Err(_) => return Ok(save_error(SaveError::BadBody)),
+    };
+    let saves = config.saves.clone();
+    let saved = tokio::task::spawn_blocking(move || {
+        let _guard = saves
+            .lock()
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        crate::plan_store::save(plan.parent().expect("plan directory"), &body, &png)
+            .map_err(|error| std::io::Error::other(error.to_string()))
+    })
+    .await
+    .map_err(std::io::Error::other)??;
+    Ok(match saved {
+        Ok(meta) => Json(serde_json::json!({"rev": meta.rev})).into_response(),
+        Err(error) => save_error(error),
+    })
 }

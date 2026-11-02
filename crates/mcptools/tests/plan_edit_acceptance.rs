@@ -322,27 +322,74 @@ async fn save_status(expected: u16) {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1138: save persists snapshot and PNG and increments revision"]
 async fn save_200_persists_snapshot_png_and_revision() {
     save_status(200).await;
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1138: stale saves return 409 without changing storage"]
 async fn save_409_rejects_stale_revision_without_writing() {
     save_status(409).await;
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1138: oversized saves return 413 without changing storage"]
 async fn save_413_rejects_over_ten_mib_without_writing() {
     save_status(413).await;
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1138: malformed saves return 400 without changing storage"]
 async fn save_400_rejects_malformed_json_without_writing() {
     save_status(400).await;
+}
+
+#[tokio::test]
+async fn save_serializes_competing_revisions_and_rejects_invalid_payloads() {
+    let home = tempfile::tempdir().unwrap();
+    let mut mcp = server(home.path());
+    let directory = seed(home.path(), &mut mcp).await;
+    let meta = read_json(&directory.join("meta.json"));
+    let (_daemon, client, url) = daemon(home.path(), meta["token"].as_str().unwrap()).await;
+    let before = files(&directory);
+    let body = json!({"rev":meta["rev"],"snapshot":snapshot(),"png":PNG});
+    for field in ["rev", "snapshot", "png"] {
+        let mut invalid = body.clone();
+        invalid[field] = json!("invalid");
+        assert_eq!(
+            client
+                .post(&url)
+                .json(&invalid)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+        assert_eq!(files(&directory), before);
+    }
+    assert_eq!(
+        client
+            .post(&url)
+            .header("host", "attacker.invalid")
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        403
+    );
+    assert_eq!(files(&directory), before);
+    let first = client.post(&url).json(&body).send();
+    let second = client.post(&url).json(&body).send();
+    let (first, second) = tokio::join!(first, second);
+    let mut statuses = [
+        first.unwrap().status().as_u16(),
+        second.unwrap().status().as_u16(),
+    ];
+    statuses.sort();
+    assert_eq!(statuses, [200, 409]);
+    assert_eq!(
+        read_json(&directory.join("meta.json"))["rev"],
+        meta["rev"].as_u64().unwrap() + 1
+    );
 }
 
 #[tokio::test]

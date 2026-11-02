@@ -41,6 +41,29 @@ fn stage(directory: &Path, value: &impl serde::Serialize) -> Result<tempfile::Na
     Ok(file)
 }
 
+pub fn save(
+    directory: &Path,
+    body: &plan_store::SaveBody,
+    png: &[u8],
+) -> Result<std::result::Result<PlanMeta, plan_store::SaveError>> {
+    let meta: PlanMeta = read_optional(&directory.join("meta.json"))?
+        .ok_or_else(|| eyre!("missing plan metadata"))?;
+    let meta = match plan_store::prepare_save(body, png, &meta) {
+        Ok(meta) => meta,
+        Err(error) => return Ok(Err(error)),
+    };
+    let snapshot = stage(directory, &body.snapshot)?;
+    let mut image = tempfile::NamedTempFile::new_in(directory)?;
+    image.write_all(png)?;
+    image.flush()?;
+    image.as_file().sync_all()?;
+    let metadata = stage(directory, &meta)?;
+    snapshot.persist(directory.join("plan.tldr"))?;
+    image.persist(directory.join("latest.png"))?;
+    metadata.persist(directory.join("meta.json"))?;
+    Ok(Ok(meta))
+}
+
 pub fn write(args: &WriteArgs) -> Result<WriteOutput> {
     let plan = plan_store::validate_write(args).map_err(|error| eyre!(error))?;
     let directory = data_dir()?.join("diagrams").join(&args.id);

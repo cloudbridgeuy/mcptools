@@ -30,9 +30,9 @@ are used, defaulting to `127.0.0.1` and `5199`. IPv6 hosts are bracketed in URLs
 Set the host to the daemon's reachable Tailscale IP for phone access.
 
 Both JSON files are staged and synced before replacement with temp-file rename.
-Replacement is atomic per file, not a two-file transaction. Simultaneous writers
-are not serialized; callers must use one writer per plan. Daemon implementation,
-canvas saves, notifications, and retention are outside GUZ-1131.
+Replacement is atomic per file, not a two-file transaction. External writers
+are not serialized; callers must use one writer per plan. Canvas saves are
+documented in `diagram-serve.md`; notifications remain separate work.
 
 ## GUZ-1131 verification
 
@@ -68,12 +68,14 @@ All six diff goldens, the baseline-advance/restart test, and the read-only PNG
 path test were un-ignored and observed failing with unknown-tool errors before
 implementation through `RUST_TEST_THREADS=1 cargo xtask lint`. The acceptance
 helper now supplies write permission only for `plan_diff`; outputs and golden
-assertions are unchanged. The four GUZ-1138 save tests stay ignored. Tool
+assertions are unchanged. The four GUZ-1138 save tests are now enabled. Tool
 contracts cover 110 registered tools (107 catalog tools and 3 meta tools).
 
 After implementation, `RUST_TEST_THREADS=1 cargo xtask lint` passed, including
 all eight enabled acceptance tests, pure baseline/path tests, and a storage
 contract test for denied writes and failed reads.
 
-Concurrent writes or diff calls for the same plan are not serialized. Use one
-writer per plan; atomic rename prevents partial JSON, not lost updates.
+Concurrent external writes or diff calls for the same plan are not serialized.
+Daemon saves serialize revision checks and replacements with each other, not
+with external writers. Use one writer per plan; atomic rename prevents partial
+JSON, not lost updates across processes or mixed files after an I/O failure.

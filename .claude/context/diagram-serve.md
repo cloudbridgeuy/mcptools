@@ -13,13 +13,14 @@ Routes:
 
 - `GET /d/<token>`: embedded tldraw page for an existing plan token.
 - `GET /d/<token>/plan.tldr`: stored snapshot bytes, JSON content type.
+- `POST /d/<token>/save`: save `{rev, snapshot, png}`; PNG is standard base64.
 - `GET /assets/<file>`: embedded build assets.
 
 Unknown tokens and paths return 404. Other methods return 405. Every request
 must contain exactly one Host header whose IP address and port equal the bound
 socket; otherwise it returns 403. DNS aliases and reverse proxy Host rewrites
 are not accepted. No CORS headers are added. Responses disable caching and
-referrers and set nosniff. Requests are read-only; no save endpoint exists yet.
+referrers and set nosniff.
 
 Lookup scans `<data_dir>/mcptools/diagrams/*/meta.json` for a matching 32-byte
 lowercase hexadecimal token and reads the sibling `plan.tldr`. Here `data_dir`
@@ -36,6 +37,31 @@ all 32 bytes and accumulates XOR differences, with compiler barriers on byte
 inputs and the result. Length rejection depends only on public token length.
 No I/O occurs in these checks. Axum and storage reads live in
 `crates/mcptools/src/diagram/serve.rs`.
+
+## Canvas saves (GUZ-1138)
+
+Save returns 200 with `{rev}` after replacing `plan.tldr`, `latest.png`, and
+`meta.json`. A stale revision returns 409, bodies over 10 MiB return 413, and
+malformed JSON, snapshot envelopes, or PNG encodings return 400. Declared size
+is checked before upload; streamed bodies have the same cap. Unknown tokens
+return 404. Rejected saves do not stage or replace files. Baseline stays intact.
+
+Pure save routing, size, body, and revision decisions live in core `plan_store`.
+The shell decodes base64, stages and syncs all three files, then renames each.
+Replacement is atomic per file, not a multi-file transaction: a crash or rename
+failure can leave mixed versions. A daemon mutex serializes saves, including
+revision reads, on blocking workers. External `plan_write` processes and other
+daemons are not serialized; use one daemon and avoid simultaneous external writes.
+The existing retention task and shutdown selection are unchanged.
+
+Failing-first: `cargo test -p mcptools --test plan_edit_acceptance save_ --
+--test-threads=1` ran the four newly un-ignored tests before implementation.
+All four failed because the endpoint returned 405 instead of 200/409/413/400.
+Acceptance assertions were not changed. The same command passed all four after
+implementation; pure size-boundary, routing, body, and revision tests also passed.
+Final foreground `RUST_TEST_THREADS=1 cargo xtask lint` passed formatting,
+check, clippy, all tests, machete, and typos. The added concurrent-save test
+observed one 200 and one 409 for competing saves with the same revision.
 
 The embedded page build and limitations are in `diagram-page/README.md`.
 GUZ-1131 supplies plan writes and URLs. Its MCP-backed token-route acceptance
