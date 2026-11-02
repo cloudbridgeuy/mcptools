@@ -26,7 +26,7 @@ lowercase hexadecimal token and reads the sibling `plan.tldr`. Here `data_dir`
 is `XDG_DATA_HOME`, else the platform data root: `~/Library/Application Support`
 on macOS, `$APPDATA` on Windows, or `~/.local/share` on other platforms.
 The mcptools data directory is the root plus `mcptools`, matching GUZ-1131.
-No reusable data-directory helper was found in the existing checkout.
+The shared data-directory helper is `crate::plan_store::data_dir`.
 Malformed JSON or metadata without a token is skipped. I/O errors other than missing
 files return 500 and are logged without the request token. Files are read on
 each request, so plans created or updated after startup require no restart.
@@ -57,3 +57,39 @@ including clippy with warnings denied, tests, machete, and typos. A headless
 Chromium smoke test loaded the seeded spike at a 390×844 viewport: 12 rendered
 shape elements, no load alert, and no page errors. A real phone over Tailscale
 was not tested.
+
+## Offline browser and retention follow-up (GUZ-1147 / GUZ-1148)
+
+The daemon starts the existing retention loop after binding the listener. It
+logs loop errors without stopping HTTP service, then aborts and joins the loop
+when the server stops. The existing loop sweeps immediately and hourly; its
+default TTL is 30 days, overridden by `MCPTOOLS_DIAGRAM_TTL_SECONDS`.
+
+`plan_offline_acceptance.rs` reuses the Chrome selection/version/skip recipe
+from `crates/mcptools/tests/e2e_md_chain.rs:15`, the modern headless launch
+options from `crates/mcptools/src/md/browser.rs:20`, and CDP network enable and
+event-listener setup from `crates/mcptools/src/md/mod.rs:115`. These helpers are
+private, so the test uses the same existing `headless_chrome` dependency and
+core version validators directly; no new harness or dependency was added.
+Chrome absent or older than 156 prints a skip reason. `CHROME` selects a binary.
+
+The runtime test requires seeded `.tl-canvas .tl-shape` elements, waits for
+fonts and a two-second settling interval, and inspects outgoing CDP requests.
+Only the exact tldraw CDN origin and `/5.6.0/watermarks/watermark-track.svg`
+path are allowed off-origin (including its tracking query). Inline data URLs
+do not leave the origin and are excluded. The loopback development page sends
+no watermark request, so zero external requests is also valid.
+
+Failing-first verification used only foreground `RUST_TEST_THREADS=1 cargo
+xtask lint`, with `CHROME` pointing to the installed Chrome for Testing 156.
+Before sweep wiring, `daemon_sweeps_expired_plans_on_startup` failed with
+`startup sweep must remove expired plans`. The browser test rendered shapes,
+then temporarily fetched
+`https://cdn.tldraw.com/5.6.0/fonts/IBMPlexSans-Medium.woff2` inside the page.
+After excluding inline data URLs, the unchanged network assertion failed with
+that font URL as its sole external request. The temporary fetch was removed
+before final verification. No bundled asset or other worker's file was edited.
+
+Final foreground lint passed formatting, check, clippy, all tests, machete,
+and typos. Both new tests passed; the browser test ran (not skipped) with
+Chrome for Testing 156.0.8078.47 selected through `CHROME`.

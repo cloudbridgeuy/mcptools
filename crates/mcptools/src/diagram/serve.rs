@@ -1,3 +1,4 @@
+use std::future::IntoFuture;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
@@ -23,15 +24,38 @@ pub async fn run(host: IpAddr, port: u16) -> Result<()> {
     let directory = crate::plan_store::data_dir()?.join("diagrams");
     let listener = tokio::net::TcpListener::bind(SocketAddr::new(host, port)).await?;
     let bound = listener.local_addr()?;
+    let mut retention = tokio::spawn(super::retention::run(directory.clone()));
     let app = Router::new()
         .fallback(handler)
         .with_state(Config { bound, directory });
     println!("http://{bound}");
-    axum::serve(listener, app)
+    let server = axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
-        .await?;
+        .into_future();
+    tokio::pin!(server);
+    let result = tokio::select! {
+        result = &mut server => {
+            retention.abort();
+            match retention.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!("diagram retention: {error}"),
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => eprintln!("diagram retention task: {error}"),
+            }
+            result
+        }
+        result = &mut retention => {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!("diagram retention: {error}"),
+                Err(error) => eprintln!("diagram retention task: {error}"),
+            }
+            server.await
+        }
+    };
+    result?;
     Ok(())
 }
 
@@ -113,7 +137,7 @@ async fn respond(config: &Config, request: Request) -> std::io::Result<Response>
             let bytes = match tokio::fs::read(plan.expect("authorized snapshot")).await {
                 Ok(bytes) => bytes,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Ok(StatusCode::NOT_FOUND.into_response())
+                    return Ok(StatusCode::NOT_FOUND.into_response());
                 }
                 Err(error) => return Err(error),
             };

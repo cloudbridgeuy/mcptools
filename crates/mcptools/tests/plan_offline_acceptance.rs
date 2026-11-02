@@ -77,8 +77,6 @@ async fn served_page_assets_need_no_external_resources() {
     let remote =
         Regex::new(r#"https?://(?:cdn\.[a-zA-Z0-9.-]+|fonts\.[a-zA-Z0-9.-]+)[^"'`\s]*"#).unwrap();
     let asset_base = Regex::new(r#"(?P<base>[$a-zA-Z_][$a-zA-Z0-9_]*)=`(?P<url>https://cdn\.tldraw\.com)`;function (?P<getter>[$a-zA-Z_][$a-zA-Z0-9_]*)\(\)\{return`\$\{(?P<reference>[$a-zA-Z_][$a-zA-Z0-9_]*)\}/\$\{(?P<version>[$a-zA-Z_][$a-zA-Z0-9_]*)\}`\}"#).unwrap();
-    // The SDK constructs its 5.6.0 watermark tracking URL from a shared CDN base;
-    // local assetUrls override the other, inert font, icon, and translation defaults.
     let unexpected_remote = |body: &str, javascript: bool| {
         let mut urls: Vec<_> = remote.find_iter(body).collect();
         if javascript && urls.len() == 1 {
@@ -182,6 +180,121 @@ async fn served_page_assets_need_no_external_resources() {
         seen.len() >= 3,
         "expected page, script and stylesheet: {seen:?}"
     );
+}
+
+#[test]
+fn browser_renders_shapes_with_only_watermark_external() {
+    use headless_chrome::protocol::cdp::{types::Event, Network};
+    use headless_chrome::{Browser, LaunchOptions};
+    use mcptools_core::md::{parse_chrome_major, validate_chrome_major};
+    use std::sync::{Arc, Mutex};
+
+    let path = match std::env::var_os("CHROME") {
+        Some(path) => std::path::PathBuf::from(path),
+        None => match headless_chrome::browser::default_executable() {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!(
+                    "skipping browser_renders_shapes_with_only_watermark_external: Chrome not found: {error}"
+                );
+                return;
+            }
+        },
+    };
+    let version = match Command::new(&path).arg("--version").output() {
+        Ok(output) => parse_chrome_major(&String::from_utf8_lossy(&output.stdout))
+            .and_then(validate_chrome_major),
+        Err(error) => Err(format!("cannot run {}: {error}", path.display())),
+    };
+    if let Err(reason) = version {
+        eprintln!("skipping browser_renders_shapes_with_only_watermark_external: {reason}");
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+    seed(home.path(), "seed", SystemTime::now());
+    let (_daemon, base) = start(
+        home.path(),
+        &["diagram", "serve", "--host", "127.0.0.1", "--port", "0"],
+    );
+    let browser = Browser::new(LaunchOptions {
+        path: Some(path),
+        headless: false,
+        args: vec![std::ffi::OsStr::new("--headless=new")],
+        ignore_certificate_errors: false,
+        ..LaunchOptions::default()
+    })
+    .expect("launch Chrome");
+    let tab = browser.new_tab().unwrap();
+    tab.set_default_timeout(Duration::from_secs(15));
+    tab.call_method(Network::Enable {
+        max_total_buffer_size: None,
+        max_resource_buffer_size: None,
+        max_post_data_size: None,
+        report_direct_socket_traffic: None,
+        enable_durable_messages: None,
+    })
+    .unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&requests);
+    tab.add_event_listener(Arc::new(move |event: &Event| {
+        if let Event::NetworkRequestWillBeSent(event) = event {
+            observed
+                .lock()
+                .unwrap()
+                .push(event.params.request.url.clone());
+        }
+    }))
+    .unwrap();
+    tab.navigate_to(&format!("{base}/d/0123456789abcdef0123456789abcdef"))
+        .unwrap();
+    tab.wait_for_element(".tl-canvas .tl-shape")
+        .expect("seeded tldraw shapes must render");
+    tab.evaluate("document.fonts.ready.then(() => true)", true)
+        .expect("canvas fonts must finish loading");
+    std::thread::sleep(Duration::from_secs(2));
+    let requests = requests.lock().unwrap();
+    assert!(
+        !requests.is_empty(),
+        "network capture must observe navigation"
+    );
+    let origin = reqwest::Url::parse(&base).unwrap().origin();
+    let external: Vec<_> = requests
+        .iter()
+        .map(|url| reqwest::Url::parse(url).unwrap())
+        .filter(|url| matches!(url.scheme(), "http" | "https" | "ws" | "wss"))
+        .filter(|url| url.origin() != origin)
+        .collect();
+    assert!(
+        external.iter().all(|url| {
+            url.origin()
+                == reqwest::Url::parse("https://cdn.tldraw.com")
+                    .unwrap()
+                    .origin()
+                && url.path() == "/5.6.0/watermarks/watermark-track.svg"
+        }),
+        "only the tldraw watermark may leave the local origin: {external:?}"
+    );
+}
+
+#[test]
+fn daemon_sweeps_expired_plans_on_startup() {
+    let home = tempfile::tempdir().unwrap();
+    seed(home.path(), "expired", SystemTime::UNIX_EPOCH);
+    seed(home.path(), "fresh", SystemTime::now());
+    let (_daemon, _base) = start(
+        home.path(),
+        &["diagram", "serve", "--host", "127.0.0.1", "--port", "0"],
+    );
+    let expired = home.path().join("mcptools/diagrams/expired");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while expired.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!expired.exists(), "startup sweep must remove expired plans");
+    assert!(home
+        .path()
+        .join("mcptools/diagrams/fresh/plan.tldr")
+        .exists());
 }
 
 fn retention_plan(
