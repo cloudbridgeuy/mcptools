@@ -151,6 +151,17 @@ pub fn prepare_diff(baseline: Option<&Value>, current: &Value) -> Result<DiffOut
     })
 }
 
+/// Diff for a browser save. Without a baseline (no `plan_diff` or save since
+/// `plan_write`), the stored plan the browser loaded is the reference, so the
+/// person's first edits are reported instead of diffing the save against itself.
+pub fn prepare_save_diff(
+    baseline: Option<&Value>,
+    stored: Option<&Value>,
+    saved: &Value,
+) -> Result<DiffOutput, String> {
+    prepare_diff(baseline.or(stored), saved)
+}
+
 pub fn latest_png_path(data_dir: &Path, id: &str) -> Result<PathBuf, String> {
     validate_id(id)?;
     if !data_dir.is_absolute() {
@@ -415,6 +426,25 @@ mod tests {
         assert_eq!(prepare_diff(Some(&current), &current).unwrap().diff, "");
         assert!(prepare_diff(None, &Value::Null).is_err());
         assert!(prepare_diff(Some(&Value::Null), &current).is_err());
+    }
+
+    #[test]
+    fn save_diff_without_baseline_compares_against_stored_plan() {
+        let stored = json!({"records": []});
+        let saved = json!({"records": [{
+            "id":"shape:ink1", "typeName":"shape", "type":"draw", "x":0, "y":0, "props":{}
+        }]});
+        assert_eq!(
+            prepare_save_diff(None, Some(&stored), &saved).unwrap().diff,
+            "+ draw ink1"
+        );
+        assert_eq!(
+            prepare_save_diff(Some(&saved), Some(&stored), &saved)
+                .unwrap()
+                .diff,
+            ""
+        );
+        assert_eq!(prepare_save_diff(None, None, &saved).unwrap().diff, "");
     }
 
     #[test]

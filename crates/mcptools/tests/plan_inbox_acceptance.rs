@@ -442,3 +442,46 @@ async fn rejected_saves_leave_notify_inbox_and_storage_unchanged() {
         assert_eq!(std::fs::read(path).unwrap(), bytes);
     }
 }
+
+#[tokio::test]
+async fn first_save_after_plan_write_reports_added_note_and_ink() {
+    let fixture = Fixture::new(true);
+    // plan_write leaves no baseline; the fixture's seeded copy must not mask that.
+    std::fs::remove_file(fixture.directory.join("baseline.tldr")).unwrap();
+    let mut added = snapshot();
+    let records = added["records"].as_array_mut().unwrap();
+    records.push(json!({
+        "id":"shape:n1", "typeName":"shape", "type":"note", "parentId":"page:page",
+        "index":"aE", "isLocked":false, "opacity":1, "meta":{}, "x":300, "y":40,
+        "rotation":0, "props":{"color":"yellow", "size":"m", "font":"draw",
+            "align":"middle", "verticalAlign":"middle", "growY":0, "url":"", "scale":1,
+            "labelColor":"black", "fontSizeAdjustment":0,
+            "richText":{"type":"doc","content":[{"type":"paragraph",
+                "content":[{"type":"text","text":"Check inbox"}]}]}}
+    }));
+    records.push(json!({
+        "id":"shape:ink1", "typeName":"shape", "type":"draw", "parentId":"page:page",
+        "index":"aF", "isLocked":false, "opacity":1, "meta":{}, "x":20, "y":30,
+        "rotation":0, "props":{"color":"black", "fill":"none", "dash":"draw",
+            "size":"m", "segments":[{"type":"free", "path":"AAAAAAAAgD8AAABAAACAPw=="}],
+            "isComplete":true, "isClosed":false, "isPen":false, "scale":1, "scaleX":1, "scaleY":1}
+    }));
+    assert_eq!(fixture.save(1, &added).await.status(), 200);
+    let delivered = files(&fixture.inbox);
+    assert_eq!(delivered.len(), 1);
+    let text = read_json(&delivered[0])["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        !text.contains("No changes."),
+        "first save after plan_write must report canvas edits: {text}"
+    );
+    assert_report(
+        &delivered[0],
+        &fixture,
+        2,
+        "+ draw ink1\n+ note n1 \"Check inbox\"",
+    );
+    assert_eq!(read_json(&fixture.directory.join("baseline.tldr")), added);
+}

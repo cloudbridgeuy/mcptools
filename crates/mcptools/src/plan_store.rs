@@ -110,8 +110,10 @@ pub fn save(
     let report = if let Some(notify) = notify {
         let notify = notify_target(notify.inbox)?;
         let baseline = read_optional(&directory.join("baseline.tldr"))?;
-        let diff = plan_store::prepare_diff(baseline.as_ref(), &body.snapshot)
-            .map_err(|error| eyre!(error))?;
+        let stored = read_optional(&directory.join("plan.tldr"))?;
+        let diff =
+            plan_store::prepare_save_diff(baseline.as_ref(), stored.as_ref(), &body.snapshot)
+                .map_err(|error| eyre!(error))?;
         let png = std::path::absolute(directory.join("latest.png"))?;
         let elapsed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let at = plan_inbox::report_at(elapsed.as_secs(), elapsed.subsec_nanos())
