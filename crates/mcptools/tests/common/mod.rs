@@ -2,7 +2,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const CLEARED_ENV: [&str; 10] = [
+const CLEARED_ENV: [&str; 11] = [
+    "RALPH_INBOX",
     "MCPTOOLS_DISCOVERY",
     "ATLASSIAN_BASE_URL",
     "JEV_PROVIDER",
