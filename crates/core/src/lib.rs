@@ -90,6 +90,7 @@ pub mod llm_stream;
 pub mod md;
 pub mod pagination;
 pub mod plan_diff;
+pub mod plan_inbox;
 pub mod plan_retention;
 pub mod plan_share;
 pub mod plan_store;
