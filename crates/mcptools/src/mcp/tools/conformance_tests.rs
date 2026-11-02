@@ -21,6 +21,8 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
     match tool {
         "plan_write" => roundtrip::<mcptools_core::plan_store::WriteOutput>(value),
         "plan_url" => roundtrip::<mcptools_core::plan_store::UrlOutput>(value),
+        "plan_diff" => roundtrip::<mcptools_core::plan_store::DiffOutput>(value),
+        "plan_png" => roundtrip::<mcptools_core::plan_store::PngOutput>(value),
         "lane_list" => roundtrip::<mcptools_core::lane::ListOutput>(value),
         "lane_cleanup_plan" => roundtrip::<mcptools_core::lane::CleanupPlanOutput>(value),
         "lane_cleanup_apply" => roundtrip::<mcptools_core::lane::CleanupApplyOutput>(value),

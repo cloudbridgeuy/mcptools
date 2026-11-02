@@ -35,3 +35,21 @@ pub async fn handle_plan_url(
     mcptools_core::plan_store::validate_id(&args.id).map_err(invalid)?;
     super::to_dual_result(crate::plan_store::url(&args.id).map_err(failed)?)
 }
+
+pub async fn handle_plan_diff(
+    arguments: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: UrlArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
+    mcptools_core::plan_store::validate_id(&args.id).map_err(invalid)?;
+    super::to_dual_result(crate::plan_store::diff(&args.id).map_err(failed)?)
+}
+
+pub async fn handle_plan_png(
+    arguments: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: UrlArgs =
+        serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
+    mcptools_core::plan_store::validate_id(&args.id).map_err(invalid)?;
+    super::to_dual_result(crate::plan_store::png(&args.id).map_err(failed)?)
+}

@@ -82,3 +82,22 @@ pub fn url(id: &str) -> Result<UrlOutput> {
             .map_err(|error| eyre!(error))?,
     })
 }
+
+pub fn diff(id: &str) -> Result<plan_store::DiffOutput> {
+    plan_store::validate_id(id).map_err(|error| eyre!(error))?;
+    let directory = data_dir()?.join("diagrams").join(id);
+    let current: serde_json::Value =
+        read_optional(&directory.join("plan.tldr"))?.ok_or_else(|| eyre!("unknown plan: {id}"))?;
+    let baseline = read_optional(&directory.join("baseline.tldr"))?;
+    let output =
+        plan_store::prepare_diff(baseline.as_ref(), &current).map_err(|error| eyre!(error))?;
+    stage(&directory, &current)?.persist(directory.join("baseline.tldr"))?;
+    Ok(output)
+}
+
+pub fn png(id: &str) -> Result<plan_store::PngOutput> {
+    let data_dir = std::path::absolute(data_dir()?)?;
+    let path = plan_store::latest_png_path(&data_dir, id).map_err(|error| eyre!(error))?;
+    let metadata = std::fs::metadata(&path)?;
+    plan_store::png_output(path, metadata.is_file()).map_err(|error| eyre!(error))
+}

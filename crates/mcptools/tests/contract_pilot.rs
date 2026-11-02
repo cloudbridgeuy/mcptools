@@ -166,6 +166,8 @@ fn mcp_contract_pilot() {
             "pdf_peek",
             "pdf_read",
             "pdf_toc",
+            "plan_diff",
+            "plan_png",
             "plan_url",
             "plan_write",
             "ui_annotations_clear",

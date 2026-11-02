@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,40 @@ pub struct WriteOutput {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UrlOutput {
     pub url: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DiffOutput {
+    pub diff: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PngOutput {
+    pub path: PathBuf,
+}
+
+pub fn prepare_diff(baseline: Option<&Value>, current: &Value) -> Result<DiffOutput, String> {
+    Ok(DiffOutput {
+        diff: crate::plan_diff::render_diff(&crate::plan_diff::diff_snapshots(
+            baseline.unwrap_or(current),
+            current,
+        )?),
+    })
+}
+
+pub fn latest_png_path(data_dir: &Path, id: &str) -> Result<PathBuf, String> {
+    validate_id(id)?;
+    if !data_dir.is_absolute() {
+        return Err("plan data directory must be absolute".into());
+    }
+    Ok(data_dir.join("diagrams").join(id).join("latest.png"))
+}
+
+pub fn png_output(path: PathBuf, is_file: bool) -> Result<PngOutput, String> {
+    if !path.is_absolute() || !is_file {
+        return Err("latest plan PNG must be an existing file with an absolute path".into());
+    }
+    Ok(PngOutput { path })
 }
 
 pub struct StoredWrite {
@@ -218,6 +253,27 @@ pub fn prepare_write(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn missing_baseline_starts_at_current_and_invalid_snapshots_fail() {
+        let current = json!({"records": []});
+        assert_eq!(prepare_diff(None, &current).unwrap().diff, "");
+        assert_eq!(prepare_diff(Some(&current), &current).unwrap().diff, "");
+        assert!(prepare_diff(None, &Value::Null).is_err());
+        assert!(prepare_diff(Some(&Value::Null), &current).is_err());
+    }
+
+    #[test]
+    fn png_paths_require_absolute_data_directory_valid_id_and_existing_file() {
+        let base = Path::new(if cfg!(windows) { "C:\\" } else { "/" });
+        let path = latest_png_path(base, "example").unwrap();
+        assert_eq!(path, base.join("diagrams/example/latest.png"));
+        assert!(latest_png_path(Path::new("relative"), "example").is_err());
+        assert!(latest_png_path(base, "../escape").is_err());
+        assert!(png_output(path.clone(), false).is_err());
+        assert_eq!(png_output(path.clone(), true).unwrap().path, path);
+        assert!(png_output(PathBuf::from("latest.png"), true).is_err());
+    }
 
     #[test]
     fn tokens_are_lowercase_fixed_width_and_revisions_preserve_them() {

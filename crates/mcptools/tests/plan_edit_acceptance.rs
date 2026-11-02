@@ -45,7 +45,7 @@ async fn read_tool(mcp: &mut common::McpServer, name: &str) -> Value {
     let response = mcp
         .request(json!({
             "jsonrpc":"2.0", "id":1135, "method":"tools/call",
-            "params":{"name":name,"arguments":{"id":"spike"}}
+            "params":{"name":name,"arguments":{"id":"spike","allowWrites":name == "plan_diff"}}
         }))
         .await;
     assert!(
@@ -88,7 +88,6 @@ async fn diff_golden(current: Value, expected: &str) {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1136: relabel diff golden; GUZ-1139 exposes plan_diff"]
 async fn diff_relabel_golden() {
     let mut current = snapshot();
     relabel(&mut current);
@@ -96,7 +95,6 @@ async fn diff_relabel_golden() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1136: added shape and bound arrow golden; GUZ-1139 exposes plan_diff"]
 async fn diff_add_golden() {
     let mut current = snapshot();
     let mut node = record(&mut current, "shape:s6").clone();
@@ -129,7 +127,6 @@ async fn diff_add_golden() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1136: deleted shape and bound arrow golden; GUZ-1139 exposes plan_diff"]
 async fn diff_delete_golden() {
     let mut current = snapshot();
     current["records"].as_array_mut().unwrap().retain(|record| {
@@ -149,7 +146,6 @@ async fn diff_delete_golden() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1136: arrow binding change golden; GUZ-1139 exposes plan_diff"]
 async fn diff_repoint_arrow_golden() {
     let mut current = snapshot();
     record(&mut current, "binding:s5-s6-end")["toId"] = json!("shape:s4");
@@ -157,7 +153,6 @@ async fn diff_repoint_arrow_golden() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1136: position change golden; GUZ-1139 exposes plan_diff"]
 async fn diff_move_golden() {
     let mut current = snapshot();
     let node = record(&mut current, "shape:s1");
@@ -168,7 +163,6 @@ async fn diff_move_golden() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1136: freehand golden; GUZ-1139 exposes plan_diff"]
 async fn diff_freehand_golden() {
     let mut current = snapshot();
     current["records"].as_array_mut().unwrap().push(json!({
@@ -352,7 +346,6 @@ async fn save_400_rejects_malformed_json_without_writing() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1139: plan_diff advances the persisted baseline after reading"]
 async fn plan_diff_advances_baseline_and_second_read_is_empty() {
     let home = tempfile::tempdir().unwrap();
     let mut mcp = server(home.path());
@@ -387,7 +380,6 @@ async fn plan_diff_advances_baseline_and_second_read_is_empty() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1139: plan_png returns the absolute latest PNG path"]
 async fn plan_png_returns_absolute_latest_png_path_without_writing() {
     let home = tempfile::tempdir().unwrap();
     let mut mcp = server(home.path());
