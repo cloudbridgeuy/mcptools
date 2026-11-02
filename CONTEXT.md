@@ -20,6 +20,26 @@ _Avoid_: history, timeline, audit log
 MCP server mode in which `tools/list` returns exactly two tools: `find_tools`, then `call_tool`.
 _Avoid_: finder mode, list gating
 
+**Plan**:
+Named local tldraw document created from nodes and edges, editable in the canvas, and stored under `diagrams/<id>/` with metadata, an optional **Baseline**, and an optional saved PNG.
+_Avoid_: Linear project, issue plan
+
+**Token URL**:
+Secret `/d/<token>` address for a **Plan**, with a persisted 128-bit random token that permits reading and saving by any holder with network access and has no expiry while the plan exists.
+_Avoid_: read-only link, temporary link
+
+**Baseline**:
+Stored `baseline.tldr` comparison snapshot, replaced with the current snapshot after each successful `plan_diff`, with a missing baseline starting at current and returning an empty diff.
+_Avoid_: original plan, save revision
+
+**Save revision**:
+The **Plan** metadata's `rev`, starting at 1 and incremented by `plan_write` and canvas saves, which a browser save must match to avoid a 409 conflict.
+_Avoid_: baseline, version history
+
+**Daemon address record**:
+Potentially stale `diagrams/.daemon-address!` record of the bound IP and port in the shared data directory, used for plan URLs below independent host/port environment overrides and above `127.0.0.1:5199` fallback, not a health check.
+_Avoid_: config file, liveness record
+
 ## Relationships
 
 - An **Issue identifier** contains exactly one **Team key**
@@ -33,6 +53,7 @@ _Avoid_: finder mode, list gating
 
 Linear command reference: [Linear](.claude/context/linear.md).
 MCP server reference: [MCP Server](.claude/context/mcp-server.md).
+Plan canvas references: [Plan tools](.claude/context/diagram.md), [Daemon](.claude/context/diagram-serve.md), and [Security model](README.md#security-model).
 
 ### Requirement: Lane authorization and ownership
 `lane_list`, `lane_cleanup_plan`, `lane_cleanup_apply`, and `lane_create` require an exact canonical repository-root allowlist in the operator-controlled server environment `MCPTOOLS_LANE_REPOS`, or the exact whole value `'*'` to authorize all otherwise-supported roots; unset or empty denies all four. Wildcard mode broadens operator trust, not supported root types or other safety guards. Mixed wildcard/path lists and whitespace wildcards are invalid. Repository files and request arguments cannot authorize access. Listing and cleanup use native Git because Worktrunk JSON listing writes and prunes repository caches. Creation uses isolated Worktrunk 0.77.0 with hooks disabled. Ownership requires registered filesystem identities and the creation commit's ancestry; unfamiliar identities remain unmanaged. Cleanup plans are read-only advisory observations, not approval tokens or atomic snapshots; dirty, ignored, locked, missing, unmanaged, unmerged, changed, and unknown lanes are blocked. Apply replans, removes only eligible worktrees and merged local branches without force, then removes matching ownership records. MCP apply is a destructive Write gated by `allowWrites`; CLI is `mcptools lane cleanup`. See [Lanes](.claude/context/lanes.md).

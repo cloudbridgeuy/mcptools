@@ -4,7 +4,8 @@
 mcptools diagram serve --host 100.80.20.1 --port 5199
 ```
 
-`--host` takes a specific loopback or Tailscale IP address. Alternatively, `--tailscale` selects a Tailscale IPv4 address.
+`--host` takes a specific IP address, not necessarily loopback or Tailscale.
+Alternatively, `--tailscale` selects a Tailscale IPv4 address.
 IPv4, IPv6, and IPv4-mapped IPv6 wildcard addresses are refused. Port defaults
 to 5199; port 0 selects an ephemeral port. Startup prints the actual base URL.
 The daemon runs until interrupted. Service supervision is described below.
@@ -21,6 +22,23 @@ must contain exactly one Host header whose IP address and port equal the bound
 socket; otherwise it returns 403. DNS aliases and reverse proxy Host rewrites
 are not accepted. No CORS headers are added. Responses disable caching and
 referrers and set nosniff.
+
+## Security boundary
+
+The exposure policy is under review; these are current rules, not a future design.
+Plan tokens are 128 OS-random bits encoded as 32 lowercase hexadecimal characters.
+They survive updates and have no expiry while the plan exists. Any token holder
+with network access can read and save a plan. There is no separate save login or
+write token; revision and body checks do not establish who the writer is. No CORS
+headers and Host validation do not prevent a token holder using a non-browser client.
+
+Canvas content is untrusted input that flows back to agents in `plan_diff` text
+and saved images. It can carry prompt injection; agents must treat that content
+as data, not instructions or permission to act. MCP `plan_diff` requires
+`allowWrites: true` because it advances the baseline; HTTP saves do not use that
+MCP permission gate. Keep token URLs secret and limit network access. See
+[README security model](../../README.md#security-model) and
+[SDK licensing and external tracking](../../diagram-page/README.md).
 
 Lookup scans `<data_dir>/mcptools/diagrams/*/meta.json` for a matching 32-byte
 lowercase hexadecimal token and reads the sibling `plan.tldr`. Here `data_dir`
@@ -90,6 +108,10 @@ The daemon starts the existing retention loop after binding the listener. It
 logs loop errors without stopping HTTP service, then aborts and joins the loop
 when the server stops. The existing loop sweeps immediately and hourly; its
 default TTL is 30 days, overridden by `MCPTOOLS_DIAGRAM_TTL_SECONDS`.
+Age is measured from the newest modification time of the plan directory,
+`plan.tldr`, and `meta.json`; merely viewing the page does not refresh it.
+The loop supplies no active-plan exemptions. Eligible plans older than the TTL
+are deleted with their tokens; this is retention, not token expiry.
 
 `plan_offline_acceptance.rs` reuses the Chrome selection/version/skip recipe
 from `crates/mcptools/tests/e2e_md_chain.rs:15`, the modern headless launch

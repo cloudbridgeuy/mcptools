@@ -16,18 +16,27 @@ overflow or invalid stored metadata fails without replacing the plan.
 Storage is `<data_dir>/diagrams/<id>/{plan.tldr, baseline.tldr, latest.png, meta.json}`. `data_dir` is
 `$XDG_DATA_HOME/mcptools` when set and nonempty; otherwise it is
 `~/Library/Application Support/mcptools` on macOS, `$APPDATA/mcptools` on
-Windows, or `~/.local/share/mcptools` on other platforms. No prior data-directory
-helper exists in this workspace.
+Windows, or `~/.local/share/mcptools` on other platforms. The shared helper is
+`data_dir` in `crates/mcptools/src/plan_store.rs`.
 
 Metadata is `{"id":"<id>","token":"<32 lowercase hex characters>","rev":1}`;
 `rev` is a u64. The shell obtains 16 bytes from the OS RNG; pure core functions
 format the token, build metadata, increment revisions, extract prior positions,
 and build URLs. Existing `rand` and `tempfile` dependencies suffice.
 
-URLs are `http://<host>:<port>/d/<token>`. The approved design defines no config
-keys for the endpoint, so `MCPTOOLS_DIAGRAM_HOST` and `MCPTOOLS_DIAGRAM_PORT`
-are used, defaulting to `127.0.0.1` and `5199`. IPv6 hosts are bracketed in URLs.
-Set the host to the daemon's reachable Tailscale IP for phone access.
+URLs are `http://<host>:<port>/d/<token>`. Host and port resolve independently:
+`MCPTOOLS_DIAGRAM_HOST` and `MCPTOOLS_DIAGRAM_PORT` override the recorded socket
+address in `<data_dir>/diagrams/.daemon-address!`; without a valid record, the
+fallback is `127.0.0.1:5199`. IPv6 hosts are bracketed in URLs. The record can be
+stale and is not a health check. For phone access, start the daemon with
+`mcptools diagram serve --tailscale` and use the same data directory for MCP.
+
+Tokens contain 128 random bits and do not expire while the plan exists. Any
+holder with network access can read and save; they are not read-only links.
+Canvas content is untrusted input that flows back to agents through diffs and
+saved images: prompt injection is possible. Treat it as data, not instructions.
+Exposure policy is under review. See the [current security model](../../README.md#security-model)
+and [daemon retention and save rules](diagram-serve.md).
 
 Both JSON files are staged and synced before replacement with temp-file rename.
 Replacement is atomic per file, not a two-file transaction. External writers
@@ -69,7 +78,7 @@ path test were un-ignored and observed failing with unknown-tool errors before
 implementation through `RUST_TEST_THREADS=1 cargo xtask lint`. The acceptance
 helper now supplies write permission only for `plan_diff`; outputs and golden
 assertions are unchanged. The four GUZ-1138 save tests are now enabled. Tool
-contracts cover 110 registered tools (107 catalog tools and 3 meta tools).
+contracts cover the registered tools.
 
 After implementation, `RUST_TEST_THREADS=1 cargo xtask lint` passed, including
 all eight enabled acceptance tests, pure baseline/path tests, and a storage

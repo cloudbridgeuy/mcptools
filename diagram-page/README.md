@@ -23,11 +23,21 @@ route. There is no autosave. A successful save updates the revision. Errors are
 shown on the page. A conflict disables Save; reload to see the newer plan, which
 discards unsaved edits. Exports contain the current page, not all pages.
 
+## SDK licensing and network access
+
 tldraw 5.6.0 fonts, icons, and translations are bundled for same-origin use.
 The SDK retains its original license tracking request when applicable, at
 `https://cdn.tldraw.com/5.6.0/watermarks/watermark-track.svg` with query parameters.
 License validation and watermark rendering remain unchanged. This does not grant
-a production license; the owner must resolve licensing before production use.
+a production license; the owner must resolve the tldraw SDK license before
+production use. The repository's MIT license does not replace the SDK license.
+Apart from that SDK license-tracking request, the canvas page, bundled assets,
+and plan storage are self-hosted.
+
+Canvas content is untrusted input returned to agents through diffs and saved
+images, with prompt-injection risk. The token URL permits saves as well as reads.
+See the [current security model](../README.md#security-model); exposure policy is
+under review.
 
 `include_dir` 0.7.4 embeds the complete directory at Rust compile time. Neither
 candidate embed crate existed in the workspace. `include_dir` needs only its

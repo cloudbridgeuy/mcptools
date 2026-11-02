@@ -78,6 +78,8 @@ For detailed usage of each feature, see the context files:
 - **[Agent Setup](.claude/context/agent-setup.md)** - User-level agent integration; setup, status, uninstall for codex, claude, opencode
 
 ### Infrastructure
+- **[Plan Canvas](.claude/context/diagram.md)** - `plan_write`, `plan_url`, `plan_diff` (requires `allowWrites`), `plan_png`; canvas content is untrusted agent input (prompt injection)
+- **[Diagram Daemon](.claude/context/diagram-serve.md)** - Binding, token access, saves, retention, and `deploy/` services; [security and licensing](README.md#plan-canvas)
 - **[Lanes](.claude/context/lanes.md)** - Native Git read-only listing/cleanup planning and guarded Worktrunk creation; operator-only `MCPTOOLS_LANE_REPOS` authorization
 - **[MCP Server](.claude/context/mcp-server.md)** - Server configuration; available tools
 - **[Upgrade](.claude/context/upgrade.md)** - Self-update mechanism; platform support
@@ -85,6 +87,14 @@ For detailed usage of each feature, see the context files:
 - **[Lint](.claude/context/lint.md)** - Unified lint pipeline; skip flags; git hook management
 
 ## Common Commands
+
+### Plan Canvas
+
+```sh
+mcptools diagram serve --tailscale
+mcptools diagram serve --host 127.0.0.1 --port 5199
+mcptools mcp declarations plan_write plan_url plan_diff plan_png
+```
 
 ### Jira
 
