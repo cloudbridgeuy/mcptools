@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, VecDeque};
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime};
@@ -369,6 +370,8 @@ fn service_contract(path: &str, systemd: bool) {
     let definition = std::fs::read_to_string(root.join(path))
         .unwrap_or_else(|_| panic!("missing supervised daemon definition: {path}"));
     if systemd {
+        assert!(definition.contains("RestartSec=10"));
+        assert!(definition.contains("StartLimitIntervalSec=0"));
         assert!(
             definition.contains("Restart=always") || definition.contains("Restart=on-failure"),
             "systemd must restart daemon"
@@ -378,6 +381,9 @@ fn service_contract(path: &str, systemd: bool) {
             "systemd must start at boot"
         );
     } else {
+        assert!(definition.contains("<key>ThrottleInterval</key><integer>10</integer>"));
+        assert!(definition.contains("<key>UserName</key><string>PLAN_USER</string>"));
+        assert!(definition.contains("<key>HOME</key><string>/Users/PLAN_USER</string>"));
         assert!(
             definition.contains("<key>KeepAlive</key>")
                 && definition.contains("<true/>")
@@ -390,7 +396,7 @@ fn service_contract(path: &str, systemd: bool) {
         "service must resolve the Tailscale address"
     );
     assert!(
-        definition.contains("--host") && definition.contains("--port"),
+        definition.contains("--tailscale") && definition.contains("--port"),
         "service must pass documented listener flags"
     );
     let arguments: Vec<String> = if systemd {
@@ -422,15 +428,16 @@ fn service_contract(path: &str, systemd: bool) {
         "service must directly execute mcptools: {arguments:?}"
     );
     let mut arguments = arguments[1..].to_vec();
-    for (flag, replacement) in [("--host", "127.0.0.1"), ("--port", "0")] {
-        let index = arguments
-            .iter()
-            .position(|arg| arg == flag)
-            .expect("service listener flag");
-        *arguments
-            .get_mut(index + 1)
-            .expect("service listener value") = replacement.to_owned();
-    }
+    let index = arguments
+        .iter()
+        .position(|arg| arg == "--tailscale")
+        .expect("tailscale flag");
+    arguments.splice(index..=index, ["--host".to_owned(), "127.0.0.1".to_owned()]);
+    let index = arguments
+        .iter()
+        .position(|arg| arg == "--port")
+        .expect("service port");
+    *arguments.get_mut(index + 1).expect("service port value") = "0".to_owned();
     let home = tempfile::tempdir().unwrap();
     let args: Vec<_> = arguments.iter().map(String::as_str).collect();
     let (_daemon, base) = start(home.path(), &args);
@@ -438,13 +445,122 @@ fn service_contract(path: &str, systemd: bool) {
 }
 
 #[test]
-#[ignore = "GUZ-1149"]
 fn systemd_service_supervises_documented_daemon() {
     service_contract("deploy/systemd/mcptools-diagram.service", true);
 }
 
 #[test]
-#[ignore = "GUZ-1149"]
 fn launchd_service_supervises_documented_daemon() {
     service_contract("deploy/launchd/com.mcptools.diagram.plist", false);
+    let docs = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.claude/context/diagram-serve.md"),
+    )
+    .unwrap();
+    assert!(docs.contains("/Library/LaunchDaemons/com.mcptools.diagram.plist"));
+    assert!(docs.contains("launchctl bootstrap system "));
+    assert!(docs.contains("loginctl enable-linger \"$USER\""));
+}
+
+#[test]
+fn daemon_records_actual_ephemeral_address() {
+    let home = tempfile::tempdir().unwrap();
+    seed(home.path(), "address", SystemTime::now());
+    let (_daemon, base) = start(
+        home.path(),
+        &["diagram", "serve", "--host", "127.0.0.1", "--port", "0"],
+    );
+    assert!(mcptools_core::plan_store::validate_id("address").is_ok());
+    assert!(mcptools_core::plan_store::validate_id(".daemon-address!").is_err());
+    let record = std::fs::read_to_string(home.path().join("mcptools/diagrams/.daemon-address!"))
+        .expect("bound address record");
+    assert_eq!(format!("http://{}", record.trim()), base);
+    assert!(!record.trim().ends_with(":0"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(home.path().join("mcptools/diagrams/.daemon-address!"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o077, 0);
+    }
+    assert!(home
+        .path()
+        .join("mcptools/diagrams/address/plan.tldr")
+        .exists());
+}
+
+#[test]
+fn plan_tools_use_recorded_daemon_address() {
+    let home = tempfile::tempdir().unwrap();
+    let (_daemon, base) = start(
+        home.path(),
+        &["diagram", "serve", "--host", "127.0.0.1", "--port", "0"],
+    );
+    let mut mcp = Daemon(
+        Command::new(env!("CARGO_BIN_EXE_mcptools"))
+            .args(["mcp", "stdio"])
+            .env("HOME", home.path())
+            .env("XDG_DATA_HOME", home.path())
+            .env_remove("MCPTOOLS_DIAGRAM_HOST")
+            .env_remove("MCPTOOLS_DIAGRAM_PORT")
+            .env_remove("MCPTOOLS_DISCOVERY")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut input = mcp.0.stdin.take().unwrap();
+    let mut output = BufReader::new(mcp.0.stdout.take().unwrap());
+    let mut request = |method: &str, params: serde_json::Value| {
+        writeln!(
+            input,
+            "{}",
+            serde_json::json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params})
+        )
+        .unwrap();
+        let mut line = String::new();
+        output.read_line(&mut line).unwrap();
+        serde_json::from_str::<serde_json::Value>(&line).unwrap()["result"].clone()
+    };
+    request("initialize", serde_json::json!({}));
+    let mut plan: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/plan/spike.short.json"
+    ))
+    .unwrap();
+    plan["allowWrites"] = serde_json::json!(true);
+    let written = request(
+        "tools/call",
+        serde_json::json!({"name":"plan_write", "arguments":plan}),
+    );
+    let url = written["structuredContent"]["url"]
+        .as_str()
+        .expect("write url");
+    assert!(url.starts_with(&format!("{base}/d/")), "{url}");
+    let found = request(
+        "tools/call",
+        serde_json::json!({"name":"plan_url", "arguments":{"id":"spike"}}),
+    );
+    assert_eq!(found["structuredContent"]["url"], url);
+    std::fs::write(
+        home.path().join("mcptools/diagrams/.daemon-address!"),
+        "100.80.20.1:5199",
+    )
+    .unwrap();
+    let found = request(
+        "tools/call",
+        serde_json::json!({"name":"plan_url", "arguments":{"id":"spike"}}),
+    );
+    assert!(found["structuredContent"]["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("http://100.80.20.1:5199/d/"));
+    let written = request(
+        "tools/call",
+        serde_json::json!({"name":"plan_write", "arguments":plan}),
+    );
+    assert_eq!(
+        written["structuredContent"]["url"],
+        found["structuredContent"]["url"]
+    );
 }

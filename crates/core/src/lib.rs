@@ -97,3 +97,5 @@ pub mod queries;
 pub mod sandbox;
 pub mod ts_decl;
 pub mod upgrade;
+
+pub mod diagram_endpoint;

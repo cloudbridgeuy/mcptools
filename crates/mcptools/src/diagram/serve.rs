@@ -25,9 +25,14 @@ struct Config {
 
 pub async fn run(host: IpAddr, port: u16) -> Result<()> {
     diagram_serve::check_bind_host(host).map_err(|error| eyre!(error))?;
-    let directory = crate::plan_store::data_dir()?.join("diagrams");
+    let data_directory = crate::plan_store::data_dir()?;
+    let directory = data_directory.join("diagrams");
     let listener = tokio::net::TcpListener::bind(SocketAddr::new(host, port)).await?;
     let bound = listener.local_addr()?;
+    std::fs::create_dir_all(&directory)?;
+    let mut record = tempfile::NamedTempFile::new_in(&directory)?;
+    std::io::Write::write_all(&mut record, bound.to_string().as_bytes())?;
+    record.persist(directory.join(".daemon-address!"))?;
     let mut retention = tokio::spawn(super::retention::run(directory.clone()));
     let app = Router::new()
         .fallback(handler)

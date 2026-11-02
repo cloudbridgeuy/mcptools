@@ -4,10 +4,10 @@
 mcptools diagram serve --host 100.80.20.1 --port 5199
 ```
 
-`--host` is a required IP address. Bind a specific loopback or Tailscale IP.
+`--host` takes a specific loopback or Tailscale IP address. Alternatively, `--tailscale` selects a Tailscale IPv4 address.
 IPv4, IPv6, and IPv4-mapped IPv6 wildcard addresses are refused. Port defaults
 to 5199; port 0 selects an ephemeral port. Startup prints the actual base URL.
-The daemon runs until interrupted; the operator supplies service supervision.
+The daemon runs until interrupted. Service supervision is described below.
 
 Routes:
 
@@ -128,3 +128,46 @@ on explicit user action; it exports the current page as PNG, posts the document
 and revision, and retains the returned revision. A conflict disables Save and
 requires a reload, which discards unsaved edits. The browser validates revision
 values, handles HTTP outcomes, and encodes the PNG; storage rules remain in core.
+
+
+# Supervised diagram server
+
+Run one server per user data directory. The service binds only the first valid Tailscale IPv4 address, on port 5199. It never binds a wildcard address. Connect the phone to the same tailnet. Tailscale access controls and the secret diagram URL still apply.
+
+Install `mcptools` and Tailscale first. Edit the service file so its `/usr/local/bin/mcptools` is the absolute path to the installed binary. Set the service `PATH` to include the absolute directory containing the `tailscale` executable. The server runs `tailscale ip -4`; missing Tailscale, a missing address, or a failed bind causes an exit. Both supervisors retry startup failures, with a 10-second restart or throttle interval. Do not run another server against the same data directory.
+
+The service and MCP process must use the same user and data directory: `$XDG_DATA_HOME/mcptools` if set; otherwise `~/Library/Application Support/mcptools` on macOS or `~/.local/share/mcptools` on Linux. Set the same `XDG_DATA_HOME` in both environments if needed.
+
+## macOS
+
+Edit `deploy/launchd/com.mcptools.diagram.plist`: replace `PLAN_USER` in `UserName` with the plan owner's account name, and set `HOME` to that account's actual home directory. Edit the binary path and PATH. If the MCP process sets `XDG_DATA_HOME`, add the same absolute `XDG_DATA_HOME` value to `EnvironmentVariables`. The account must own and access the plan data. Install as a system LaunchDaemon, owned by root with mode 644, and load it in the system domain for startup at boot:
+
+```sh
+sudo install -o root -g wheel -m 644 deploy/launchd/com.mcptools.diagram.plist /Library/LaunchDaemons/com.mcptools.diagram.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.mcptools.diagram.plist
+sudo launchctl kickstart system/com.mcptools.diagram
+```
+
+Unload with:
+
+```sh
+sudo launchctl bootout system /Library/LaunchDaemons/com.mcptools.diagram.plist
+```
+
+## Linux
+
+Copy `deploy/systemd/mcptools-diagram.service` to `~/.config/systemd/user/`, edit the binary and PATH, and set `XDG_DATA_HOME` in the unit if the MCP process uses it. Enable user lingering: it is required for unattended startup at boot. Then enable the unit:
+
+```sh
+loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now mcptools-diagram.service
+```
+
+Stop and disable with `systemctl --user disable --now mcptools-diagram.service`.
+
+## Address record
+
+After a successful bind, the server atomically writes its actual socket address to `diagrams/.daemon-address!` in the shared data directory. The `!` makes the record name an invalid plan ID. `plan_write` and `plan_url` use it unless their host or port environment override is set; each override takes precedence independently. Without a valid record, they use `127.0.0.1:5199`. Existing host and port validation still applies. The address record contains no diagram tokens; its staged file is private to the current user.
+
+The record is not a health check. It can remain stale after a crash, stop, or address change until a server binds again. Remove it manually if needed; do not treat an existing record as proof the server is running.

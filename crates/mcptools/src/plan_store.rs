@@ -64,13 +64,23 @@ pub fn save(
     Ok(Ok(meta))
 }
 
+fn endpoint() -> Result<(String, String)> {
+    let host = std::env::var("MCPTOOLS_DIAGRAM_HOST").ok();
+    let port = std::env::var("MCPTOOLS_DIAGRAM_PORT").ok();
+    let record = std::fs::read_to_string(data_dir()?.join("diagrams/.daemon-address!")).ok();
+    Ok(mcptools_core::diagram_endpoint::endpoint(
+        host.as_deref(),
+        port.as_deref(),
+        record.as_deref(),
+    ))
+}
+
 pub fn write(args: &WriteArgs) -> Result<WriteOutput> {
     let plan = plan_store::validate_write(args).map_err(|error| eyre!(error))?;
     let directory = data_dir()?.join("diagrams").join(&args.id);
     let meta: Option<PlanMeta> = read_optional(&directory.join("meta.json"))?;
     let previous = read_optional(&directory.join("plan.tldr"))?;
-    let host = std::env::var("MCPTOOLS_DIAGRAM_HOST").ok();
-    let port = std::env::var("MCPTOOLS_DIAGRAM_PORT").ok();
+    let (host, port) = endpoint()?;
     let mut token = [0; 16];
     rand::rngs::OsRng
         .try_fill_bytes(&mut token)
@@ -80,8 +90,8 @@ pub fn write(args: &WriteArgs) -> Result<WriteOutput> {
         previous.as_ref(),
         meta.as_ref(),
         token,
-        host.as_deref(),
-        port.as_deref(),
+        Some(&host),
+        Some(&port),
     )
     .map_err(|error| eyre!(error))?;
     std::fs::create_dir_all(&directory)?;
@@ -98,11 +108,9 @@ pub fn url(id: &str) -> Result<UrlOutput> {
     let meta: PlanMeta =
         read_optional(&directory.join("meta.json"))?.ok_or_else(|| eyre!("unknown plan: {id}"))?;
     plan_store::validate_meta(id, &meta).map_err(|error| eyre!(error))?;
-    let host = std::env::var("MCPTOOLS_DIAGRAM_HOST").ok();
-    let port = std::env::var("MCPTOOLS_DIAGRAM_PORT").ok();
+    let (host, port) = endpoint()?;
     Ok(UrlOutput {
-        url: plan_store::plan_url(&meta, host.as_deref(), port.as_deref())
-            .map_err(|error| eyre!(error))?,
+        url: plan_store::plan_url(&meta, Some(&host), Some(&port)).map_err(|error| eyre!(error))?,
     })
 }
 

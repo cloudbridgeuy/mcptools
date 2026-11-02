@@ -62,6 +62,9 @@ pub fn sweep(directory: &Path, active_ids: &[&str], now: SystemTime, ttl: Durati
     let _ = root;
     for entry in std::fs::read_dir(directory)? {
         let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
         let name = entry.file_name();
         let Some(id) = name.to_str().filter(|id| validate_id(id).is_ok()) else {
             continue;
@@ -154,11 +157,13 @@ mod tests {
         seed(root.path(), "fresh", now);
         std::fs::create_dir(root.path().join("unrelated")).unwrap();
         std::fs::write(root.path().join("unrelated/file"), "keep").unwrap();
+        std::fs::write(root.path().join("address"), "100.80.20.1:5199").unwrap();
         sweep(root.path(), &["active"], now, Duration::from_secs(100)).unwrap();
         assert!(!root.path().join("old").exists());
         assert!(root.path().join("active/plan.tldr").exists());
         assert!(root.path().join("fresh/plan.tldr").exists());
         assert!(root.path().join("unrelated/file").exists());
+        assert!(root.path().join("address").is_file());
     }
 
     #[test]
