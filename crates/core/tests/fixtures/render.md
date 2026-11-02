@@ -8,6 +8,22 @@
 let value = "<safe>";
 ```
 
+```js
+const value = "<script>alert('code')</script>";
+```
+
+```sh
+echo "<safe>" && printf '%s\n' "$HOME"
+```
+
+```unknown-language
+<script>alert('unknown')</script> & plain
+```
+
+```
+<script>alert('plain')</script> & plain
+```
+
 - [x] Done
 - [ ] Pending
 

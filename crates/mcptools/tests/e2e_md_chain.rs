@@ -10,8 +10,6 @@ const section = await md_fetch({ url: PAGE_URL, offset: beta.char_offset, limit:
 console.log(toc.title, toc.entries.length, section.content.includes("BETA MARKER"), section.content.includes("ALPHA MARKER"));
 "#;
 
-/// Returns why browser tests must skip: no Chrome at `CHROME` or the default
-/// location, or a Chrome older than `MIN_CHROME_MAJOR`.
 fn unsupported_chrome() -> Option<String> {
     use mcptools_core::md::{parse_chrome_major, validate_chrome_major};
 
@@ -162,6 +160,41 @@ fn markdown_render_is_offline_and_diagrams_are_isolated(scheme: &str) {
         .unwrap()
         .value;
     assert_eq!(readable, Some(serde_json::json!(true)), "{scheme} colors");
+    let token_colors = r#"JSON.stringify(['rust', 'js', 'sh'].map(language => {
+        const code = document.querySelector(`code.language-${language}`);
+        const tokens = [...code.querySelectorAll('span')];
+        if (!tokens.length || code.querySelector('[style]')) throw new Error(language);
+        const colors = tokens.map(token => getComputedStyle(token).color);
+        if (new Set(colors).size < 2) throw new Error(`${language}: no token colors`);
+        return colors;
+    }))"#;
+    let read_colors = || {
+        let colors = tab.evaluate(token_colors, false).unwrap();
+        serde_json::from_str::<Vec<Vec<String>>>(
+            colors
+                .value
+                .as_ref()
+                .and_then(|value| value.as_str())
+                .expect("token colors"),
+        )
+        .unwrap()
+    };
+    let initial_colors = read_colors();
+    tab.call_method(Emulation::SetEmulatedMedia {
+        media: None,
+        features: Some(vec![Emulation::MediaFeature {
+            name: "prefers-color-scheme".into(),
+            value: if scheme == "dark" { "light" } else { "dark" }.into(),
+        }]),
+    })
+    .unwrap();
+    let switched_colors = read_colors();
+    for (initial, switched) in initial_colors.iter().zip(&switched_colors) {
+        assert_ne!(
+            initial, switched,
+            "{scheme}: code colors must follow CSS media"
+        );
+    }
     assert!(
         external.lock().unwrap().is_empty(),
         "unexpected network requests: {external:?}"
@@ -569,7 +602,11 @@ async fn md_rejects_old_chrome_before_launch_for_cli_and_mcp() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn md_reuses_browser_across_calls_and_idle_then_relaunches_after_death() {
     skip_without_chrome!("md_reuses_browser_across_calls_and_idle_then_relaunches_after_death");
-    let binary = headless_chrome::browser::default_executable().expect("Chrome installed");
+    let binary = std::env::var_os("CHROME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            headless_chrome::browser::default_executable().expect("Chrome installed")
+        });
     let directory = tempfile::tempdir().expect("temporary directory");
     let wrapper = directory.path().join("chrome");
     let launches = directory.path().join("launches");
