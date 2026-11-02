@@ -1,3 +1,4 @@
+pub mod retention;
 mod serve;
 
 use std::net::IpAddr;

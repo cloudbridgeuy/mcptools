@@ -160,43 +160,36 @@ fn assert_retention(
 }
 
 #[test]
-#[ignore = "GUZ-1148"]
 fn retention_expired() {
     assert_retention(&[retention_plan("old", 899, false)], 100, &["old"]);
 }
 
 #[test]
-#[ignore = "GUZ-1148"]
 fn retention_boundary() {
     assert_retention(&[retention_plan("boundary", 900, false)], 100, &[]);
 }
 
 #[test]
-#[ignore = "GUZ-1148"]
 fn retention_fresh() {
     assert_retention(&[retention_plan("fresh", 901, false)], 100, &[]);
 }
 
 #[test]
-#[ignore = "GUZ-1148"]
 fn retention_active_old() {
     assert_retention(&[retention_plan("active", 1, true)], 100, &[]);
 }
 
 #[test]
-#[ignore = "GUZ-1148"]
 fn retention_future() {
     assert_retention(&[retention_plan("future", 1001, false)], 100, &[]);
 }
 
 #[test]
-#[ignore = "GUZ-1148"]
 fn retention_empty() {
     assert_retention(&[], 100, &[]);
 }
 
 #[test]
-#[ignore = "GUZ-1148"]
 fn retention_configured_ttl() {
     let plans = [
         retention_plan("old", 800, false),
