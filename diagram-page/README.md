@@ -20,11 +20,11 @@ records to a tldraw document store, loads it, and fits the camera. Load errors
 appear in an accessible alert. Edits are local to this tab and are not saved.
 Save routes belong to the next epic.
 
-tldraw 5.6.0 still fetches fonts, icons, and translations from its CDN. Offline
-assets belong to the unattended/offline epic in the approved design. The HTML
-and server use a no-referrer policy to keep the token out of CDN requests.
-The approved HTTP deployment keeps tldraw's unlicensed watermark; the owner
-must resolve licensing before production use.
+tldraw 5.6.0 fonts, icons, and translations are bundled for same-origin use.
+The SDK retains its original license tracking request when applicable, at
+`https://cdn.tldraw.com/5.6.0/watermarks/watermark-track.svg` with query parameters.
+License validation and watermark rendering remain unchanged. This does not grant
+a production license; the owner must resolve licensing before production use.
 
 `include_dir` 0.7.4 embeds the complete directory at Rust compile time. Neither
 candidate embed crate existed in the workspace. `include_dir` needs only its

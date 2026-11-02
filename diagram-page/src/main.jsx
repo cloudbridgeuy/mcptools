@@ -1,7 +1,10 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { Tldraw, loadSnapshot } from 'tldraw'
+import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
 import 'tldraw/tldraw.css'
+
+const assetUrls = getAssetUrlsByImport()
 
 async function loadPlan(editor) {
   try {
@@ -19,5 +22,5 @@ async function loadPlan(editor) {
 }
 
 createRoot(document.getElementById('root')).render(
-  <Tldraw onMount={editor => { void loadPlan(editor) }} />,
+  <Tldraw assetUrls={assetUrls} onMount={editor => { void loadPlan(editor) }} />,
 )

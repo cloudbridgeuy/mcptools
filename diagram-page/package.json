@@ -6,6 +6,7 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@tldraw/assets": "5.6.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tldraw": "5.6.0"

@@ -60,7 +60,6 @@ fn seed(home: &Path, id: &str, modified: SystemTime) {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1147"]
 async fn served_page_assets_need_no_external_resources() {
     let home = tempfile::tempdir().unwrap();
     seed(home.path(), "seed", SystemTime::now());
@@ -77,6 +76,31 @@ async fn served_page_assets_need_no_external_resources() {
     let local = Regex::new(r#"["'`](/assets/[^"'`?#]+)"#).unwrap();
     let remote =
         Regex::new(r#"https?://(?:cdn\.[a-zA-Z0-9.-]+|fonts\.[a-zA-Z0-9.-]+)[^"'`\s]*"#).unwrap();
+    let asset_base = Regex::new(r#"(?P<base>[$a-zA-Z_][$a-zA-Z0-9_]*)=`(?P<url>https://cdn\.tldraw\.com)`;function (?P<getter>[$a-zA-Z_][$a-zA-Z0-9_]*)\(\)\{return`\$\{(?P<reference>[$a-zA-Z_][$a-zA-Z0-9_]*)\}/\$\{(?P<version>[$a-zA-Z_][$a-zA-Z0-9_]*)\}`\}"#).unwrap();
+    // The SDK constructs its 5.6.0 watermark tracking URL from a shared CDN base;
+    // local assetUrls override the other, inert font, icon, and translation defaults.
+    let unexpected_remote = |body: &str, javascript: bool| {
+        let mut urls: Vec<_> = remote.find_iter(body).collect();
+        if javascript && urls.len() == 1 {
+            if let Some(parts) = asset_base.captures(body) {
+                let getter = &parts["getter"];
+                let version = &parts["version"];
+                let version_binding =
+                    Regex::new(&format!(r"(?:^|[,;]){}=`5\.6\.0`", regex::escape(version)))
+                        .unwrap();
+                let tracking = format!("`${{{getter}()}}/watermarks/watermark-track.svg`");
+                if parts["base"] == parts["reference"]
+                    && version_binding.find_iter(body).count() == 1
+                    && body.matches(&tracking).count() == 1
+                    && parts.name("url").unwrap().start() == urls[0].start()
+                    && parts.name("url").unwrap().end() == urls[0].end()
+                {
+                    urls.clear();
+                }
+            }
+        }
+        urls.first().map(|url| url.as_str().to_owned())
+    };
     let mut queue = VecDeque::from(["/d/0123456789abcdef0123456789abcdef".to_owned()]);
     let mut seen = BTreeSet::new();
     while let Some(path) = queue.pop_front() {
@@ -102,10 +126,37 @@ async fn served_page_assets_need_no_external_resources() {
             continue;
         }
         let body = response.text().await.unwrap();
+        let javascript = content_type.contains("javascript");
+        if javascript && asset_base.is_match(&body) {
+            assert!(unexpected_remote(&body.replace("=`5.6.0`", "=`5.6.1`"), true).is_some());
+            assert!(unexpected_remote(
+                &body.replace("/watermarks/watermark-track.svg", "/watermarks/other.svg"),
+                true
+            )
+            .is_some());
+            assert!(unexpected_remote(
+                &body.replace(
+                    "/watermarks/watermark-track.svg",
+                    "/watermarks/watermark-track.svg.extra"
+                ),
+                true
+            )
+            .is_some());
+            assert!(unexpected_remote(
+                &format!("{body}\n`https://cdn.tldraw.com/5.6.0/fonts/other.woff2`"),
+                true
+            )
+            .is_some());
+            assert!(unexpected_remote(
+                &body.replace("https://cdn.tldraw.com", "https://cdn.tldraw.com.evil"),
+                true
+            )
+            .is_some());
+        }
         assert!(
-            !remote.is_match(&body),
+            unexpected_remote(&body, javascript).is_none(),
             "{path} references an external asset host: {:?}",
-            remote.find(&body).map(|m| m.as_str())
+            unexpected_remote(&body, javascript)
         );
         for capture in links.captures_iter(if content_type.contains("javascript") {
             ""
