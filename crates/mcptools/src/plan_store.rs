@@ -41,6 +41,16 @@ fn stage(directory: &Path, value: &impl serde::Serialize) -> Result<tempfile::Na
     Ok(file)
 }
 
+pub fn touch_access(directory: &Path) {
+    if let Err(error) = tempfile::NamedTempFile::new_in(directory).and_then(|file| {
+        file.persist(directory.join("last-access"))
+            .map(|_| ())
+            .map_err(|error| error.error)
+    }) {
+        std::eprintln!("diagram last access: {error}");
+    }
+}
+
 pub fn save(
     directory: &Path,
     body: &plan_store::SaveBody,
@@ -109,9 +119,11 @@ pub fn url(id: &str) -> Result<UrlOutput> {
         read_optional(&directory.join("meta.json"))?.ok_or_else(|| eyre!("unknown plan: {id}"))?;
     plan_store::validate_meta(id, &meta).map_err(|error| eyre!(error))?;
     let (host, port) = endpoint()?;
-    Ok(UrlOutput {
+    let output = UrlOutput {
         url: plan_store::plan_url(&meta, Some(&host), Some(&port)).map_err(|error| eyre!(error))?,
-    })
+    };
+    touch_access(&directory);
+    Ok(output)
 }
 
 pub fn diff(id: &str) -> Result<plan_store::DiffOutput> {
@@ -130,5 +142,7 @@ pub fn png(id: &str) -> Result<plan_store::PngOutput> {
     let data_dir = std::path::absolute(data_dir()?)?;
     let path = plan_store::latest_png_path(&data_dir, id).map_err(|error| eyre!(error))?;
     let metadata = std::fs::metadata(&path)?;
-    plan_store::png_output(path, metadata.is_file()).map_err(|error| eyre!(error))
+    let output = plan_store::png_output(path, metadata.is_file()).map_err(|error| eyre!(error))?;
+    touch_access(output.path.parent().expect("PNG directory"));
+    Ok(output)
 }

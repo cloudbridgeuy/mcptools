@@ -146,6 +146,14 @@ async fn respond(config: &Config, request: Request) -> std::io::Result<Response>
         Route::Page(token) | Route::Snapshot(token) => find_plan(&config.directory, token).await?,
         _ => None,
     };
+    if let Some(plan) = &plan {
+        let directory = plan.parent().expect("plan directory").to_owned();
+        if let Err(error) =
+            tokio::task::spawn_blocking(move || crate::plan_store::touch_access(&directory)).await
+        {
+            eprintln!("diagram last access task: {error}");
+        }
+    }
     let asset = match route {
         Route::Asset(path) => PAGE.get_file(format!("assets/{path}")),
         _ => None,

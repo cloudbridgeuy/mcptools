@@ -3,7 +3,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use base64::Engine;
 use serde_json::{json, Value};
@@ -427,7 +427,7 @@ async fn plan_diff_advances_baseline_and_second_read_is_empty() {
 }
 
 #[tokio::test]
-async fn plan_png_returns_absolute_latest_png_path_without_writing() {
+async fn plan_png_returns_absolute_latest_png_path_and_records_access() {
     let home = tempfile::tempdir().unwrap();
     let mut mcp = server(home.path());
     let directory = seed(home.path(), &mut mcp).await;
@@ -444,7 +444,12 @@ async fn plan_png_returns_absolute_latest_png_path_without_writing() {
         directory.join("latest.png").canonicalize().unwrap()
     );
     assert_eq!(std::fs::read(path).unwrap(), png);
-    assert_eq!(files(&directory), before, "PNG read changed storage");
+    let mut after = files(&directory);
+    assert_eq!(
+        after.remove(&directory.join("last-access")),
+        Some(Vec::new())
+    );
+    assert_eq!(after, before, "PNG read changed plan storage");
 }
 
 #[tokio::test]
@@ -647,4 +652,228 @@ async fn browser_save_conflict_preserves_files() {
 async fn browser_save_errors_are_visible() {
     browser_save(400).await;
     browser_save(413).await;
+}
+
+#[tokio::test]
+async fn canvas_edit_save_diff_png_end_to_end() {
+    use headless_chrome::{Browser, LaunchOptions};
+
+    let Some(path) = chrome_path() else {
+        return;
+    };
+    let home = tempfile::tempdir().unwrap();
+    let mut mcp = server(home.path());
+    let written = mcp
+        .tools_call(
+            "plan_write",
+            json!({
+                "id":"spike", "nodes":[{"id":"start","text":"Start"}],
+                "edges":[], "allowWrites":true
+            }),
+        )
+        .await;
+    structured(&written);
+    let baseline = read_tool(&mut mcp, "plan_diff").await;
+    structured(&baseline);
+    let directory = home.path().join("mcptools/diagrams/spike");
+    let meta = read_json(&directory.join("meta.json"));
+    let (_daemon, _client, url) = daemon(home.path(), meta["token"].as_str().unwrap()).await;
+    let browser = Browser::new(LaunchOptions {
+        path: Some(path),
+        headless: false,
+        args: vec![std::ffi::OsStr::new("--headless=new")],
+        ignore_certificate_errors: false,
+        ..LaunchOptions::default()
+    })
+    .unwrap();
+    let tab = browser.new_tab().unwrap();
+    tab.set_default_timeout(Duration::from_secs(20));
+    tab.navigate_to(url.strip_suffix("/save").unwrap()).unwrap();
+    tab.wait_for_element(".tl-canvas .tl-shape").unwrap();
+    tab.wait_for_element("#save:not([disabled])").unwrap();
+    tab.press_key("t").unwrap();
+    tab.find_element(".tl-canvas").unwrap().click().unwrap();
+    tab.type_str("Canvas E2E edit").unwrap();
+    tab.press_key("Escape").unwrap();
+    tab.wait_for_element("#save").unwrap().click().unwrap();
+    tab.wait_for_element("#save-status[data-state='saved'][data-rev='2']")
+        .expect("browser edit must save");
+    let diff = read_tool(&mut mcp, "plan_diff").await;
+    let diff = structured(&diff)["diff"].as_str().unwrap();
+    assert!(
+        diff.contains("+ text ") && diff.contains("Canvas E2E edit"),
+        "browser edit absent from MCP diff: {diff}"
+    );
+    let png = read_tool(&mut mcp, "plan_png").await;
+    let path = Path::new(structured(&png)["path"].as_str().unwrap());
+    assert!(
+        path.is_absolute() && path.is_file(),
+        "MCP PNG path must exist"
+    );
+    assert!(std::fs::read(path)
+        .unwrap()
+        .starts_with(b"\x89PNG\r\n\x1a\n"));
+}
+
+fn retention_daemon(home: &Path, ttl: &str) -> (Daemon, String) {
+    use std::io::{BufRead, BufReader};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mcptools"))
+        .args(["diagram", "serve", "--host", "127.0.0.1", "--port", "0"])
+        .env("HOME", home)
+        .env("XDG_DATA_HOME", home)
+        .env("MCPTOOLS_DIAGRAM_TTL_SECONDS", ttl)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let daemon = Daemon(child);
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = send.send(BufReader::new(stdout).lines().next());
+    });
+    let base = receive
+        .recv_timeout(Duration::from_secs(10))
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    (daemon, base)
+}
+
+async fn accessed_plan_survives_sweep(read: &str) {
+    let home = tempfile::tempdir().unwrap();
+    let mut mcp = server(home.path());
+    let directory = seed(home.path(), &mut mcp).await;
+    std::fs::write(
+        directory.join("latest.png"),
+        base64::engine::general_purpose::STANDARD
+            .decode(PNG)
+            .unwrap(),
+    )
+    .unwrap();
+    let control = mcp
+        .tools_call(
+            "plan_write",
+            json!({
+                "id":"expired", "nodes":[{"id":"start","text":"Start"}],
+                "edges":[], "allowWrites":true
+            }),
+        )
+        .await;
+    structured(&control);
+    let (running, base) = retention_daemon(home.path(), "2592000");
+    access_plan(&mut mcp, &directory, &base, read).await;
+    drop(running);
+    let old = SystemTime::now() - Duration::from_secs(1000);
+    let expired = home.path().join("mcptools/diagrams/expired");
+    for plan in [&directory, &expired] {
+        for path in [
+            plan.join("plan.tldr"),
+            plan.join("meta.json"),
+            plan.to_path_buf(),
+        ] {
+            std::fs::File::open(path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(old))
+                .unwrap();
+        }
+    }
+    let (_sweeper, _base) = retention_daemon(home.path(), "100");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while expired.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "control plan must expire in startup sweep"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        directory.join("plan.tldr").is_file(),
+        "plan read via {read} within TTL must survive sweep"
+    );
+}
+
+async fn access_plan(mcp: &mut common::McpServer, directory: &Path, base: &str, read: &str) {
+    let meta = read_json(&directory.join("meta.json"));
+    if read.starts_with("GET") {
+        let suffix = if read == "GET page" { "" } else { "/plan.tldr" };
+        let url = format!("{base}/d/{}{suffix}", meta["token"].as_str().unwrap());
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(response) = client.get(&url).send().await {
+                assert_eq!(response.status(), 200);
+                break;
+            }
+            assert!(Instant::now() < deadline, "daemon startup timed out");
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    } else {
+        let response = read_tool(mcp, read).await;
+        structured(&response);
+    }
+}
+
+#[tokio::test]
+async fn access_marker_replacement_and_failures_preserve_reads() {
+    let home = tempfile::tempdir().unwrap();
+    let mut mcp = server(home.path());
+    let directory = seed(home.path(), &mut mcp).await;
+    std::fs::write(
+        directory.join("latest.png"),
+        base64::engine::general_purpose::STANDARD
+            .decode(PNG)
+            .unwrap(),
+    )
+    .unwrap();
+    let (_daemon, base) = retention_daemon(home.path(), "2592000");
+    let before = files(&directory);
+    let marker = directory.join("last-access");
+    let old = SystemTime::now() - Duration::from_secs(1000);
+    for read in ["GET page", "GET snapshot", "plan_url", "plan_png"] {
+        std::fs::write(&marker, []).unwrap();
+        std::fs::File::open(&marker)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old))
+            .unwrap();
+        access_plan(&mut mcp, &directory, &base, read).await;
+        assert!(
+            std::fs::metadata(&marker).unwrap().modified().unwrap() > old,
+            "{read} must refresh existing marker"
+        );
+        std::fs::remove_file(&marker).unwrap();
+        std::fs::create_dir(&marker).unwrap();
+        access_plan(&mut mcp, &directory, &base, read).await;
+        std::fs::remove_dir(&marker).unwrap();
+        assert_eq!(
+            files(&directory),
+            before,
+            "{read} changed plan or left staging files"
+        );
+    }
+}
+
+#[tokio::test]
+async fn retention_page_access_survives_sweep() {
+    accessed_plan_survives_sweep("GET page").await;
+}
+
+#[tokio::test]
+async fn retention_snapshot_access_survives_sweep() {
+    accessed_plan_survives_sweep("GET snapshot").await;
+}
+
+#[tokio::test]
+async fn retention_plan_url_access_survives_sweep() {
+    accessed_plan_survives_sweep("plan_url").await;
+}
+
+#[tokio::test]
+async fn retention_plan_png_access_survives_sweep() {
+    accessed_plan_survives_sweep("plan_png").await;
 }

@@ -108,8 +108,11 @@ The daemon starts the existing retention loop after binding the listener. It
 logs loop errors without stopping HTTP service, then aborts and joins the loop
 when the server stops. The existing loop sweeps immediately and hourly; its
 default TTL is 30 days, overridden by `MCPTOOLS_DIAGRAM_TTL_SECONDS`.
-Age is measured from the newest modification time of the plan directory,
-`plan.tldr`, and `meta.json`; merely viewing the page does not refresh it.
+Successful `GET /d/<token>`, snapshot GET, `plan_url`, and `plan_png` reads
+atomically replace a `last-access` marker in the plan directory. Marker failures
+are logged and never fail the read. Retention uses the newest directory,
+snapshot, metadata, or access-marker modification time, selected in core;
+plans without a marker retain the previous modification-time behavior.
 The loop supplies no active-plan exemptions. Eligible plans older than the TTL
 are deleted with their tokens; this is retention, not token expiry.
 

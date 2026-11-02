@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use mcptools_core::plan_retention::{expired_plan_ids, Plan};
+use mcptools_core::plan_retention::{expired_plan_ids, newest_activity, Plan};
 use mcptools_core::plan_store::{validate_id, validate_meta, PlanMeta};
 
 use crate::prelude::*;
@@ -13,8 +13,8 @@ fn ttl(value: Option<&str>) -> Result<Duration> {
     Ok(Duration::from_secs(seconds))
 }
 
-fn inspect(path: &Path, id: &str) -> Result<Option<(PlanMeta, [SystemTime; 3])>> {
-    let inspect = || -> Result<Option<(PlanMeta, [SystemTime; 3])>> {
+fn inspect(path: &Path, id: &str) -> Result<Option<(PlanMeta, [SystemTime; 4])>> {
+    let inspect = || -> Result<Option<(PlanMeta, [SystemTime; 4])>> {
         let directory = std::fs::symlink_metadata(path)?;
         let snapshot = std::fs::symlink_metadata(path.join("plan.tldr"))?;
         let metadata = std::fs::symlink_metadata(path.join("meta.json"))?;
@@ -31,12 +31,19 @@ fn inspect(path: &Path, id: &str) -> Result<Option<(PlanMeta, [SystemTime; 3])>>
             Ok(meta) if validate_meta(id, &meta).is_ok() => meta,
             _ => return Ok(None),
         };
+        let accessed = match std::fs::symlink_metadata(path.join("last-access")) {
+            Ok(marker) if marker.is_file() => marker.modified()?,
+            Ok(_) => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => SystemTime::UNIX_EPOCH,
+            Err(error) => return Err(error.into()),
+        };
         Ok(Some((
             meta,
             [
                 directory.modified()?,
                 snapshot.modified()?,
                 metadata.modified()?,
+                accessed,
             ],
         )))
     };
@@ -73,11 +80,11 @@ pub fn sweep(directory: &Path, active_ids: &[&str], now: SystemTime, ttl: Durati
         let Some((meta, times)) = inspect(&path, id)? else {
             continue;
         };
-        let select = |times: &[SystemTime; 3]| {
+        let select = |times: &[SystemTime; 4]| {
             expired_plan_ids(
                 &[Plan {
                     id,
-                    modified: *times.iter().max().expect("three timestamps"),
+                    modified: newest_activity(times).expect("four timestamps"),
                     active: active_ids.contains(&id),
                 }],
                 now,
@@ -176,6 +183,28 @@ mod tests {
             Duration::ZERO,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn sweep_counts_access_marker_but_still_expires_old_access() {
+        let root = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let old = now - Duration::from_secs(1000);
+        for (id, accessed) in [("viewed", now), ("expired", old)] {
+            seed(root.path(), id, old);
+            let directory = root.path().join(id);
+            let marker = directory.join("last-access");
+            std::fs::write(&marker, []).unwrap();
+            for (path, modified) in [(marker, accessed), (directory, old)] {
+                std::fs::File::open(path)
+                    .unwrap()
+                    .set_times(std::fs::FileTimes::new().set_modified(modified))
+                    .unwrap();
+            }
+        }
+        sweep(root.path(), &[], now, Duration::from_secs(100)).unwrap();
+        assert!(root.path().join("viewed/plan.tldr").is_file());
+        assert!(!root.path().join("expired").exists());
     }
 
     #[cfg(unix)]

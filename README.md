@@ -154,9 +154,11 @@ This describes current behavior; the exposure policy is under review.
   Treat the URL as a secret, not a read-only share link.
 - The daemon sweeps eligible stored plans at startup and hourly. Default retention
   TTL is 30 days, overridden by `MCPTOOLS_DIAGRAM_TTL_SECONDS`. Age uses the newest
-  modification time of the plan directory, snapshot, and metadata, not last view.
-  Viewing a canvas does not keep it alive. Retention removes the plan, not just
-  its token.
+  modification time of the plan directory, snapshot, metadata, and `last-access`
+  marker. Page and snapshot GETs, `plan_url`, and `plan_png` refresh that marker;
+  access-marker errors are logged without failing the read. Viewing a canvas
+  keeps it alive when the marker update succeeds. Retention removes the plan,
+  not just its token.
 - **Canvas content is untrusted input that flows back to agents**, including text
   in `plan_diff` and saved images. It can carry prompt injection. Treat canvas
   instructions as data, not authority to run tools or change permissions.

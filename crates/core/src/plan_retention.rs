@@ -6,6 +6,10 @@ pub struct Plan<'a> {
     pub active: bool,
 }
 
+pub fn newest_activity(times: &[SystemTime]) -> Option<SystemTime> {
+    times.iter().copied().max()
+}
+
 pub fn expired_plan_ids<'a>(
     plans: &[Plan<'a>],
     now: SystemTime,
@@ -21,6 +25,21 @@ pub fn expired_plan_ids<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_uses_newest_timestamp_regardless_of_source() {
+        let old = SystemTime::UNIX_EPOCH;
+        let recent = old + Duration::from_secs(100);
+        for times in [
+            [recent, old, old, old],
+            [old, recent, old, old],
+            [old, old, recent, old],
+            [old, old, old, recent],
+        ] {
+            assert_eq!(newest_activity(&times), Some(recent));
+        }
+        assert_eq!(newest_activity(&[]), None);
+    }
 
     #[test]
     fn selects_only_inactive_plans_older_than_ttl() {
