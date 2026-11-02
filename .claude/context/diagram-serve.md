@@ -74,10 +74,25 @@ Save returns 200 with `{rev}` after replacing `plan.tldr`, `latest.png`, and
 `meta.json`. A stale revision returns 409, bodies over 10 MiB return 413, and
 malformed JSON, snapshot envelopes, or PNG encodings return 400. Declared size
 is checked before upload; streamed bodies have the same cap. Unknown tokens
-return 404. Rejected saves do not stage or replace files. Baseline stays intact.
+return 404. Rejected saves do not stage or replace files or deliver reports.
+Each successful save closes the share window: page, snapshot, and save routes
+return 404 until `plan_url` reopens the same token URL.
+
+`plan_write` captures an absolute `RALPH_INBOX` directory in sibling
+`notify.json` (`{"inbox":"<directory>"}`), never in strict `meta.json`.
+Without that environment variable, no notify file remains. The daemon reads
+this persisted target, not its own environment. A save computes the diff from
+`baseline.tldr` with the core diff engine and calls core `canvas_report` with
+the plan ID, new revision, diff, absolute `latest.png` path, and shell clock
+timestamp. It publishes one Ralph Report (`worker="canvas:<plan-id>"`, `at`,
+`status="done"`, `text`) through a hidden inbox temp
+file and rename, then advances `baseline.tldr` and closes the share window.
+Unchanged saves after reopening still deliver one report. Without a target,
+save succeeds, logs `no notify target`, advances the baseline, and closes access.
+`plan_diff` after a successful save therefore returns an empty diff.
 
 Pure save routing, size, body, and revision decisions live in core `plan_store`.
-The shell decodes base64, stages and syncs all three files, then renames each.
+The shell decodes base64, stages and syncs the files, then renames each.
 Replacement is atomic per file, not a multi-file transaction: a crash or rename
 failure can leave mixed versions. A daemon mutex serializes saves, including
 revision reads, on blocking workers. External `plan_write` processes and other
@@ -92,6 +107,7 @@ implementation; pure size-boundary, routing, body, and revision tests also passe
 Final foreground `RUST_TEST_THREADS=1 cargo xtask lint` passed formatting,
 check, clippy, all tests, machete, and typos. The added concurrent-save test
 observed one 200 and one 409 for competing saves with the same revision.
+Under the single-save window rule, the competing request now returns 404.
 
 The embedded page build and limitations are in `diagram-page/README.md`.
 GUZ-1131 supplies plan writes and URLs. Its MCP-backed token-route acceptance
@@ -182,6 +198,7 @@ on explicit user action; it exports the current page as PNG, posts the document
 and revision, and retains the returned revision. A conflict disables Save and
 requires a reload, which discards unsaved edits. The browser validates revision
 values, handles HTTP outcomes, and encodes the PNG; storage rules remain in core.
+After a save, ask the agent to reopen with `plan_url` before saving again.
 
 
 # On-demand diagram server

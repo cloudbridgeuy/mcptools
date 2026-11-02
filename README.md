@@ -97,7 +97,9 @@ Append `--discovery` or `--code-mode` to the args to select another mode. See th
 
 The plan canvas is a self-hosted tldraw page backed by local plan files. An agent
 writes nodes and edges; a person opens the secret URL, edits the canvas, and
-presses **Save**. The agent can then read text changes and the saved PNG path.
+presses **Save**. With `RALPH_INBOX` set when the plan is written, the agent
+receives the saved diff and PNG path in its inbox. Each successful save closes
+the link until `plan_url` reopens it.
 
 | MCP tool | Input | Result and effect |
 |----------|-------|-------------------|
@@ -119,8 +121,14 @@ Remove an old user agent manually with `launchctl bootout gui/$(id -u)/com.mcpto
 3. Connect the phone to the same tailnet and open the returned IP-based URL.
    Edit, then press **Save**; there is no autosave. A revision conflict requires
    reload and discards unsaved edits.
-4. Call `plan_diff` to read saved changes and advance the baseline. Use `plan_png`
-   for the PNG saved from the browser's current page.
+4. Read the inbox Report for the saved diff and PNG path. `plan_write` captures
+   the writer's absolute `RALPH_INBOX` in separate `notify.json`; the daemon
+   publishes a complete Report through a hidden temp file and rename. Each
+   successful save advances the baseline, so a following `plan_diff` is empty.
+   Use `plan_png` for the saved image. Reopen with `plan_url` before another
+   save; unchanged saves also notify. Without a notify target, saves still
+   succeed, advance the baseline, close the link, and log `no notify target`.
+   Rejected saves never notify.
 
 URL host and port resolve independently: `MCPTOOLS_DIAGRAM_HOST` and
 `MCPTOOLS_DIAGRAM_PORT`, then the daemon's recorded address in
@@ -142,7 +150,8 @@ set a Tailscale ACL to allow port 5199 only from the user's devices.
   Tokens survive updates, but a separate share window gates access. `plan_write`
   and `plan_url` open or extend it to now plus 1800 seconds by default. Optional
   `share_seconds` overrides `MCPTOOLS_DIAGRAM_SHARE_SECONDS`; both are clamped to
-  60–86400 seconds. `plan_close` revokes access at turn end. Missing, malformed,
+  60–86400 seconds. A successful save closes the share until `plan_url` reopens
+  it. `plan_close` revokes access at turn end. Missing, malformed,
   closed, or expired windows return 404 on page, snapshot, and save routes without
   refreshing last-access. Existing plans need a fresh share. Any holder
   with network access during the window can read and save; there is no separate save

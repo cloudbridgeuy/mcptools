@@ -10,6 +10,13 @@ pub fn is_open(window: Option<&ShareWindow>, now: u64) -> bool {
     window.is_some_and(|window| now < window.expires_at_unix_secs)
 }
 
+/// The share window staged on every successful save: already expired.
+pub fn closed() -> ShareWindow {
+    ShareWindow {
+        expires_at_unix_secs: 0,
+    }
+}
+
 pub fn clamp_ttl(seconds: Option<u64>) -> u64 {
     seconds.unwrap_or(1800).clamp(60, 86400)
 }
@@ -99,5 +106,13 @@ mod tests {
         }
         assert_eq!(clamp_ttl(Some(86401)), 86400);
         assert_eq!(clamp_ttl(Some(u64::MAX)), 86400);
+    }
+
+    #[test]
+    fn closed_window_is_never_open() {
+        let window = closed();
+        assert_eq!(window.expires_at_unix_secs, 0);
+        assert!(!is_open(Some(&window), 0));
+        assert!(!is_open(Some(&window), u64::MAX));
     }
 }

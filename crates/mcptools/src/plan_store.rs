@@ -1,12 +1,25 @@
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
+use mcptools_core::plan_inbox;
 use mcptools_core::plan_share::{self, ShareWindow};
 use mcptools_core::plan_store::{self, PlanMeta, UrlOutput, WriteArgs, WriteOutput};
 use rand::RngCore;
 use serde::de::DeserializeOwned;
 
 use crate::prelude::*;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Notify {
+    inbox: PathBuf,
+}
+
+fn notify_target(inbox: PathBuf) -> Result<Notify> {
+    if !inbox.is_absolute() {
+        return Err(eyre!("RALPH_INBOX must be an absolute directory"));
+    }
+    Ok(Notify { inbox })
+}
 
 pub fn data_dir() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("XDG_DATA_HOME").filter(|path| !path.is_empty()) {
@@ -93,15 +106,47 @@ pub fn save(
         Ok(meta) => meta,
         Err(error) => return Ok(Err(error)),
     };
+    let notify: Option<Notify> = read_optional(&directory.join("notify.json"))?;
+    let report = if let Some(notify) = notify {
+        let notify = notify_target(notify.inbox)?;
+        let baseline = read_optional(&directory.join("baseline.tldr"))?;
+        let diff = plan_store::prepare_diff(baseline.as_ref(), &body.snapshot)
+            .map_err(|error| eyre!(error))?;
+        let png = std::path::absolute(directory.join("latest.png"))?;
+        let elapsed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+        let at = plan_inbox::report_at(elapsed.as_secs(), elapsed.subsec_nanos())
+            .ok_or_else(|| eyre!("invalid report timestamp"))?;
+        let report = plan_inbox::canvas_report(&meta.id, meta.rev, &diff.diff, &png, &at)
+            .map_err(|error| eyre!(error))?;
+        let name = plan_inbox::inbox_file_name(&report.at, meta.rev, &report.worker);
+        std::fs::create_dir_all(&notify.inbox)?;
+        let mut file = tempfile::Builder::new()
+            .prefix(".")
+            .tempfile_in(&notify.inbox)?;
+        serde_json::to_writer(&mut file, &report)?;
+        file.flush()?;
+        file.as_file().sync_all()?;
+        Some((file, notify.inbox.join(name)))
+    } else {
+        std::eprintln!("diagram save: no notify target");
+        None
+    };
     let snapshot = stage(directory, &body.snapshot)?;
+    let baseline = stage(directory, &body.snapshot)?;
     let mut image = tempfile::NamedTempFile::new_in(directory)?;
     image.write_all(png)?;
     image.flush()?;
     image.as_file().sync_all()?;
     let metadata = stage(directory, &meta)?;
+    let share = stage(directory, &plan_share::closed())?;
     snapshot.persist(directory.join("plan.tldr"))?;
     image.persist(directory.join("latest.png"))?;
     metadata.persist(directory.join("meta.json"))?;
+    if let Some((file, target)) = report {
+        file.persist(target)?;
+    }
+    baseline.persist(directory.join("baseline.tldr"))?;
+    share.persist(directory.join("share.json"))?;
     Ok(Ok(meta))
 }
 
@@ -126,6 +171,10 @@ pub fn current_url(id: &str) -> Result<String> {
 
 pub fn write(args: &WriteArgs) -> Result<WriteOutput> {
     let plan = plan_store::validate_write(args).map_err(|error| eyre!(error))?;
+    let notify = std::env::var_os("RALPH_INBOX")
+        .map(PathBuf::from)
+        .map(notify_target)
+        .transpose()?;
     let window = share_window(args.share_seconds)?;
     let directory = data_dir()?.join("diagrams").join(&args.id);
     let meta: Option<PlanMeta> = read_optional(&directory.join("meta.json"))?;
@@ -151,6 +200,15 @@ pub fn write(args: &WriteArgs) -> Result<WriteOutput> {
     snapshot.persist(directory.join("plan.tldr"))?;
     meta.persist(directory.join("meta.json"))?;
     share.persist(directory.join("share.json"))?;
+    if let Some(notify) = notify {
+        stage(&directory, &notify)?.persist(directory.join("notify.json"))?;
+    } else {
+        match std::fs::remove_file(directory.join("notify.json")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
     Ok(write.output)
 }
 

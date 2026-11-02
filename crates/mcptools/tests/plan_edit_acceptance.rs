@@ -316,9 +316,10 @@ async fn save_status(expected: u16) {
         let updated = read_json(&directory.join("meta.json"));
         assert_eq!(updated["rev"], rev + 1);
         assert_eq!(updated["token"], meta["token"]);
+        assert_eq!(read_json(&directory.join("baseline.tldr")), current);
         assert_eq!(
-            std::fs::read(directory.join("baseline.tldr")).unwrap(),
-            before[&directory.join("baseline.tldr")]
+            read_json(&directory.join("share.json"))["expires_at_unix_secs"],
+            0
         );
         assert_eq!(
             files(&directory).len(),
@@ -394,7 +395,7 @@ async fn save_serializes_competing_revisions_and_rejects_invalid_payloads() {
         second.unwrap().status().as_u16(),
     ];
     statuses.sort();
-    assert_eq!(statuses, [200, 409]);
+    assert_eq!(statuses, [200, 404]);
     assert_eq!(
         read_json(&directory.join("meta.json"))["rev"],
         meta["rev"].as_u64().unwrap() + 1
@@ -486,6 +487,8 @@ async fn snapshot_revision_header_tracks_saved_snapshot() {
         .await
         .unwrap();
     assert_eq!(result.status(), 200);
+    let reopened = mcp.tools_call("plan_url", json!({"id":"spike"})).await;
+    structured(&reopened);
     let response = client.get(&snapshot_url).send().await.unwrap();
     assert_eq!(
         response
@@ -613,6 +616,8 @@ async fn browser_save(mode: u16) {
             .await
             .unwrap();
         assert_eq!(response.status(), 200);
+        let reopened = mcp.tools_call("plan_url", json!({"id":"spike"})).await;
+        structured(&reopened);
         let before = files(&directory);
         touch_save(&tab);
         tab.wait_for_element("#save-status[data-state='conflict']")
@@ -643,6 +648,10 @@ async fn browser_save(mode: u16) {
         std::thread::sleep(Duration::from_millis(300));
         assert_eq!(files(&directory), before, "page must not autosave");
         for revision in [2, 3] {
+            if revision == 3 {
+                let reopened = mcp.tools_call("plan_url", json!({"id":"spike"})).await;
+                structured(&reopened);
+            }
             touch_save(&tab);
             tab.wait_for_element(&format!(
                 "#save-status[data-state='saved'][data-rev='{revision}']"
@@ -894,14 +903,24 @@ async fn canvas_edit_save_diff_png_end_to_end() {
     tab.find_element(".tl-canvas").unwrap().click().unwrap();
     tab.type_str("Canvas E2E edit").unwrap();
     tab.press_key("Escape").unwrap();
+    let before_save = read_json(&directory.join("baseline.tldr"));
     tab.wait_for_element("#save").unwrap().click().unwrap();
     tab.wait_for_element("#save-status[data-state='saved'][data-rev='2']")
         .expect("browser edit must save");
+    let saved = read_json(&directory.join("plan.tldr"));
+    let saved_diff = mcptools_core::plan_diff::render_diff(
+        &mcptools_core::plan_diff::diff_snapshots(&before_save, &saved).unwrap(),
+    );
+    assert!(
+        saved_diff.contains("+ text ") && saved_diff.contains("Canvas E2E edit"),
+        "browser edit absent from saved snapshot: {saved_diff}"
+    );
+    assert_eq!(read_json(&directory.join("baseline.tldr")), saved);
     let diff = read_tool(&mut mcp, "plan_diff").await;
     let diff = structured(&diff)["diff"].as_str().unwrap();
-    assert!(
-        diff.contains("+ text ") && diff.contains("Canvas E2E edit"),
-        "browser edit absent from MCP diff: {diff}"
+    assert_eq!(
+        diff, "",
+        "saved edits must not repeat after baseline advancement"
     );
     let png = read_tool(&mut mcp, "plan_png").await;
     let path = Path::new(structured(&png)["path"].as_str().unwrap());

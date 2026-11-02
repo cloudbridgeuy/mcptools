@@ -43,9 +43,31 @@ pub fn canvas_report(
     })
 }
 
+/// ralph `Report.at`: chrono `DateTime<Utc>::to_rfc3339()` of the given instant.
+pub fn report_at(unix_secs: u64, nanos: u32) -> Option<String> {
+    let secs = i64::try_from(unix_secs).ok()?;
+    chrono::DateTime::from_timestamp(secs, nanos).map(|at| at.to_rfc3339())
+}
+
+/// ralph inbox file name: digits of `at`, zero-padded sequence, sanitized worker.
+pub fn inbox_file_name(at: &str, seq: u64, worker: &str) -> String {
+    let stamp: String = at.chars().filter(char::is_ascii_digit).collect();
+    let worker: String = worker
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{stamp}-{seq:06}-{worker}.json")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{canvas_message, canvas_report};
+    use super::{canvas_message, canvas_report, inbox_file_name, report_at};
     use std::path::Path;
 
     #[test]
@@ -130,5 +152,38 @@ mod tests {
 
         let png = Path::new(OsStr::from_bytes(b"/plans/\xff/latest.png"));
         assert!(canvas_message("plan", 1, "", png).is_err());
+    }
+
+    #[test]
+    fn report_at_matches_ralph_rfc3339_and_parses_back() {
+        assert_eq!(
+            report_at(1_793_622_896, 123_456_789).as_deref(),
+            Some("2026-11-02T12:34:56.123456789+00:00")
+        );
+        assert_eq!(
+            report_at(1_793_622_896, 0).as_deref(),
+            Some("2026-11-02T12:34:56+00:00")
+        );
+        assert_eq!(
+            report_at(1_793_622_896, 120_000_000).as_deref(),
+            Some("2026-11-02T12:34:56.120+00:00")
+        );
+        let at = report_at(1_793_622_896, 5_000).unwrap();
+        assert_eq!(at, "2026-11-02T12:34:56.000005+00:00");
+        let parsed = chrono::DateTime::parse_from_rfc3339(&at).unwrap();
+        assert_eq!(parsed.timestamp(), 1_793_622_896);
+        assert_eq!(report_at(u64::MAX, 0), None);
+    }
+
+    #[test]
+    fn inbox_file_name_matches_ralph_scheme() {
+        assert_eq!(
+            inbox_file_name("2026-11-02T12:34:56.123+00:00", 7, "canvas:my-plan"),
+            "202611021234561230000-000007-canvas_my-plan.json"
+        );
+        assert_eq!(
+            inbox_file_name("2026-11-02T12:34:56+00:00", 1_234_567, "canvas:a.b_c/d"),
+            "202611021234560000-1234567-canvas_a_b_c_d.json"
+        );
     }
 }

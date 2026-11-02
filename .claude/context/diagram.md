@@ -22,7 +22,7 @@ Both tools use the same persisted token. Updates retain existing node positions,
 retain the token, and increment `rev` from its initial value of 1. Revision
 overflow or invalid stored metadata fails without replacing the plan.
 
-Storage is `<data_dir>/diagrams/<id>/{plan.tldr, baseline.tldr, latest.png, meta.json, share.json}`. `data_dir` is
+Storage is `<data_dir>/diagrams/<id>/{plan.tldr, baseline.tldr, latest.png, meta.json, share.json, notify.json}`. `notify.json` is optional. `data_dir` is
 `$XDG_DATA_HOME/mcptools` when set and nonempty; otherwise it is
 `~/Library/Application Support/mcptools` on macOS, `$APPDATA/mcptools` on
 Windows, or `~/.local/share/mcptools` on other platforms. The shared helper is
@@ -55,7 +55,19 @@ and [daemon retention and save rules](diagram-serve.md).
 Snapshot, metadata, and share JSON are staged and synced before replacement
 with temp-file rename. Replacement is atomic per file, not a multi-file transaction. External writers
 are not serialized; callers must use one writer per plan. Canvas saves are
-documented in `diagram-serve.md`; notifications remain separate work.
+documented in `diagram-serve.md`.
+
+`plan_write` captures the writer's absolute `RALPH_INBOX` in `notify.json` as
+`{"inbox":"<directory>"}`. A write without that variable removes any old notify
+target. Metadata stays unchanged. Each successful canvas save publishes one
+Ralph Report to the persisted inbox through a hidden temp file and rename.
+The core builds the message from the saved revision, baseline diff, and absolute
+PNG path. The baseline then advances and the share closes. Reopen with
+`plan_url` before another save; page, snapshot, and save routes return 404 until
+then. Unchanged saves still notify. With no target, saves succeed and log
+`no notify target`; they still advance the baseline and close the share.
+Rejected saves deliver nothing. `plan_diff` immediately after a successful save
+returns an empty diff, because the save already advanced the baseline.
 
 ## GUZ-1131 verification
 

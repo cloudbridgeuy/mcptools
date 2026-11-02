@@ -202,12 +202,24 @@ fn assert_report(path: &Path, fixture: &Fixture, revision: u64, diff: &str) {
     let report = read_json(path);
     let object = report.as_object().expect("ralph Report object");
     assert_eq!(object.len(), 4, "ralph Report has four string fields");
+    assert_eq!(report["worker"], "canvas:spike");
+    assert_eq!(report["status"], "done");
     for field in ["worker", "at", "status", "text"] {
         assert!(!report[field]
             .as_str()
             .expect("Report string field")
             .is_empty());
     }
+    let stamp: String = report["at"]
+        .as_str()
+        .unwrap()
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect();
+    assert_eq!(
+        path.file_name().unwrap().to_str().unwrap(),
+        format!("{stamp}-{revision:06}-canvas_spike.json")
+    );
     let text = report["text"].as_str().unwrap();
     assert!(text.to_lowercase().contains("canvas input"));
     assert!(text.contains("spike"));
@@ -221,7 +233,6 @@ fn assert_report(path: &Path, fixture: &Fixture, revision: u64, diff: &str) {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1142"]
 async fn plan_write_persists_writer_inbox_outside_strict_meta() {
     let fixture = Fixture::new(true);
     let notify = fixture.directory.join("notify.json");
@@ -238,7 +249,6 @@ async fn plan_write_persists_writer_inbox_outside_strict_meta() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1144"]
 async fn each_save_publishes_one_complete_report_to_persisted_writer_inbox() {
     let mut fixture = Fixture::new(true);
     fixture.seed_notify();
@@ -300,7 +310,6 @@ async fn each_save_publishes_one_complete_report_to_persisted_writer_inbox() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1144"]
 async fn successful_save_closes_all_token_routes_until_plan_url() {
     let mut fixture = Fixture::new(false);
     assert_eq!(
@@ -348,7 +357,6 @@ async fn successful_save_closes_all_token_routes_until_plan_url() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1144"]
 async fn missing_notify_target_saves_without_delivery_and_logs_absence() {
     let mut fixture = Fixture::new(false);
     assert!(!fixture.directory.join("notify.json").exists());
@@ -367,7 +375,6 @@ async fn missing_notify_target_saves_without_delivery_and_logs_absence() {
 }
 
 #[tokio::test]
-#[ignore = "GUZ-1144"]
 async fn delivery_advances_baseline_before_following_plan_diff() {
     let mut fixture = Fixture::new(true);
     fixture.seed_notify();
@@ -382,4 +389,56 @@ async fn delivery_advances_baseline_before_following_plan_diff() {
     );
     assert_eq!(delivered_baseline, edited());
     assert_eq!(files(&fixture.inbox).len(), 1);
+}
+
+#[tokio::test]
+async fn rejected_saves_leave_notify_inbox_and_storage_unchanged() {
+    let fixture = Fixture::new(true);
+    let before: Vec<_> = files(&fixture.directory)
+        .into_iter()
+        .map(|path| {
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
+    assert_eq!(fixture.save(0, &edited()).await.status(), 409);
+    for body in [
+        "{broken".to_owned(),
+        json!({"rev":1,"snapshot":edited(),"png":"invalid"}).to_string(),
+    ] {
+        assert_eq!(
+            fixture
+                .client
+                .post(format!("{}/save", fixture.base))
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            400
+        );
+    }
+    let url = reqwest::Url::parse(&format!("{}/save", fixture.base)).unwrap();
+    let host = url.host_str().unwrap();
+    let port = url.port().unwrap();
+    let mut stream = std::net::TcpStream::connect((host, port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(stream, "POST {} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", url.path(), 10 * 1024 * 1024 + 1).unwrap();
+    let mut response = String::new();
+    BufReader::new(stream).read_line(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 413"), "{response}");
+    assert!(files(&fixture.inbox).is_empty());
+    assert!(files(&fixture.other_inbox).is_empty());
+    assert_eq!(
+        files(&fixture.directory),
+        before
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>()
+    );
+    for (path, bytes) in before {
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
 }
