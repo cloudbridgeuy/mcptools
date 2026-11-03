@@ -1,7 +1,11 @@
 use crate::prelude::{eprintln, *};
 use axum::{
     extract::State,
-    response::sse::{Event, Sse},
+    http::StatusCode,
+    response::{
+        sse::{Event, Sse},
+        IntoResponse, Response,
+    },
     routing::{get, post},
     Json, Router,
 };
@@ -64,8 +68,58 @@ async fn sse_handler(
 async fn message_handler(
     State((global, flags)): State<(Arc<crate::Global>, super::cli::ServeFlags)>,
     Json(request): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> Response {
     let request_str = serde_json::to_string(&request).unwrap_or_default();
-    let response = super::handle_request(&request_str, &global, flags).await;
-    Json(serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
+    match super::handle_request(&request_str, &global, flags).await {
+        Some(response) => Json(response).into_response(),
+        None => StatusCode::ACCEPTED.into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn post(message: serde_json::Value) -> Response {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let flags = super::super::ServeFlags {
+            discovery: false,
+            code_mode: false,
+        };
+        message_handler(State((Arc::new(global), flags)), Json(message)).await
+    }
+
+    #[tokio::test]
+    async fn notifications_have_empty_http_bodies() {
+        for method in [
+            "notifications/initialized",
+            "notifications/cancelled",
+            "unknown",
+            "tools/call",
+        ] {
+            let response = post(serde_json::json!({"jsonrpc":"2.0","method":method})).await;
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert!(body.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_request_keeps_json_rpc_error() {
+        let response = post(serde_json::json!({"jsonrpc":"2.0","id":1,"method":"unknown"})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response["id"], 1);
+        assert_eq!(response["error"]["code"], -32601);
+    }
 }

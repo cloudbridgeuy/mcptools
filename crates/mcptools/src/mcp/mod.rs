@@ -18,6 +18,62 @@ struct JsonRpcRequest {
     params: Option<serde_json::Value>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn response(message: serde_json::Value) -> serde_json::Value {
+        let global = crate::Global {
+            verbose: false,
+            execute_timeout_secs: 30,
+            execute_memory_mb: 64,
+            execute_output_kb: 256,
+        };
+        let flags = ServeFlags {
+            discovery: false,
+            code_mode: false,
+        };
+        serde_json::to_value(handle_request(&message.to_string(), &global, flags).await).unwrap()
+    }
+
+    #[tokio::test]
+    async fn unknown_notification_has_no_response() {
+        assert_eq!(
+            response(serde_json::json!({"jsonrpc":"2.0","method":"unknown"})).await,
+            serde_json::Value::Null
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_request_returns_method_not_found() {
+        let response =
+            response(serde_json::json!({"jsonrpc":"2.0","id":7,"method":"unknown"})).await;
+        assert_eq!(response["id"], 7);
+        assert_eq!(response["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn notifications_are_classified_before_dispatch() {
+        for method in [
+            "notifications/initialized",
+            "notifications/cancelled",
+            "unknown",
+            "tools/call",
+        ] {
+            let message = serde_json::json!({"jsonrpc":"2.0","method":method});
+            assert!(parse_request(&message.to_string()).unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn null_id_is_still_a_request() {
+        let response =
+            response(serde_json::json!({"jsonrpc":"2.0","id":null,"method":"unknown"})).await;
+        assert_eq!(response["id"], serde_json::Value::Null);
+        assert_eq!(response["error"]["code"], -32601);
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct JsonRpcResponse {
     jsonrpc: String,
@@ -78,15 +134,26 @@ pub async fn run(app: App, global: crate::Global) -> Result<()> {
     }
 }
 
+fn parse_request(
+    request_str: &str,
+) -> std::result::Result<Option<JsonRpcRequest>, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(request_str)?;
+    if value.is_object() && value.get("id").is_none() {
+        return Ok(None);
+    }
+    serde_json::from_value(value).map(Some)
+}
+
 pub async fn handle_request(
     request_str: &str,
     global: &crate::Global,
     flags: ServeFlags,
-) -> JsonRpcResponse {
-    let request: JsonRpcRequest = match serde_json::from_str(request_str) {
-        Ok(req) => req,
+) -> Option<JsonRpcResponse> {
+    let request = match parse_request(request_str) {
+        Ok(Some(req)) => req,
+        Ok(None) => return None,
         Err(e) => {
-            return JsonRpcResponse {
+            return Some(JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 id: None,
                 result: None,
@@ -95,7 +162,7 @@ pub async fn handle_request(
                     message: format!("Parse error: {e}"),
                     data: None,
                 }),
-            };
+            });
         }
     };
 
@@ -112,7 +179,7 @@ pub async fn handle_request(
         }),
     };
 
-    match result {
+    Some(match result {
         Ok(value) => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id: request.id,
@@ -125,5 +192,5 @@ pub async fn handle_request(
             result: None,
             error: Some(error),
         },
-    }
+    })
 }

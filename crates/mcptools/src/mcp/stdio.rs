@@ -62,7 +62,9 @@ async fn serve(global: crate::Global, flags: crate::mcp::ServeFlags) -> Result<(
             eprintln!("Received: {trimmed}");
         }
 
-        let response = super::handle_request(trimmed, &global, flags).await;
+        let Some(response) = super::handle_request(trimmed, &global, flags).await else {
+            continue;
+        };
         let response_json = serde_json::to_string(&response)?;
 
         if global.verbose {

@@ -29,6 +29,20 @@ For web-based clients using Server-Sent Events over HTTP.
 mcptools mcp catalog # Print the compact tool catalog (domain, name, summary)
 mcptools mcp declarations [NAME...] # Print TypeScript declarations for named tools (all tools without names)
 
+### JSON-RPC notifications
+
+Messages without an `id` are notifications. Both transports ignore them before
+method dispatch, including `notifications/initialized`, `notifications/cancelled`,
+and unknown methods. Stdio writes nothing; `/message` returns HTTP 202 with an
+empty body, not a JSON-RPC response. An explicit `id: null` is still a request.
+Unknown requests keep error `-32601`.
+
+Regression evidence for GUZ-1228: before the fix, `RUST_TEST_THREADS=1 cargo xtask lint`
+failed at `crates/mcptools/tests/mcp_notifications.rs:31` (three responses, expected
+two), and `crates/mcptools/src/mcp/mod.rs:41` (unknown notification returned
+`-32601`, expected no response). The protocol decision is the pure `parse_request`
+function in `mcp/mod.rs`; stdio and SSE consume its optional response.
+
 ## Claude Desktop Configuration
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:

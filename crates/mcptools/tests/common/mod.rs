@@ -45,7 +45,6 @@ pub fn spawn_server(env: &[(&str, &str)]) -> std::io::Result<McpServer> {
     server.send(&envelope("initialize", serde_json::json!({})))?;
     server.receive()?;
     server.send(&serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))?;
-    server.receive()?;
     Ok(server)
 }
 

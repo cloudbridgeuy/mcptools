@@ -59,7 +59,12 @@ impl Mcp {
             _process: process,
         };
         mcp.request(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}));
-        mcp.request(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
+        writeln!(
+            mcp.input,
+            "{}",
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+        )
+        .unwrap();
         mcp
     }
 
