@@ -980,6 +980,10 @@ async fn accessed_plan_survives_sweep(read: &str) {
         )
         .await;
     structured(&control);
+    let closed = mcp
+        .tools_call("plan_close", json!({"id":"expired", "allowWrites":true}))
+        .await;
+    structured(&closed);
     let (running, base) = retention_daemon(home.path(), "2592000");
     access_plan(&mut mcp, &directory, &base, read).await;
     drop(running);

@@ -336,6 +336,16 @@ fn browser_renders_shapes_with_only_watermark_external() {
 fn daemon_sweeps_expired_plans_on_startup() {
     let home = tempfile::tempdir().unwrap();
     seed(home.path(), "expired", SystemTime::UNIX_EPOCH);
+    std::fs::write(
+        home.path().join("mcptools/diagrams/expired/share.json"),
+        serde_json::json!({"expires_at_unix_secs":0}).to_string(),
+    )
+    .unwrap();
+    std::fs::File::open(home.path().join("mcptools/diagrams/expired"))
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH))
+        .unwrap();
+    seed(home.path(), "open", SystemTime::UNIX_EPOCH);
     seed(home.path(), "fresh", SystemTime::now());
     let (_daemon, _base) = start(
         home.path(),
@@ -347,6 +357,10 @@ fn daemon_sweeps_expired_plans_on_startup() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(!expired.exists(), "startup sweep must remove expired plans");
+    assert!(home
+        .path()
+        .join("mcptools/diagrams/open/plan.tldr")
+        .exists());
     assert!(home
         .path()
         .join("mcptools/diagrams/fresh/plan.tldr")
@@ -362,6 +376,7 @@ fn retention_plan(
         id,
         modified: SystemTime::UNIX_EPOCH + Duration::from_secs(modified),
         active,
+        share: None,
     }
 }
 

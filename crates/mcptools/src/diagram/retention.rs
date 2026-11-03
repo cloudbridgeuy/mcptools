@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use mcptools_core::plan_retention::{expired_plan_ids, newest_activity, Plan};
+use mcptools_core::plan_share::ShareWindow;
 use mcptools_core::plan_store::{validate_id, validate_meta, PlanMeta};
 
 use crate::prelude::*;
@@ -60,6 +61,22 @@ fn inspect(path: &Path, id: &str) -> Result<Option<(PlanMeta, [SystemTime; 4])>>
 }
 
 pub fn sweep(directory: &Path, active_ids: &[&str], now: SystemTime, ttl: Duration) -> Result<()> {
+    sweep_with_share(directory, active_ids, now, ttl, |path| match std::fs::read(
+        path.join("share.json"),
+    ) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes).ok()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    })
+}
+
+fn sweep_with_share(
+    directory: &Path,
+    active_ids: &[&str],
+    now: SystemTime,
+    ttl: Duration,
+    mut read_share: impl FnMut(&Path) -> Result<Option<ShareWindow>>,
+) -> Result<()> {
     let root = match std::fs::symlink_metadata(directory) {
         Ok(root) if root.is_dir() => root,
         Ok(_) => return Ok(()),
@@ -80,12 +97,14 @@ pub fn sweep(directory: &Path, active_ids: &[&str], now: SystemTime, ttl: Durati
         let Some((meta, times)) = inspect(&path, id)? else {
             continue;
         };
-        let select = |times: &[SystemTime; 4]| {
+        let mut select = |times: &[SystemTime; 4]| {
+            let share = read_share(&path)?;
             expired_plan_ids(
                 &[Plan {
                     id,
                     modified: newest_activity(times).expect("four timestamps"),
                     active: active_ids.contains(&id),
+                    share: share.as_ref(),
                 }],
                 now,
                 ttl,
@@ -171,6 +190,50 @@ mod tests {
         assert!(root.path().join("fresh/plan.tldr").exists());
         assert!(root.path().join("unrelated/file").exists());
         assert!(root.path().join("address").is_file());
+    }
+
+    #[test]
+    fn sweep_preserves_old_open_shares_and_deletes_expired_shares() {
+        let root = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        let seconds = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let old = now - Duration::from_secs(1000);
+        for (id, expiry) in [("open", seconds + 1000), ("expired", seconds)] {
+            seed(root.path(), id, old);
+            let directory = root.path().join(id);
+            std::fs::write(
+                directory.join("share.json"),
+                format!("{{\"expires_at_unix_secs\":{expiry}}}"),
+            )
+            .unwrap();
+            std::fs::File::open(directory)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(old))
+                .unwrap();
+        }
+        sweep(root.path(), &[], now, Duration::from_secs(100)).unwrap();
+        assert!(root.path().join("open/plan.tldr").exists());
+        assert!(!root.path().join("expired").exists());
+    }
+
+    #[test]
+    fn sweep_rechecks_share_even_when_metadata_and_times_do_not_change() {
+        let root = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        seed(root.path(), "reopened", now - Duration::from_secs(1000));
+        let mut reads = 0;
+        sweep_with_share(root.path(), &[], now, Duration::from_secs(100), |_| {
+            reads += 1;
+            Ok(Some(ShareWindow {
+                expires_at_unix_secs: if reads == 1 { 0 } else { u64::MAX },
+            }))
+        })
+        .unwrap();
+        assert_eq!(reads, 2);
+        assert!(root.path().join("reopened/plan.tldr").exists());
     }
 
     #[test]

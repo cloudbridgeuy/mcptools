@@ -142,8 +142,9 @@ atomically replace a `last-access` marker in the plan directory. Marker failures
 are logged and never fail the read. Retention uses the newest directory,
 snapshot, metadata, or access-marker modification time, selected in core;
 plans without a marker retain the previous modification-time behavior.
-The loop supplies no active-plan exemptions. Eligible plans older than the TTL
-are deleted with their tokens; this is retention, not token expiry.
+Open share windows protect plans regardless of age. Closed or expired shares
+follow the normal TTL rule. Eligible plans are deleted with their tokens;
+this is retention, not token expiry.
 
 `plan_offline_acceptance.rs` reuses the Chrome selection/version/skip recipe
 from `crates/mcptools/tests/e2e_md_chain.rs:15`, the modern headless launch
@@ -235,11 +236,13 @@ The address record `diagrams/.daemon-address!` can be stale. Host and port envir
 | `XDG_DATA_HOME` | Nonempty override for the data root; see [storage](diagram.md#plan_write-and-plan_url). Must match between tool process and daemon. |
 | `RALPH_INBOX` | Optional absolute inbox captured on `plan_write`; not read from the daemon environment during save. |
 
-The retention loop passes no active IDs to the pure selector. Open shares and
-browser tabs are not deletion exemptions. Successful page/snapshot GETs and
-`plan_url`/`plan_png` calls refresh activity; an idle tab does not poll. With a
-short retention TTL, an open but unread plan can be deleted. The sweep rechecks
-metadata and timestamps before deletion, and skips invalid layouts or symlinks.
+The retention shell reads each plan's `share.json` and passes its window to
+the pure core selector. Open windows exempt plans from deletion, even without
+reads. Missing or invalid windows are closed; other read errors stop the sweep.
+Browser tabs alone are not exemptions. Successful page/snapshot GETs and
+`plan_url`/`plan_png` calls refresh activity; an idle tab does not poll. The sweep
+rechecks share state, metadata, and timestamps before deletion, and skips invalid
+layouts or symlinks. A share opened before that recheck protects the plan.
 
 ## Offline assets and license position
 

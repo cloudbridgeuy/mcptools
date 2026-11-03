@@ -4,6 +4,7 @@ pub struct Plan<'a> {
     pub id: &'a str,
     pub modified: SystemTime,
     pub active: bool,
+    pub share: Option<&'a crate::plan_share::ShareWindow>,
 }
 
 pub fn newest_activity(times: &[SystemTime]) -> Option<SystemTime> {
@@ -15,9 +16,17 @@ pub fn expired_plan_ids<'a>(
     now: SystemTime,
     ttl: Duration,
 ) -> Result<Vec<&'a str>, &'static str> {
+    let seconds = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     Ok(plans
         .iter()
-        .filter(|plan| !plan.active && now.duration_since(plan.modified).is_ok_and(|age| age > ttl))
+        .filter(|plan| {
+            !plan.active
+                && !crate::plan_share::is_open(plan.share, seconds)
+                && now.duration_since(plan.modified).is_ok_and(|age| age > ttl)
+        })
         .map(|plan| plan.id)
         .collect())
 }
@@ -49,21 +58,25 @@ mod tests {
                 id: "old",
                 modified: now - Duration::from_secs(11),
                 active: false,
+                share: None,
             },
             Plan {
                 id: "boundary",
                 modified: now - Duration::from_secs(10),
                 active: false,
+                share: None,
             },
             Plan {
                 id: "active",
                 modified: now - Duration::from_secs(11),
                 active: true,
+                share: None,
             },
             Plan {
                 id: "future",
                 modified: now + Duration::from_secs(1),
                 active: false,
+                share: None,
             },
         ];
         assert_eq!(
@@ -71,5 +84,33 @@ mod tests {
             Ok(vec!["old"])
         );
         assert_eq!(expired_plan_ids(&[], now, Duration::ZERO), Ok(vec![]));
+    }
+
+    #[test]
+    fn open_shares_protect_old_plans_but_closed_and_expired_shares_do_not() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        let windows = [
+            crate::plan_share::ShareWindow {
+                expires_at_unix_secs: 1001,
+            },
+            crate::plan_share::ShareWindow {
+                expires_at_unix_secs: 1000,
+            },
+            crate::plan_share::closed(),
+        ];
+        let plans: Vec<_> = ["open", "expired", "closed"]
+            .into_iter()
+            .zip(&windows)
+            .map(|(id, share)| Plan {
+                id,
+                modified: SystemTime::UNIX_EPOCH,
+                active: false,
+                share: Some(share),
+            })
+            .collect();
+        assert_eq!(
+            expired_plan_ids(&plans, now, Duration::from_secs(100)),
+            Ok(vec!["expired", "closed"])
+        );
     }
 }
