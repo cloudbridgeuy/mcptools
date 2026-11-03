@@ -66,11 +66,19 @@ fn launch(deadline: Instant, timeout: u64) -> Result<Browser> {
     if Instant::now() >= deadline {
         return Err(eyre!("Fetch timed out after {timeout} seconds"));
     }
-    Browser::new(LaunchOptions {
+    let guard = crate::chrome_reaper::LaunchGuard::prepare()?;
+    let browser = Browser::new(LaunchOptions {
         path: Some(path),
+        user_data_dir: Some(guard.profile.clone()),
         ..launch_options()
     })
-    .map_err(|error| eyre!("Failed to launch browser: {error}"))
+    .map_err(|error| eyre!("Failed to launch browser: {error}"))?;
+    guard.launched(
+        browser
+            .get_process_id()
+            .ok_or_else(|| eyre!("Missing Chrome pid"))?,
+    )?;
+    Ok(browser)
 }
 
 struct RequestTab(Arc<Tab>);

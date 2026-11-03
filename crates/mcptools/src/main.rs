@@ -7,6 +7,7 @@ use std::time::Duration;
 
 mod agent;
 mod atlassian;
+mod chrome_reaper;
 mod diagram;
 mod error;
 mod find_tools;
@@ -89,6 +90,8 @@ impl Global {
 
 #[derive(Debug, clap::Parser)]
 pub enum SubCommands {
+    #[command(hide = true)]
+    ChromeReaper(crate::chrome_reaper::App),
     Diagram(crate::diagram::App),
     /// Agent setup, status, and uninstall
     Agent(crate::agent::App),
@@ -122,14 +125,27 @@ pub enum SubCommands {
     Upgrade(crate::upgrade::App),
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     env_logger::init();
     color_eyre::install()?;
 
     let app = App::parse();
 
+    if let SubCommands::ChromeReaper(sub_app) = app.command {
+        return crate::chrome_reaper::run(sub_app);
+    }
+
+    run(app)
+}
+
+#[tokio::main]
+async fn run(app: App) -> Result<()> {
+    if matches!(app.command, SubCommands::MCP(_)) {
+        crate::chrome_reaper::sweep()?;
+    }
+
     match app.command {
+        SubCommands::ChromeReaper(sub_app) => crate::chrome_reaper::run(sub_app),
         SubCommands::Diagram(sub_app) => crate::diagram::run(sub_app).await,
         SubCommands::Agent(sub_app) => crate::agent::run(sub_app, app.global).await,
         SubCommands::Atlassian(sub_app) => crate::atlassian::run(*sub_app, app.global).await,
