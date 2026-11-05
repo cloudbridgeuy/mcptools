@@ -8,7 +8,7 @@ mcptools linear auth status
 mcptools linear auth status --json
 ```
 
-Missing or invalid credentials return actionable errors. The key never appears in output.
+Alternatively, set `api_key` in the `[linear]` section of `~/.config/mcptools/config.toml` (or the file named by `MCPTOOLS_CONFIG`), and protect it with `chmod 600`. `LINEAR_API_KEY` takes precedence when set. Missing or invalid credentials return actionable errors. The key never appears in output.
 
 ## CLI Commands
 

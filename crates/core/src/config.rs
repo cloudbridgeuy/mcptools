@@ -8,6 +8,13 @@ use std::path::{Path, PathBuf};
 pub struct AppConfig {
     pub gateway: gateway::Config,
     pub atlassian: Atlassian,
+    pub linear: Linear,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Linear {
+    pub api_key: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -245,5 +252,34 @@ mod atlassian_regressions {
             value["atlassian"]["confluence"]["query"].as_str(),
             Some("space = TEST")
         );
+    }
+}
+
+#[cfg(test)]
+mod linear_regressions {
+    use super::*;
+
+    #[test]
+    fn linear_file_key_and_environment_precedence() {
+        let config = parse("[linear]\napi_key = 'file-key'\n").unwrap();
+        let value = toml::Value::try_from(config).unwrap();
+        let key = value["linear"]["api_key"].as_str();
+        assert_eq!(resolve(None, None, key, None), Some("file-key"));
+        assert_eq!(resolve(Some("env-key"), None, key, None), Some("env-key"));
+    }
+
+    #[test]
+    fn linear_invalid_fields_do_not_reveal_values() {
+        for (text, expected) in [
+            ("[linear]\nunknown = 'secret-value'\n", "unknown"),
+            (
+                "[linear]\napi_key = ['secret-value']\n",
+                "expected a string",
+            ),
+        ] {
+            let error = parse(text).err().unwrap().to_string();
+            assert!(error.contains(expected), "{error}");
+            assert!(!error.contains("secret-value"));
+        }
     }
 }

@@ -254,18 +254,6 @@ mod tests {
         execute_with_url(&client, &served, query, serde_json::json!({})).await
     }
 
-    #[test]
-    fn missing_key_error_names_variable() {
-        let saved = std::env::var("LINEAR_API_KEY").ok();
-        std::env::remove_var("LINEAR_API_KEY");
-        let err = LinearConfig::from_env().unwrap_err();
-        let text = format!("{err:?}");
-        assert!(text.contains("LINEAR_API_KEY"));
-        if let Some(key) = saved {
-            std::env::set_var("LINEAR_API_KEY", key);
-        }
-    }
-
     #[tokio::test]
     async fn redacts_key_in_debug_and_error_output() {
         let fixture_key = "lin_api_3x4mpl3_s3cr3t_k3y_zz99";

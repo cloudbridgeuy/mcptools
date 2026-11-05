@@ -47,6 +47,7 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | Jira | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_BOARD_ID`, `JIRA_QUERY`, `JIRA_ISSUE_KEY` | `ATLASSIAN_*` |
 | Confluence | `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN`, `CONFLUENCE_QUERY` | `ATLASSIAN_*` |
 | Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` | None (required) |
+| Linear | `LINEAR_API_KEY` | `[linear].api_key` in config |
 
 **Jev**
 
@@ -239,11 +240,14 @@ Call find_tools (task, --domain, or --list-domains). A domain list is how you pr
 - [Atlassian Quick Start](docs/ATLASSIAN_QUICK_START.md) - Quick reference
 
 
-Atlassian settings can also be stored in `~/.config/mcptools/config.toml`.
+Atlassian and Linear settings can also be stored in `~/.config/mcptools/config.toml`.
 Set `MCPTOOLS_CONFIG` to use another file. Protect credentials with `chmod 600`.
 Environment values override file values; service settings override shared settings within each source.
 
 ```toml
+[linear]
+api_key = "lin_api_..."
+
 [atlassian]
 base_url = "https://example.atlassian.net"
 email = "user@example.com"

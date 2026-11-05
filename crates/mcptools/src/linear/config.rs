@@ -15,8 +15,15 @@ impl std::fmt::Debug for LinearConfig {
 
 impl LinearConfig {
     pub fn from_env() -> Result<Self> {
-        match std::env::var("LINEAR_API_KEY") {
-            Ok(key) if !key.trim().is_empty() => Ok(Self { api_key: key }),
+        let env = std::env::var("LINEAR_API_KEY");
+        let file = if matches!(&env, Err(std::env::VarError::NotPresent)) {
+            crate::config::linear()?.api_key
+        } else {
+            None
+        };
+        let key = mcptools_core::config::resolve(env.ok(), None, file, None);
+        match key {
+            Some(key) if !key.trim().is_empty() => Ok(Self { api_key: key }),
             _ => Err(eyre!(
                 "LINEAR_API_KEY environment variable not set. Set LINEAR_API_KEY to a Linear API key."
             )),

@@ -165,6 +165,117 @@ fn atlassian_file_only_and_invalid_fields() {
     assert!(!String::from_utf8_lossy(&checked.stderr).contains("secret-value"));
 }
 
+#[test]
+fn linear_missing_key_error_names_variable() {
+    let home = tempfile::tempdir().unwrap();
+    let output = command(home.path())
+        .env("MCPTOOLS_CONFIG", home.path().join("missing.toml"))
+        .env_remove("LINEAR_API_KEY")
+        .args(["linear", "auth", "status"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("LINEAR_API_KEY environment variable not set"));
+}
+
+#[cfg(unix)]
+#[test]
+fn linear_non_unicode_environment_key_does_not_fall_back_to_file() {
+    use std::os::unix::ffi::OsStringExt;
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[linear]\napi_key = \"file\\nkey\"\n").unwrap();
+    let output = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .env("LINEAR_API_KEY", std::ffi::OsString::from_vec(vec![0xff]))
+        .args(["linear", "auth", "status"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("LINEAR_API_KEY environment variable not set"));
+}
+
+#[test]
+fn linear_file_key_and_secret_safe_config_check() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[linear]\napi_key = 'secret-value'\n").unwrap();
+    let checked = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&checked.stdout).contains("secret-value"));
+    assert!(!String::from_utf8_lossy(&checked.stderr).contains("secret-value"));
+    for (text, expected) in [
+        ("[linear]\nunknown = 'secret-value'\n", "unknown"),
+        (
+            "[linear]\napi_key = ['secret-value']\n",
+            "expected a string",
+        ),
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let checked = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(!checked.status.success());
+        let output = format!(
+            "{}{}",
+            String::from_utf8_lossy(&checked.stdout),
+            String::from_utf8_lossy(&checked.stderr)
+        );
+        assert!(output.contains(expected), "{output}");
+        assert!(!output.contains("secret-value"));
+    }
+}
+
+#[test]
+fn linear_file_fallback_and_environment_override() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[linear]\napi_key = \"file\\nkey\"\n").unwrap();
+    let file = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .env_remove("LINEAR_API_KEY")
+        .args(["linear", "auth", "status"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&file.stderr).contains("Invalid Linear API key"));
+    std::fs::write(&path, "[linear]\napi_key = ' '\n").unwrap();
+    let env = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .env("LINEAR_API_KEY", "env\nkey")
+        .args(["linear", "auth", "status"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&env.stderr).contains("Invalid Linear API key"));
+    std::fs::write(&path, "invalid = true\n").unwrap();
+    let env = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .env("LINEAR_API_KEY", "env\nkey")
+        .args(["linear", "auth", "status"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&env.stderr).contains("Invalid Linear API key"));
+    let blank = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .env("LINEAR_API_KEY", " ")
+        .args(["linear", "auth", "status"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&blank.stderr)
+        .contains("LINEAR_API_KEY environment variable not set"));
+}
+
 #[cfg(unix)]
 #[test]
 fn atlassian_config_permission_warning() {

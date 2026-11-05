@@ -35,15 +35,23 @@ pub fn load(path: &Path) -> Result<Option<AppConfig>> {
 }
 
 pub fn atlassian() -> Result<mcptools_core::config::Atlassian> {
+    Ok(optional()?.unwrap_or_default().atlassian)
+}
+
+pub fn linear() -> Result<mcptools_core::config::Linear> {
+    Ok(optional()?.unwrap_or_default().linear)
+}
+
+fn optional() -> Result<Option<AppConfig>> {
     let Some(path) = mcptools_core::config::optional_config_path(
         std::env::var_os("MCPTOOLS_CONFIG").as_deref(),
         std::env::var_os("XDG_CONFIG_HOME").as_deref(),
         std::env::var_os("HOME").as_deref().map(Path::new),
         &std::env::current_dir()?,
     ) else {
-        return Ok(Default::default());
+        return Ok(None);
     };
-    Ok(load(&path)?.unwrap_or_default().atlassian)
+    load(&path)
 }
 
 pub fn run(app: App) -> Result<()> {
