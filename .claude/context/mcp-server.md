@@ -84,12 +84,14 @@ Add environment entries with `[gateway.upstreams.env]` below an upstream.
 Commands are executed directly, not through a shell. Relative paths use the
 mcptools working directory; use absolute paths for stable configuration.
 Prefixes must be unique ASCII letters/digits, starting with a letter; no
-underscores. Upstream tool names may use ASCII letters/digits/underscores,
-dots and hyphens. Names with dots or hyphens use `globalThis["<prefix>_<name>"]`
-inside `execute`; their declarations show a quoted callable property interface
-instead of an invalid JavaScript function identifier.
-Unsupported names, malformed object input schemas, duplicate names and
-collisions with built-in tools or hidden aliases fail startup.
+underscores. Exposed tool names are `<prefix>_` followed by the upstream name
+with each character outside `[A-Za-z0-9_]` replaced by `_`. For example,
+`resolve-library-id` becomes `context7_resolve_library_id`, and `query.docs`
+becomes `context7_query_docs`. Each non-ASCII character also becomes one `_`.
+Declarations use plain `declare function`; `execute` calls plain globals.
+Forwarding always sends the original upstream name. Empty names, malformed
+object input schemas, duplicate names after normalization (such as `a-b` and
+`a_b`), and collisions with built-in tools or hidden aliases fail startup.
 
 On a cache miss, startup sends `initialize`, `notifications/initialized` and
 paginated `tools/list`. Tools are cached next to the selected config in
@@ -97,6 +99,8 @@ paginated `tools/list`. Tools are cached next to the selected config in
 itself be named `upstreams.cache.json`.
 Cache writes are atomic with owner-only permissions. The cache stores tool
 schemas and a configuration fingerprint, not the command environment values.
+Cached names are original upstream names; normalization and collision checks
+run on every startup, including with caches written before normalization.
 The pure cache decision covers prefix, command, arguments, environment and
 read-only policy. Formatting-only changes do not invalidate it. Invalid cache
 JSON triggers rediscovery; I/O failures fail startup. Configuration is fixed
@@ -113,18 +117,20 @@ observed process tree, escalating TERM to KILL, using the Chrome reaper helpers,
 even if the root exits on stdin EOF before the reaper runs.
 Commands that detach/reparent descendants before shutdown are not supported.
 
-`context7_resolve-library-id` appears in `find_tools`, `mcptools mcp catalog`, and
-`mcptools mcp declarations context7_resolve-library-id`. It is never advertised by plain
+`context7_resolve_library_id` appears in `find_tools`, `mcptools mcp catalog`, and
+`mcptools mcp declarations context7_resolve_library_id`. It is never advertised by plain
 `tools/list`, including full mode. Call through the existing interfaces:
 
 ```javascript
 find_tools({domain: "context7"})
-call_tool({name: "context7_resolve-library-id", input: {libraryName: "tokio", query: "Tokio async runtime"}})
-execute({code: 'return await globalThis["context7_resolve-library-id"]({libraryName: "tokio", query: "Tokio async runtime"})'})
+call_tool({name: "context7_resolve_library_id", input: {libraryName: "tokio", query: "Tokio async runtime"}})
+execute({code: 'return await context7_resolve_library_id({libraryName: "tokio", query: "Tokio async runtime"})'})
 ```
 
 **Security:** Every upstream tool needs `allowWrites` unless its original,
-unprefixed name is explicitly in that upstream's `readOnly` list. Upstream
+unprefixed name is explicitly in that upstream's `readOnly` list. Normalized
+aliases and prefixed names do not grant read-only access; an unchanged name
+still matches its original spelling. Upstream
 safety annotations are ignored. `allowSpend` does not authorize upstream writes.
 This permission gate does not sandbox the executable: discovery itself runs
 trusted operator-configured code with the user's permissions and inherited
@@ -151,6 +157,28 @@ upstream are serialized. Client `ping` is supported; other server-initiated
 requests receive method-not-found. No sampling, roots, elicitation or progress
 relay. Failed/uncertain calls are never retried automatically; a later explicit
 call starts a fresh connection after a failed request.
+
+### Regression evidence (GUZ-1443)
+
+Before implementation, `RUST_TEST_THREADS=1 cargo xtask lint --no-fmt --no-check
+--no-clippy --no-machete --no-typos` failed at
+`crates/mcptools/tests/acceptance_gateway.rs:109`, `:285`, `:303`, `:321`,
+`:337`, and `:351` (pre-format locations): normalized catalog/cache, discovery,
+plain declarations, plain-global execution, original-name forwarding, and
+normalization collisions. Core tests also failed at
+`crates/core/src/gateway.rs:234` and `:251`: arbitrary-character mapping with
+original-name read-only policy, and normalized/reserved-name collisions.
+The fake upstream provides both hyphenated and dotted names without network.
+Cache coverage checks original-name storage, normalized cache hits, config
+invalidation, and startup rejection of collisions in a version-1 cache.
+The manual Context7 check with a temporary `MCPTOOLS_CONFIG` returned Tokio
+library matches, including `/tokio-rs/tokio`, from plain-global
+`context7_resolve_library_id` inside `execute` with no write permission.
+
+The generic declaration renderer retains quoted callable interfaces for
+non-identifier inputs: the read-only `acceptance_config.rs` regression directly
+requires that behavior. Gateway names no longer reach that branch or need
+`globalThis` guidance.
 
 ### Regression evidence (GUZ-1414)
 

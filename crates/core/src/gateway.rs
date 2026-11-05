@@ -113,16 +113,25 @@ pub fn merge_tools(
     for (index, (upstream, discovered)) in config.upstreams.iter().zip(discovered).enumerate() {
         for tool in discovered {
             if tool.name.is_empty()
-                || !tool
-                    .name
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
                 || !tool.input_schema.is_object()
                 || tool.input_schema.get("type").and_then(Value::as_str) != Some("object")
             {
-                return Err(Error("tool names must use ASCII letters/digits/underscores/dots/hyphens and inputSchema must be an object schema".into()));
+                return Err(Error(
+                    "tool names must be nonempty and inputSchema must be an object schema".into(),
+                ));
             }
-            let name = format!("{}_{}", upstream.prefix, tool.name);
+            let normalized: String = tool
+                .name
+                .chars()
+                .map(|character| {
+                    if character.is_ascii_alphanumeric() || character == '_' {
+                        character
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let name = format!("{}_{}", upstream.prefix, normalized);
             if !names.insert(name.clone()) {
                 return Err(Error(format!("duplicate tool name: {name}")));
             }
@@ -221,5 +230,40 @@ mod tests {
         assert!(!merged[1].requires_writes);
         assert_eq!(merge_catalog(vec![], &merged)[0].domain, "fake");
         assert!(merge_tools(&config, &[tools], ["fake_echo".into()]).is_err());
+    }
+
+    #[test]
+    fn merge_normalizes_each_non_identifier_character_and_preserves_original_policy() {
+        let config = config(json!({"upstreams":[{"prefix":"fake","command":"x","readOnly":["resolve-library-id", "query_docs"]}]})).unwrap();
+        let tools: Vec<UpstreamTool> = serde_json::from_value(json!([
+            {"name":"resolve-library-id","inputSchema":{"type":"object"}},
+            {"name":"query.docs","inputSchema":{"type":"object"}},
+            {"name":"9_Az /é😀-$","inputSchema":{"type":"object"}}
+        ]))
+        .unwrap();
+        let merged = merge_tools(&config, &[tools], []).unwrap();
+        assert_eq!(merged[0].name, "fake_resolve_library_id");
+        assert_eq!(merged[0].original_name, "resolve-library-id");
+        assert!(!merged[0].requires_writes);
+        assert_eq!(merged[1].name, "fake_query_docs");
+        assert!(merged[1].requires_writes);
+        assert_eq!(merged[2].name, "fake_9_Az______");
+        assert_eq!(merged[2].original_name, "9_Az /é😀-$");
+    }
+
+    #[test]
+    fn merge_rejects_normalized_collisions_with_upstream_or_reserved_names() {
+        let config = config(json!({"upstreams":[{"prefix":"fake","command":"x"}]})).unwrap();
+        let tools: Vec<UpstreamTool> = serde_json::from_value(json!([
+            {"name":"a-b","inputSchema":{"type":"object"}},
+            {"name":"a_b","inputSchema":{"type":"object"}}
+        ]))
+        .unwrap();
+        assert!(merge_tools(&config, std::slice::from_ref(&tools), [])
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("duplicate tool name: fake_a_b"));
+        assert!(merge_tools(&config, &[tools[..1].to_vec()], ["fake_a_b".into()]).is_err());
     }
 }

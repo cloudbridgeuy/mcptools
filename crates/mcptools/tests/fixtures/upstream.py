@@ -18,7 +18,7 @@ for line in sys.stdin:
     if method == "initialize":
         result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "1"}}
     elif method == "tools/list":
-        result = {"tools": [{"name": os.environ.get("FIXTURE_TOOL", "echo"), "description": "Echo fixture arguments", "inputSchema": {"type": "object", "properties": {"value": {"type": "string"}}}, "annotations": {"readOnlyHint": True}}]}
+        result = {"tools": [{"name": name, "description": "Echo fixture arguments", "inputSchema": {"type": "object", "properties": {"value": {"type": "string"}}}, "annotations": {"readOnlyHint": True}} for name in json.loads(os.environ.get("FIXTURE_TOOLS", '["echo", "resolve-library-id", "query.docs"]'))]}
     elif method == "tools/call":
         result = {"content": [{"type": "text", "text": "opaque"}], "structuredContent": {"name": request["params"]["name"], "arguments": request["params"]["arguments"]}, "_meta": {"untouched": True}}
     else:

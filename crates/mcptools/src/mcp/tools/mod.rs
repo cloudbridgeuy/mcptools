@@ -164,14 +164,7 @@ pub fn registered_tools() -> Vec<Tool> {
     let mut tools = builtin_tools();
     tools.extend(crate::gateway::tools().iter().map(|tool| Tool {
         name: tool.name.clone(),
-        description: if tool.name.contains(['-', '.']) {
-            format!(
-                "Call as globalThis[\"{}\"](input) inside execute. {}",
-                tool.name, tool.description
-            )
-        } else {
-            tool.description.clone()
-        },
+        description: tool.description.clone(),
         input_schema: tool.input_schema.clone(),
         output_schema: serde_json::json!({"type": "object", "additionalProperties": true}),
         summary: "Local upstream MCP tool",

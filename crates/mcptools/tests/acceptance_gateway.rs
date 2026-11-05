@@ -25,7 +25,7 @@ impl Fixture {
     fn configure(&self, read_only: bool, prefix: &str) {
         std::fs::write(
             &self.config,
-            format!("[[gateway.upstreams]]\nprefix = {prefix:?}\ncommand = '/bin/sh'\nargs = {}\nreadOnly = {}\n[gateway.upstreams.env]\nFIXTURE_LOG = {}\n", json!(["-c", "sleep 0.05; exec python3 \"$@\"", "gateway-fixture", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/upstream.py")]), json!(if read_only { vec!["echo"] } else { vec![] }), json!(self.log)),
+            format!("[[gateway.upstreams]]\nprefix = {prefix:?}\ncommand = '/bin/sh'\nargs = {}\nreadOnly = {}\n[gateway.upstreams.env]\nFIXTURE_LOG = {}\n", json!(["-c", "sleep 0.05; exec python3 \"$@\"", "gateway-fixture", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/upstream.py")]), json!(if read_only { vec!["echo", "resolve-library-id", "query.docs"] } else { vec![] }), json!(self.log)),
         )
         .unwrap();
     }
@@ -106,6 +106,12 @@ fn discovery_cache_and_config_invalidation() {
     let first = fixture.command().args(["mcp", "catalog"]).output().unwrap();
     assert!(first.status.success());
     assert!(String::from_utf8_lossy(&first.stdout).contains("fake\tfake_echo\t"));
+    assert!(String::from_utf8_lossy(&first.stdout).contains("fake_resolve_library_id"));
+    let cache: Value = serde_json::from_slice(
+        &std::fs::read(fixture.dir.path().join("upstreams.cache.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(cache["tools"][0][1]["name"], "resolve-library-id");
     assert_eq!(
         fixture
             .events()
@@ -116,6 +122,7 @@ fn discovery_cache_and_config_invalidation() {
     );
     let second = fixture.command().args(["mcp", "catalog"]).output().unwrap();
     assert!(second.status.success());
+    assert!(String::from_utf8_lossy(&second.stdout).contains("fake_query_docs"));
     assert_eq!(
         fixture
             .events()
@@ -129,6 +136,7 @@ fn discovery_cache_and_config_invalidation() {
     let changed = fixture.command().args(["mcp", "catalog"]).output().unwrap();
     assert!(changed.status.success());
     assert!(String::from_utf8_lossy(&changed.stdout).contains("changed_echo"));
+    assert!(String::from_utf8_lossy(&changed.stdout).contains("changed_resolve_library_id"));
     assert_eq!(
         fixture
             .events()
@@ -268,35 +276,122 @@ fn read_only_override() {
 }
 
 #[test]
-fn punctuated_upstream_names_support_discovery_declarations_and_execute() {
+fn punctuated_upstream_names_are_normalized_in_discovery() {
     let fixture = Fixture::new(true);
-    let content = std::fs::read_to_string(&fixture.config)
-        .unwrap()
-        .replace("\"echo\"", "\"resolve-library-id\"");
-    std::fs::write(
-        &fixture.config,
-        format!("{content}FIXTURE_TOOL = 'resolve-library-id'\n"),
-    )
-    .unwrap();
     let mut session = fixture.start();
     let found = session.call("find_tools", json!({"domain": "fake"}));
-    assert_eq!(
-        found["structuredContent"]["tools"][0]["name"],
-        "fake_resolve-library-id"
-    );
-    assert!(found["structuredContent"]["tools"][0]["declaration"]
-        .as_str()
-        .unwrap()
-        .contains("\"fake_resolve-library-id\"(input:"));
-    let executed = session.call(
-        "execute",
-        json!({"code": "return await globalThis['fake_resolve-library-id']({value: 'tokio'})"}),
-    );
-    assert_eq!(
-        executed["structuredContent"]["result"]["arguments"]["value"],
-        "tokio"
-    );
+    let tools = found["structuredContent"]["tools"].as_array().unwrap();
+    for name in ["fake_resolve_library_id", "fake_query_docs"] {
+        let tool = tools.iter().find(|tool| tool["name"] == name);
+        assert!(tool.is_some(), "missing normalized tool {name}: {found}");
+        assert!(tool.unwrap()["declaration"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("declare function {name}(input:")));
+    }
     session.finish();
+}
+
+#[test]
+fn punctuated_upstream_names_have_plain_function_declarations() {
+    let fixture = Fixture::new(true);
+    for name in ["fake_resolve_library_id", "fake_query_docs"] {
+        let output = fixture
+            .command()
+            .args(["mcp", "declarations", name])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout)
+            .contains(&format!("declare function {name}(input:")));
+    }
+}
+
+#[test]
+fn punctuated_upstream_names_execute_as_plain_globals() {
+    let fixture = Fixture::new(true);
+    let mut session = fixture.start();
+    for (name, original) in [
+        ("fake_resolve_library_id", "resolve-library-id"),
+        ("fake_query_docs", "query.docs"),
+    ] {
+        let executed = session.call(
+            "execute",
+            json!({"code": format!("return await {name}({{value: 'tokio'}})")}),
+        );
+        assert_eq!(
+            executed["structuredContent"]["error"],
+            Value::Null,
+            "{executed}"
+        );
+        assert_eq!(executed["structuredContent"]["result"]["name"], original);
+        assert_eq!(
+            executed["structuredContent"]["result"]["arguments"]["value"],
+            "tokio"
+        );
+    }
+    session.finish();
+}
+
+#[test]
+fn normalized_call_tool_forwards_original_upstream_name() {
+    let fixture = Fixture::new(true);
+    let mut session = fixture.start();
+    for (name, original) in [
+        ("fake_resolve_library_id", "resolve-library-id"),
+        ("fake_query_docs", "query.docs"),
+    ] {
+        let called = session.call(
+            "call_tool",
+            json!({"name": name, "input": {"value": "tokio"}}),
+        );
+        assert_eq!(called["structuredContent"]["name"], original, "{called}");
+        assert!(fixture
+            .events()
+            .iter()
+            .any(|event| event["method"] == "tools/call"
+                && event["params"]["name"] == original
+                && event["params"]["arguments"]["value"] == "tokio"));
+    }
+    session.finish();
+}
+
+#[test]
+fn normalization_collision_fails_startup() {
+    for cached in [false, true] {
+        let fixture = Fixture::new(false);
+        let content = format!(
+            "{}FIXTURE_TOOLS = '[\"a-b\", \"a_b\"]'\n",
+            std::fs::read_to_string(&fixture.config).unwrap()
+        );
+        std::fs::write(&fixture.config, &content).unwrap();
+        if cached {
+            let config = mcptools_core::config::parse(&content).unwrap();
+            let cache = json!({
+                "version": 1,
+                "fingerprint": mcptools_core::gateway::fingerprint(&config.gateway),
+                "tools": [[
+                    {"name": "a-b", "inputSchema": {"type": "object"}},
+                    {"name": "a_b", "inputSchema": {"type": "object"}}
+                ]]
+            });
+            std::fs::write(
+                fixture.dir.path().join("upstreams.cache.json"),
+                serde_json::to_vec(&cache).unwrap(),
+            )
+            .unwrap();
+        }
+        let output = fixture.command().args(["mcp", "catalog"]).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate tool name: fake_a_b"));
+        if cached {
+            assert!(fixture.events().is_empty());
+        }
+    }
 }
 
 #[test]
