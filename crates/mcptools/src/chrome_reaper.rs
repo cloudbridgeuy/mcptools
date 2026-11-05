@@ -24,7 +24,7 @@ fn directory() -> Result<PathBuf> {
     )?)
 }
 
-fn inspect(pid: u32) -> Result<Option<ProcessIdentity>> {
+pub(crate) fn inspect(pid: u32) -> Result<Option<ProcessIdentity>> {
     Ok(inspect_with_parent(pid)?.map(|(process, _)| process))
 }
 
@@ -194,7 +194,7 @@ impl Drop for LaunchGuard {
     }
 }
 
-fn signal(process: &ProcessIdentity, name: &str) -> Result<()> {
+pub(crate) fn signal(process: &ProcessIdentity, name: &str) -> Result<()> {
     if inspect(process.pid)?.as_ref() == Some(process) {
         let output = Command::new("kill")
             .args([name, &process.pid.to_string()])
@@ -206,7 +206,7 @@ fn signal(process: &ProcessIdentity, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn terminate_tree(record: &ChromeRecord, chrome: &ProcessIdentity) -> Result<()> {
+pub(crate) fn process_tree(chrome: &ProcessIdentity) -> Result<Vec<ProcessIdentity>> {
     let output = Command::new("ps")
         .args(["-ax", "-o", "pid=", "-o", "ppid="])
         .output()?;
@@ -238,6 +238,11 @@ fn terminate_tree(record: &ChromeRecord, chrome: &ProcessIdentity) -> Result<()>
         }
         index += 1;
     }
+    Ok(processes)
+}
+
+fn terminate_tree(record: &ChromeRecord, chrome: &ProcessIdentity) -> Result<()> {
+    let processes = process_tree(chrome)?;
     if !orphaned_and_ours(
         record,
         inspect(record.owner.pid)?.as_ref(),

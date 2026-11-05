@@ -31,9 +31,17 @@ pub fn tool_declaration(
         text.push_str(&doc);
         text.push('\n');
     }
-    text.push_str(&format!(
-        "declare function {name}(input: {prefix}Input): Promise<{prefix}Output>;\n"
-    ));
+    if name
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        text.push_str(&format!(
+            "declare function {name}(input: {prefix}Input): Promise<{prefix}Output>;\n"
+        ));
+    } else {
+        let key = serde_json::to_string(name).expect("serializable tool name");
+        text.push_str(&format!("interface {prefix}Tool {{\n  {key}(input: {prefix}Input): Promise<{prefix}Output>;\n}}\n"));
+    }
     text
 }
 
@@ -46,7 +54,7 @@ fn unless_empty(text: &str) -> Option<&str> {
 }
 
 fn pascal(name: &str) -> String {
-    name.split('_')
+    name.split(['_', '-', '.'])
         .map(|piece| {
             let mut chars = piece.chars();
             match chars.next() {

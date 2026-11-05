@@ -161,6 +161,39 @@ pub fn handle_initialize() -> Result<serde_json::Value, JsonRpcError> {
 }
 
 pub fn registered_tools() -> Vec<Tool> {
+    let mut tools = builtin_tools();
+    tools.extend(crate::gateway::tools().iter().map(|tool| Tool {
+        name: tool.name.clone(),
+        description: if tool.name.contains(['-', '.']) {
+            format!(
+                "Call as globalThis[\"{}\"](input) inside execute. {}",
+                tool.name, tool.description
+            )
+        } else {
+            tool.description.clone()
+        },
+        input_schema: tool.input_schema.clone(),
+        output_schema: serde_json::json!({"type": "object", "additionalProperties": true}),
+        summary: "Local upstream MCP tool",
+        kind: if tool.requires_writes {
+            ToolKind::Write
+        } else {
+            ToolKind::Read
+        },
+        destructive: true,
+    }));
+    tools
+}
+
+pub fn reserved_names() -> impl Iterator<Item = String> {
+    builtin_tools().into_iter().map(|tool| tool.name).chain(
+        aliases::HIDDEN_ALIASES
+            .iter()
+            .map(|(alias, _)| (*alias).to_string()),
+    )
+}
+
+pub fn builtin_tools() -> Vec<Tool> {
     vec![
         Tool {
             name: "plan_close".into(),
@@ -1208,7 +1241,7 @@ pub fn listed_tools(tools: Vec<Tool>, flags: ServeFlags) -> Vec<Tool> {
 }
 
 pub fn handle_tools_list(flags: ServeFlags) -> Result<serde_json::Value, JsonRpcError> {
-    let mut tools = listed_tools(registered_tools(), flags);
+    let mut tools = listed_tools(builtin_tools(), flags);
     if !flags.discovery && !flags.code_mode {
         for tool in &mut tools {
             if !is_meta_tool(&tool.name) {
@@ -1258,11 +1291,14 @@ fn add_direct_permission_schema(schema: &mut serde_json::Value, kind: ToolKind) 
 }
 
 pub fn tool_catalog() -> Vec<mcptools_core::catalog::CatalogEntry> {
-    mcptools_core::catalog::build_catalog(
-        registered_tools()
-            .iter()
-            .filter(|tool| !is_meta_tool(&tool.name))
-            .map(|tool| (tool.name.as_str(), tool.summary)),
+    mcptools_core::gateway::merge_catalog(
+        mcptools_core::catalog::build_catalog(
+            builtin_tools()
+                .iter()
+                .filter(|tool| !is_meta_tool(&tool.name))
+                .map(|tool| (tool.name.as_str(), tool.summary)),
+        ),
+        crate::gateway::tools(),
     )
 }
 
@@ -1366,6 +1402,15 @@ pub async fn dispatch_tool_call(
 ) -> Result<serde_json::Value, JsonRpcError> {
     let tools = registered_tools();
     let name = aliases::resolve(&params.name, &tools)?;
+    if crate::gateway::tools().iter().any(|tool| tool.name == name) {
+        return crate::gateway::call(name, params.arguments)
+            .await
+            .map_err(|error| JsonRpcError {
+                code: -32603,
+                message: error.to_string(),
+                data: None,
+            });
+    }
     match name {
         "plan_write" => plan::handle_plan_write(params.arguments).await,
         "plan_url" => plan::handle_plan_url(params.arguments).await,

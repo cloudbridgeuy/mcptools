@@ -26,6 +26,7 @@ html2md = { workspace = true }
 scraper = { workspace = true }
 md5 = "0.7"
 thiserror = { workspace = true }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 urlencoding = { workspace = true }
 pulldown-cmark = { version = "=0.13.5", default-features = false, features = ["html"] }
 syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "html", "regex-fancy"] }

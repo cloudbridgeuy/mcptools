@@ -102,4 +102,6 @@ pub mod sandbox;
 pub mod ts_decl;
 pub mod upgrade;
 
+pub mod config;
 pub mod diagram_endpoint;
+pub mod gateway;

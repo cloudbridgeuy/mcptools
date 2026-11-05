@@ -8,9 +8,11 @@ use std::time::Duration;
 mod agent;
 mod atlassian;
 mod chrome_reaper;
+mod config;
 mod diagram;
 mod error;
 mod find_tools;
+mod gateway;
 mod hn;
 mod images;
 mod jev;
@@ -90,6 +92,9 @@ impl Global {
 
 #[derive(Debug, clap::Parser)]
 pub enum SubCommands {
+    Config(crate::config::App),
+    #[command(hide = true)]
+    UpstreamReaper(crate::gateway::ReaperArgs),
     #[command(hide = true)]
     ChromeReaper(crate::chrome_reaper::App),
     Diagram(crate::diagram::App),
@@ -134,17 +139,25 @@ fn main() -> Result<()> {
     if let SubCommands::ChromeReaper(sub_app) = app.command {
         return crate::chrome_reaper::run(sub_app);
     }
+    if let SubCommands::UpstreamReaper(args) = app.command {
+        return crate::gateway::reap(args);
+    }
 
     run(app)
 }
 
 #[tokio::main]
 async fn run(app: App) -> Result<()> {
+    if matches!(app.command, SubCommands::MCP(_) | SubCommands::FindTools(_)) {
+        crate::gateway::initialize().await?;
+    }
     if matches!(app.command, SubCommands::MCP(_)) {
         crate::chrome_reaper::sweep()?;
     }
 
-    match app.command {
+    let result = match app.command {
+        SubCommands::Config(args) => crate::config::run(args),
+        SubCommands::UpstreamReaper(args) => crate::gateway::reap(args),
         SubCommands::ChromeReaper(sub_app) => crate::chrome_reaper::run(sub_app),
         SubCommands::Diagram(sub_app) => crate::diagram::run(sub_app).await,
         SubCommands::Agent(sub_app) => crate::agent::run(sub_app, app.global).await,
@@ -159,7 +172,9 @@ async fn run(app: App) -> Result<()> {
         SubCommands::Linear(sub_app) => crate::linear::run(sub_app, app.global).await,
         SubCommands::Upgrade(sub_app) => crate::upgrade::run(sub_app, app.global).await,
     }
-    .map_err(|err: color_eyre::eyre::Report| eyre!(err))
+    .map_err(|err: color_eyre::eyre::Report| eyre!(err));
+    crate::gateway::shutdown().await;
+    result
 }
 
 #[cfg(test)]

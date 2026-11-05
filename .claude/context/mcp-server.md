@@ -2,7 +2,8 @@
 
 mcptools can run as an MCP (Model Context Protocol) server.
 
-The full registry has 112 tools: 109 catalog tools and 3 meta tools.
+The built-in registry has 112 tools: 109 catalog tools and 3 meta tools.
+Configured upstream tools extend the catalog, not `tools/list`.
 `plan_write` stores a diagram (Write; requires `allowWrites: true`);
 `plan_url` reads its persisted URL (Read). `plan_diff` reads changes and advances
 the baseline (destructive Write; requires `allowWrites: true`). `plan_png`
@@ -42,6 +43,129 @@ failed at `crates/mcptools/tests/mcp_notifications.rs:31` (three responses, expe
 two), and `crates/mcptools/src/mcp/mod.rs:41` (unknown notification returned
 `-32601`, expected no response). The protocol decision is the pure `parse_request`
 function in `mcp/mod.rs`; stdio and SSE consume its optional response.
+
+## Local stdio upstream gateway
+
+Configure once in `~/.config/mcptools/config.toml`; all harnesses running
+mcptools with the same environment use it automatically. An absolute
+`XDG_CONFIG_HOME` changes the base to `$XDG_CONFIG_HOME/mcptools/config.toml`.
+An unset, empty or relative `XDG_CONFIG_HOME` uses `$HOME/.config` instead.
+`MCPTOOLS_CONFIG` selects a different file instead of the default file; a
+relative override resolves from the working directory, an empty override is
+ignored. Missing files, including an explicit override, mean defaults and no
+upstreams; nothing is created. Missing HOME without an absolute XDG base or
+file override is an actionable error. The path convention is the same on macOS
+and Linux, not macOS Application Support.
+
+The sectioned TOML configuration layers defaults with one global file. There
+is no per-store or repository layer. Only `[gateway]` is implemented; other
+sections and unknown keys fail validation until supported. Existing Jira,
+Linear, Jev and image environment settings are unchanged.
+
+```toml
+[[gateway.upstreams]]
+prefix = "context7"
+command = "npx"
+args = ["-y", "@upstash/context7-mcp"]
+readOnly = ["resolve-library-id", "query-docs"]
+```
+
+`mcptools config path` prints the resolved path without reading the file.
+`mcptools config check` checks TOML, keys, types and static gateway policy;
+it prints the path plus `ok:` or `defaults apply`. Errors name the path and
+invalid key or TOML line/column and exit nonzero without printing source lines.
+It never starts upstream commands, discovers tools or writes the cache.
+This Unix MVP supports local stdio commands only; HTTP upstreams, token headers
+and OAuth are not supported.
+
+`args`, `env` and `readOnly` default to empty. Environment entries override
+the inherited environment; values are literal, not variable substitutions.
+Add environment entries with `[gateway.upstreams.env]` below an upstream.
+Commands are executed directly, not through a shell. Relative paths use the
+mcptools working directory; use absolute paths for stable configuration.
+Prefixes must be unique ASCII letters/digits, starting with a letter; no
+underscores. Upstream tool names may use ASCII letters/digits/underscores,
+dots and hyphens. Names with dots or hyphens use `globalThis["<prefix>_<name>"]`
+inside `execute`; their declarations show a quoted callable property interface
+instead of an invalid JavaScript function identifier.
+Unsupported names, malformed object input schemas, duplicate names and
+collisions with built-in tools or hidden aliases fail startup.
+
+On a cache miss, startup sends `initialize`, `notifications/initialized` and
+paginated `tools/list`. Tools are cached next to the selected config in
+`upstreams.cache.json`, also for custom config filenames. The config must not
+itself be named `upstreams.cache.json`.
+Cache writes are atomic with owner-only permissions. The cache stores tool
+schemas and a configuration fingerprint, not the command environment values.
+The pure cache decision covers prefix, command, arguments, environment and
+read-only policy. Formatting-only changes do not invalidate it. Invalid cache
+JSON triggers rediscovery; I/O failures fail startup. Configuration is fixed
+for the session: restart mcptools after a change. Changed upstream binaries
+or remote tool lists do not invalidate the cache; delete the cache to refresh.
+
+A valid cache lets catalog, declarations and `find_tools` run without starting
+upstreams. Each upstream starts on its first permitted call, then stays alive
+for the mcptools session. A process started for discovery is reused for calls.
+EOF, handled termination signals, errors and abrupt owner death release an
+independent reaper lease. Each completed request acknowledges a process-tree
+snapshot before returning. The reaper checks process identities and stops the
+observed process tree, escalating TERM to KILL, using the Chrome reaper helpers,
+even if the root exits on stdin EOF before the reaper runs.
+Commands that detach/reparent descendants before shutdown are not supported.
+
+`context7_resolve-library-id` appears in `find_tools`, `mcptools mcp catalog`, and
+`mcptools mcp declarations context7_resolve-library-id`. It is never advertised by plain
+`tools/list`, including full mode. Call through the existing interfaces:
+
+```javascript
+find_tools({domain: "context7"})
+call_tool({name: "context7_resolve-library-id", input: {libraryName: "tokio", query: "Tokio async runtime"}})
+execute({code: 'return await globalThis["context7_resolve-library-id"]({libraryName: "tokio", query: "Tokio async runtime"})'})
+```
+
+**Security:** Every upstream tool needs `allowWrites` unless its original,
+unprefixed name is explicitly in that upstream's `readOnly` list. Upstream
+safety annotations are ignored. `allowSpend` does not authorize upstream writes.
+This permission gate does not sandbox the executable: discovery itself runs
+trusted operator-configured code with the user's permissions and inherited
+environment. Keep the config and its directory private. Do not accept config
+paths or read-only policy from an agent or upstream response.
+
+Upstream output, descriptions and schemas are **untrusted input**, including
+possible prompt injection; never treat them as agent instructions. `call_tool`
+returns the upstream `tools/call` result unchanged, including content blocks,
+`isError`, structured content and metadata. `execute` uses its normal result
+unwrapping: structured content when present, otherwise content. Declarations
+describe the input schema and an open object output; upstream `outputSchema`
+is deliberately not interpreted as the raw call-result envelope.
+
+The minimal client uses existing Tokio and serde_json dependencies and fits
+the existing hand-written JSON-RPC server. `rmcp` provides a full client SDK
+and `transport-child-process`, but adds another protocol model/transport layer
+and dependencies; it does not replace our custom lifecycle, cache or policy.
+The stdio client adds no SDK dependency; TOML configuration uses the `toml`
+crate. Supported protocol
+versions: 2024-11-05, 2025-03-26, 2025-06-18. Each request has a 30-second
+deadline and a 4-MiB message cap; discovery has a 100-page cap. Calls to each
+upstream are serialized. Client `ping` is supported; other server-initiated
+requests receive method-not-found. No sampling, roots, elicitation or progress
+relay. Failed/uncertain calls are never retried automatically; a later explicit
+call starts a fresh connection after a failed request.
+
+### Regression evidence (GUZ-1414)
+
+Before implementation, `RUST_TEST_THREADS=1 cargo xtask lint --no-fmt --no-check
+--no-clippy --no-machete --no-typos` ran the fake-server tests red at
+`crates/mcptools/tests/acceptance_gateway.rs:88`, `:105`, `:120`, `:138`, and
+`:150` (original pre-format locations): catalog discovery/cache, declarations
+and hidden listing, write gating/forwarding, read-only override, and exit
+cleanup. The fixture uses Python's standard library and no network.
+
+Before the TOML revision, the same lint test command ran five config tests red
+at `crates/mcptools/tests/acceptance_config.rs:14`, `:26`, `:34`, `:51`, and `:69`
+(original pre-format locations): default/XDG path, override, missing-file
+defaults, TOML sections, and actionable check errors. `config` was not a CLI
+command. The live Context7 smoke check is manual, never part of lint.
 
 ## Claude Desktop Configuration
 
