@@ -19,11 +19,9 @@ pub fn show(saved: &SavedOutput, preview: bool, json: bool) {
             term_program.as_deref(),
             tmux.as_ref().map(|_| ""),
         )
-        || saved.output_format != "png"
+        || skip_format_notice(&saved.output_format).is_some()
     {
-        eprintln!(
-            "Image preview skipped: requires PNG, a supported terminal, and non-JSON terminal output."
-        );
+        eprintln!("{}", skip_format_notice(&saved.output_format).unwrap_or("Image preview skipped: requires a supported terminal and non-JSON terminal output."));
         return;
     }
     let result = (|| -> std::io::Result<()> {
@@ -44,5 +42,25 @@ pub fn show(saved: &SavedOutput, preview: bool, json: bool) {
     })();
     if let Err(error) = result {
         eprintln!("Image preview skipped: {error}");
+    }
+}
+
+fn skip_format_notice(format: &str) -> Option<&'static str> {
+    (format != "png").then_some("Image preview skipped: requires PNG.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::skip_format_notice;
+
+    #[test]
+    fn svg_and_gif_skip_preview_with_notice() {
+        for format in ["svg", "gif"] {
+            assert_eq!(
+                skip_format_notice(format),
+                Some("Image preview skipped: requires PNG.")
+            );
+        }
+        assert_eq!(skip_format_notice("png"), None);
     }
 }

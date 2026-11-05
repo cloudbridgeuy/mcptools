@@ -28,6 +28,9 @@ pub struct GenerateParams {
     pub quality: String,
     pub output_format: String,
     pub output_compression: Option<u8>,
+    pub frame_count: Option<u8>,
+    pub frame_duration_ms: Option<u16>,
+    pub complexity: Option<String>,
     pub background: String,
     pub moderation: Option<String>,
     pub n: u8,
@@ -398,6 +401,9 @@ pub fn default_generate_params(prompt: String) -> GenerateParams {
         quality: "auto".to_string(),
         output_format: "png".to_string(),
         output_compression: None,
+        frame_count: None,
+        frame_duration_ms: None,
+        complexity: None,
         background: "auto".to_string(),
         moderation: None,
         n: 1,
@@ -455,8 +461,8 @@ pub fn validate_background(b: &str) -> Result<(), String> {
 
 pub fn validate_format(f: &str) -> Result<(), String> {
     match f {
-        "png" | "jpeg" | "webp" => Ok(()),
-        other => Err(format!("format must be png|jpeg|webp, got {other}")),
+        "png" | "jpeg" | "webp" | "gif" | "svg" => Ok(()),
+        other => Err(format!("format must be png|jpeg|webp|gif|svg, got {other}")),
     }
 }
 
@@ -485,6 +491,77 @@ pub fn validate_size(s: &str) -> Result<(), String> {
         }
         _ => Err(format!("invalid size '{s}', want auto or WIDTHxHEIGHT")),
     }
+}
+
+pub fn validate_generate(p: &GenerateParams) -> Result<(), String> {
+    validate_size(&p.size)?;
+    validate_quality(&p.quality)?;
+    validate_format(&p.output_format)?;
+    validate_background(&p.background)?;
+    validate_compression(p.output_compression)?;
+    validate_n(p.n)?;
+    if let Some(c) = &p.complexity {
+        if !matches!(c.as_str(), "low" | "medium" | "high") {
+            return Err(format!("complexity must be low|medium|high, got {c}"));
+        }
+    }
+    if p.output_format != "gif" && (p.frame_count.is_some() || p.frame_duration_ms.is_some()) {
+        return Err("frame options require GIF output".to_string());
+    }
+    if let Some(count) = p.frame_count {
+        if !(2..=64).contains(&count) {
+            return Err(format!("frame count must be 2-64, got {count}"));
+        }
+    }
+    if let Some(duration) = p.frame_duration_ms {
+        if !(20..=2000).contains(&duration) {
+            return Err(format!("frame duration must be 20-2000 ms, got {duration}"));
+        }
+    }
+    if matches!(p.output_format.as_str(), "gif" | "svg") && p.output_compression.is_some() {
+        return Err("GIF and SVG do not support output compression".to_string());
+    }
+    if p.output_format == "svg" && p.n != 1 {
+        return Err("SVG requires n=1".to_string());
+    }
+    Ok(())
+}
+
+pub fn validate_generate_backend(p: &GenerateParams, openai: bool) -> Result<(), String> {
+    if !openai && (matches!(p.output_format.as_str(), "gif" | "svg") || p.complexity.is_some()) {
+        return Err("GIF, SVG and complexity require api=openai".to_string());
+    }
+    Ok(())
+}
+
+pub fn validate_edit_options(
+    frame_count: Option<u8>,
+    frame_duration_ms: Option<u16>,
+    complexity: Option<&str>,
+) -> Result<(), String> {
+    if frame_count.is_some() || frame_duration_ms.is_some() || complexity.is_some() {
+        return Err("frame options and complexity are generation only".to_string());
+    }
+    Ok(())
+}
+
+pub fn validate_edit_format(format: &str) -> Result<(), String> {
+    validate_format(format)?;
+    if matches!(format, "gif" | "svg") {
+        return Err("GIF and SVG output is generation only".to_string());
+    }
+    Ok(())
+}
+
+pub fn validate_edit_filename(name: &str) -> Result<(), String> {
+    if name
+        .rsplit('.')
+        .next()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
+    {
+        return Err("SVG input is not supported for edits".to_string());
+    }
+    Ok(())
 }
 
 pub fn validate_image_count(n: usize) -> Result<(), String> {
@@ -607,6 +684,8 @@ pub fn extension_for_format(format: &str) -> &str {
     match format {
         "jpeg" => "jpg",
         "webp" => "webp",
+        "gif" => "gif",
+        "svg" => "svg",
         _ => "png",
     }
 }
@@ -629,9 +708,27 @@ pub fn build_generate_body(p: &GenerateParams) -> serde_json::Value {
         "n": p.n,
     });
     let map = body.as_object_mut().expect("object");
+    if p.output_format == "svg" && p.quality == "auto" {
+        map.remove("quality");
+    }
     if let Some(c) = p.output_compression {
         map.insert("output_compression".to_string(), serde_json::json!(c));
     }
+    if p.output_format == "gif" {
+        map.insert(
+            "frame_count".to_string(),
+            serde_json::json!(p.frame_count.unwrap_or(9)),
+        );
+        let duration = p.frame_duration_ms.unwrap_or(200);
+        map.insert(
+            "frame_duration_ms".to_string(),
+            serde_json::json!((duration + 5) / 10 * 10),
+        );
+    }
+    map.insert(
+        "complexity".to_string(),
+        serde_json::json!(p.complexity.as_deref().unwrap_or("high")),
+    );
     if let Some(m) = &p.moderation {
         map.insert("moderation".to_string(), serde_json::json!(m));
     }
@@ -715,12 +812,87 @@ mod tests {
         assert!(validate_background("opaque").is_ok());
         assert!(validate_background("red").is_err());
         assert!(validate_format("webp").is_ok());
-        assert!(validate_format("gif").is_err());
+        assert!(validate_format("gif").is_ok());
+        assert!(validate_format("svg").is_ok());
         assert!(validate_size("auto").is_ok());
         assert!(validate_size("1024x1024").is_ok());
         assert!(validate_size("1536x864").is_ok());
         assert!(validate_size("1535x864").is_err());
         assert!(validate_size("big").is_err());
+    }
+
+    #[test]
+    fn generation_format_rules_and_body() {
+        let mut p = default_generate_params("fox".to_string());
+        p.output_format = "gif".to_string();
+        assert_eq!(build_generate_body(&p)["frame_count"], 9);
+        assert_eq!(build_generate_body(&p)["complexity"], "high");
+        assert_eq!(build_generate_body(&p)["frame_duration_ms"], 200);
+        assert!(validate_generate_backend(&p, false).is_err());
+        assert!(validate_generate_backend(&p, true).is_ok());
+        for duration in [20, 2000] {
+            p.frame_count = Some(64);
+            p.frame_duration_ms = Some(duration);
+            assert!(validate_generate(&p).is_ok());
+        }
+        p.frame_count = None;
+        p.frame_duration_ms = None;
+        p.size = "31x32".to_string();
+        assert!(validate_generate(&p).is_err());
+        p.size = "auto".to_string();
+        for format in ["gif", "svg"] {
+            p.output_format = format.to_string();
+            let body = build_generate_body(&p);
+            for field in [
+                "stream",
+                "partial_images",
+                "output_compression",
+                "prompt_rewriter",
+            ] {
+                assert!(body.get(field).is_none());
+            }
+        }
+        p.output_format = "png".to_string();
+        p.frame_count = Some(2);
+        assert!(validate_generate(&p).is_err());
+        p.output_format = "gif".to_string();
+        assert!(validate_generate(&p).is_ok());
+        assert_eq!(build_generate_body(&p)["frame_count"], 2);
+        assert_eq!(build_generate_body(&p)["frame_duration_ms"], 200);
+        p.frame_duration_ms = Some(205);
+        assert_eq!(build_generate_body(&p)["frame_duration_ms"], 210);
+        for count in [1, 65] {
+            p.frame_count = Some(count);
+            assert!(validate_generate(&p).is_err());
+        }
+        p.frame_count = None;
+        for duration in [19, 2001] {
+            p.frame_duration_ms = Some(duration);
+            assert!(validate_generate(&p).is_err());
+        }
+        p.frame_duration_ms = None;
+        p.output_compression = Some(50);
+        assert!(validate_generate(&p).is_err());
+        p.output_compression = None;
+        p.output_format = "svg".to_string();
+        assert!(build_generate_body(&p).get("quality").is_none());
+        p.quality = "xhigh".to_string();
+        assert_eq!(build_generate_body(&p)["quality"], "xhigh");
+        p.output_compression = Some(1);
+        assert!(validate_generate(&p).is_err());
+        p.output_compression = None;
+        p.n = 2;
+        assert!(validate_generate(&p).is_err());
+        p.n = 1;
+        p.complexity = Some("medium".to_string());
+        assert_eq!(build_generate_body(&p)["complexity"], "medium");
+        p.complexity = Some("extreme".to_string());
+        assert!(validate_generate(&p).is_err());
+        assert!(validate_edit_format("svg").is_err());
+        assert!(validate_edit_format("gif").is_err());
+        assert!(validate_edit_filename("input.SVG").is_err());
+        assert!(validate_edit_options(Some(2), None, None).is_err());
+        assert!(validate_edit_options(None, None, None).is_ok());
     }
 
     #[test]
@@ -735,6 +907,8 @@ mod tests {
     fn filenames_use_format_extension() {
         assert_eq!(suggested_filename("img", 0, "jpeg", 1), "img-1-0.jpg");
         assert_eq!(suggested_filename("img", 2, "png", 7), "img-7-2.png");
+        assert_eq!(suggested_filename("img", 0, "gif", 1), "img-1-0.gif");
+        assert_eq!(suggested_filename("img", 0, "svg", 1), "img-1-0.svg");
     }
 
     #[test]

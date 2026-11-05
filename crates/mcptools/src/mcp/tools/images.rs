@@ -13,11 +13,27 @@ pub struct ImagesGenerateArgs {
     )]
     pub model: Option<String>,
     pub size: Option<String>,
+    #[schemars(
+        description = "Quality: auto|low|medium|high|xhigh|max. For SVG, selects reference raster quality; auto omits the field."
+    )]
     pub quality: Option<String>,
     #[serde(default, rename = "outputFormat")]
+    #[schemars(
+        description = "png|jpeg|webp|gif|svg. GIF and SVG require api=openai; SVG requires n=1."
+    )]
     pub output_format: Option<String>,
     #[serde(default, rename = "outputCompression")]
     pub output_compression: Option<u8>,
+    #[serde(default, rename = "frameCount")]
+    #[schemars(description = "GIF only: 2-64 frames, default 9.")]
+    pub frame_count: Option<u8>,
+    #[serde(default, rename = "frameDurationMs")]
+    #[schemars(description = "GIF only: 20-2000 ms, rounded to 10 ms; default 200.")]
+    pub frame_duration_ms: Option<u16>,
+    #[schemars(
+        description = "Generation only, api=openai: low|medium|high; default high, independent of quality."
+    )]
+    pub complexity: Option<String>,
     pub background: Option<String>,
     pub moderation: Option<String>,
     pub n: Option<u8>,
@@ -53,6 +69,11 @@ pub struct ImagesEditArgs {
     pub output_format: Option<String>,
     #[serde(default, rename = "outputCompression")]
     pub output_compression: Option<u8>,
+    #[serde(default, rename = "frameCount")]
+    pub frame_count: Option<u8>,
+    #[serde(default, rename = "frameDurationMs")]
+    pub frame_duration_ms: Option<u16>,
+    pub complexity: Option<String>,
     pub background: Option<String>,
     pub moderation: Option<String>,
     #[serde(default, rename = "inputFidelity")]
@@ -85,6 +106,11 @@ pub struct ImagesVaryArgs {
     pub output_format: Option<String>,
     #[serde(default, rename = "outputCompression")]
     pub output_compression: Option<u8>,
+    #[serde(default, rename = "frameCount")]
+    pub frame_count: Option<u8>,
+    #[serde(default, rename = "frameDurationMs")]
+    pub frame_duration_ms: Option<u16>,
+    pub complexity: Option<String>,
     pub background: Option<String>,
     pub moderation: Option<String>,
     #[serde(default, rename = "inputFidelity")]
@@ -196,10 +222,14 @@ pub async fn handle_images_generate(
         quality: args.quality.unwrap_or_else(|| "auto".to_string()),
         output_format: args.output_format.unwrap_or_else(|| "png".to_string()),
         output_compression: args.output_compression,
+        frame_count: args.frame_count,
+        frame_duration_ms: args.frame_duration_ms,
+        complexity: args.complexity,
         background: args.background.unwrap_or_else(|| "auto".to_string()),
         moderation: args.moderation,
         n: args.n.unwrap_or(1),
     };
+    mcptools_core::images::validate_generate(&params).map_err(invalid)?;
     let saved = crate::images::generate_data(
         params,
         backend_of(&BackendArgs {
@@ -223,6 +253,20 @@ pub async fn handle_images_edit(
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: ImagesEditArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
+    mcptools_core::images::validate_edit_options(
+        args.frame_count,
+        args.frame_duration_ms,
+        args.complexity.as_deref(),
+    )
+    .map_err(invalid)?;
+    mcptools_core::images::validate_edit_format(args.output_format.as_deref().unwrap_or("png"))
+        .map_err(invalid)?;
+    for image in &args.images {
+        mcptools_core::images::validate_edit_filename(image).map_err(invalid)?;
+    }
+    if let Some(mask) = &args.mask {
+        mcptools_core::images::validate_edit_filename(mask).map_err(invalid)?;
+    }
     let params = mcptools_core::images::EditParams {
         prompt: args.prompt,
         model: args.model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
@@ -264,6 +308,17 @@ pub async fn handle_images_vary(
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: ImagesVaryArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
+    mcptools_core::images::validate_edit_options(
+        args.frame_count,
+        args.frame_duration_ms,
+        args.complexity.as_deref(),
+    )
+    .map_err(invalid)?;
+    mcptools_core::images::validate_edit_format(args.output_format.as_deref().unwrap_or("png"))
+        .map_err(invalid)?;
+    for image in &args.images {
+        mcptools_core::images::validate_edit_filename(image).map_err(invalid)?;
+    }
     let saved = crate::images::vary_data(
         args.images
             .into_iter()
@@ -311,6 +366,116 @@ mod tests {
         let args = serde_json::json!({"prompt": "edit", "images": ["missing.png"], "markup": "missing-markup.png"});
         let error = handle_images_edit(Some(args), &global).await.unwrap_err();
         assert!(error.message.contains("markup requires"));
+    }
+
+    #[tokio::test]
+    async fn mcp_svg_sends_options_and_saves_xml() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "created": 1, "data": [{"b64_json": "PHN2Zy8+"}]
+            })))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let global = crate::Global::try_parse_from(["mcptools"]).unwrap();
+        handle_images_generate(
+            Some(serde_json::json!({
+                "prompt": "fox", "api": "openai", "apiKey": "test", "baseUrl": server.uri(),
+                "outputDir": dir.path(), "outputFormat": "svg", "complexity": "medium"
+            })),
+            &global,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("image-1-0.svg")).unwrap(),
+            b"<svg/>"
+        );
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url.path(), "/images/generations");
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["output_format"], "svg");
+        assert_eq!(body["n"], 1);
+        assert_eq!(body["complexity"], "medium");
+        for field in [
+            "frame_count",
+            "frame_duration_ms",
+            "stream",
+            "partial_images",
+            "output_compression",
+            "prompt_rewriter",
+        ] {
+            assert!(body.get(field).is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_formats_before_requests() {
+        let server = MockServer::start().await;
+        let global = crate::Global::try_parse_from(["mcptools"]).unwrap();
+        for (args, message) in [
+            (
+                serde_json::json!({"prompt": "fox", "api": "openai", "apiKey": "test", "baseUrl": server.uri(), "outputFormat": "svg", "n": 2}),
+                "SVG requires n=1",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "api": "openai", "apiKey": "test", "baseUrl": server.uri(), "frameCount": 9}),
+                "frame options require GIF output",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "api": "openai", "apiKey": "test", "baseUrl": server.uri(), "frameDurationMs": 200}),
+                "frame options require GIF output",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "api": "openai", "apiKey": "test", "baseUrl": server.uri(), "outputFormat": "svg", "frameCount": 9}),
+                "frame options require GIF output",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "api": "chatgpt", "outputFormat": "gif"}),
+                "require api=openai",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "api": "chatgpt", "outputFormat": "svg"}),
+                "require api=openai",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "api": "chatgpt", "complexity": "high"}),
+                "require api=openai",
+            ),
+        ] {
+            let error = handle_images_generate(Some(args), &global)
+                .await
+                .unwrap_err();
+            assert!(error.message.contains(message), "{}", error.message);
+        }
+        for (args, message) in [
+            (
+                serde_json::json!({"prompt": "fox", "images": ["in.png"], "outputFormat": "svg"}),
+                "GIF and SVG output is generation only",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "images": ["in.png"], "outputFormat": "gif"}),
+                "GIF and SVG output is generation only",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "images": ["in.svg"]}),
+                "SVG input is not supported for edits",
+            ),
+            (
+                serde_json::json!({"prompt": "fox", "images": ["in.png"], "complexity": "high"}),
+                "frame options and complexity are generation only",
+            ),
+        ] {
+            let error = handle_images_edit(Some(args.clone()), &global)
+                .await
+                .unwrap_err();
+            assert!(error.message.contains(message), "{}", error.message);
+            let error = handle_images_vary(Some(args), &global).await.unwrap_err();
+            assert!(error.message.contains(message), "{}", error.message);
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
     }
 
     #[test]

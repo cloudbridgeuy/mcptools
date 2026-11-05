@@ -103,6 +103,12 @@ pub struct GenerateOptions {
     pub prompt: String,
     #[clap(long, short = 'n', default_value_t = 1)]
     pub number: u8,
+    #[clap(long)]
+    pub frames: Option<u8>,
+    #[clap(long)]
+    pub frame_ms: Option<u16>,
+    #[clap(long)]
+    pub complexity: Option<String>,
     #[clap(flatten)]
     pub out: OutOpts,
     #[clap(flatten)]
@@ -251,6 +257,9 @@ fn gen_params(prompt: String, number: u8, o: &OutOpts) -> GenerateParams {
         quality: o.quality.clone(),
         output_format: o.format.clone(),
         output_compression: o.compression,
+        frame_count: None,
+        frame_duration_ms: None,
+        complexity: None,
         background: o.background.clone(),
         moderation: o.moderation.clone(),
         n: number,
@@ -286,18 +295,17 @@ fn start_spinner(msg: &str) -> indicatif::ProgressBar {
 
 async fn generate_cli(o: GenerateOptions) -> Result<SavedOutput> {
     validate_out(&o.out, o.number)?;
+    let mut params = gen_params(o.prompt, o.number, &o.out);
+    params.frame_count = o.frames;
+    params.frame_duration_ms = o.frame_ms;
+    params.complexity = o.complexity;
+    images::validate_generate(&params).map_err(|e| eyre!(e))?;
     let backend = backend_of(&o.backend)?;
     if matches!(backend, Backend::ChatGpt { .. }) && o.number != 1 {
         return Err(eyre!("--api chatgpt generates one image per call; drop -n"));
     }
     let spinner = start_spinner("Generating image...");
-    let result = generate_data(
-        gen_params(o.prompt, o.number, &o.out),
-        backend,
-        o.out.output,
-        o.out.output_dir,
-    )
-    .await;
+    let result = generate_data(params, backend, o.out.output, o.out.output_dir).await;
     spinner.finish_and_clear();
     result
 }
@@ -305,6 +313,7 @@ async fn generate_cli(o: GenerateOptions) -> Result<SavedOutput> {
 async fn edit_cli(o: EditOptions) -> Result<SavedOutput> {
     validate_out(&o.out, o.number)?;
     validate_fidelity(&o.input_fidelity)?;
+    images::validate_edit_format(&o.out.format).map_err(|e| eyre!(e))?;
     images::validate_image_count(o.images.len()).map_err(|e| eyre!(e))?;
     let backend = backend_of(&o.backend)?;
     if matches!(backend, Backend::ChatGpt { .. }) && o.number != 1 {
@@ -328,6 +337,7 @@ async fn edit_cli(o: EditOptions) -> Result<SavedOutput> {
 async fn vary_cli(o: VaryOptions) -> Result<SavedOutput> {
     validate_out(&o.out, o.number)?;
     validate_fidelity(&o.input_fidelity)?;
+    images::validate_edit_format(&o.out.format).map_err(|e| eyre!(e))?;
     images::validate_image_count(o.images.len()).map_err(|e| eyre!(e))?;
     let backend = backend_of(&o.backend)?;
     if matches!(backend, Backend::ChatGpt { .. }) && o.number != 1 {
@@ -576,9 +586,11 @@ pub async fn generate_data(
     output: Option<std::path::PathBuf>,
     output_dir: std::path::PathBuf,
 ) -> Result<SavedOutput> {
+    images::validate_generate(&params).map_err(|e| eyre!(e))?;
+    images::validate_generate_backend(&params, matches!(backend, Backend::OpenAi { .. }))
+        .map_err(|e| eyre!(e))?;
     match backend {
         Backend::OpenAi { api_key, base_url } => {
-            images::validate_n(params.n).map_err(|e| eyre!(e))?;
             if output.is_some() && params.n != 1 {
                 return Err(eyre!("--output requires -n 1"));
             }
@@ -654,6 +666,10 @@ pub async fn edit_data(
     output_dir: std::path::PathBuf,
 ) -> Result<SavedOutput> {
     images::validate_image_count(image_paths.len()).map_err(|e| eyre!(e))?;
+    images::validate_edit_format(&params.output_format).map_err(|e| eyre!(e))?;
+    for path in image_paths.iter().chain(mask_path.iter()) {
+        images::validate_edit_filename(&path.to_string_lossy()).map_err(|e| eyre!(e))?;
+    }
     let validated = if let Some(path) = &markup_path {
         if matches!(backend, Backend::ChatGpt { .. }) {
             return Err(eyre!("markup requires --api openai"));
@@ -811,6 +827,62 @@ mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn cli_gif_sends_options_and_saves_bytes() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "created": 1, "data": [{"b64_json": "R0lGODlh"}]
+            })))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::try_parse_from([
+            "images",
+            "generate",
+            "fox",
+            "--api",
+            "openai",
+            "--api-key",
+            "test",
+            "--base-url",
+            &server.uri(),
+            "--output-dir",
+            dir.path().to_str().unwrap(),
+            "--format",
+            "gif",
+            "--frames",
+            "4",
+            "--frame-ms",
+            "205",
+            "--complexity",
+            "low",
+        ])
+        .unwrap();
+        let Commands::Generate(options) = app.command else {
+            panic!()
+        };
+        let saved = generate_cli(options).await.unwrap();
+        assert!(saved.files[0].ends_with(".gif"));
+        assert_eq!(std::fs::read(&saved.files[0]).unwrap(), b"GIF89a");
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url.path(), "/images/generations");
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["output_format"], "gif");
+        for field in [
+            "stream",
+            "partial_images",
+            "output_compression",
+            "prompt_rewriter",
+        ] {
+            assert!(body.get(field).is_none());
+        }
+        assert_eq!(body["frame_count"], 4);
+        assert_eq!(body["frame_duration_ms"], 210);
+        assert_eq!(body["complexity"], "low");
+    }
 
     #[test]
     fn edit_accepts_markup() {

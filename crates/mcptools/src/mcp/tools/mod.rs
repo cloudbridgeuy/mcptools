@@ -779,7 +779,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<crate::images::SavedOutput>(),
             name: "images_generate".to_string(),
-            description: "Generate images with ChatGPT Images 2.5 (gpt-image-2.5-flare default, gpt-image-2.5-sunburst for premium precision). Text-to-image via POST /v1/images/generations. Saves PNG/JPEG/WebP files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
+            description: "Generate images with GPT Image 2.6 (gpt-image-2.6-flare default). Saves PNG/JPEG/WebP files; GIF and SVG generation require api=openai. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
             input_schema: schema::input_schema_for::<images::ImagesGenerateArgs>(),
             summary: "Generate images from a text prompt and save them to files",
             kind: ToolKind::Spend,
@@ -788,7 +788,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<crate::images::SavedOutput>(),
             name: "images_edit".to_string(),
-            description: "Edit ChatGPT Images 2.5 images with a prompt plus 1-16 reference image file paths and optional mask or PNG markup via POST /v1/images/edits. Markup requires api=openai and cannot be combined with a mask. Saves files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
+            description: "Edit GPT images with a prompt plus 1-16 reference image file paths and optional mask or PNG markup. Markup requires api=openai and cannot be combined with a mask. GIF and SVG output and SVG input are not supported. Defaults to the ChatGPT subscription; pass api=openai for the metered API.".to_string(),
             input_schema: schema::input_schema_for::<images::ImagesEditArgs>(),
             summary: "Edit images with a prompt, reference image files, and an optional mask",
             kind: ToolKind::Spend,
@@ -797,7 +797,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<crate::images::SavedOutput>(),
             name: "images_vary".to_string(),
-            description: "Create variations of ChatGPT Images 2.5 images anchored to 1-16 reference images. Same as images_edit with a default variation prompt when prompt is omitted. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
+            description: "Create variations anchored to 1-16 reference images. Same as images_edit with a default prompt; GIF and SVG output and SVG input are not supported. Defaults to the ChatGPT subscription; pass api=openai for the metered API.".to_string(),
             input_schema: schema::input_schema_for::<images::ImagesVaryArgs>(),
             summary: "Create variations of reference images",
             kind: ToolKind::Spend,

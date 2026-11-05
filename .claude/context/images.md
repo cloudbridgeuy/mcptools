@@ -25,6 +25,8 @@ mcptools images vary --image /tmp/fox.png --prompt "same fox, cyberpunk style" -
 mcptools images generate "a lighthouse" --api openai --model gpt-image-2.6-sunburst -n 2 --output-dir /tmp
 ```
 
+GIF and SVG generation require `--api openai`. Use `--format gif --frames 9 --frame-ms 200` for animation, or `--format svg --complexity high` for SVG. GIF accepts 2–64 frames and 20–2000 ms per frame, rounded to the nearest 10 ms (ties round up). Defaults are 9 frames and 200 ms. Complexity accepts `low`, `medium`, or `high` and defaults to `high`. GIF and SVG do not support compression; SVG requires `-n 1`. These formats and complexity are unavailable for edits and variations, and SVG is not an edit input. SVG quality selects the reference raster quality; `auto` omits the quality field and lets the API choose.
+
 Output: saved file paths, one per line (or JSON metadata with `--json`). A cyan spinner ticks on stderr during the request. `--open` launches the system viewer after saving. `--preview` displays each saved PNG inline in Kitty or Ghostty when stdout is a terminal and `--json` is absent. In tmux, enable passthrough with `set -g allow-passthrough on`. Other formats and unsupported output skip the preview with a notice; saved files remain available. `-n` above 1 works only with `--api openai`; the subscription returns one image per call.
 
 ## MCP Tools
@@ -41,6 +43,9 @@ Tool names: `images_generate`, `images_edit`, `images_vary`
 | `quality` | string | no | `auto` |
 | `outputFormat` | string | no | `png` |
 | `outputCompression` | integer | no | — |
+| `frameCount` | integer | no | `9` (GIF) |
+| `frameDurationMs` | integer | no | `200` (GIF) |
+| `complexity` | string | no | `high` (API default) |
 | `background` | string | no | `auto` |
 | `moderation` | string | no | — |
 | `inputFidelity` | string | no | — |

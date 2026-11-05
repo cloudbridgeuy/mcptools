@@ -72,7 +72,7 @@ For detailed usage of each feature, see the context files:
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC; render offline HTML with Mermaid
-- **[Images](.claude/context/images.md)** - Image generation, editing, variations, terminal preview; subscription or API key; GPT Image 2.6 on both; default gpt-image-2.6-flare
+- **[Images](.claude/context/images.md)** - Image generation, editing, variations, terminal preview; GIF and SVG generation via API key; subscription or API key; GPT Image 2.6 on both; default gpt-image-2.6-flare
 - **[PDF Navigation](.claude/context/pdf.md)** - PDF document tree, section reading, image extraction
 - **[UI Annotations](.claude/context/annotations.md)** - Dev overlay annotation management for calendsync
 - **[Agent Setup](.claude/context/agent-setup.md)** - User-level agent integration; setup, status, uninstall for codex, claude, opencode
