@@ -1,6 +1,6 @@
 # Images: Generation via Subscription or API Key
 
-Generates, edits, and varies images with `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, `gpt-image-2.6-flare` (default), and `gpt-image-2.6-sunburst`. The 2.6 models are supported via `--api openai` (MCP: `api=openai`). Two backends: the ChatGPT subscription (default, `--api chatgpt`) through the Codex Responses backend with the `image_generation` tool, and the metered OpenAI Image API (`--api openai`) with `OPENAI_API_KEY`.
+Generates, edits, and varies images with `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, `gpt-image-2.6-flare` (default), and `gpt-image-2.6-sunburst`. The 2.6 models work with both the ChatGPT subscription and the API key (`--api openai`, MCP: `api=openai`). Two backends: the ChatGPT subscription (default, `--api chatgpt`) through the Codex Responses backend with the `image_generation` tool, and the metered OpenAI Image API (`--api openai`) with `OPENAI_API_KEY`.
 
 Subscription auth reuses llm-stream credentials: `mcptools` reads `<config_dir>/auth.json` (default `~/.config/llm-stream`), refreshes the access token when near expiry, and writes back with mode `0600`. First sign-in happens via `llm-stream --login`; there is no `images login` command.
 
@@ -73,6 +73,6 @@ Follows the Functional Core - Imperative Shell pattern:
 
 ## Notes
 
-- The subscription request sends the requested image model unchanged in the image tool. Remote acceptance or normalization of 2.6 models is unverified.
+- The subscription request sends the requested image model unchanged in the image tool. The subscription accepted the default gpt-image-2.6-flare in a live generate run on 2026-11-05.
 - There is no variations endpoint for GPT image models; `vary` is `edit` with a subject-preserving default prompt.
 - The Codex backend requires streaming; the shell sends `stream: true` and reads the image from `output_item.done` events (`response.completed` carries empty output there).
