@@ -788,7 +788,7 @@ pub fn registered_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<crate::images::SavedOutput>(),
             name: "images_edit".to_string(),
-            description: "Edit ChatGPT Images 2.5 images with a prompt plus 1-16 reference image file paths and optional mask via POST /v1/images/edits. Saves files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
+            description: "Edit ChatGPT Images 2.5 images with a prompt plus 1-16 reference image file paths and optional mask or PNG markup via POST /v1/images/edits. Markup requires api=openai and cannot be combined with a mask. Saves files and returns paths plus usage. Defaults to the ChatGPT subscription (llm-stream auth.json); pass api=openai with OPENAI_API_KEY for the metered API.".to_string(),
             input_schema: schema::input_schema_for::<images::ImagesEditArgs>(),
             summary: "Edit images with a prompt, reference image files, and an optional mask",
             kind: ToolKind::Spend,

@@ -117,6 +117,8 @@ pub struct EditOptions {
     #[clap(long)]
     pub mask: Option<std::path::PathBuf>,
     #[clap(long)]
+    pub markup: Option<std::path::PathBuf>,
+    #[clap(long)]
     pub input_fidelity: Option<String>,
     #[clap(long, short = 'n', default_value_t = 1)]
     pub number: u8,
@@ -313,6 +315,7 @@ async fn edit_cli(o: EditOptions) -> Result<SavedOutput> {
         edit_params(o.prompt, o.number, o.input_fidelity, &o.out),
         o.images,
         o.mask,
+        o.markup,
         backend,
         o.out.output,
         o.out.output_dir,
@@ -417,6 +420,10 @@ async fn image_part(path: &std::path::Path) -> Result<reqwest::multipart::Part> 
     let bytes = tokio::fs::read(path)
         .await
         .map_err(|e| eyre!("Failed to read '{}': {e}", path.display()))?;
+    image_part_bytes(path, bytes)
+}
+
+fn image_part_bytes(path: &std::path::Path, bytes: Vec<u8>) -> Result<reqwest::multipart::Part> {
     let name = path
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
@@ -432,6 +439,7 @@ fn edit_form(
     p: &EditParams,
     image_parts: Vec<reqwest::multipart::Part>,
     mask: Option<reqwest::multipart::Part>,
+    markup: Option<reqwest::multipart::Part>,
 ) -> reqwest::multipart::Form {
     let mut form = reqwest::multipart::Form::new()
         .text("model", p.model.clone())
@@ -455,6 +463,9 @@ fn edit_form(
     }
     if let Some(m) = mask {
         form = form.part("mask", m);
+    }
+    if let Some(m) = markup {
+        form = form.part("markup", m);
     }
     form
 }
@@ -637,25 +648,63 @@ pub async fn edit_data(
     params: EditParams,
     image_paths: Vec<std::path::PathBuf>,
     mask_path: Option<std::path::PathBuf>,
+    markup_path: Option<std::path::PathBuf>,
     backend: Backend,
     output: Option<std::path::PathBuf>,
     output_dir: std::path::PathBuf,
 ) -> Result<SavedOutput> {
     images::validate_image_count(image_paths.len()).map_err(|e| eyre!(e))?;
+    let validated = if let Some(path) = &markup_path {
+        if matches!(backend, Backend::ChatGpt { .. }) {
+            return Err(eyre!("markup requires --api openai"));
+        }
+        use tokio::io::AsyncReadExt;
+        let file = tokio::fs::File::open(path)
+            .await
+            .map_err(|e| eyre!("Failed to read '{}': {e}", path.display()))?;
+        let mut markup = Vec::new();
+        file.take((images::MAX_MARKUP_BYTES + 1) as u64)
+            .read_to_end(&mut markup)
+            .await
+            .map_err(|e| eyre!("Failed to read '{}': {e}", path.display()))?;
+        let image = tokio::fs::read(&image_paths[0])
+            .await
+            .map_err(|e| eyre!("Failed to read '{}': {e}", image_paths[0].display()))?;
+        images::validate_markup(&image, &markup, mask_path.is_some()).map_err(|e| eyre!(e))?;
+        Some((image, markup))
+    } else {
+        None
+    };
     match backend {
         Backend::OpenAi { api_key, base_url } => {
             if output.is_some() && params.n != 1 {
                 return Err(eyre!("--output requires -n 1"));
             }
             let mut parts = Vec::with_capacity(image_paths.len());
-            for p in &image_paths {
+            let (mut first, markup_bytes) = match validated {
+                Some((image, markup)) => (Some(image), Some(markup)),
+                None => (None, None),
+            };
+            for (index, p) in image_paths.iter().enumerate() {
+                if index == 0 {
+                    if let Some(image) = first.take() {
+                        parts.push(image_part_bytes(p, image)?);
+                        continue;
+                    }
+                }
                 parts.push(image_part(p).await?);
             }
             let mask = match mask_path {
                 Some(m) => Some(image_part(&m).await?),
                 None => None,
             };
-            let form = edit_form(&params, parts, mask);
+            let markup = match (markup_path, markup_bytes) {
+                (Some(path), Some(bytes)) => {
+                    Some(image_part_bytes(&path, bytes)?.mime_str("image/png")?)
+                }
+                _ => None,
+            };
+            let form = edit_form(&params, parts, mask, markup);
             let client = reqwest::Client::new();
             let resp = post_openai_edit(&client, &base_url, &api_key, form).await?;
             let mut binaries = Vec::with_capacity(resp.data.len());
@@ -754,7 +803,7 @@ pub async fn vary_data(
         input_fidelity,
         n,
     };
-    edit_data(params, image_paths, None, backend, output, output_dir).await
+    edit_data(params, image_paths, None, None, backend, output, output_dir).await
 }
 
 #[cfg(test)]
@@ -762,6 +811,101 @@ mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn edit_accepts_markup() {
+        assert!(App::try_parse_from([
+            "images",
+            "edit",
+            "otter",
+            "--image",
+            "input.png",
+            "--markup",
+            "markup.png"
+        ])
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn markup_is_uploaded_and_chatgpt_rejects_it() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"created": 1, "data": []})),
+            )
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("first.png");
+        let other = dir.path().join("other.png");
+        let markup = dir.path().join("marks.jpg");
+        use base64::Engine;
+        let png = base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==").unwrap();
+        let marks = base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg==").unwrap();
+        std::fs::write(&image, &png).unwrap();
+        std::fs::write(&other, &png).unwrap();
+        std::fs::write(&markup, &marks).unwrap();
+        let image = image.to_str().unwrap();
+        let other = other.to_str().unwrap();
+        let markup = markup.to_str().unwrap();
+        let base_url = server.uri();
+        let args = [
+            "images",
+            "edit",
+            "otter",
+            "--image",
+            image,
+            "--image",
+            other,
+            "--markup",
+            markup,
+            "--api",
+            "openai",
+            "--api-key",
+            "test",
+            "--base-url",
+            &base_url,
+        ];
+        let Commands::Edit(options) = App::try_parse_from(args).unwrap().command else {
+            panic!()
+        };
+        edit_cli(options).await.unwrap();
+        let requests = server.received_requests().await.unwrap();
+        let body = &requests[0].body;
+        assert!(body.windows(marks.len()).any(|part| part == marks));
+        let text = String::from_utf8_lossy(body);
+        let markup_headers = text
+            .split("\r\n\r\n")
+            .find(|headers| headers.contains("name=\"markup\"; filename=\"marks.jpg\""))
+            .unwrap();
+        assert!(markup_headers
+            .lines()
+            .any(|header| header.eq_ignore_ascii_case("content-type: image/png")));
+        assert_eq!(text.matches("name=\"image[]\"").count(), 2);
+        std::fs::write(markup, b"not a PNG").unwrap();
+        let Commands::Edit(options) = App::try_parse_from(args).unwrap().command else {
+            panic!()
+        };
+        assert!(edit_cli(options)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("markup must be a PNG"));
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        let args = [
+            "images", "edit", "otter", "--image", image, "--markup", markup, "--api", "chatgpt",
+        ];
+        let Commands::Edit(options) = App::try_parse_from(args).unwrap().command else {
+            panic!()
+        };
+        assert!(edit_cli(options)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("markup requires"));
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
 
     #[test]
     fn help_lists_image_26_models() {

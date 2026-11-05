@@ -40,6 +40,10 @@ pub struct ImagesEditArgs {
     pub images: Vec<String>,
     pub mask: Option<String>,
     #[schemars(
+        description = "Local transparent PNG markup path matching the first image dimensions; requires api=openai and cannot be combined with mask."
+    )]
+    pub markup: Option<String>,
+    #[schemars(
         description = "Image model (default: gpt-image-2.6-flare). gpt-image-2.6-flare and gpt-image-2.6-sunburst are supported via api=openai."
     )]
     pub model: Option<String>,
@@ -238,6 +242,7 @@ pub async fn handle_images_edit(
             .map(std::path::PathBuf::from)
             .collect(),
         args.mask.map(std::path::PathBuf::from),
+        args.markup.map(std::path::PathBuf::from),
         backend_of(&BackendArgs {
             api: args.api,
             config_dir: args.config_dir,
@@ -294,6 +299,19 @@ mod tests {
     use super::*;
     use clap::Parser;
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn markup_schema_and_handler_are_wired() {
+        let schema = super::super::schema::input_schema_for::<ImagesEditArgs>();
+        assert!(schema["properties"]["markup"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("PNG"));
+        let global = crate::Global::try_parse_from(["mcptools"]).unwrap();
+        let args = serde_json::json!({"prompt": "edit", "images": ["missing.png"], "markup": "missing-markup.png"});
+        let error = handle_images_edit(Some(args), &global).await.unwrap_err();
+        assert!(error.message.contains("markup requires"));
+    }
 
     #[test]
     fn model_schema_describes_image_26_availability() {

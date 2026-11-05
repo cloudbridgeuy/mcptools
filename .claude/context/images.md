@@ -76,3 +76,7 @@ Follows the Functional Core - Imperative Shell pattern:
 - The subscription request sends the requested image model unchanged in the image tool. The subscription accepted the default gpt-image-2.6-flare in a live generate run on 2026-11-05.
 - There is no variations endpoint for GPT image models; `vary` is `edit` with a subject-preserving default prompt.
 - The Codex backend requires streaming; the shell sends `stream: true` and reads the image from `output_item.done` events (`response.completed` carries empty output there).
+
+Markup edits: CLI `images edit --markup PATH` and MCP `images_edit` accept a transparent PNG overlay with `api=openai`. It must match the first reference image dimensions. Each of those images is limited to 16,777,216 pixels; markup is limited to 50,000,000 bytes. Markup and mask cannot be combined. Other reference images remain supported. ChatGPT subscription edits reject markup before authentication or requests. GPT Image 2.5 and 2.6 support markup.
+
+Example: `mcptools images edit "Change the marked area" --image input.png --markup overlay.png --api openai`. Validation reads image headers and does not decode image data or inspect transparency. The API validates image content and transparency.

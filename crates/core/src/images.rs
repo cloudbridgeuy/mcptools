@@ -18,6 +18,7 @@ pub const NOT_SIGNED_IN: &str = "not signed in — run: llm-stream --login";
 pub const VARY_PROMPT: &str =
     "Create a variation of this image, preserving subject, style and composition.";
 pub const MAX_INPUT_IMAGES: usize = 16;
+pub const MAX_MARKUP_BYTES: usize = 50_000_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateParams {
@@ -498,6 +499,110 @@ pub fn validate_image_count(n: usize) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_markup(image: &[u8], markup: &[u8], has_mask: bool) -> Result<(), String> {
+    if has_mask {
+        return Err("markup cannot be combined with mask".into());
+    }
+    if markup.len() > MAX_MARKUP_BYTES {
+        return Err("markup exceeds 50,000,000 bytes".into());
+    }
+    let first = image_dimensions(image).ok_or("invalid or unsupported first image")?;
+    let marked = png_dimensions(markup).ok_or("markup must be a PNG image")?;
+    for (width, height) in [first, marked] {
+        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 16_777_216 {
+            return Err("image dimensions must be nonzero and at most 16,777,216 pixels".into());
+        }
+    }
+    if first != marked {
+        return Err("markup dimensions must match the first image".into());
+    }
+    Ok(())
+}
+
+fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    if data.len() < 33 || data.get(..16)? != b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" {
+        return None;
+    }
+    Some((
+        u32::from_be_bytes(data.get(16..20)?.try_into().ok()?),
+        u32::from_be_bytes(data.get(20..24)?.try_into().ok()?),
+    ))
+}
+
+fn image_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    if let Some(dimensions) = png_dimensions(data) {
+        return Some(dimensions);
+    }
+    if data.starts_with(b"RIFF") && data.get(8..12)? == b"WEBP" {
+        return match data.get(12..16)? {
+            b"VP8X" => Some((
+                1 + u32::from_le_bytes([
+                    data.get(24).copied()?,
+                    data.get(25).copied()?,
+                    data.get(26).copied()?,
+                    0,
+                ]),
+                1 + u32::from_le_bytes([
+                    data.get(27).copied()?,
+                    data.get(28).copied()?,
+                    data.get(29).copied()?,
+                    0,
+                ]),
+            )),
+            b"VP8L" if *data.get(20)? == 0x2f => {
+                let bits = u32::from_le_bytes(data.get(21..25)?.try_into().ok()?);
+                Some(((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1))
+            }
+            b"VP8 " if data.get(23..26)? == b"\x9d\x01\x2a" => Some((
+                u32::from(u16::from_le_bytes(data.get(26..28)?.try_into().ok()?) & 0x3fff),
+                u32::from(u16::from_le_bytes(data.get(28..30)?.try_into().ok()?) & 0x3fff),
+            )),
+            _ => None,
+        };
+    }
+    if !data.starts_with(b"\xff\xd8") {
+        return None;
+    }
+    let mut offset = 2;
+    while offset < data.len() {
+        if *data.get(offset)? != 0xff {
+            return None;
+        }
+        while *data.get(offset)? == 0xff {
+            offset += 1;
+        }
+        let marker = *data.get(offset)?;
+        offset += 1;
+        if marker == 0xd9 || marker == 0xda {
+            return None;
+        }
+        if marker == 0x01 || (0xd0..=0xd7).contains(&marker) {
+            continue;
+        }
+        let len = usize::from(u16::from_be_bytes(
+            data.get(offset..offset + 2)?.try_into().ok()?,
+        ));
+        if len < 2 || offset.checked_add(len)? > data.len() {
+            return None;
+        }
+        if matches!(marker, 0xc0..=0xc3 | 0xc5..=0xc7 | 0xc9..=0xcb | 0xcd..=0xcf) {
+            if len < 7 {
+                return None;
+            }
+            return Some((
+                u32::from(u16::from_be_bytes(
+                    data.get(offset + 5..offset + 7)?.try_into().ok()?,
+                )),
+                u32::from(u16::from_be_bytes(
+                    data.get(offset + 3..offset + 5)?.try_into().ok()?,
+                )),
+            ));
+        }
+        offset += len;
+    }
+    None
+}
+
 pub fn extension_for_format(format: &str) -> &str {
     match format {
         "jpeg" => "jpg",
@@ -788,5 +893,65 @@ mod tests {
         let v = parse_sse_payloads(raw);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0]["type"], "x");
+    }
+}
+
+#[cfg(test)]
+mod markup_tests {
+    use super::*;
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        bytes.extend(w.to_be_bytes());
+        bytes.extend(h.to_be_bytes());
+        bytes.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        bytes
+    }
+
+    #[test]
+    fn reads_jpeg_and_webp_headers() {
+        let jpeg = [0xff, 0xd8, 0xff, 0xc0, 0, 7, 8, 0, 2, 0, 3];
+        assert_eq!(image_dimensions(&jpeg), Some((3, 2)));
+        assert_eq!(image_dimensions(&jpeg[..9]), None);
+        let mut webp = [0u8; 30];
+        webp[..4].copy_from_slice(b"RIFF");
+        webp[8..12].copy_from_slice(b"WEBP");
+        webp[12..16].copy_from_slice(b"VP8X");
+        webp[24] = 2;
+        webp[27] = 1;
+        assert_eq!(image_dimensions(&webp), Some((3, 2)));
+        assert_eq!(image_dimensions(&webp[..27]), None);
+        webp[12..16].copy_from_slice(b"VP8L");
+        webp[20] = 0x2f;
+        webp[21..25].copy_from_slice(&(2u32 | (1 << 14)).to_le_bytes());
+        assert_eq!(image_dimensions(&webp), Some((3, 2)));
+        webp[12..16].copy_from_slice(b"VP8 ");
+        webp[23..26].copy_from_slice(b"\x9d\x01\x2a");
+        webp[26..28].copy_from_slice(&3u16.to_le_bytes());
+        webp[28..30].copy_from_slice(&2u16.to_le_bytes());
+        assert_eq!(image_dimensions(&webp), Some((3, 2)));
+        assert_eq!(image_dimensions(&webp[..29]), None);
+    }
+
+    #[test]
+    fn markup_checks_format_dimensions_and_limits() {
+        let image = png(4096, 4096);
+        assert!(validate_markup(&image, &image, false).is_ok());
+        assert!(validate_markup(&image, b"not a png", false).is_err());
+        assert!(validate_markup(&image, &image[..24], false).is_err());
+        assert!(validate_markup(&png(4097, 4096), &image, false).is_err());
+        assert!(validate_markup(&image, &png(4097, 4096), false).is_err());
+        assert!(validate_markup(&image, &png(1, 1), false).is_err());
+        assert!(validate_markup(&image, &image, true).is_err());
+        assert!(validate_markup(&png(0, 1), &png(0, 1), false).is_err());
+        assert!(
+            validate_markup(&png(u32::MAX, u32::MAX), &png(u32::MAX, u32::MAX), false).is_err()
+        );
+        assert!(validate_markup(&png(4097, 4096), &png(4097, 4096), false).is_err());
+        let mut large = png(4096, 4096);
+        large.resize(50_000_000, 0);
+        assert!(validate_markup(&image, &large, false).is_ok());
+        large.push(0);
+        assert!(validate_markup(&image, &large, false).is_err());
     }
 }
