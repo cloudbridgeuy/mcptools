@@ -85,6 +85,7 @@ pub mod hn;
 pub mod images;
 pub mod jev;
 pub mod json_schema;
+pub mod kitty;
 pub mod lane;
 pub mod linear;
 pub mod llm_stream;

@@ -1,4 +1,5 @@
 pub mod auth;
+mod preview;
 
 use crate::open::maybe_open;
 use crate::prelude::{println, *};
@@ -68,6 +69,8 @@ pub struct OutOpts {
     pub json: bool,
     #[clap(long)]
     pub open: bool,
+    #[clap(long)]
+    pub preview: bool,
 }
 
 #[derive(Debug, clap::Parser)]
@@ -165,24 +168,30 @@ pub async fn run(app: App, _global: crate::Global) -> Result<()> {
         Commands::Generate(o) => {
             let open = o.out.open;
             let json = o.out.json;
+            let preview = o.out.preview;
             let saved = generate_cli(o).await?;
             print_saved(&saved, json)?;
+            preview::show(&saved, preview, json);
             maybe_open(&saved.files, open);
             Ok(())
         }
         Commands::Edit(o) => {
             let open = o.out.open;
             let json = o.out.json;
+            let preview = o.out.preview;
             let saved = edit_cli(o).await?;
             print_saved(&saved, json)?;
+            preview::show(&saved, preview, json);
             maybe_open(&saved.files, open);
             Ok(())
         }
         Commands::Vary(o) => {
             let open = o.out.open;
             let json = o.out.json;
+            let preview = o.out.preview;
             let saved = vary_cli(o).await?;
             print_saved(&saved, json)?;
+            preview::show(&saved, preview, json);
             maybe_open(&saved.files, open);
             Ok(())
         }

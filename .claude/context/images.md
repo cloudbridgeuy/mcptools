@@ -25,7 +25,7 @@ mcptools images vary --image /tmp/fox.png --prompt "same fox, cyberpunk style" -
 mcptools images generate "a lighthouse" --api openai --model gpt-image-2.5-sunburst -n 2 --output-dir /tmp
 ```
 
-Output: saved file paths, one per line (or JSON metadata with `--json`). A cyan spinner ticks on stderr during the request. `--open` launches the system viewer after saving. `-n` above 1 works only with `--api openai`; the subscription returns one image per call.
+Output: saved file paths, one per line (or JSON metadata with `--json`). A cyan spinner ticks on stderr during the request. `--open` launches the system viewer after saving. `--preview` displays each saved PNG inline in Kitty or Ghostty when stdout is a terminal and `--json` is absent. In tmux, enable passthrough with `set -g allow-passthrough on`. Other formats and unsupported output skip the preview with a notice; saved files remain available. `-n` above 1 works only with `--api openai`; the subscription returns one image per call.
 
 ## MCP Tools
 
