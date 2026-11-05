@@ -139,3 +139,146 @@ fn config_check_reports_path_key_and_parse_location_without_secrets() {
         assert!(!error.contains("secret-value"));
     }
 }
+
+#[test]
+fn atlassian_file_only_and_invalid_fields() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[atlassian]\nbase_url = 'https://example.test'\nemail = 'a@example.test'\napi_token = 'secret-value'\n[atlassian.jira]\nboard_id = 42\n[atlassian.confluence]\nemail = 'b@example.test'\n[atlassian.bitbucket]\nusername = 'user'\napp_password = 'secret-value'\nbase_url = 'https://bitbucket.test'\n").unwrap();
+    let checked = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    std::fs::write(&path, "[atlassian.jira]\nboard_id = 'secret-value'\n").unwrap();
+    let checked = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .unwrap();
+    assert!(!checked.status.success());
+    assert!(!String::from_utf8_lossy(&checked.stderr).contains("secret-value"));
+}
+
+#[cfg(unix)]
+#[test]
+fn atlassian_config_permission_warning() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[atlassian]\napi_token = 'secret-value'\n").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let checked = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .unwrap();
+    assert!(checked.status.success());
+    let output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&checked.stdout),
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(output.contains("chmod 600"), "{output}");
+    assert!(!output.contains("secret-value"));
+    for mode in [0o640, 0o604, 0o600] {
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+        let checked = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(checked.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&checked.stderr).contains("chmod 600"),
+            mode != 0o600
+        );
+    }
+}
+
+#[tokio::test]
+async fn jira_file_service_and_environment_shared_precedence() {
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let stub = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/rest/agile/1.0/board/42/sprint"))
+        .and(header(
+            "authorization",
+            "Basic c2VydmljZS1lbWFpbDpzZXJ2aWNlLXRva2Vu",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"maxResults": 50, "startAt": 0, "values": [], "isLast": true}),
+        ))
+        .expect(1)
+        .mount(&stub)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/rest/agile/1.0/board/42/sprint"))
+        .and(header(
+            "authorization",
+            "Basic ZW52LWVtYWlsOmVudi10b2tlbg==",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"maxResults": 50, "startAt": 0, "values": [], "isLast": true}),
+        ))
+        .expect(3)
+        .mount(&stub)
+        .await;
+    let home = tempfile::tempdir().unwrap();
+    let config = home.path().join("config.toml");
+    std::fs::write(&config, format!("[atlassian]\nbase_url = 'http://127.0.0.1:1'\nemail = 'shared'\napi_token = 'shared'\n[atlassian.jira]\nbase_url = '{}'\nemail = 'service-email'\napi_token = 'service-token'\nboard_id = 42\n", stub.uri())).unwrap();
+    for mode in 0..4 {
+        let mut cmd = command(home.path());
+        for key in [
+            "ATLASSIAN_BASE_URL",
+            "ATLASSIAN_EMAIL",
+            "ATLASSIAN_API_TOKEN",
+            "JIRA_BASE_URL",
+            "JIRA_EMAIL",
+            "JIRA_API_TOKEN",
+            "JIRA_BOARD_ID",
+        ] {
+            cmd.env_remove(key);
+        }
+        cmd.env("MCPTOOLS_CONFIG", &config)
+            .args(["atlassian", "jira", "sprint", "list"]);
+        if mode > 0 {
+            if mode >= 2 {
+                cmd.env("MCPTOOLS_CONFIG", home.path().join("missing.toml"))
+                    .env("JIRA_BOARD_ID", "42");
+            }
+            if mode == 3 {
+                cmd.env_remove("HOME")
+                    .env_remove("XDG_CONFIG_HOME")
+                    .env_remove("MCPTOOLS_CONFIG");
+            }
+            cmd.env("ATLASSIAN_BASE_URL", stub.uri())
+                .env("ATLASSIAN_EMAIL", "env-email")
+                .env("ATLASSIAN_API_TOKEN", "env-token");
+        }
+        let output = tokio::task::spawn_blocking(move || cmd.output().unwrap())
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for subcommand in ["path", "check"] {
+        let output = command(home.path())
+            .env_remove("HOME")
+            .args(["config", subcommand])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Cannot resolve config path"));
+    }
+}

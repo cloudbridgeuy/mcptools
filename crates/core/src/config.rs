@@ -7,6 +7,55 @@ use std::path::{Path, PathBuf};
 #[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
     pub gateway: gateway::Config,
+    pub atlassian: Atlassian,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Atlassian {
+    pub base_url: Option<String>,
+    pub email: Option<String>,
+    pub api_token: Option<String>,
+    pub jira: Jira,
+    pub confluence: Confluence,
+    pub bitbucket: Bitbucket,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Jira {
+    pub base_url: Option<String>,
+    pub email: Option<String>,
+    pub api_token: Option<String>,
+    pub board_id: Option<u64>,
+    pub query: Option<String>,
+    pub issue_key: Option<String>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Confluence {
+    pub base_url: Option<String>,
+    pub email: Option<String>,
+    pub api_token: Option<String>,
+    pub query: Option<String>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Bitbucket {
+    pub base_url: Option<String>,
+    pub username: Option<String>,
+    pub app_password: Option<String>,
+}
+
+pub fn resolve<T>(
+    service: Option<T>,
+    shared: Option<T>,
+    file_service: Option<T>,
+    file_shared: Option<T>,
+) -> Option<T> {
+    service.or(shared).or(file_service).or(file_shared)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -19,8 +68,19 @@ pub fn config_path(
     home: Option<&Path>,
     cwd: &Path,
 ) -> Result<PathBuf, Error> {
+    optional_config_path(override_path, xdg_config_home, home, cwd).ok_or_else(|| {
+        Error("Cannot resolve config path: set HOME, XDG_CONFIG_HOME or MCPTOOLS_CONFIG".into())
+    })
+}
+
+pub fn optional_config_path(
+    override_path: Option<&OsStr>,
+    xdg_config_home: Option<&OsStr>,
+    home: Option<&Path>,
+    cwd: &Path,
+) -> Option<PathBuf> {
     if let Some(path) = override_path.filter(|path| !path.is_empty()).map(Path::new) {
-        return Ok(if path.is_absolute() {
+        return Some(if path.is_absolute() {
             path.to_owned()
         } else {
             cwd.join(path)
@@ -33,11 +93,8 @@ pub fn config_path(
         .or_else(|| {
             home.filter(|path| !path.as_os_str().is_empty())
                 .map(|home| home.join(".config"))
-        })
-        .ok_or_else(|| {
-            Error("Cannot resolve config path: set HOME, XDG_CONFIG_HOME or MCPTOOLS_CONFIG".into())
         })?;
-    Ok(directory.join("mcptools/config.toml"))
+    Some(directory.join("mcptools/config.toml"))
 }
 
 pub fn cache_path(config_path: &Path) -> Result<PathBuf, Error> {
@@ -97,6 +154,10 @@ mod tests {
             Path::new("/home/test/.config/mcptools/config.toml")
         );
         assert!(config_path(None, None, None, Path::new("/cwd")).is_err());
+        assert_eq!(
+            optional_config_path(None, None, None, Path::new("/cwd")),
+            None
+        );
     }
 
     #[test]
@@ -107,5 +168,82 @@ mod tests {
                 .unwrap();
         assert!(!error.to_string().contains("secret-value"));
         assert!(error.to_string().contains("line 4"));
+    }
+}
+
+#[cfg(test)]
+mod atlassian_regressions {
+    use super::*;
+
+    #[test]
+    fn file_only_and_service_over_shared() {
+        let config = parse("[atlassian]\nbase_url = 'shared'\nemail = 'shared-email'\napi_token = 'shared-token'\n[atlassian.jira]\nbase_url = 'service'\nboard_id = 42\n").unwrap();
+        let value = toml::Value::try_from(config).unwrap();
+        assert_eq!(value["atlassian"]["base_url"].as_str(), Some("shared"));
+        assert_eq!(
+            value["atlassian"]["jira"]["base_url"].as_str(),
+            Some("service")
+        );
+        assert_eq!(
+            value["atlassian"]["jira"]["board_id"].as_integer(),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn atlassian_validation_rejects_unknown_fields_without_leaking_secrets() {
+        let error = parse("[atlassian.jira]\nunknown = 'secret-value'\n")
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("unknown"));
+        assert!(!error.contains("secret-value"));
+    }
+    #[test]
+    fn environment_precedes_file_and_service_precedes_shared() {
+        assert_eq!(
+            resolve(
+                Some("service-env"),
+                Some("shared-env"),
+                Some("service-file"),
+                Some("shared-file")
+            ),
+            Some("service-env")
+        );
+        assert_eq!(
+            resolve(
+                None,
+                Some("shared-env"),
+                Some("service-file"),
+                Some("shared-file")
+            ),
+            Some("shared-env")
+        );
+        assert_eq!(
+            resolve(None, None, Some("service-file"), Some("shared-file")),
+            Some("service-file")
+        );
+        assert_eq!(
+            resolve(None, None, None, Some("shared-file")),
+            Some("shared-file")
+        );
+    }
+
+    #[test]
+    fn operation_defaults_are_parsed() {
+        let config = parse("[atlassian.jira]\nquery = 'project = TEST'\nissue_key = 'TEST-1'\n[atlassian.confluence]\nquery = 'space = TEST'\n").unwrap();
+        let value = toml::Value::try_from(config).unwrap();
+        assert_eq!(
+            value["atlassian"]["jira"]["query"].as_str(),
+            Some("project = TEST")
+        );
+        assert_eq!(
+            value["atlassian"]["jira"]["issue_key"].as_str(),
+            Some("TEST-1")
+        );
+        assert_eq!(
+            value["atlassian"]["confluence"]["query"].as_str(),
+            Some("space = TEST")
+        );
     }
 }

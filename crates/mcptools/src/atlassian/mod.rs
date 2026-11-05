@@ -76,72 +76,47 @@ pub struct JiraConfig {
 }
 
 impl JiraConfig {
-    /// Create configuration from CLI options with fallback to shared Atlassian options
-    /// Used by CLI path
-    pub fn new(jira_global: &jira::Global, atlassian_global: &Global) -> Result<Self> {
-        let base_url = jira_global
-            .jira_url
-            .as_ref()
-            .or(atlassian_global.atlassian_url.as_ref())
-            .ok_or_else(|| {
-                eyre!(
-                    "Jira URL not configured. Set --jira-url, --atlassian-url, JIRA_BASE_URL, or ATLASSIAN_BASE_URL"
-                )
-            })?;
-
-        let email = jira_global
-            .jira_email
-            .as_ref()
-            .or(atlassian_global.atlassian_email.as_ref())
-            .ok_or_else(|| {
-                eyre!(
-                    "Jira email not configured. Set --jira-email, --atlassian-email, JIRA_EMAIL, or ATLASSIAN_EMAIL"
-                )
-            })?;
-
-        let api_token = jira_global
-            .jira_token
-            .as_ref()
-            .or(atlassian_global.atlassian_token.as_ref())
-            .ok_or_else(|| {
-                eyre!(
-                    "Jira API token not configured. Set --jira-token, --atlassian-token, JIRA_API_TOKEN, or ATLASSIAN_API_TOKEN"
-                )
-            })?;
-
+    pub fn new(service: &jira::Global, shared: &Global) -> Result<Self> {
+        let file = crate::config::atlassian()?;
+        let resolve = mcptools_core::config::resolve;
         Ok(Self {
-            base_url: base_url.clone(),
-            email: email.clone(),
-            api_token: api_token.clone(),
+            base_url: resolve(
+                service.jira_url.clone(),
+                shared.atlassian_url.clone(),
+                file.jira.base_url,
+                file.base_url,
+            )
+            .ok_or_else(|| eyre!("Jira URL not configured"))?,
+            email: resolve(
+                service.jira_email.clone(),
+                shared.atlassian_email.clone(),
+                file.jira.email,
+                file.email,
+            )
+            .ok_or_else(|| eyre!("Jira email not configured"))?,
+            api_token: resolve(
+                service.jira_token.clone(),
+                shared.atlassian_token.clone(),
+                file.jira.api_token,
+                file.api_token,
+            )
+            .ok_or_else(|| eyre!("Jira API token not configured"))?,
         })
     }
 
-    /// Load configuration from environment variables
-    /// Used by MCP server path
     pub fn from_env() -> Result<Self> {
-        let base_url = std::env::var("JIRA_BASE_URL")
-            .or_else(|_| std::env::var("ATLASSIAN_BASE_URL"))
-            .map_err(|_| {
-                eyre!("Neither JIRA_BASE_URL nor ATLASSIAN_BASE_URL environment variable is set")
-            })?;
-
-        let email = std::env::var("JIRA_EMAIL")
-            .or_else(|_| std::env::var("ATLASSIAN_EMAIL"))
-            .map_err(|_| {
-                eyre!("Neither JIRA_EMAIL nor ATLASSIAN_EMAIL environment variable is set")
-            })?;
-
-        let api_token = std::env::var("JIRA_API_TOKEN")
-            .or_else(|_| std::env::var("ATLASSIAN_API_TOKEN"))
-            .map_err(|_| {
-                eyre!("Neither JIRA_API_TOKEN nor ATLASSIAN_API_TOKEN environment variable is set")
-            })?;
-
-        Ok(Self {
-            base_url,
-            email,
-            api_token,
-        })
+        let shared = Global {
+            atlassian_url: std::env::var("ATLASSIAN_BASE_URL").ok(),
+            atlassian_email: std::env::var("ATLASSIAN_EMAIL").ok(),
+            atlassian_token: std::env::var("ATLASSIAN_API_TOKEN").ok(),
+        };
+        let service = jira::Global {
+            jira_url: std::env::var("JIRA_BASE_URL").ok(),
+            jira_email: std::env::var("JIRA_EMAIL").ok(),
+            jira_token: std::env::var("JIRA_API_TOKEN").ok(),
+            jira_board_id: None,
+        };
+        Self::new(&service, &shared)
     }
 }
 
@@ -154,67 +129,46 @@ pub struct ConfluenceConfig {
 }
 
 impl ConfluenceConfig {
-    /// Create configuration from CLI options with fallback to shared Atlassian options
-    /// Used by CLI path
-    pub fn new(confluence_global: &confluence::Global, atlassian_global: &Global) -> Result<Self> {
-        let base_url = confluence_global.confluence_url
-            .as_ref()
-            .or(atlassian_global.atlassian_url.as_ref())
-            .ok_or_else(|| eyre!(
-                "Confluence URL not configured. Set --confluence-url, --atlassian-url, CONFLUENCE_BASE_URL, or ATLASSIAN_BASE_URL"
-            ))?;
-
-        let email = confluence_global.confluence_email
-            .as_ref()
-            .or(atlassian_global.atlassian_email.as_ref())
-            .ok_or_else(|| eyre!(
-                "Confluence email not configured. Set --confluence-email, --atlassian-email, CONFLUENCE_EMAIL, or ATLASSIAN_EMAIL"
-            ))?;
-
-        let api_token = confluence_global.confluence_token
-            .as_ref()
-            .or(atlassian_global.atlassian_token.as_ref())
-            .ok_or_else(|| eyre!(
-                "Confluence API token not configured. Set --confluence-token, --atlassian-token, CONFLUENCE_API_TOKEN, or ATLASSIAN_API_TOKEN"
-            ))?;
-
+    pub fn new(service: &confluence::Global, shared: &Global) -> Result<Self> {
+        let file = crate::config::atlassian()?;
+        let resolve = mcptools_core::config::resolve;
         Ok(Self {
-            base_url: base_url.clone(),
-            email: email.clone(),
-            api_token: api_token.clone(),
+            base_url: resolve(
+                service.confluence_url.clone(),
+                shared.atlassian_url.clone(),
+                file.confluence.base_url,
+                file.base_url,
+            )
+            .ok_or_else(|| eyre!("Confluence URL not configured"))?,
+            email: resolve(
+                service.confluence_email.clone(),
+                shared.atlassian_email.clone(),
+                file.confluence.email,
+                file.email,
+            )
+            .ok_or_else(|| eyre!("Confluence email not configured"))?,
+            api_token: resolve(
+                service.confluence_token.clone(),
+                shared.atlassian_token.clone(),
+                file.confluence.api_token,
+                file.api_token,
+            )
+            .ok_or_else(|| eyre!("Confluence API token not configured"))?,
         })
     }
 
-    /// Load configuration from environment variables
-    /// Tries CONFLUENCE_* first, falls back to ATLASSIAN_*
     pub fn from_env() -> Result<Self> {
-        let base_url = std::env::var("CONFLUENCE_BASE_URL")
-            .or_else(|_| std::env::var("ATLASSIAN_BASE_URL"))
-            .map_err(|_| {
-                eyre!(
-                    "Neither CONFLUENCE_BASE_URL nor ATLASSIAN_BASE_URL environment variable is set"
-                )
-            })?;
-
-        let email = std::env::var("CONFLUENCE_EMAIL")
-            .or_else(|_| std::env::var("ATLASSIAN_EMAIL"))
-            .map_err(|_| {
-                eyre!("Neither CONFLUENCE_EMAIL nor ATLASSIAN_EMAIL environment variable is set")
-            })?;
-
-        let api_token = std::env::var("CONFLUENCE_API_TOKEN")
-            .or_else(|_| std::env::var("ATLASSIAN_API_TOKEN"))
-            .map_err(|_| {
-                eyre!(
-                    "Neither CONFLUENCE_API_TOKEN nor ATLASSIAN_API_TOKEN environment variable is set"
-                )
-            })?;
-
-        Ok(Self {
-            base_url,
-            email,
-            api_token,
-        })
+        let shared = Global {
+            atlassian_url: std::env::var("ATLASSIAN_BASE_URL").ok(),
+            atlassian_email: std::env::var("ATLASSIAN_EMAIL").ok(),
+            atlassian_token: std::env::var("ATLASSIAN_API_TOKEN").ok(),
+        };
+        let service = confluence::Global {
+            confluence_url: std::env::var("CONFLUENCE_BASE_URL").ok(),
+            confluence_email: std::env::var("CONFLUENCE_EMAIL").ok(),
+            confluence_token: std::env::var("CONFLUENCE_API_TOKEN").ok(),
+        };
+        Self::new(&service, &shared)
     }
 }
 
@@ -264,54 +218,49 @@ pub struct BitbucketConfig {
 }
 
 impl BitbucketConfig {
-    /// Default Bitbucket Cloud API base URL
     pub const DEFAULT_BASE_URL: &'static str = "https://api.bitbucket.org/2.0";
 
-    /// Create configuration from CLI options with fallback to shared Atlassian options
-    /// Used by CLI path
-    pub fn new(bitbucket_global: &bitbucket::Global, _atlassian_global: &Global) -> Result<Self> {
-        let base_url = bitbucket_global
-            .bitbucket_url
-            .clone()
-            .unwrap_or_else(|| Self::DEFAULT_BASE_URL.to_string());
-
-        let username = bitbucket_global
-            .bitbucket_username
-            .as_ref()
-            .ok_or_else(|| {
-                eyre!(
-                "Bitbucket username not configured. Set --bitbucket-username or BITBUCKET_USERNAME"
-            )
-            })?;
-
-        let app_password = bitbucket_global.bitbucket_app_password
-            .as_ref()
-            .ok_or_else(|| eyre!(
-                "Bitbucket app password not configured. Set --bitbucket-app-password or BITBUCKET_APP_PASSWORD"
-            ))?;
-
+    pub fn new(service: &bitbucket::Global, _shared: &Global) -> Result<Self> {
+        let file = crate::config::atlassian()?.bitbucket;
+        let resolve = mcptools_core::config::resolve;
         Ok(Self {
-            base_url,
-            username: username.clone(),
-            app_password: app_password.clone(),
+            base_url: resolve(
+                service.bitbucket_url.clone(),
+                None,
+                file.base_url,
+                Some(Self::DEFAULT_BASE_URL.to_string()),
+            )
+            .expect("Bitbucket base URL default is set"),
+            username: resolve(
+                service.bitbucket_username.clone(),
+                None,
+                file.username,
+                None,
+            )
+            .ok_or_else(|| eyre!("Bitbucket username not configured"))?,
+            app_password: resolve(
+                service.bitbucket_app_password.clone(),
+                None,
+                file.app_password,
+                None,
+            )
+            .ok_or_else(|| eyre!("Bitbucket app password not configured"))?,
         })
     }
 
-    /// Load configuration from environment variables
-    /// Used by MCP server path
     pub fn from_env() -> Result<Self> {
-        let username = std::env::var("BITBUCKET_USERNAME")
-            .map_err(|_| eyre!("BITBUCKET_USERNAME environment variable not set"))?;
-
-        let app_password = std::env::var("BITBUCKET_APP_PASSWORD")
-            .map_err(|_| eyre!("BITBUCKET_APP_PASSWORD environment variable not set"))?;
-
-        Ok(Self {
-            base_url: std::env::var("BITBUCKET_BASE_URL")
-                .unwrap_or_else(|_| Self::DEFAULT_BASE_URL.to_string()),
-            username,
-            app_password,
-        })
+        Self::new(
+            &bitbucket::Global {
+                bitbucket_url: std::env::var("BITBUCKET_BASE_URL").ok(),
+                bitbucket_username: std::env::var("BITBUCKET_USERNAME").ok(),
+                bitbucket_app_password: std::env::var("BITBUCKET_APP_PASSWORD").ok(),
+            },
+            &Global {
+                atlassian_url: None,
+                atlassian_email: None,
+                atlassian_token: None,
+            },
+        )
     }
 }
 

@@ -11,7 +11,7 @@ use crate::prelude::{println, *};
 pub struct GetOptions {
     /// Issue key (e.g., "PROJ-123")
     #[arg(env = "JIRA_ISSUE_KEY")]
-    pub issue_key: String,
+    pub issue_key: Option<String>,
 
     /// Output as JSON
     #[arg(long)]
@@ -87,7 +87,14 @@ pub async fn get_ticket_data(
 
 /// Handle the get command
 pub async fn handler(options: GetOptions, config: &super::super::JiraConfig) -> Result<()> {
-    let ticket = get_ticket_data(options.issue_key.clone(), config).await?;
+    let ticket = get_ticket_data(
+        options
+            .issue_key
+            .clone()
+            .ok_or_else(|| eyre!("issue key is required"))?,
+        config,
+    )
+    .await?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&ticket)?);

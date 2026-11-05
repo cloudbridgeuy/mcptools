@@ -61,7 +61,7 @@ pub enum Commands {
 pub struct SearchOptions {
     /// CQL query (e.g., "space = SPACE AND text ~ 'keyword'")
     #[arg(env = "CONFLUENCE_QUERY")]
-    pub query: String,
+    pub query: Option<String>,
 
     /// Maximum number of results to return
     #[arg(short, long, default_value = "10")]
@@ -240,7 +240,15 @@ pub async fn update_page_data(
 
 /// Handle the search command
 async fn search_handler(options: SearchOptions, config: &ConfluenceConfig) -> Result<()> {
-    let data = search_pages_data(options.query.clone(), options.limit, config).await?;
+    let data = search_pages_data(
+        options
+            .query
+            .clone()
+            .ok_or_else(|| eyre!("query is required"))?,
+        options.limit,
+        config,
+    )
+    .await?;
 
     if options.json {
         println!("{}", serde_json::to_string_pretty(&data)?);
@@ -310,7 +318,6 @@ async fn update_handler(options: UpdateOptions, config: &ConfluenceConfig) -> Re
     print_write_page(page, options.json)
 }
 
-/// Run Confluence commands
 pub async fn run(
     app: App,
     atlassian_global: super::Global,
@@ -320,10 +327,18 @@ pub async fn run(
         println!("Running Confluence command...");
     }
 
-    // Create config with fallback logic
     let config = super::ConfluenceConfig::new(&app.global, &atlassian_global)?;
 
-    match app.command {
+    let mut command = app.command;
+    if let Commands::Search(options) = &mut command {
+        options.query = mcptools_core::config::resolve(
+            options.query.take(),
+            None,
+            crate::config::atlassian()?.confluence.query,
+            None,
+        );
+    }
+    match command {
         Commands::Search(options) => search_handler(options, &config).await,
         Commands::Get(options) => get_handler(options, &config).await,
         Commands::Create(options) => create_handler(options, &config).await,

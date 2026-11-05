@@ -175,3 +175,34 @@ mcptools atlassian jira search "assignee = currentUser()"
 3. Default values (lowest priority)
 
 Service-specific variables (e.g., `JIRA_*`) take precedence over shared variables (`ATLASSIAN_*`).
+
+
+Atlassian settings can also be stored in `~/.config/mcptools/config.toml`.
+Set `MCPTOOLS_CONFIG` to use another file. Protect credentials with `chmod 600`.
+Environment values override file values; service settings override shared settings within each source.
+
+```toml
+[atlassian]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+
+[atlassian.jira]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+board_id = 42
+query = "project = EXAMPLE"
+issue_key = "EXAMPLE-1"
+
+[atlassian.confluence]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+query = "space = EXAMPLE"
+
+[atlassian.bitbucket]
+base_url = "https://api.bitbucket.org/2.0"
+username = "user"
+app_password = "password"
+```

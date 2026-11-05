@@ -11,6 +11,7 @@ pub mod update;
 
 use colored::Colorize;
 use mcptools_core::atlassian::jira::TicketOutput;
+use mcptools_core::config::resolve;
 
 use crate::prelude::{println, *};
 
@@ -99,7 +100,6 @@ pub enum Commands {
     Link(link::LinkCommands),
 }
 
-/// Run Jira commands
 pub async fn run(
     app: App,
     atlassian_global: super::Global,
@@ -109,10 +109,26 @@ pub async fn run(
         println!("Running Jira command...");
     }
 
-    // Create config with fallback logic
     let config = super::JiraConfig::new(&app.global, &atlassian_global)?;
 
-    match app.command {
+    let file = crate::config::atlassian()?.jira;
+    let board = resolve(app.global.jira_board_id, None, file.board_id, None);
+    let mut command = app.command;
+    match &mut command {
+        Commands::Create(options) => options.board = resolve(options.board, None, board, None),
+        Commands::Update(options) => options.board = resolve(options.board, None, board, None),
+        Commands::Sprint(sprint::SprintCommands::List(options)) => {
+            options.board = resolve(options.board, None, board, None)
+        }
+        Commands::Search(options) => {
+            options.jql_query = resolve(options.jql_query.take(), None, file.query, None)
+        }
+        Commands::Get(options) => {
+            options.issue_key = resolve(options.issue_key.take(), None, file.issue_key, None)
+        }
+        _ => {}
+    }
+    match command {
         Commands::Create(options) => create::handler(options, &config).await,
         Commands::Search(options) => search::handler(options, &config).await,
         Commands::Get(options) => get::handler(options, &config).await,

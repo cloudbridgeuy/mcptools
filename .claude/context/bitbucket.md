@@ -476,3 +476,34 @@ Required permissions:
 - Repositories: Read, Admin (for deploy keys)
 - Pull requests: Read, Write
 - Workspaces: Read (for workspace listing)
+
+
+Atlassian settings can also be stored in `~/.config/mcptools/config.toml`.
+Set `MCPTOOLS_CONFIG` to use another file. Protect credentials with `chmod 600`.
+Environment values override file values; service settings override shared settings within each source.
+
+```toml
+[atlassian]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+
+[atlassian.jira]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+board_id = 42
+query = "project = EXAMPLE"
+issue_key = "EXAMPLE-1"
+
+[atlassian.confluence]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+query = "space = EXAMPLE"
+
+[atlassian.bitbucket]
+base_url = "https://api.bitbucket.org/2.0"
+username = "user"
+app_password = "password"
+```

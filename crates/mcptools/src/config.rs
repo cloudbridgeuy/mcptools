@@ -34,6 +34,18 @@ pub fn load(path: &Path) -> Result<Option<AppConfig>> {
     )?))
 }
 
+pub fn atlassian() -> Result<mcptools_core::config::Atlassian> {
+    let Some(path) = mcptools_core::config::optional_config_path(
+        std::env::var_os("MCPTOOLS_CONFIG").as_deref(),
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref().map(Path::new),
+        &std::env::current_dir()?,
+    ) else {
+        return Ok(Default::default());
+    };
+    Ok(load(&path)?.unwrap_or_default().atlassian)
+}
+
 pub fn run(app: App) -> Result<()> {
     let path = path()?;
     match app.command {
@@ -41,6 +53,16 @@ pub fn run(app: App) -> Result<()> {
         Commands::Check => match load(&path)? {
             Some(_) => {
                 mcptools_core::config::cache_path(&path)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if std::fs::metadata(&path)?.permissions().mode() & 0o044 != 0 {
+                        std::eprintln!(
+                            "warning: config is group or world readable; run chmod 600 {}",
+                            path.display()
+                        );
+                    }
+                }
                 println!("ok: {}", path.display());
             }
             None => println!("no config at {}; defaults apply", path.display()),

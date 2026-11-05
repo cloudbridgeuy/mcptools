@@ -44,9 +44,9 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 
 | Service | Variables | Fallback |
 |---------|-----------|----------|
-| Jira | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_BOARD_ID` | `ATLASSIAN_*` |
-| Confluence | `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN` | `ATLASSIAN_*` |
-| Bitbucket | `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` | None (required) |
+| Jira | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_BOARD_ID`, `JIRA_QUERY`, `JIRA_ISSUE_KEY` | `ATLASSIAN_*` |
+| Confluence | `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN`, `CONFLUENCE_QUERY` | `ATLASSIAN_*` |
+| Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` | None (required) |
 
 **Jev**
 
@@ -237,3 +237,34 @@ Call find_tools (task, --domain, or --list-domains). A domain list is how you pr
 
 - [Atlassian Setup](docs/ATLASSIAN_SETUP.md) - Detailed setup instructions
 - [Atlassian Quick Start](docs/ATLASSIAN_QUICK_START.md) - Quick reference
+
+
+Atlassian settings can also be stored in `~/.config/mcptools/config.toml`.
+Set `MCPTOOLS_CONFIG` to use another file. Protect credentials with `chmod 600`.
+Environment values override file values; service settings override shared settings within each source.
+
+```toml
+[atlassian]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+
+[atlassian.jira]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+board_id = 42
+query = "project = EXAMPLE"
+issue_key = "EXAMPLE-1"
+
+[atlassian.confluence]
+base_url = "https://example.atlassian.net"
+email = "user@example.com"
+api_token = "token"
+query = "space = EXAMPLE"
+
+[atlassian.bitbucket]
+base_url = "https://api.bitbucket.org/2.0"
+username = "user"
+app_password = "password"
+```

@@ -22,7 +22,7 @@ pub enum SprintCommands {
 pub struct SprintListOptions {
     /// Board ID (or set JIRA_BOARD_ID)
     #[arg(long, env = "JIRA_BOARD_ID")]
-    pub board: u64,
+    pub board: Option<u64>,
 
     /// Filter by sprint state(s), comma-separated
     #[arg(long, default_value = "active,future")]
@@ -138,7 +138,14 @@ pub async fn move_issue_to_sprint(
 pub async fn handler(cmd: SprintCommands, config: &super::super::JiraConfig) -> Result<()> {
     match cmd {
         SprintCommands::List(options) => {
-            let sprints = list_sprints_data(options.board, &options.state, config).await?;
+            let sprints = list_sprints_data(
+                options
+                    .board
+                    .ok_or_else(|| eyre!("--board is required (or set JIRA_BOARD_ID)"))?,
+                &options.state,
+                config,
+            )
+            .await?;
 
             if options.json {
                 std::println!("{}", serde_json::to_string_pretty(&sprints)?);
