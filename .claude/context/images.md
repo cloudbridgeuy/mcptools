@@ -1,6 +1,6 @@
-# Images: ChatGPT Images 2.5 Generation via Subscription or API Key
+# Images: Generation via Subscription or API Key
 
-Generates, edits, and varies images with the GPT Image 2.5 models (`gpt-image-2.5-flare` default, `gpt-image-2.5-sunburst` for premium precision). Two backends: the ChatGPT subscription (default, `--api chatgpt`) through the Codex Responses backend with the `image_generation` tool, and the metered OpenAI Image API (`--api openai`) with `OPENAI_API_KEY`.
+Generates, edits, and varies images with `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, `gpt-image-2.6-flare` (default), and `gpt-image-2.6-sunburst`. The 2.6 models are supported via `--api openai` (MCP: `api=openai`). Two backends: the ChatGPT subscription (default, `--api chatgpt`) through the Codex Responses backend with the `image_generation` tool, and the metered OpenAI Image API (`--api openai`) with `OPENAI_API_KEY`.
 
 Subscription auth reuses llm-stream credentials: `mcptools` reads `<config_dir>/auth.json` (default `~/.config/llm-stream`), refreshes the access token when near expiry, and writes back with mode `0600`. First sign-in happens via `llm-stream --login`; there is no `images login` command.
 
@@ -22,7 +22,7 @@ mcptools images vary --image /tmp/fox.png --quality low -o /tmp/fox-vary.png
 mcptools images vary --image /tmp/fox.png --prompt "same fox, cyberpunk style" -o /tmp/fox-cyber.png
 
 # Metered API path (multiple images per call)
-mcptools images generate "a lighthouse" --api openai --model gpt-image-2.5-sunburst -n 2 --output-dir /tmp
+mcptools images generate "a lighthouse" --api openai --model gpt-image-2.6-sunburst -n 2 --output-dir /tmp
 ```
 
 Output: saved file paths, one per line (or JSON metadata with `--json`). A cyan spinner ticks on stderr during the request. `--open` launches the system viewer after saving. `--preview` displays each saved PNG inline in Kitty or Ghostty when stdout is a terminal and `--json` is absent. In tmux, enable passthrough with `set -g allow-passthrough on`. Other formats and unsupported output skip the preview with a notice; saved files remain available. `-n` above 1 works only with `--api openai`; the subscription returns one image per call.
@@ -36,7 +36,7 @@ Tool names: `images_generate`, `images_edit`, `images_vary`
 | `prompt` | string | yes (generate, edit) | — |
 | `images` | array of string | yes (edit, vary) | — |
 | `mask` | string | no | — |
-| `model` | string | no | `gpt-image-2.5-flare` |
+| `model` | string | no | `gpt-image-2.6-flare` |
 | `size` | string | no | `auto` |
 | `quality` | string | no | `auto` |
 | `outputFormat` | string | no | `png` |
@@ -67,12 +67,12 @@ Follows the Functional Core - Imperative Shell pattern:
 | `MCPTOOLS_IMAGES_API` | `chatgpt` | Backend: `chatgpt` (subscription) or `openai` (API key) |
 | `LLM_STREAM_CONFIG_DIR` | `~/.config/llm-stream` | Config dir holding subscription `auth.json` |
 | `MCPTOOLS_IMAGES_MAINLINE` | `gpt-5.6-sol` | Chat model fronting the image tool (subscription) |
-| `OPENAI_IMAGES_MODEL` | `gpt-image-2.5-flare` | Image model |
+| `OPENAI_IMAGES_MODEL` | `gpt-image-2.6-flare` | Image model |
 | `OPENAI_API_KEY` | — | Key for `--api openai` |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Base URL for `--api openai` |
 
 ## Notes
 
-- The subscription backend normalizes the requested image model to its own managed model; `--model` fully applies only to `--api openai`.
+- The subscription request sends the requested image model unchanged in the image tool. Remote acceptance or normalization of 2.6 models is unverified.
 - There is no variations endpoint for GPT image models; `vary` is `edit` with a subject-preserving default prompt.
 - The Codex backend requires streaming; the shell sends `stream: true` and reads the image from `output_item.done` events (`response.completed` carries empty output there).

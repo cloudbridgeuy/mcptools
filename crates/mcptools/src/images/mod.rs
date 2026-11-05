@@ -47,7 +47,12 @@ pub struct BackendOpts {
 
 #[derive(Debug, clap::Args)]
 pub struct OutOpts {
-    #[clap(long, env = "OPENAI_IMAGES_MODEL", default_value = DEFAULT_MODEL)]
+    #[clap(
+        long,
+        env = "OPENAI_IMAGES_MODEL",
+        default_value = DEFAULT_MODEL,
+        help = "Image model; gpt-image-2.6-flare and gpt-image-2.6-sunburst supported via --api openai"
+    )]
     pub model: String,
     #[clap(long, default_value = "auto")]
     pub size: String,
@@ -76,7 +81,7 @@ pub struct OutOpts {
 #[derive(Debug, clap::Parser)]
 #[command(name = "images")]
 #[command(
-    about = "ChatGPT Images 2.5 generation, editing and variations (gpt-image-2.5-flare/sunburst)"
+    about = "Image generation, editing and variations; gpt-image-2.6-flare and gpt-image-2.6-sunburst supported via --api openai"
 )]
 pub struct App {
     #[command(subcommand)]
@@ -750,4 +755,115 @@ pub async fn vary_data(
         n,
     };
     edit_data(params, image_paths, None, backend, output, output_dir).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{CommandFactory, Parser};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn help_lists_image_26_models() {
+        let help = App::command().render_long_help().to_string();
+        assert!(help.contains("gpt-image-2.6-flare"));
+        assert!(help.contains("gpt-image-2.6-sunburst"));
+    }
+
+    #[test]
+    fn cli_commands_default_to_image_26_flare() {
+        let command = App::command();
+        for name in ["generate", "edit", "vary"] {
+            let subcommand = command.find_subcommand(name).unwrap();
+            let model = subcommand
+                .get_arguments()
+                .find(|arg| arg.get_id() == "model")
+                .unwrap();
+            assert_eq!(
+                model
+                    .get_default_values()
+                    .first()
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+                "gpt-image-2.6-flare"
+            );
+
+            let mut args = vec!["images", name];
+            if name != "vary" {
+                args.push("otter");
+            }
+            if name != "generate" {
+                args.extend(["--image", "input.png"]);
+            }
+            let app = App::try_parse_from(args).unwrap();
+            let model = match app.command {
+                Commands::Generate(o) => o.out.model,
+                Commands::Edit(o) => o.out.model,
+                Commands::Vary(o) => o.out.model,
+            };
+            let expected = std::env::var("OPENAI_IMAGES_MODEL")
+                .unwrap_or_else(|_| "gpt-image-2.6-flare".to_string());
+            assert_eq!(model, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn cli_passes_models_to_openai_requests() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"created": 1, "data": []})),
+            )
+            .mount(&server)
+            .await;
+        let base_url = server.uri();
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("input.png");
+        std::fs::write(&image, b"image").unwrap();
+        let image = image.to_str().unwrap();
+        for model in ["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"] {
+            for command in ["generate", "edit", "vary"] {
+                let mut args = vec!["images", command];
+                if command != "vary" {
+                    args.push("otter");
+                }
+                if command != "generate" {
+                    args.extend(["--image", image]);
+                }
+                args.extend([
+                    "--model",
+                    model,
+                    "--api",
+                    "openai",
+                    "--api-key",
+                    "test",
+                    "--base-url",
+                    &base_url,
+                ]);
+                let app = App::try_parse_from(args).unwrap();
+                match app.command {
+                    Commands::Generate(o) => {
+                        generate_cli(o).await.unwrap();
+                    }
+                    Commands::Edit(o) => {
+                        edit_cli(o).await.unwrap();
+                    }
+                    Commands::Vary(o) => {
+                        vary_cli(o).await.unwrap();
+                    }
+                }
+                let requests = server.received_requests().await.unwrap();
+                let request = requests.last().unwrap();
+                if command == "generate" {
+                    let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+                    assert_eq!(body["model"], model);
+                } else {
+                    let body = String::from_utf8_lossy(&request.body);
+                    assert!(body.contains(&format!("name=\"model\"\r\n\r\n{model}\r\n")));
+                }
+            }
+        }
+    }
 }

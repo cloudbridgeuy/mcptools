@@ -8,6 +8,9 @@ use crate::images::{Api, Backend, BackendOpts};
 #[derive(Deserialize, JsonSchema)]
 pub struct ImagesGenerateArgs {
     pub prompt: String,
+    #[schemars(
+        description = "Image model (default: gpt-image-2.6-flare). gpt-image-2.6-flare and gpt-image-2.6-sunburst are supported via api=openai."
+    )]
     pub model: Option<String>,
     pub size: Option<String>,
     pub quality: Option<String>,
@@ -36,6 +39,9 @@ pub struct ImagesEditArgs {
     pub prompt: String,
     pub images: Vec<String>,
     pub mask: Option<String>,
+    #[schemars(
+        description = "Image model (default: gpt-image-2.6-flare). gpt-image-2.6-flare and gpt-image-2.6-sunburst are supported via api=openai."
+    )]
     pub model: Option<String>,
     pub size: Option<String>,
     pub quality: Option<String>,
@@ -65,6 +71,9 @@ pub struct ImagesEditArgs {
 pub struct ImagesVaryArgs {
     pub images: Vec<String>,
     pub prompt: Option<String>,
+    #[schemars(
+        description = "Image model (default: gpt-image-2.6-flare). gpt-image-2.6-flare and gpt-image-2.6-sunburst are supported via api=openai."
+    )]
     pub model: Option<String>,
     pub size: Option<String>,
     pub quality: Option<String>,
@@ -278,4 +287,66 @@ pub async fn handle_images_vary(
     .await
     .map_err(exec_err)?;
     super::to_dual_result(saved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn model_schema_describes_image_26_availability() {
+        let schemas = [
+            super::super::schema::input_schema_for::<ImagesGenerateArgs>(),
+            super::super::schema::input_schema_for::<ImagesEditArgs>(),
+            super::super::schema::input_schema_for::<ImagesVaryArgs>(),
+        ];
+        for schema in schemas {
+            let description = schema["properties"]["model"]["description"]
+                .as_str()
+                .unwrap();
+            assert!(description.contains("default: gpt-image-2.6-flare"));
+            assert!(description.contains("gpt-image-2.6-sunburst"));
+            assert!(description.to_lowercase().contains("api"));
+        }
+    }
+
+    #[tokio::test]
+    async fn handlers_pass_models_to_openai_requests() {
+        let server = MockServer::start().await;
+        Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"created": 1, "data": []})),
+            )
+            .mount(&server)
+            .await;
+        let global = crate::Global::try_parse_from(["mcptools"]).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("input.png");
+        std::fs::write(&image, b"image").unwrap();
+        for model in ["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"] {
+            for command in ["generate", "edit", "vary"] {
+                let args = serde_json::json!({
+                    "prompt": "otter", "images": [image], "model": model,
+                    "api": "openai", "apiKey": "test", "baseUrl": server.uri()
+                });
+                match command {
+                    "generate" => handle_images_generate(Some(args), &global).await.unwrap(),
+                    "edit" => handle_images_edit(Some(args), &global).await.unwrap(),
+                    _ => handle_images_vary(Some(args), &global).await.unwrap(),
+                };
+                let requests = server.received_requests().await.unwrap();
+                let request = requests.last().unwrap();
+                if command == "generate" {
+                    let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+                    assert_eq!(body["model"], model);
+                } else {
+                    let body = String::from_utf8_lossy(&request.body);
+                    assert!(body.contains(&format!("name=\"model\"\r\n\r\n{model}\r\n")));
+                }
+            }
+        }
+    }
 }

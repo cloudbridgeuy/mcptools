@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_MODEL: &str = "gpt-image-2.5-flare";
+pub const DEFAULT_MODEL: &str = "gpt-image-2.6-flare";
 pub const FLARE_MODEL: &str = "gpt-image-2.5-flare";
 pub const FLARE_SNAPSHOT: &str = "gpt-image-2.5-flare-2026-09-08";
 pub const SUNBURST_MODEL: &str = "gpt-image-2.5-sunburst";
@@ -554,9 +554,34 @@ mod tests {
     fn generate_body_omits_unset_optionals() {
         let p = default_generate_params("otter".to_string());
         let b = build_generate_body(&p);
-        assert_eq!(b["model"], "gpt-image-2.5-flare");
+        assert_eq!(b["model"], "gpt-image-2.6-flare");
+        assert_eq!(
+            default_edit_params("otter".to_string()).model,
+            "gpt-image-2.6-flare"
+        );
         assert!(b.get("output_compression").is_none());
         assert!(b.get("moderation").is_none());
+    }
+
+    #[test]
+    fn image_26_models_pass_through_api_and_subscription_bodies() {
+        for model in [
+            "gpt-image-2.5-flare",
+            "gpt-image-2.5-sunburst",
+            "gpt-image-2.6-flare",
+            "gpt-image-2.6-sunburst",
+        ] {
+            let mut params = default_generate_params("otter".to_string());
+            params.model = model.to_string();
+            assert_eq!(build_generate_body(&params)["model"], model);
+            for action in ["generate", "edit"] {
+                let tool = build_image_tool(
+                    model, action, "auto", "auto", "png", None, "auto", None, None, None,
+                );
+                assert_eq!(tool["model"], model);
+                assert_eq!(tool["action"], action);
+            }
+        }
     }
 
     #[test]
@@ -654,6 +679,26 @@ mod tests {
         assert_eq!(t["model"], "gpt-image-2.5-sunburst");
         assert_eq!(t["action"], "edit");
         assert!(t.get("input_image_mask").is_none());
+    }
+
+    #[test]
+    fn subscription_body_keeps_default_image_and_mainline_models() {
+        let params = default_generate_params("otter".to_string());
+        let tool = build_image_tool(
+            &params.model,
+            "generate",
+            &params.size,
+            &params.quality,
+            &params.output_format,
+            params.output_compression,
+            &params.background,
+            params.moderation.as_deref(),
+            None,
+            None,
+        );
+        let body = build_responses_body(CHAT_MAINLINE_DEFAULT, &params.prompt, &[], tool);
+        assert_eq!(body["model"], "gpt-5.6-sol");
+        assert_eq!(body["tools"][0]["model"], "gpt-image-2.6-flare");
     }
 
     #[test]
