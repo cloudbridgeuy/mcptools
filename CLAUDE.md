@@ -247,7 +247,7 @@ Call find_tools (task, --domain, or --list-domains). A domain list is how you pr
 - [Atlassian Quick Start](docs/ATLASSIAN_QUICK_START.md) - Quick reference
 
 
-Persistent settings can also be stored in `~/.config/mcptools/config.toml`; see the [config key mapping](.claude/context/mcp-server.md#local-stdio-upstream-gateway). `MCPTOOLS_LANE_REPOS` remains operator-controlled environment only so agent-writable config cannot grant lane access.
+Persistent settings can also be stored in `~/.config/mcptools/config.toml`; see the [config key mapping](.claude/context/mcp-server.md#upstream-gateway). `MCPTOOLS_LANE_REPOS` remains operator-controlled environment only so agent-writable config cannot grant lane access.
 Set `MCPTOOLS_CONFIG` to use another file. Protect credentials with `chmod 600`.
 CLI flags and per-call arguments override environment values, then file values, then built-in defaults; service settings override shared settings within each source.
 

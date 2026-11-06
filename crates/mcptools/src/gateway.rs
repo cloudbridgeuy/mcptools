@@ -1,3 +1,5 @@
+mod http;
+
 use crate::prelude::*;
 use mcptools_core::gateway::{self, Cache, GatewayTool, Upstream, UpstreamTool};
 use serde_json::{json, Value};
@@ -19,7 +21,7 @@ struct Gateway {
     clients: Vec<Mutex<Option<Client>>>,
 }
 
-struct Client {
+struct StdioClient {
     child: Child,
     input: ChildStdin,
     output: BufReader<ChildStdout>,
@@ -43,7 +45,11 @@ pub async fn initialize() -> Result<()> {
         return Ok(());
     }
     #[cfg(not(unix))]
-    if !config.upstreams.is_empty() {
+    if config
+        .upstreams
+        .iter()
+        .any(|upstream| upstream.url.is_none())
+    {
         return Err(eyre!("Local upstreams require Unix process supervision"));
     }
     let cache_path = mcptools_core::config::cache_path(&path)?;
@@ -58,30 +64,55 @@ pub async fn initialize() -> Result<()> {
             (cache.tools, clients, false)
         } else {
             let mut discovered = Vec::new();
-            let mut clients = Vec::new();
+            let mut clients: Vec<Mutex<Option<Client>>> = Vec::new();
             for upstream in &config.upstreams {
-                let mut client = Client::start(upstream).await?;
-                discovered.push(client.discover().await?);
+                let mut client = match Client::start(upstream).await {
+                    Ok(client) => client,
+                    Err(error) => {
+                        stop_clients(clients).await;
+                        return Err(error);
+                    }
+                };
+                let tools = match client.discover().await {
+                    Ok(tools) => tools,
+                    Err(error) => {
+                        client.stop().await;
+                        stop_clients(clients).await;
+                        return Err(error);
+                    }
+                };
+                discovered.push(tools);
                 clients.push(Mutex::new(Some(client)));
             }
             (discovered, clients, true)
         };
-    let tools = gateway::merge_tools(&config, &discovered, crate::mcp::tools::reserved_names())?;
-    if refresh {
-        let cache = Cache {
-            version: 1,
-            fingerprint: gateway::fingerprint(&config),
-            tools: discovered,
-        };
-        let mut staged = tempfile::NamedTempFile::new_in(
-            path.parent()
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or(Path::new(".")),
-        )?;
-        serde_json::to_writer(&mut staged, &cache)?;
-        staged.as_file_mut().sync_all()?;
-        staged.persist(&cache_path).map_err(|error| eyre!(error))?;
-    }
+    let result = (|| -> Result<Vec<GatewayTool>> {
+        let tools =
+            gateway::merge_tools(&config, &discovered, crate::mcp::tools::reserved_names())?;
+        if refresh {
+            let cache = Cache {
+                version: 1,
+                fingerprint: gateway::fingerprint(&config),
+                tools: discovered,
+            };
+            let mut staged = tempfile::NamedTempFile::new_in(
+                path.parent()
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .unwrap_or(Path::new(".")),
+            )?;
+            serde_json::to_writer(&mut staged, &cache)?;
+            staged.as_file_mut().sync_all()?;
+            staged.persist(&cache_path).map_err(|error| eyre!(error))?;
+        }
+        Ok(tools)
+    })();
+    let tools = match result {
+        Ok(tools) => tools,
+        Err(error) => {
+            stop_clients(clients).await;
+            return Err(error);
+        }
+    };
     GATEWAY
         .set(Gateway {
             tools,
@@ -90,6 +121,14 @@ pub async fn initialize() -> Result<()> {
         })
         .map_err(|_| eyre!("Gateway already initialized"))?;
     Ok(())
+}
+
+async fn stop_clients(clients: Vec<Mutex<Option<Client>>>) {
+    for client in clients {
+        if let Some(client) = client.into_inner() {
+            client.stop().await;
+        }
+    }
 }
 
 pub async fn shutdown() {
@@ -136,9 +175,66 @@ pub async fn call(name: &str, arguments: Option<Value>) -> Result<Value> {
     result
 }
 
+enum Client {
+    Stdio(Box<StdioClient>),
+    Http(Box<http::Client>),
+}
+
 impl Client {
     async fn start(upstream: &Upstream) -> Result<Self> {
-        let mut command = Command::new(&upstream.command);
+        if upstream.url.is_some() {
+            Ok(Self::Http(Box::new(http::Client::start(upstream).await?)))
+        } else {
+            Ok(Self::Stdio(Box::new(StdioClient::start(upstream).await?)))
+        }
+    }
+
+    async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+        match self {
+            Self::Stdio(client) => client.request(method, params).await,
+            Self::Http(client) => client.request(method, params).await,
+        }
+    }
+
+    async fn discover(&mut self) -> Result<Vec<UpstreamTool>> {
+        let mut tools = Vec::new();
+        let mut cursor = None;
+        let mut cursors = std::collections::BTreeSet::new();
+        for _ in 0..100 {
+            let params = cursor
+                .as_ref()
+                .map_or_else(|| json!({}), |cursor| json!({"cursor": cursor}));
+            let result = self.request("tools/list", params).await?;
+            let page: Vec<UpstreamTool> = serde_json::from_value(result["tools"].clone())
+                .map_err(|_| eyre!("Invalid upstream tools/list"))?;
+            tools.extend(page);
+            match result.get("nextCursor").filter(|value| !value.is_null()) {
+                None => return Ok(tools),
+                Some(Value::String(next)) if !next.is_empty() && cursors.insert(next.clone()) => {
+                    cursor = Some(next.clone())
+                }
+                _ => return Err(eyre!("Invalid or repeated upstream cursor")),
+            }
+        }
+        Err(eyre!("Upstream discovery exceeded 100 pages"))
+    }
+
+    async fn stop(self) {
+        match self {
+            Self::Stdio(client) => (*client).stop().await,
+            Self::Http(client) => (*client).stop().await,
+        }
+    }
+}
+
+impl StdioClient {
+    async fn start(upstream: &Upstream) -> Result<Self> {
+        let mut command = Command::new(
+            upstream
+                .command
+                .as_deref()
+                .ok_or_else(|| eyre!("Missing upstream command"))?,
+        );
         command
             .args(&upstream.args)
             .envs(&upstream.env)
@@ -294,29 +390,6 @@ impl Client {
         }
     }
 
-    async fn discover(&mut self) -> Result<Vec<UpstreamTool>> {
-        let mut tools = Vec::new();
-        let mut cursor = None;
-        let mut cursors = std::collections::BTreeSet::new();
-        for _ in 0..100 {
-            let params = cursor
-                .as_ref()
-                .map_or_else(|| json!({}), |cursor| json!({"cursor": cursor}));
-            let result = self.request("tools/list", params).await?;
-            let page: Vec<UpstreamTool> = serde_json::from_value(result["tools"].clone())
-                .map_err(|_| eyre!("Invalid upstream tools/list"))?;
-            tools.extend(page);
-            match result.get("nextCursor").filter(|value| !value.is_null()) {
-                None => return Ok(tools),
-                Some(Value::String(next)) if !next.is_empty() && cursors.insert(next.clone()) => {
-                    cursor = Some(next.clone())
-                }
-                _ => return Err(eyre!("Invalid or repeated upstream cursor")),
-            }
-        }
-        Err(eyre!("Upstream discovery exceeded 100 pages"))
-    }
-
     async fn stop(mut self) {
         self.lease.take();
         let _ = tokio::time::timeout(Duration::from_secs(3), self.reaper.wait()).await;
@@ -325,7 +398,7 @@ impl Client {
     }
 }
 
-impl Drop for Client {
+impl Drop for StdioClient {
     fn drop(&mut self) {
         self.lease.take();
     }

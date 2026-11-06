@@ -44,7 +44,7 @@ two), and `crates/mcptools/src/mcp/mod.rs:41` (unknown notification returned
 `-32601`, expected no response). The protocol decision is the pure `parse_request`
 function in `mcp/mod.rs`; stdio and SSE consume its optional response.
 
-## Local stdio upstream gateway
+## Upstream gateway
 
 Configure once in `~/.config/mcptools/config.toml`; all harnesses running
 mcptools with the same environment use it automatically. An absolute
@@ -84,8 +84,32 @@ readOnly = ["resolve-library-id", "query-docs"]
 it prints the path plus `ok:` or `defaults apply`. Errors name the path and
 invalid key or TOML line/column and exit nonzero without printing source lines.
 It never starts upstream commands, discovers tools or writes the cache.
-This Unix MVP supports local stdio commands only; HTTP upstreams, token headers
-and OAuth are not supported.
+For a remote Streamable HTTP server, configure a URL instead of a command:
+
+```toml
+[[gateway.upstreams]]
+prefix = "remote"
+url = "https://example.com/mcp"
+readOnly = ["search"]
+[gateway.upstreams.headers]
+Authorization = "Bearer token"
+```
+
+URLs must use HTTPS, except loopback HTTP. Set exactly one of `command` or `url`;
+an empty `command` with a URL is invalid. Header values are literal. HTTP
+sessions support JSON and event-stream responses, retain the initialization
+session ID, and send best-effort DELETE on normal exit and request errors.
+Protocol headers override configured headers. OAuth and legacy SSE are not
+supported. The gateway uses its own client for both transports. Protect the
+configuration file because it can contain credentials.
+
+HTTP tool results are redacted only for credential headers: `Authorization`,
+`Proxy-Authorization`, `Cookie`, or any name containing `token`, `key`,
+`secret`, `password` or `auth` (case-insensitive). The full value is redacted,
+and for `<scheme> <credential>` values such as `Bearer abc` the bare credential
+is redacted too. Candidates shorter than 8 characters are not redacted, and
+other header values (for example `X-Team`) are left untouched. Redacted result
+keys that collide fail the call.
 
 `args`, `env` and `readOnly` default to empty. Environment entries override
 the inherited environment; values are literal, not variable substitutions.
@@ -107,11 +131,12 @@ paginated `tools/list`. Tools are cached next to the selected config in
 `upstreams.cache.json`, also for custom config filenames. The config must not
 itself be named `upstreams.cache.json`.
 Cache writes are atomic with owner-only permissions. The cache stores tool
-schemas and a configuration fingerprint, not the command environment values.
+schemas and a configuration fingerprint, not the command environment values or HTTP header values. HTTP header names participate in the fingerprint.
 Cached names are original upstream names; normalization and collision checks
 run on every startup, including with caches written before normalization.
-The pure cache decision covers prefix, command, arguments, environment and
-read-only policy. Formatting-only changes do not invalidate it. Invalid cache
+The pure cache decision covers prefix, command, URL, header names, arguments,
+environment and read-only policy. Header value changes and formatting-only
+changes do not invalidate it. Invalid cache
 JSON triggers rediscovery; I/O failures fail startup. Configuration is fixed
 for the session: restart mcptools after a change. Changed upstream binaries
 or remote tool lists do not invalidate the cache; delete the cache to refresh.

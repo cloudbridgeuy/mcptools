@@ -1,0 +1,173 @@
+use crate::prelude::*;
+use mcptools_core::gateway::{self, HttpResponseType, Upstream};
+use serde_json::{json, Value};
+use std::time::Duration;
+
+pub struct Client {
+    http: reqwest::Client,
+    url: String,
+    prefix: String,
+    headers: reqwest::header::HeaderMap,
+    session: Option<String>,
+    protocol: Option<String>,
+    next_id: u64,
+    secrets: Vec<String>,
+}
+
+impl Client {
+    pub async fn start(upstream: &Upstream) -> Result<Self> {
+        let mut headers = reqwest::header::HeaderMap::new();
+        for (name, value) in &upstream.headers {
+            let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| eyre!("Invalid upstream headers"))?;
+            let mut value = reqwest::header::HeaderValue::from_str(value)
+                .map_err(|_| eyre!("Invalid upstream headers"))?;
+            value.set_sensitive(true);
+            headers.insert(name, value);
+        }
+        headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            reqwest::header::HeaderValue::from_static("application/json"),
+        );
+        headers.remove("Mcp-Session-Id");
+        headers.remove("MCP-Protocol-Version");
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|_| eyre!("Cannot create upstream client"))?;
+        let mut client = Self {
+            http,
+            url: upstream
+                .url
+                .clone()
+                .ok_or_else(|| eyre!("Missing upstream URL"))?,
+            prefix: upstream.prefix.clone(),
+            headers,
+            session: None,
+            protocol: None,
+            next_id: 0,
+            secrets: gateway::http_secrets(&upstream.headers),
+        };
+        let started = async {
+            let result = client.request("initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcptools","version":env!("MCPTOOLS_VERSION")}})).await?;
+            let version = result["protocolVersion"].as_str().filter(|version| matches!(*version, "2024-11-05" | "2025-03-26" | "2025-06-18")).ok_or_else(|| eyre!("Upstream {} incompatible protocol", client.prefix))?;
+            if !result["capabilities"]["tools"].is_object() {
+                return Err(eyre!("Upstream {} incompatible tools", client.prefix));
+            }
+            client.protocol = Some(version.to_owned());
+            client.post(json!({"jsonrpc":"2.0","method":"notifications/initialized"}), None).await?;
+            Ok(())
+        }.await;
+        if let Err(error) = started {
+            client.stop().await;
+            return Err(error);
+        }
+        Ok(client)
+    }
+
+    pub async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+        self.next_id += 1;
+        let id = self.next_id;
+        self.post(
+            json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
+            Some(id),
+        )
+        .await?
+        .ok_or_else(|| eyre!("Upstream {} missing response", self.prefix))
+    }
+
+    async fn post(&mut self, message: Value, id: Option<u64>) -> Result<Option<Value>> {
+        let mut request = self
+            .http
+            .post(&self.url)
+            .headers(self.headers.clone())
+            .json(&message);
+        if let Some(session) = &self.session {
+            request = request.header("Mcp-Session-Id", session);
+        }
+        if let Some(protocol) = &self.protocol {
+            request = request.header("MCP-Protocol-Version", protocol);
+        }
+        let mut response = request.send().await.map_err(|error| {
+            if error.is_timeout() {
+                eyre!("Upstream {} timed out", self.prefix)
+            } else {
+                eyre!("Upstream {} request failed", self.prefix)
+            }
+        })?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(eyre!("Upstream {} HTTP {}", self.prefix, status.as_u16()));
+        }
+        if let Some(session) = gateway::http_session_header(
+            message["method"].as_str().unwrap_or_default(),
+            response
+                .headers()
+                .get("Mcp-Session-Id")
+                .and_then(|value| value.to_str().ok()),
+        ) {
+            self.session = Some(session.to_owned());
+        }
+        let Some(id) = id else { return Ok(None) };
+        let kind = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(gateway::http_response_type)
+            .ok_or_else(|| eyre!("Upstream {} invalid response type", self.prefix))?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            if error.is_timeout() {
+                eyre!("Upstream {} timed out", self.prefix)
+            } else {
+                eyre!("Upstream {} response failed", self.prefix)
+            }
+        })? {
+            bytes.extend_from_slice(&chunk);
+            if bytes.len() > 4 * 1024 * 1024 {
+                return Err(eyre!("Upstream {} response too large", self.prefix));
+            }
+            if kind == HttpResponseType::EventStream {
+                while let Some((end, data)) = gateway::http_event(&bytes) {
+                    bytes.drain(..end);
+                    if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                        if value.get("id") == Some(&json!(id)) {
+                            return self.result(value, id).map(Some);
+                        }
+                    }
+                }
+            }
+        }
+        if kind == HttpResponseType::Json {
+            let value = serde_json::from_slice(&bytes)
+                .map_err(|_| eyre!("Upstream {} invalid JSON", self.prefix))?;
+            return self.result(value, id).map(Some);
+        }
+        Err(eyre!("Upstream {} missing response", self.prefix))
+    }
+
+    fn result(&self, value: Value, id: u64) -> Result<Value> {
+        gateway::http_result(value, id, &self.secrets)
+            .map_err(|error| eyre!("Upstream {} {error}", self.prefix))
+    }
+
+    pub async fn stop(self) {
+        if let Some(session) = self.session {
+            let mut request = self
+                .http
+                .delete(&self.url)
+                .headers(self.headers)
+                .header("Mcp-Session-Id", session)
+                .timeout(Duration::from_secs(3));
+            if let Some(protocol) = self.protocol {
+                request = request.header("MCP-Protocol-Version", protocol);
+            }
+            let _ = request.send().await;
+        }
+    }
+}

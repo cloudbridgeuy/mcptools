@@ -14,7 +14,12 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 pub struct Upstream {
     pub prefix: String,
-    pub command: String,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
@@ -53,6 +58,136 @@ pub struct Cache {
 #[error("Invalid upstream configuration or catalog: {0}")]
 pub struct Error(pub String);
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum HttpResponseType {
+    Json,
+    EventStream,
+}
+
+pub fn http_response_type(value: &str) -> Option<HttpResponseType> {
+    match value
+        .split(';')
+        .next()?
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "application/json" => Some(HttpResponseType::Json),
+        "text/event-stream" => Some(HttpResponseType::EventStream),
+        _ => None,
+    }
+}
+
+pub fn http_session_header<'a>(method: &str, value: Option<&'a str>) -> Option<&'a str> {
+    value.filter(|value| {
+        method == "initialize"
+            && !value.is_empty()
+            && value.bytes().all(|byte| (33..=126).contains(&byte))
+    })
+}
+
+pub fn http_event(bytes: &[u8]) -> Option<(usize, String)> {
+    let mut start = 0;
+    let mut data = Vec::new();
+    loop {
+        let end = start
+            + bytes[start..]
+                .iter()
+                .position(|byte| matches!(byte, b'\r' | b'\n'))?;
+        let line = &bytes[start..end];
+        start = end
+            + if bytes[end] == b'\r' && bytes.get(end + 1) == Some(&b'\n') {
+                2
+            } else {
+                1
+            };
+        if line.is_empty() {
+            return Some((start, data.join("\n")));
+        }
+        if let Some(value) = line.strip_prefix(b"data:") {
+            data.push(
+                String::from_utf8_lossy(value.strip_prefix(b" ").unwrap_or(value)).into_owned(),
+            );
+        }
+    }
+}
+
+const HTTP_SECRET_MIN_CHARS: usize = 8;
+
+fn is_credential_header(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "authorization" | "proxy-authorization" | "cookie"
+    ) || ["token", "key", "secret", "password", "auth"]
+        .iter()
+        .any(|part| name.contains(part))
+}
+
+/// Header values that must be redacted from HTTP upstream results: full
+/// credential header values plus the bare credential after an auth scheme
+/// (`Bearer <credential>`), skipping candidates shorter than 8 characters.
+pub fn http_secrets(headers: &BTreeMap<String, String>) -> Vec<String> {
+    let mut secrets = BTreeSet::new();
+    for (name, value) in headers {
+        if !is_credential_header(name) {
+            continue;
+        }
+        let value = value.trim();
+        secrets.insert(value.to_owned());
+        if let Some((scheme, credential)) = value.split_once(' ') {
+            if !scheme.is_empty()
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-')
+            {
+                secrets.insert(credential.trim().to_owned());
+            }
+        }
+    }
+    secrets
+        .into_iter()
+        .filter(|secret| secret.chars().count() >= HTTP_SECRET_MIN_CHARS)
+        .collect()
+}
+
+pub fn http_result(value: Value, id: u64, secrets: &[String]) -> Result<Value, &'static str> {
+    if value["jsonrpc"] != "2.0" || value["id"] != id || value.get("error").is_some() {
+        return Err("invalid JSON-RPC response");
+    }
+    let mut result = value.get("result").cloned().ok_or("missing result")?;
+    redact_http_secrets(&mut result, secrets)?;
+    Ok(result)
+}
+
+fn redact_http_secrets(value: &mut Value, secrets: &[String]) -> Result<(), &'static str> {
+    match value {
+        Value::String(text) => {
+            for secret in secrets {
+                *text = text.replace(secret, "[redacted]");
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                redact_http_secrets(value, secrets)?;
+            }
+        }
+        Value::Object(values) => {
+            for (mut key, mut value) in std::mem::take(values) {
+                for secret in secrets {
+                    key = key.replace(secret, "[redacted]");
+                }
+                redact_http_secrets(&mut value, secrets)?;
+                if values.insert(key, value).is_some() {
+                    return Err("response keys collide after credential filtering");
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 pub fn validate_config(config: &Config) -> Result<(), Error> {
     let mut prefixes = BTreeSet::new();
     for (index, upstream) in config.upstreams.iter().enumerate() {
@@ -66,10 +201,21 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
         {
             return Err(Error(format!("gateway.upstreams[{index}].prefix must be unique ASCII letters/digits starting with a letter")));
         }
-        if upstream.command.trim().is_empty() || upstream.command.contains('\0') {
-            return Err(Error(format!(
-                "gateway.upstreams[{index}].command must be nonempty and contain no NUL"
-            )));
+        match (&upstream.url, upstream.command.as_deref()) {
+            (None, Some(command)) if !command.trim().is_empty() && !command.contains('\0') && upstream.headers.is_empty() => {},
+            (Some(url), None) if upstream.args.is_empty() && upstream.env.is_empty() => {
+                let parsed = reqwest::Url::parse(url).map_err(|_| Error(format!("gateway.upstreams[{index}].url is invalid")))?;
+                let loopback = parsed.host_str().is_some_and(|host| host == "localhost" || host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()));
+                if !(parsed.scheme() == "https" || parsed.scheme() == "http" && loopback) || !parsed.username().is_empty() || parsed.password().is_some() || parsed.fragment().is_some() {
+                    return Err(Error(format!("gateway.upstreams[{index}].url must use HTTPS or loopback HTTP")));
+                }
+                for (name, value) in &upstream.headers {
+                    if reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_err() || reqwest::header::HeaderValue::from_str(value).is_err() {
+                        return Err(Error(format!("gateway.upstreams[{index}].headers contains an invalid header")));
+                    }
+                }
+            }
+            _ => return Err(Error(format!("gateway.upstreams[{index}] must specify either command or url with matching options"))),
         }
         if upstream.args.iter().any(|arg| arg.contains('\0')) {
             return Err(Error(format!(
@@ -88,9 +234,15 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
 }
 
 pub fn fingerprint(config: &Config) -> String {
+    let mut sanitized = config.clone();
+    for upstream in &mut sanitized.upstreams {
+        for value in upstream.headers.values_mut() {
+            value.clear();
+        }
+    }
     format!(
         "{:x}",
-        md5::compute(serde_json::to_vec(config).expect("serializable config"))
+        md5::compute(serde_json::to_vec(&sanitized).expect("serializable config"))
     )
 }
 
@@ -166,6 +318,152 @@ pub fn merge_catalog(mut existing: Vec<CatalogEntry>, tools: &[GatewayTool]) -> 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn http_session_headers_and_response_types() {
+        assert_eq!(
+            http_session_header("initialize", Some("session-1")),
+            Some("session-1")
+        );
+        assert_eq!(http_session_header("initialize", None), None);
+        assert!(http_session_header("initialize", Some("bad\nvalue")).is_none());
+        assert!(http_session_header("initialize", Some("session with spaces")).is_none());
+        assert!(http_session_header("tools/list", Some("later-session")).is_none());
+        assert!(http_session_header("notifications/initialized", Some("later-session")).is_none());
+        assert_eq!(
+            http_response_type("application/json; charset=utf-8"),
+            Some(HttpResponseType::Json)
+        );
+        assert_eq!(
+            http_response_type("text/event-stream; charset=utf-8"),
+            Some(HttpResponseType::EventStream)
+        );
+        assert_eq!(http_response_type("text/html"), None);
+    }
+
+    #[test]
+    fn http_events_support_split_frames_and_line_endings() {
+        for ending in ["\n", "\r\n", "\r"] {
+            let event = format!(
+                ": heartbeat{ending}data: {{\"jsonrpc\":{ending}data: \"2.0\"}}{ending}{ending}"
+            );
+            assert_eq!(
+                http_event(event.as_bytes()),
+                Some((event.len(), "{\"jsonrpc\":\n\"2.0\"}".into()))
+            );
+            assert_eq!(
+                http_event(event.trim_end_matches(['\r', '\n']).as_bytes()),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn http_results_filter_nested_keys_and_values_and_reject_collisions() {
+        let secrets = vec!["secret-token".into()];
+        let result = http_result(json!({"jsonrpc":"2.0","id":1,"result":{"secret-token":[{"text":"echo secret-token"}]}}), 1, &secrets).unwrap();
+        assert!(!serde_json::to_string(&result)
+            .unwrap()
+            .contains("secret-token"));
+        assert!(http_result(
+            json!({"jsonrpc":"2.0","id":1,"result":{"secret-token":1,"[redacted]":2}}),
+            1,
+            &secrets
+        )
+        .is_err());
+        assert!(http_result(json!({"jsonrpc":"2.0","id":2,"result":{}}), 1, &secrets).is_err());
+    }
+
+    #[test]
+    fn http_secrets_only_cover_credential_headers() {
+        let headers = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(name, value)| ((*name).into(), (*value).into()))
+                .collect()
+        };
+        let secrets = http_secrets(&headers(&[
+            ("X-Team", "engineering-team"),
+            ("Content-Type", "application/json"),
+        ]));
+        assert!(secrets.is_empty(), "{secrets:?}");
+        let result = http_result(
+            json!({"jsonrpc":"2.0","id":1,"result":{"text":"engineering"}}),
+            1,
+            &http_secrets(&headers(&[("X-Team", "eng")])),
+        )
+        .unwrap();
+        assert_eq!(result, json!({"text":"engineering"}));
+
+        let secrets = http_secrets(&headers(&[("authorization", "Bearer abc123456789")]));
+        assert!(secrets.contains(&"abc123456789".to_string()), "{secrets:?}");
+        assert!(secrets.contains(&"Bearer abc123456789".to_string()));
+        let result = http_result(
+            json!({"jsonrpc":"2.0","id":1,"result":{"text":"token abc123456789"}}),
+            1,
+            &secrets,
+        )
+        .unwrap();
+        assert_eq!(result, json!({"text":"token [redacted]"}));
+
+        assert!(http_secrets(&headers(&[("Authorization", "short")])).is_empty());
+        assert!(
+            http_secrets(&headers(&[("Authorization", "Bearer short")]))
+                == vec!["Bearer short".to_string()]
+        );
+
+        let secrets = http_secrets(&headers(&[
+            ("Cookie", "session=abcdef123456"),
+            ("X-Api-Key", "key-abcdef123456"),
+            ("Proxy-Authorization", "Basic dXNlcjpwYXNz"),
+            ("X-Client-Secret", "s3cr3t-value"),
+        ]));
+        for expected in [
+            "session=abcdef123456",
+            "key-abcdef123456",
+            "Basic dXNlcjpwYXNz",
+            "dXNlcjpwYXNz",
+            "s3cr3t-value",
+        ] {
+            assert!(
+                secrets.contains(&expected.to_string()),
+                "{expected} {secrets:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn http_config_accepts_secure_and_loopback_urls() {
+        for url in [
+            "https://example.com/mcp",
+            "http://127.0.0.1:8080/mcp",
+            "http://[::1]/mcp",
+            "http://localhost/mcp",
+        ] {
+            assert!(config(json!({"upstreams": [{"prefix": "remote", "url": url, "headers": {"Authorization": "secret"}}]})).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn http_config_rejects_insecure_urls_and_mixed_transports() {
+        for upstream in [
+            json!({"prefix": "a", "url": "http://example.com"}),
+            json!({"prefix": "a", "url": "ftp://localhost"}),
+            json!({"prefix": "a", "url": "https://example.com", "command": "x"}),
+            json!({"prefix": "a", "url": "https://example.com", "command": ""}),
+            json!({"prefix": "a", "url": "https://example.com", "args": ["x"]}),
+            json!({"prefix": "a"}),
+        ] {
+            assert!(config(json!({"upstreams": [upstream]})).is_err());
+        }
+    }
+
+    #[test]
+    fn http_cache_fingerprint_excludes_header_values() {
+        let first = config(json!({"upstreams": [{"prefix": "a", "url": "https://example.com", "headers": {"Authorization": "secret"}}]})).unwrap();
+        let second = config(json!({"upstreams": [{"prefix": "a", "url": "https://example.com", "headers": {"Authorization": "other"}}]})).unwrap();
+        assert_eq!(fingerprint(&first), fingerprint(&second));
+    }
 
     fn config(value: serde_json::Value) -> Result<Config, Error> {
         let config = serde_json::from_value(value).map_err(|error| Error(error.to_string()))?;
