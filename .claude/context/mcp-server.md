@@ -99,17 +99,20 @@ URLs must use HTTPS, except loopback HTTP. Set exactly one of `command` or `url`
 an empty `command` with a URL is invalid. Header values are literal. HTTP
 sessions support JSON and event-stream responses, retain the initialization
 session ID, and send best-effort DELETE on normal exit and request errors.
-Protocol headers override configured headers. OAuth and legacy SSE are not
-supported. The gateway uses its own client for both transports. Protect the
+Protocol headers override configured headers. OAuth requires explicit login;
+legacy SSE is not supported. The gateway uses its own client for both transports. Protect the
 configuration file because it can contain credentials.
 
-HTTP tool results are redacted only for credential headers: `Authorization`,
+HTTP tool results are redacted for credential headers: `Authorization`,
 `Proxy-Authorization`, `Cookie`, or any name containing `token`, `key`,
 `secret`, `password` or `auth` (case-insensitive). The full value is redacted,
 and for `<scheme> <credential>` values such as `Bearer abc` the bare credential
-is redacted too. Candidates shorter than 8 characters are not redacted, and
-other header values (for example `X-Team`) are left untouched. Redacted result
-keys that collide fail the call.
+is redacted too. Header-derived candidates shorter than 8 characters are not
+collected. Other headers (for example `X-Team`) do not supply redaction
+candidates. OAuth access tokens, refresh tokens and client secrets are also
+redacted when nonempty, without the header minimum length. The client retains
+old and new secrets across refresh. Redacted result keys that collide fail the
+call.
 
 `args`, `env` and `readOnly` default to empty. Environment entries override
 the inherited environment; values are literal, not variable substitutions.
@@ -565,3 +568,9 @@ curl -X POST http://127.0.0.1:3000/message \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"hn_list_items","arguments":{"limit":5}}}'
 ```
+
+### OAuth HTTP upstreams
+
+For an HTTP upstream, set `auth = "oauth"` and optionally `client_id` and `scopes` in its `[[gateway.upstreams]]` entry. OAuth cannot be used with a stdio command or a static `Authorization` header. Run `mcptools gateway login <prefix>` in a terminal before starting MCP. The command discovers the authorization server, with OpenID discovery as fallback, opens a browser, and uses a loopback callback with PKCE. Without `client_id`, the server must support dynamic client registration. Registration requests a public client (`token_endpoint_auth_method = "none"`); an explicit `client_secret_post` registration response is also supported. If registration is unavailable, configure `client_id` from a client registered with the authorization server.
+
+Credentials are stored per upstream in `XDG_DATA_HOME/mcptools/oauth` (or `~/.local/share/mcptools/oauth`) in files restricted to the user. Run `mcptools gateway logout <prefix>` to remove credentials. Expired tokens and HTTP 401 responses trigger one refresh; if refresh fails, run login again. MCP requests never start interactive login. Use HTTPS for remote endpoints; loopback HTTP is allowed for local development.

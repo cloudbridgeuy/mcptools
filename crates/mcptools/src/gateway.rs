@@ -1,4 +1,7 @@
 mod http;
+mod oauth;
+
+pub use oauth::{run, App};
 
 use crate::prelude::*;
 use mcptools_core::gateway::{self, Cache, GatewayTool, Upstream, UpstreamTool};

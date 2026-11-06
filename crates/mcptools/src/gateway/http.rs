@@ -1,5 +1,6 @@
 use crate::prelude::*;
 use mcptools_core::gateway::{self, HttpResponseType, Upstream};
+use mcptools_core::oauth::{self, RefreshAction};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -12,6 +13,8 @@ pub struct Client {
     protocol: Option<String>,
     next_id: u64,
     secrets: Vec<String>,
+    upstream: Upstream,
+    tokens: Option<mcptools_core::oauth::Tokens>,
 }
 
 impl Client {
@@ -52,7 +55,18 @@ impl Client {
             protocol: None,
             next_id: 0,
             secrets: gateway::http_secrets(&upstream.headers),
+            upstream: upstream.clone(),
+            tokens: if upstream.auth.as_deref() == Some("oauth") {
+                Some(super::oauth::load(upstream)?)
+            } else {
+                None
+            },
         };
+        if let Some(tokens) = &client.tokens {
+            client.secrets.extend(tokens.secrets());
+            client.secrets.sort();
+            client.secrets.dedup();
+        }
         let started = async {
             let result = client.request("initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcptools","version":env!("MCPTOOLS_VERSION")}})).await?;
             let version = result["protocolVersion"].as_str().filter(|version| matches!(*version, "2024-11-05" | "2025-03-26" | "2025-06-18")).ok_or_else(|| eyre!("Upstream {} incompatible protocol", client.prefix))?;
@@ -82,24 +96,38 @@ impl Client {
     }
 
     async fn post(&mut self, message: Value, id: Option<u64>) -> Result<Option<Value>> {
-        let mut request = self
-            .http
-            .post(&self.url)
-            .headers(self.headers.clone())
-            .json(&message);
-        if let Some(session) = &self.session {
-            request = request.header("Mcp-Session-Id", session);
-        }
-        if let Some(protocol) = &self.protocol {
-            request = request.header("MCP-Protocol-Version", protocol);
-        }
-        let mut response = request.send().await.map_err(|error| {
-            if error.is_timeout() {
-                eyre!("Upstream {} timed out", self.prefix)
-            } else {
-                eyre!("Upstream {} request failed", self.prefix)
+        let mut refreshed = false;
+        match oauth::refresh_action(self.tokens.as_ref(), super::oauth::now(), None, false) {
+            RefreshAction::Refresh => {
+                self.refresh().await?;
+                refreshed = true;
             }
-        })?;
+            RefreshAction::Login => return Err(super::oauth::login_error(&self.upstream)),
+            RefreshAction::Send => {}
+        }
+        let mut response = self.send(&message).await?;
+        match oauth::refresh_action(
+            self.tokens.as_ref(),
+            super::oauth::now(),
+            Some(response.status().as_u16()),
+            refreshed,
+        ) {
+            RefreshAction::Refresh => {
+                self.refresh().await?;
+                response = self.send(&message).await?;
+                if oauth::refresh_action(
+                    self.tokens.as_ref(),
+                    super::oauth::now(),
+                    Some(response.status().as_u16()),
+                    true,
+                ) == RefreshAction::Login
+                {
+                    return Err(super::oauth::login_error(&self.upstream));
+                }
+            }
+            RefreshAction::Login => return Err(super::oauth::login_error(&self.upstream)),
+            RefreshAction::Send => {}
+        }
         let status = response.status();
         if !status.is_success() {
             return Err(eyre!("Upstream {} HTTP {}", self.prefix, status.as_u16()));
@@ -151,6 +179,43 @@ impl Client {
         Err(eyre!("Upstream {} missing response", self.prefix))
     }
 
+    async fn refresh(&mut self) -> Result<()> {
+        let tokens = self
+            .tokens
+            .as_mut()
+            .ok_or_else(|| super::oauth::login_error(&self.upstream))?;
+        self.secrets.extend(tokens.secrets());
+        let result = super::oauth::refresh(&self.upstream, tokens).await;
+        self.secrets.extend(tokens.secrets());
+        self.secrets.sort();
+        self.secrets.dedup();
+        result
+    }
+
+    async fn send(&self, message: &Value) -> Result<reqwest::Response> {
+        let mut request = self
+            .http
+            .post(&self.url)
+            .headers(self.headers.clone())
+            .json(message);
+        if let Some(tokens) = &self.tokens {
+            request = request.bearer_auth(&tokens.access_token);
+        }
+        if let Some(session) = &self.session {
+            request = request.header("Mcp-Session-Id", session);
+        }
+        if let Some(protocol) = &self.protocol {
+            request = request.header("MCP-Protocol-Version", protocol);
+        }
+        request.send().await.map_err(|error| {
+            if error.is_timeout() {
+                eyre!("Upstream {} timed out", self.prefix)
+            } else {
+                eyre!("Upstream {} request failed", self.prefix)
+            }
+        })
+    }
+
     fn result(&self, value: Value, id: u64) -> Result<Value> {
         gateway::http_result(value, id, &self.secrets)
             .map_err(|error| eyre!("Upstream {} {error}", self.prefix))
@@ -164,6 +229,9 @@ impl Client {
                 .headers(self.headers)
                 .header("Mcp-Session-Id", session)
                 .timeout(Duration::from_secs(3));
+            if let Some(tokens) = self.tokens {
+                request = request.bearer_auth(tokens.access_token);
+            }
             if let Some(protocol) = self.protocol {
                 request = request.header("MCP-Protocol-Version", protocol);
             }

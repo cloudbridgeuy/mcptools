@@ -21,6 +21,12 @@ pub struct Upstream {
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
     #[serde(default)]
+    pub auth: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
@@ -200,6 +206,34 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
             || !prefixes.insert(&upstream.prefix)
         {
             return Err(Error(format!("gateway.upstreams[{index}].prefix must be unique ASCII letters/digits starting with a letter")));
+        }
+        if let Some(auth) = &upstream.auth {
+            if auth != "oauth"
+                || upstream.url.is_none()
+                || upstream
+                    .headers
+                    .keys()
+                    .any(|name| name.eq_ignore_ascii_case("authorization"))
+            {
+                return Err(Error(format!("gateway.upstreams[{index}].auth oauth requires HTTP and no Authorization header")));
+            }
+        } else if upstream.client_id.is_some() || !upstream.scopes.is_empty() {
+            return Err(Error(format!(
+                "gateway.upstreams[{index}] oauth settings require auth = oauth"
+            )));
+        }
+        if upstream
+            .client_id
+            .as_ref()
+            .is_some_and(|id| id.trim().is_empty())
+            || upstream
+                .scopes
+                .iter()
+                .any(|scope| scope.is_empty() || scope.chars().any(char::is_whitespace))
+        {
+            return Err(Error(format!(
+                "gateway.upstreams[{index}] invalid oauth settings"
+            )));
         }
         match (&upstream.url, upstream.command.as_deref()) {
             (None, Some(command)) if !command.trim().is_empty() && !command.contains('\0') && upstream.headers.is_empty() => {},

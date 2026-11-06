@@ -93,6 +93,7 @@ impl Global {
 #[derive(Debug, clap::Parser)]
 pub enum SubCommands {
     Config(crate::config::App),
+    Gateway(crate::gateway::App),
     #[command(hide = true)]
     UpstreamReaper(crate::gateway::ReaperArgs),
     #[command(hide = true)]
@@ -235,6 +236,7 @@ async fn run(app: App) -> Result<()> {
 
     let result = match app.command {
         SubCommands::Config(args) => crate::config::run(args),
+        SubCommands::Gateway(args) => crate::gateway::run(args).await,
         SubCommands::UpstreamReaper(args) => crate::gateway::reap(args),
         SubCommands::ChromeReaper(sub_app) => crate::chrome_reaper::run(sub_app),
         SubCommands::Diagram(sub_app) => crate::diagram::run(sub_app).await,

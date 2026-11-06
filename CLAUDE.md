@@ -231,6 +231,8 @@ cat report.md | mcptools md render - --json
 ```bash
 mcptools config path # Default ~/.config/mcptools/config.toml; XDG_CONFIG_HOME or MCPTOOLS_CONFIG override
 mcptools config check # Validate the global TOML config without starting upstreams
+mcptools gateway login NAME # Authorize an OAuth HTTP upstream
+mcptools gateway logout NAME # Remove its OAuth credentials
 mcptools mcp stdio   # For local agents (Claude Desktop)
 mcptools mcp stdio --discovery  # tools/list returns find_tools,call_tool (env: MCPTOOLS_DISCOVERY=true)
 mcptools mcp stdio --code-mode  # tools/list returns find_tools,execute,call_tool (env: MCPTOOLS_CODE_MODE=true)
