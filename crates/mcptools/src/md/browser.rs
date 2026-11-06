@@ -141,6 +141,7 @@ impl Drop for Shutdown {
                     url,
                     browser.get_process_id(),
                     Duration::from_secs(2),
+                    None,
                 ) {
                     let _ = transport.call_method_on_browser(
                         headless_chrome::protocol::cdp::Browser::Close(None),

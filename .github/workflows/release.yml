@@ -156,7 +156,7 @@ jobs:
             ### Method 1: Install via Cargo (Recommended for macOS users with Rust)
 
             ```bash
-            cargo install --git https://github.com/cloudbridgeuy/mcptools
+            cargo install --locked --git https://github.com/cloudbridgeuy/mcptools
             ```
 
             ### Method 2: Download Pre-built Binaries
