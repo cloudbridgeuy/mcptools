@@ -13,8 +13,13 @@ pub struct Global {
     #[clap(long, env = "CONFLUENCE_EMAIL")]
     pub confluence_email: Option<String>,
 
-    /// Confluence API token (overrides ATLASSIAN_API_TOKEN)
-    #[clap(long, env = "CONFLUENCE_API_TOKEN", hide = true)]
+    #[clap(
+        long,
+        env = "CONFLUENCE_API_TOKEN",
+        hide = true,
+        hide_env_values = true,
+        help = "Confluence API token (overrides ATLASSIAN_API_TOKEN)"
+    )]
     pub confluence_token: Option<String>,
 }
 

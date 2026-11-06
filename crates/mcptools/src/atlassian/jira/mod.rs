@@ -26,8 +26,13 @@ pub struct Global {
     #[clap(long, env = "JIRA_EMAIL")]
     pub jira_email: Option<String>,
 
-    /// Jira API token (overrides ATLASSIAN_API_TOKEN)
-    #[clap(long, env = "JIRA_API_TOKEN", hide = true)]
+    #[clap(
+        long,
+        env = "JIRA_API_TOKEN",
+        hide = true,
+        hide_env_values = true,
+        help = "Jira API token (overrides ATLASSIAN_API_TOKEN)"
+    )]
     pub jira_token: Option<String>,
 
     /// Jira board ID for sprint operations

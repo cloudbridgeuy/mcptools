@@ -293,4 +293,25 @@ mod tests {
     fn zero_execute_memory_is_rejected() {
         assert!(Global::try_parse_from(["mcptools", "--execute-memory-mb", "0"]).is_err());
     }
+    #[test]
+    fn secret_environment_arguments_hide_values() {
+        let mut commands = vec![super::App::command()];
+        let mut failures = Vec::new();
+        while let Some(command) = commands.pop() {
+            for arg in command.get_arguments() {
+                if let Some(env) = arg.get_env().and_then(|name| name.to_str()) {
+                    if env != "JIRA_ISSUE_KEY"
+                        && ["KEY", "TOKEN", "PASSWORD", "SECRET"]
+                            .iter()
+                            .any(|marker| env.contains(*marker))
+                        && !arg.is_hide_env_values_set()
+                    {
+                        failures.push(format!("{}: {env}", command.get_name()));
+                    }
+                }
+            }
+            commands.extend(command.get_subcommands().cloned());
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 }

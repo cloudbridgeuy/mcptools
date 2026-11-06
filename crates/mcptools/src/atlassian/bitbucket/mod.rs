@@ -15,8 +15,13 @@ pub struct Global {
     #[clap(long, env = "BITBUCKET_USERNAME")]
     pub bitbucket_username: Option<String>,
 
-    /// Bitbucket app password for authentication
-    #[clap(long, env = "BITBUCKET_APP_PASSWORD", hide = true)]
+    #[clap(
+        long,
+        env = "BITBUCKET_APP_PASSWORD",
+        hide = true,
+        hide_env_values = true,
+        help = "Bitbucket app password for authentication"
+    )]
     pub bitbucket_app_password: Option<String>,
 }
 
