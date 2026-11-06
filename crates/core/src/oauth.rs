@@ -1,4 +1,7 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine,
+};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -10,6 +13,8 @@ pub struct Tokens {
     pub refresh_token: Option<String>,
     pub client_id: String,
     pub client_secret: Option<String>,
+    #[serde(default)]
+    pub client_auth: ClientAuth,
     pub token_endpoint: String,
     pub resource: String,
     pub expires_at: Option<u64>,
@@ -17,7 +22,10 @@ pub struct Tokens {
 
 impl Tokens {
     pub fn updated(&self, value: &Value, now: u64) -> Result<Self, &'static str> {
-        if !field(value, "token_type")?.eq_ignore_ascii_case("bearer") {
+        if value.get("ok").is_some_and(|ok| ok != true)
+            || !(field(value, "token_type")?.eq_ignore_ascii_case("bearer")
+                || value["ok"] == true && value["token_type"] == "user")
+        {
             return Err("Invalid OAuth token");
         }
         Ok(Self {
@@ -58,6 +66,55 @@ impl Tokens {
         secrets.dedup();
         secrets
     }
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientAuth {
+    #[default]
+    Post,
+    Basic,
+}
+
+pub fn basic_authorization(client_id: &str, secret: &str) -> String {
+    let encode = |value: &str| {
+        urlencoding::encode(value)
+            .replace("%20", "+")
+            .replace('~', "%7E")
+            .replace("%2A", "*")
+    };
+    format!(
+        "Basic {}",
+        STANDARD.encode(format!("{}:{}", encode(client_id), encode(secret)))
+    )
+}
+
+pub fn validate_settings(upstream: &crate::gateway::Upstream) -> Result<(), &'static str> {
+    if upstream.client_secret.is_some() && upstream.client_id.is_none() {
+        return Err("oauth client_secret requires client_id");
+    }
+    if upstream.client_secret.as_deref().is_some_and(str::is_empty) {
+        return Err("oauth client_secret must be nonempty");
+    }
+    if upstream.redirect_port == Some(0) {
+        return Err("oauth redirect_port must be 1-65535");
+    }
+    if let Some(redirect) = &upstream.redirect_uri {
+        if upstream.redirect_port.is_none() {
+            return Err("oauth redirect_uri requires redirect_port");
+        }
+        if safe_url(redirect).is_none_or(|url| url.scheme() != "https" || url.query().is_some()) {
+            return Err("oauth redirect_uri must use HTTPS without credentials, query or fragment");
+        }
+    }
+    Ok(())
+}
+
+pub fn redirect_uri(upstream: &crate::gateway::Upstream, bound_port: u16) -> String {
+    upstream
+        .redirect_uri
+        .clone()
+        .unwrap_or_else(|| format!("http://127.0.0.1:{bound_port}/callback"))
 }
 
 #[derive(Debug, PartialEq)]
@@ -149,6 +206,7 @@ pub struct ServerMetadata {
     authorization_endpoint: String,
     pub token_endpoint: String,
     registration_endpoint: Option<String>,
+    auth_methods: Option<Vec<String>>,
 }
 
 impl ServerMetadata {
@@ -164,7 +222,27 @@ impl ServerMetadata {
                 .get("registration_endpoint")
                 .map(|_| endpoint(value, "registration_endpoint", &issuer))
                 .transpose()?,
+            auth_methods: value
+                .get("token_endpoint_auth_methods_supported")
+                .map(|methods| {
+                    serde_json::from_value(methods.clone())
+                        .map_err(|_| "Invalid OAuth authentication methods")
+                })
+                .transpose()?,
         })
+    }
+
+    pub fn client_auth(&self, has_secret: bool) -> Result<ClientAuth, &'static str> {
+        let Some(methods) = self.auth_methods.as_ref().filter(|_| has_secret) else {
+            return Ok(ClientAuth::Post);
+        };
+        if methods.iter().any(|method| method == "client_secret_post") {
+            Ok(ClientAuth::Post)
+        } else if methods.iter().any(|method| method == "client_secret_basic") {
+            Ok(ClientAuth::Basic)
+        } else {
+            Err("Unsupported OAuth client authentication method")
+        }
     }
 
     pub fn registration_endpoint(&self) -> Result<&str, &'static str> {
@@ -236,12 +314,12 @@ pub fn challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
-pub fn callback(target: &str, state: &str) -> Option<String> {
-    if target.split('?').next()? != "/callback" {
+pub fn callback(target: &str, state: &str, path: &str) -> Option<String> {
+    if target.split('?').next()? != path {
         return None;
     }
     let url = Url::parse(&format!("http://127.0.0.1{target}")).ok()?;
-    if url.path() != "/callback" || url.fragment().is_some() {
+    if url.path() != path || url.fragment().is_some() {
         return None;
     }
     let values: Vec<_> = url.query_pairs().collect();
@@ -267,6 +345,7 @@ mod tests {
             refresh_token: Some("refresh-secret-value".into()),
             client_id: "client".into(),
             client_secret: Some("tiny".into()),
+            client_auth: ClientAuth::Post,
             token_endpoint: "https://example.com/token".into(),
             resource: "https://example.com/mcp".into(),
             expires_at: Some(42),
@@ -368,13 +447,13 @@ mod tests {
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
         assert_eq!(
-            callback("/callback?state=ok&code=abc", "ok").as_deref(),
+            callback("/callback?state=ok&code=abc", "ok", "/callback").as_deref(),
             Some("abc")
         );
-        assert!(callback("/callback-wrong?state=ok&code=abc", "ok").is_none());
-        assert!(callback("/x/../callback?state=ok&code=abc", "ok").is_none());
-        assert!(callback("/callback?state=no&code=abc", "ok").is_none());
-        assert!(callback("/callback?state=ok&state=ok&code=abc", "ok").is_none());
+        assert!(callback("/callback-wrong?state=ok&code=abc", "ok", "/callback").is_none());
+        assert!(callback("/x/../callback?state=ok&code=abc", "ok", "/callback").is_none());
+        assert!(callback("/callback?state=no&code=abc", "ok", "/callback").is_none());
+        assert!(callback("/callback?state=ok&state=ok&code=abc", "ok", "/callback").is_none());
     }
 
     #[test]
@@ -401,5 +480,59 @@ mod tests {
             metadata_challenge("Bearer resource_metadata=\"https://example.com/meta\""),
             Some("https://example.com/meta".into())
         );
+    }
+
+    #[test]
+    fn slack_top_level_user_token_and_ok_false() {
+        let tokens = tokens();
+        let updated = tokens.updated(&serde_json::json!({"ok":true,"access_token":"user-token","token_type":"user","authed_user":{"id":"U12345","scope":"read,write"}}), 50);
+        assert!(updated.is_ok(), "documented user token must be accepted");
+        assert_eq!(updated.unwrap().access_token, "user-token");
+    }
+
+    #[test]
+    fn slack_ok_false_rejects_token_shaped_response() {
+        assert!(tokens().updated(&serde_json::json!({"ok":false,"error":"invalid_code","access_token":"bad","token_type":"Bearer"}), 50).is_err(), "ok:false must reject even a token-shaped response");
+    }
+
+    #[test]
+    fn confidential_auth_prefers_post_and_supports_basic_only_metadata() {
+        for (methods, expected) in [
+            (
+                serde_json::json!(["client_secret_post", "client_secret_basic"]),
+                Some(ClientAuth::Post),
+            ),
+            (
+                serde_json::json!(["client_secret_basic"]),
+                Some(ClientAuth::Basic),
+            ),
+            (serde_json::json!(["none"]), None),
+            (serde_json::json!([]), None),
+        ] {
+            let metadata = serde_json::json!({"issuer":"https://example.com", "authorization_endpoint":"https://example.com/auth", "token_endpoint":"https://example.com/token", "token_endpoint_auth_methods_supported":methods});
+            let server = ServerMetadata::parse(&metadata, "https://example.com").unwrap();
+            assert_eq!(server.client_auth(true).ok(), expected);
+            assert_eq!(server.client_auth(false).unwrap(), ClientAuth::Post);
+        }
+        assert_eq!(
+            basic_authorization("id: +", "secret/~*"),
+            format!("Basic {}", STANDARD.encode("id%3A+%2B:secret%2F%7E*"))
+        );
+    }
+
+    #[test]
+    fn proxy_redirect_path_preserves_state_and_path_checks() {
+        assert_eq!(
+            callback("/slack/return?state=ok&code=abc", "ok", "/slack/return").as_deref(),
+            Some("abc")
+        );
+        for target in [
+            "/callback?state=ok&code=abc",
+            "/slack/return?state=wrong&code=abc",
+            "/slack/return?state=ok&code=abc&code=other",
+            "/slack/x/../return?state=ok&code=abc",
+        ] {
+            assert!(callback(target, "ok", "/slack/return").is_none());
+        }
     }
 }

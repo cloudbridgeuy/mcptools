@@ -14,6 +14,8 @@ const SECRETS: &[&str] = &[
     "refresh-secret-value",
     "client-secret-value",
     "code-secret-value",
+    "configured-client-secret-value",
+    "rotated-client-secret-value",
 ];
 
 struct Fixture {
@@ -23,6 +25,7 @@ struct Fixture {
     events: PathBuf,
     browser: PathBuf,
     mode: String,
+    callback_port: u16,
 }
 
 impl Fixture {
@@ -46,6 +49,8 @@ impl Fixture {
             .read_line(&mut port)
             .unwrap();
         let base = format!("http://127.0.0.1:{}", port.trim());
+        let callback = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let callback_port = callback.local_addr().unwrap().port();
         std::fs::write(
             dir.path().join("config.toml"),
             format!(
@@ -54,6 +59,13 @@ impl Fixture {
             ),
         )
         .unwrap();
+        if mode.starts_with("slack") {
+            let mut config = std::fs::OpenOptions::new()
+                .append(true)
+                .open(dir.path().join("config.toml"))
+                .unwrap();
+            writeln!(config, "client_secret = 'configured-client-secret-value'\nredirect_port = {callback_port}\nredirect_uri = 'https://oauth.example.test/slack/return'").unwrap();
+        }
         let bin = dir.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         for name in ["open", "xdg-open"] {
@@ -75,6 +87,7 @@ impl Fixture {
             events,
             browser,
             mode: mode.to_owned(),
+            callback_port,
         }
     }
 
@@ -91,6 +104,7 @@ impl Fixture {
             .env("MCPTOOLS_CONFIG", self.dir.path().join("config.toml"))
             .env("OAUTH_BROWSER_LOG", &self.browser)
             .env("OAUTH_BROWSER_MODE", &self.mode)
+            .env("OAUTH_CALLBACK_PORT", self.callback_port.to_string())
             .env("PATH", path)
             .env_remove("JEV_PROVIDER")
             .args(args);
@@ -159,8 +173,16 @@ impl Drop for Fixture {
 
 fn clean(output: &Output) {
     for secret in SECRETS {
-        assert!(!String::from_utf8_lossy(&output.stdout).contains(secret));
-        assert!(!String::from_utf8_lossy(&output.stderr).contains(secret));
+        assert!(
+            !String::from_utf8_lossy(&output.stdout).contains(secret),
+            "stdout leaked {secret}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains(secret),
+            "stderr leaked {secret}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
 
@@ -386,4 +408,135 @@ fn state_mismatch_and_wrong_redirect_are_rejected_before_valid_callback() {
             1
         );
     }
+}
+
+#[test]
+fn confidential_login_refresh_and_secret_redaction() {
+    for mode in ["slack", "slack-basic", "slack-rotate"] {
+        let fixture = Fixture::new(mode, true);
+        fixture.login();
+        let browser: Value =
+            serde_json::from_slice(&std::fs::read(&fixture.browser).unwrap()).unwrap();
+        assert_eq!(
+            browser["redirect_uri"],
+            "https://oauth.example.test/slack/return"
+        );
+        assert!(fixture.browser.with_extension("json.rejected").exists());
+        if mode == "slack-rotate" {
+            let path = fixture.dir.path().join("config.toml");
+            let config = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(
+                path,
+                config.replace(
+                    "configured-client-secret-value",
+                    "rotated-client-secret-value",
+                ),
+            )
+            .unwrap();
+        }
+        for output in [
+            fixture.command(&["config", "check"]),
+            fixture.command(&["gateway", "--help"]),
+            fixture.command(&["mcp", "catalog"]),
+            fixture.tool_call(),
+        ] {
+            clean(&output);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let events = fixture.events();
+        assert!(!events.iter().any(|event| event["method"] == "register"));
+        assert!(events
+            .iter()
+            .any(|event| event["form"]["grant_type"] == "refresh_token"));
+        assert!(events.iter().any(|event| event["method"] == "tool-call"));
+        for file in files(fixture.dir.path()) {
+            if file == fixture.events
+                || file == fixture.browser
+                || file == fixture.dir.path().join("config.toml")
+                || file.starts_with(fixture.dir.path().join("bin"))
+            {
+                continue;
+            }
+            let bytes = std::fs::read(file).unwrap();
+            for secret in [
+                "configured-client-secret-value",
+                "rotated-client-secret-value",
+            ] {
+                assert!(!String::from_utf8_lossy(&bytes).contains(secret));
+            }
+        }
+    }
+}
+
+#[test]
+fn fixed_callback_port_never_falls_back() {
+    let fixture = Fixture::new("normal", true);
+    let busy = std::net::TcpListener::bind(("127.0.0.1", fixture.callback_port)).unwrap();
+    let mut config = std::fs::OpenOptions::new()
+        .append(true)
+        .open(fixture.dir.path().join("config.toml"))
+        .unwrap();
+    writeln!(
+        config,
+        "redirect_port = {}",
+        busy.local_addr().unwrap().port()
+    )
+    .unwrap();
+    let output = fixture.command(&["gateway", "login", "remote"]);
+    clean(&output);
+    assert!(!output.status.success(), "busy port must not fall back");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("callback port"));
+    assert!(!fixture.browser.exists());
+}
+
+#[test]
+fn fixed_callback_port_without_proxy_uses_loopback() {
+    let fixture = Fixture::new("normal", true);
+    let mut config = std::fs::OpenOptions::new()
+        .append(true)
+        .open(fixture.dir.path().join("config.toml"))
+        .unwrap();
+    writeln!(config, "redirect_port = {}", fixture.callback_port).unwrap();
+    fixture.login();
+    let browser: Value = serde_json::from_slice(&std::fs::read(&fixture.browser).unwrap()).unwrap();
+    assert_eq!(
+        browser["redirect_uri"],
+        format!("http://127.0.0.1:{}/callback", fixture.callback_port)
+    );
+}
+
+#[test]
+fn confidential_config_requires_id_and_valid_https_redirect() {
+    let fixture = Fixture::new("normal", true);
+    for (settings, error) in [
+        ("client_secret = 'configured-client-secret-value'", "client_id"),
+        ("redirect_port = 0", "redirect_port"),
+        ("redirect_uri = 'https://oauth.example.test/return'", "redirect_port"),
+        ("redirect_port = 12345\nredirect_uri = 'http://127.0.0.1/return'", "HTTPS"),
+        ("redirect_port = 12345\nredirect_uri = 'https://user:configured-client-secret-value@oauth.example.test/return'", "HTTPS"),
+        ("redirect_port = 12345\nredirect_uri = 'https://oauth.example.test/return#fragment'", "HTTPS"),
+    ] {
+        std::fs::write(fixture.dir.path().join("config.toml"), format!("[[gateway.upstreams]]\nprefix = 'remote'\nurl = '{}/mcp'\nauth = 'oauth'\n{settings}\n", fixture.base)).unwrap();
+        let output = fixture.command(&["config", "check"]);
+        clean(&output);
+        assert!(!output.status.success(), "invalid settings accepted: {error}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains(error));
+    }
+}
+
+#[test]
+fn slack_http_success_with_error_does_not_store_credentials() {
+    let fixture = Fixture::new("slack-error", true);
+    let output = fixture.command(&["gateway", "login", "remote"]);
+    clean(&output);
+    assert!(!output.status.success());
+    assert!(fixture
+        .events()
+        .iter()
+        .any(|event| event["method"] == "token"));
+    assert!(files(&fixture.dir.path().join("data")).is_empty());
 }

@@ -571,6 +571,28 @@ curl -X POST http://127.0.0.1:3000/message \
 
 ### OAuth HTTP upstreams
 
-For an HTTP upstream, set `auth = "oauth"` and optionally `client_id` and `scopes` in its `[[gateway.upstreams]]` entry. OAuth cannot be used with a stdio command or a static `Authorization` header. Run `mcptools gateway login <prefix>` in a terminal before starting MCP. The command discovers the authorization server, with OpenID discovery as fallback, opens a browser, and uses a loopback callback with PKCE. Without `client_id`, the server must support dynamic client registration. Registration requests a public client (`token_endpoint_auth_method = "none"`); an explicit `client_secret_post` registration response is also supported. If registration is unavailable, configure `client_id` from a client registered with the authorization server.
+For an HTTP upstream, set `auth = "oauth"` and optionally `client_id`, `client_secret`, `scopes`, `redirect_port`, and `redirect_uri` in its `[[gateway.upstreams]]` entry. OAuth cannot be used with a stdio command or a static `Authorization` header. Run `mcptools gateway login <prefix>` in a terminal before starting MCP. The command discovers the authorization server, with OpenID discovery as fallback, opens a browser, and uses a loopback callback with PKCE. Without `client_id`, the server must support dynamic client registration. Registration requests a public client (`token_endpoint_auth_method = "none"`); an explicit `client_secret_post` registration response is also supported. If registration is unavailable, configure `client_id` from a client registered with the authorization server. `client_secret` requires `client_id`; both are literal values, not environment references. Code exchange and refresh use `client_secret_post`, or `client_secret_basic` when metadata supports basic but not post. Refresh reads the current configured secret, so rotating it does not require login again. Configured client secrets are not copied into credential files or cache and are redacted from upstream results. Protect the config with `chmod 600`.
+
+`redirect_port` must be 1–65535. It binds exactly `127.0.0.1:<port>`; a busy port is an error, with no random-port fallback. Without it, login uses a random port. The default redirect is `http://127.0.0.1:<port>/callback`. Optional `redirect_uri` must use HTTPS, requires `redirect_port`, and cannot contain credentials, a query, or a fragment. It is sent unchanged in authorization and code-exchange requests. The local listener remains plain HTTP and accepts the redirect URI's path. The operator must provide TLS termination and preserve that path and query when forwarding.
+
+[Slack MCP](https://docs.slack.dev/ai/mcp-server/) requires a registered app and confidential OAuth, with no dynamic registration. [Slack OAuth v2](https://docs.slack.dev/authentication/installing-with-oauth/#asking) requires HTTPS redirects; HTTP loopback is not a documented exception. Register an HTTPS URL reachable by the user's browser, then proxy to the fixed local port. For example, with Tailscale HTTPS enabled and the browser connected to the tailnet:
+
+```sh
+tailscale serve --bg --https=443 http://127.0.0.1:8765
+```
+
+```toml
+[[gateway.upstreams]]
+prefix = "slack"
+url = "https://mcp.slack.com/mcp"
+auth = "oauth"
+client_id = "YOUR_SLACK_CLIENT_ID"
+client_secret = "YOUR_SLACK_CLIENT_SECRET"
+redirect_port = 8765
+redirect_uri = "https://YOUR_NODE.YOUR_TAILNET.ts.net/callback"
+scopes = ["search:read.public"]
+```
+
+Use the actual hostname reported by `tailscale serve`, register that exact redirect with Slack, then run `mcptools gateway login slack`. No TLS listener is built into mcptools. [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve) terminates TLS using its provisioned certificate. Slack's [`oauth.v2.user.access`](https://docs.slack.dev/reference/methods/oauth.v2.user.access/) returns the user `access_token` at the top level with `token_type = "user"`; `authed_user` contains identity and scopes. The parser accepts this variant and rejects `ok: false` even when HTTP status is 200.
 
 Credentials are stored per upstream in `XDG_DATA_HOME/mcptools/oauth` (or `~/.local/share/mcptools/oauth`) in files restricted to the user. Run `mcptools gateway logout <prefix>` to remove credentials. Expired tokens and HTTP 401 responses trigger one refresh; if refresh fails, run login again. MCP requests never start interactive login. Use HTTPS for remote endpoints; loopback HTTP is allowed for local development.

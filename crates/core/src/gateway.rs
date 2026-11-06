@@ -25,6 +25,12 @@ pub struct Upstream {
     #[serde(default)]
     pub client_id: Option<String>,
     #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub redirect_port: Option<u16>,
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
+    #[serde(default)]
     pub scopes: Vec<String>,
     #[serde(default)]
     pub args: Vec<String>,
@@ -217,11 +223,18 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
             {
                 return Err(Error(format!("gateway.upstreams[{index}].auth oauth requires HTTP and no Authorization header")));
             }
-        } else if upstream.client_id.is_some() || !upstream.scopes.is_empty() {
+        } else if upstream.client_id.is_some()
+            || upstream.client_secret.is_some()
+            || upstream.redirect_port.is_some()
+            || upstream.redirect_uri.is_some()
+            || !upstream.scopes.is_empty()
+        {
             return Err(Error(format!(
                 "gateway.upstreams[{index}] oauth settings require auth = oauth"
             )));
         }
+        crate::oauth::validate_settings(upstream)
+            .map_err(|error| Error(format!("gateway.upstreams[{index}] {error}")))?;
         if upstream
             .client_id
             .as_ref()
@@ -270,6 +283,7 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
 pub fn fingerprint(config: &Config) -> String {
     let mut sanitized = config.clone();
     for upstream in &mut sanitized.upstreams {
+        upstream.client_secret = None;
         for value in upstream.headers.values_mut() {
             value.clear();
         }
@@ -497,6 +511,42 @@ mod tests {
         let first = config(json!({"upstreams": [{"prefix": "a", "url": "https://example.com", "headers": {"Authorization": "secret"}}]})).unwrap();
         let second = config(json!({"upstreams": [{"prefix": "a", "url": "https://example.com", "headers": {"Authorization": "other"}}]})).unwrap();
         assert_eq!(fingerprint(&first), fingerprint(&second));
+    }
+
+    #[test]
+    fn oauth_config_and_cache_exclude_configured_secrets() {
+        let base = serde_json::json!({"upstreams":[{"prefix":"a","url":"https://example.com","auth":"oauth","client_id":"id","client_secret":"first","redirect_port":12345,"redirect_uri":"https://example.com/return"}]});
+        let first = config(base.clone()).unwrap();
+        let mut changed = base.clone();
+        changed["upstreams"][0]["client_secret"] = serde_json::json!("second");
+        assert_eq!(fingerprint(&first), fingerprint(&config(changed).unwrap()));
+        assert_eq!(
+            crate::oauth::redirect_uri(&first.upstreams[0], 5555),
+            "https://example.com/return"
+        );
+        for (field, value) in [
+            ("redirect_port", serde_json::json!(65536)),
+            ("redirect_port", serde_json::json!(-1)),
+            ("redirect_port", serde_json::json!(0)),
+            (
+                "redirect_uri",
+                serde_json::json!("https://example.com/path?query=yes"),
+            ),
+            ("client_secret", serde_json::json!("")),
+            ("auth", serde_json::Value::Null),
+        ] {
+            let mut invalid = base.clone();
+            invalid["upstreams"][0][field] = value;
+            assert!(config(invalid).is_err(), "{field}");
+        }
+        let mut local = first.upstreams[0].clone();
+        local.redirect_uri = None;
+        assert_eq!(
+            crate::oauth::redirect_uri(&local, 5555),
+            "http://127.0.0.1:5555/callback"
+        );
+        local.redirect_port = Some(65535);
+        assert!(crate::oauth::validate_settings(&local).is_ok());
     }
 
     fn config(value: serde_json::Value) -> Result<Config, Error> {

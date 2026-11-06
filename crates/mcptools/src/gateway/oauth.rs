@@ -194,13 +194,13 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
     };
     let server =
         oauth::ServerMetadata::parse(&server, issuer_text).map_err(|error| eyre!(error))?;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    let port = upstream.redirect_port.unwrap_or(0);
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
         .await
-        .map_err(|_| eyre!("Cannot open OAuth callback"))?;
-    let redirect = format!(
-        "http://127.0.0.1:{}/callback",
-        listener.local_addr()?.port()
-    );
+        .map_err(|_| eyre!("Cannot bind OAuth callback port {port} on 127.0.0.1"))?;
+    let redirect = oauth::redirect_uri(upstream, listener.local_addr()?.port());
+    let callback_url =
+        reqwest::Url::parse(&redirect).map_err(|_| eyre!("Invalid OAuth redirect URI"))?;
     let (client_id, client_secret) = if let Some(id) = &upstream.client_id {
         (id.clone(), None)
     } else {
@@ -211,6 +211,9 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
         let registered = json_response(response).await?;
         oauth::registered_client(&registered).map_err(|error| eyre!(error))?
     };
+    let client_auth = server
+        .client_auth(upstream.client_secret.is_some() || client_secret.is_some())
+        .map_err(|error| eyre!(error))?;
     let verifier = random();
     let state = random();
     let url = server
@@ -253,7 +256,8 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
                 .and_then(|line| line.strip_prefix("GET "))
                 .and_then(|line| line.split_once(' '))
                 .map(|(target, _)| target);
-            let code = target.and_then(|target| oauth::callback(target, &state));
+            let code =
+                target.and_then(|target| oauth::callback(target, &state, callback_url.path()));
             let status = if code.is_some() {
                 "200 OK"
             } else {
@@ -277,24 +281,19 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
         refresh_token: None,
         client_id,
         client_secret,
+        client_auth,
         token_endpoint: server.token_endpoint,
         resource: resource.to_owned(),
         expires_at: None,
     };
-    let mut form = vec![
+    let form = vec![
         ("grant_type", "authorization_code"),
         ("code", code.as_str()),
         ("redirect_uri", redirect.as_str()),
         ("code_verifier", verifier.as_str()),
         ("resource", resource),
-        ("client_id", tokens.client_id.as_str()),
     ];
-    if let Some(secret) = &tokens.client_secret {
-        form.push(("client_secret", secret));
-    }
-    let response = client
-        .post(&tokens.token_endpoint)
-        .form(&form)
+    let response = token_request(&client, upstream, &tokens, form)
         .send()
         .await
         .map_err(|_| eyre!("OAuth token request failed"))?;
@@ -306,6 +305,34 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
     Ok(())
 }
 
+fn token_request<'a>(
+    client: &Client,
+    upstream: &'a Upstream,
+    tokens: &'a Tokens,
+    mut form: Vec<(&'a str, &'a str)>,
+) -> reqwest::RequestBuilder {
+    let secret = upstream
+        .client_secret
+        .as_deref()
+        .or(tokens.client_secret.as_deref());
+    let mut request = client.post(&tokens.token_endpoint);
+    match (tokens.client_auth, secret) {
+        (oauth::ClientAuth::Basic, Some(secret)) => {
+            request = request.header(
+                reqwest::header::AUTHORIZATION,
+                oauth::basic_authorization(&tokens.client_id, secret),
+            );
+        }
+        (_, secret) => {
+            form.push(("client_id", &tokens.client_id));
+            if let Some(secret) = secret {
+                form.push(("client_secret", secret));
+            }
+        }
+    }
+    request.form(&form)
+}
+
 pub async fn refresh(upstream: &Upstream, tokens: &mut Tokens) -> Result<()> {
     let refresh_token = tokens
         .refresh_token
@@ -315,15 +342,12 @@ pub async fn refresh(upstream: &Upstream, tokens: &mut Tokens) -> Result<()> {
     let mut form = vec![
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_token),
-        ("client_id", &tokens.client_id),
         ("resource", &tokens.resource),
     ];
-    if let Some(secret) = &tokens.client_secret {
-        form.push(("client_secret", secret));
+    if let Some(redirect) = &upstream.redirect_uri {
+        form.push(("redirect_uri", redirect));
     }
-    let response = client()?
-        .post(&tokens.token_endpoint)
-        .form(&form)
+    let response = token_request(&client()?, upstream, tokens, form)
         .send()
         .await
         .map_err(|_| login_error(upstream))?;

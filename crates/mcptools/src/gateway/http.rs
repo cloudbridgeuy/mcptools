@@ -64,6 +64,15 @@ impl Client {
         };
         if let Some(tokens) = &client.tokens {
             client.secrets.extend(tokens.secrets());
+            if let Some(secret) = &upstream.client_secret {
+                client.secrets.push(secret.clone());
+                let authorization = oauth::basic_authorization(&tokens.client_id, secret);
+                client
+                    .secrets
+                    .extend(gateway::http_secrets(&std::collections::BTreeMap::from([
+                        ("Authorization".into(), authorization),
+                    ])));
+            }
             client.secrets.sort();
             client.secrets.dedup();
         }

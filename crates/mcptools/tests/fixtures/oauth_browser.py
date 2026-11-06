@@ -12,13 +12,16 @@ with open(os.environ['OAUTH_BROWSER_LOG'], 'w') as file:
     json.dump(params, file)
 redirect = params['redirect_uri']
 mode = os.environ.get('OAUTH_BROWSER_MODE', '')
-if mode == 'wrong-path':
+if mode.startswith('slack'):
+    if redirect == 'https://oauth.example.test/slack/return':
+        redirect = 'http://127.0.0.1:' + os.environ['OAUTH_CALLBACK_PORT'] + '/slack/return'
+if mode == 'wrong-path' or mode.startswith('slack'):
     try:
         urllib.request.urlopen(redirect + '-wrong?' + urlencode({'code': 'code-secret-value', 'state': params['state']}), timeout=2).read()
     except Exception as error:
         with open(os.environ['OAUTH_BROWSER_LOG'] + '.rejected', 'w') as file:
             file.write(str(error))
-if mode == 'wrong-state':
+if mode == 'wrong-state' or mode.startswith('slack'):
     try:
         urllib.request.urlopen(redirect + '?' + urlencode({'code': 'code-secret-value', 'state': 'incorrect-state'}), timeout=2).read()
     except Exception as error:
