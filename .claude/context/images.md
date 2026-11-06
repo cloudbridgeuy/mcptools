@@ -12,6 +12,8 @@ mcptools images generate "a fox reading a newspaper, watercolor" --quality low -
 
 # Landscape with JSON output
 mcptools images generate "neon tokyo alley at night" --size 1536x1024 --quality medium --json
+mcptools images generate "phone mockup in portrait orientation" --size 1024x1536
+mcptools images generate "waving fox" --api openai --format gif --frames 9 --frame-ms 200
 
 # Edit with reference images and optional mask
 mcptools images edit "make the fox wear glasses" --image /tmp/fox.png -o /tmp/fox-glasses.png
@@ -24,6 +26,8 @@ mcptools images vary --image /tmp/fox.png --prompt "same fox, cyberpunk style" -
 # Metered API path (multiple images per call)
 mcptools images generate "a lighthouse" --api openai --model gpt-image-2.6-sunburst -n 2 --output-dir /tmp
 ```
+
+Sizes are `auto`, `1024x1024`, `1536x1024`, `1024x1536`, or custom `WIDTHxHEIGHT` with each edge a multiple of 16 from 16 to 3840. Quality values are `auto`, `low`, `medium`, `high`, `xhigh`, and `max`; output formats are `png`, `jpeg`, `webp`, `gif`, and `svg`; backgrounds are `auto`, `transparent`, and `opaque`; moderation values are `auto` and `low`; input fidelity values are `low` and `high`.
 
 GIF and SVG generation require `--api openai`. Use `--format gif --frames 9 --frame-ms 200` for animation, or `--format svg --complexity high` for SVG. GIF accepts 2–64 frames and 20–2000 ms per frame, rounded to the nearest 10 ms (ties round up). Defaults are 9 frames and 200 ms. Complexity accepts `low`, `medium`, or `high` and defaults to `high`. GIF and SVG do not support compression; SVG requires `-n 1`. These formats and complexity are unavailable for edits and variations, and SVG is not an edit input. SVG quality selects the reference raster quality; `auto` omits the quality field and lets the API choose.
 

@@ -29,15 +29,36 @@ pub enum Api {
 
 #[derive(Debug, clap::Args)]
 pub struct BackendOpts {
-    #[clap(long, value_enum, env = "MCPTOOLS_IMAGES_API")]
+    #[clap(
+        long,
+        value_enum,
+        env = "MCPTOOLS_IMAGES_API",
+        help = "Backend: chatgpt subscription or openai API; [images].api in config.toml"
+    )]
     pub api: Option<Api>,
-    #[clap(long, env = "LLM_STREAM_CONFIG_DIR")]
+    #[clap(
+        long,
+        env = "LLM_STREAM_CONFIG_DIR",
+        help = "Auth directory; defaults to mcptools config directory, then legacy ~/.config/llm-stream"
+    )]
     pub config_dir: Option<String>,
-    #[clap(long, env = "OPENAI_API_KEY")]
+    #[clap(
+        long,
+        env = "OPENAI_API_KEY",
+        help = "OpenAI API key; [images].api_key in config.toml"
+    )]
     pub api_key: Option<String>,
-    #[clap(long, env = "OPENAI_BASE_URL")]
+    #[clap(
+        long,
+        env = "OPENAI_BASE_URL",
+        help = "OpenAI API base URL; [images].base_url in config.toml"
+    )]
     pub base_url: Option<String>,
-    #[clap(long, env = "MCPTOOLS_IMAGES_MAINLINE")]
+    #[clap(
+        long,
+        env = "MCPTOOLS_IMAGES_MAINLINE",
+        help = "Subscription chat model; [images].mainline in config.toml"
+    )]
     pub mainline: Option<String>,
 }
 
@@ -46,38 +67,42 @@ pub struct OutOpts {
     #[clap(
         long,
         env = "OPENAI_IMAGES_MODEL",
-        help = "Image model; gpt-image-2.6-flare and gpt-image-2.6-sunburst supported via --api openai"
+        help = images::model_help()
     )]
     pub model: Option<String>,
-    #[clap(long)]
+    #[clap(
+        long,
+        help = "Size: auto, 1024x1024, 1536x1024, 1024x1536, or custom WIDTHxHEIGHT; edges 1-3840 and multiples of 16; [images].size in config.toml"
+    )]
     pub size: Option<String>,
-    #[clap(long)]
+    #[clap(long, help = images::values_help("Quality", images::QUALITIES, "; [images].quality in config.toml"))]
     pub quality: Option<String>,
-    #[clap(long = "format", default_value = "png")]
+    #[clap(long = "format", default_value = "png", help = images::values_help("Output format", images::FORMATS, "; GIF and SVG require --api openai and generation"))]
     pub format: String,
-    #[clap(long)]
+    #[clap(long, help = "JPEG/WebP compression from 0 to 100")]
     pub compression: Option<u8>,
-    #[clap(long, default_value = "auto")]
+    #[clap(long, default_value = "auto", help = images::values_help("Background", images::BACKGROUNDS, ""))]
     pub background: String,
-    #[clap(long)]
+    #[clap(long, help = images::values_help("Moderation", images::MODERATIONS, ""))]
     pub moderation: Option<String>,
-    #[clap(long, short = 'o')]
+    #[clap(long, short = 'o', help = "Save to this path; requires -n 1")]
     pub output: Option<std::path::PathBuf>,
-    #[clap(long, default_value = ".")]
+    #[clap(long, default_value = ".", help = "Directory for generated filenames")]
     pub output_dir: std::path::PathBuf,
-    #[clap(long)]
+    #[clap(long, help = "Print saved file metadata as JSON")]
     pub json: bool,
-    #[clap(long)]
+    #[clap(long, help = "Open saved files in the system viewer")]
     pub open: bool,
-    #[clap(long)]
+    #[clap(
+        long,
+        help = "Preview PNG files in supported terminals when stdout is a terminal and JSON is off"
+    )]
     pub preview: bool,
 }
 
 #[derive(Debug, clap::Parser)]
 #[command(name = "images")]
-#[command(
-    about = "Image generation, editing and variations; gpt-image-2.6-flare and gpt-image-2.6-sunburst supported via --api openai"
-)]
+#[command(about = images::about())]
 pub struct App {
     #[command(subcommand)]
     pub command: Commands,
@@ -85,24 +110,36 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Commands {
-    #[clap(name = "generate")]
+    #[clap(name = "generate", about = "Generate images from a prompt")]
     Generate(GenerateOptions),
-    #[clap(name = "edit")]
+    #[clap(name = "edit", about = "Edit reference images with a prompt")]
     Edit(EditOptions),
-    #[clap(name = "vary")]
+    #[clap(name = "vary", about = "Create variations of reference images")]
     Vary(VaryOptions),
 }
 
 #[derive(Debug, clap::Parser)]
+#[command(after_help = "Examples:
+  mcptools images generate \"phone mockup in portrait orientation\" --size 1024x1536
+  mcptools images generate \"waving fox\" --api openai --format gif --frames 9")]
 pub struct GenerateOptions {
+    #[clap(help = "Text describing the image to generate")]
     pub prompt: String,
-    #[clap(long, short = 'n', default_value_t = 1)]
+    #[clap(
+        long,
+        short = 'n',
+        default_value_t = 1,
+        help = "Number of images, 1-10; subscription supports only 1"
+    )]
     pub number: u8,
-    #[clap(long)]
+    #[clap(long, help = "GIF frame count, 2-64; default 9")]
     pub frames: Option<u8>,
-    #[clap(long)]
+    #[clap(
+        long,
+        help = "GIF frame duration in milliseconds, 20-2000; default 200"
+    )]
     pub frame_ms: Option<u16>,
-    #[clap(long)]
+    #[clap(long, help = images::values_help("SVG complexity", images::COMPLEXITIES, "; requires --api openai"))]
     pub complexity: Option<String>,
     #[clap(flatten)]
     pub out: OutOpts,
@@ -111,17 +148,35 @@ pub struct GenerateOptions {
 }
 
 #[derive(Debug, clap::Parser)]
+#[command(after_help = "Example:
+  mcptools images edit \"replace sky\" --image input.png --mask mask.png")]
 pub struct EditOptions {
+    #[clap(help = "Text describing the edit to apply")]
     pub prompt: String,
-    #[clap(long = "image", required = true)]
+    #[clap(
+        long = "image",
+        required = true,
+        help = "Reference image path; repeat 1-16 times"
+    )]
     pub images: Vec<std::path::PathBuf>,
-    #[clap(long)]
+    #[clap(
+        long,
+        help = "Mask defines the region to edit; cannot be combined with markup"
+    )]
     pub mask: Option<std::path::PathBuf>,
-    #[clap(long)]
+    #[clap(
+        long,
+        help = "Transparent PNG overlay matching first image; requires --api openai and no mask"
+    )]
     pub markup: Option<std::path::PathBuf>,
-    #[clap(long)]
+    #[clap(long, help = images::values_help("Reference fidelity", images::FIDELITIES, ""))]
     pub input_fidelity: Option<String>,
-    #[clap(long, short = 'n', default_value_t = 1)]
+    #[clap(
+        long,
+        short = 'n',
+        default_value_t = 1,
+        help = "Number of images, 1-10; subscription supports only 1"
+    )]
     pub number: u8,
     #[clap(flatten)]
     pub out: OutOpts,
@@ -130,14 +185,28 @@ pub struct EditOptions {
 }
 
 #[derive(Debug, clap::Parser)]
+#[command(after_help = "Example:
+  mcptools images vary --image input.png --prompt \"watercolor variation\"")]
 pub struct VaryOptions {
-    #[clap(long = "image", required = true)]
+    #[clap(
+        long = "image",
+        required = true,
+        help = "Reference image path; repeat 1-16 times"
+    )]
     pub images: Vec<std::path::PathBuf>,
-    #[clap(long)]
+    #[clap(
+        long,
+        help = "Variation prompt; defaults to preserving subject, style and composition"
+    )]
     pub prompt: Option<String>,
-    #[clap(long)]
+    #[clap(long, help = images::values_help("Reference fidelity", images::FIDELITIES, ""))]
     pub input_fidelity: Option<String>,
-    #[clap(long, short = 'n', default_value_t = 1)]
+    #[clap(
+        long,
+        short = 'n',
+        default_value_t = 1,
+        help = "Number of images, 1-10; subscription supports only 1"
+    )]
     pub number: u8,
     #[clap(flatten)]
     pub out: OutOpts,
@@ -265,7 +334,7 @@ fn validate_out(o: &OutOpts, settings: &ResolvedImages, number: u8) -> Result<()
     images::validate_compression(o.compression).map_err(|e| eyre!(e))?;
     images::validate_n(number).map_err(|e| eyre!(e))?;
     if let Some(m) = &o.moderation {
-        if m != "auto" && m != "low" {
+        if !images::MODERATIONS.contains(&m.as_str()) {
             return Err(eyre!("moderation must be auto|low, got {m}"));
         }
     }
@@ -277,7 +346,7 @@ fn validate_out(o: &OutOpts, settings: &ResolvedImages, number: u8) -> Result<()
 
 fn validate_fidelity(f: &Option<String>) -> Result<()> {
     if let Some(v) = f {
-        if v != "high" && v != "low" {
+        if !images::FIDELITIES.contains(&v.as_str()) {
             return Err(eyre!("input-fidelity must be high|low, got {v}"));
         }
     }

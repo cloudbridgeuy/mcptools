@@ -2,6 +2,24 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_MODEL: &str = "gpt-image-2.6-flare";
+pub const QUALITIES: &[&str] = &["auto", "low", "medium", "high", "xhigh", "max"];
+pub const FORMATS: &[&str] = &["png", "jpeg", "webp", "gif", "svg"];
+pub const BACKGROUNDS: &[&str] = &["auto", "transparent", "opaque"];
+pub const MODERATIONS: &[&str] = &["auto", "low"];
+pub const COMPLEXITIES: &[&str] = &["low", "medium", "high"];
+pub const FIDELITIES: &[&str] = &["low", "high"];
+
+pub fn about() -> String {
+    format!("Generate, edit, and vary images; default model {DEFAULT_MODEL}; gpt-image-2.6-sunburst also supported via --api openai")
+}
+
+pub fn model_help() -> String {
+    format!("Image model; default {DEFAULT_MODEL}; gpt-image-2.6-sunburst also supported via --api openai; [images].model in config.toml")
+}
+
+pub fn values_help(label: &str, values: &[&str], suffix: &str) -> String {
+    format!("{label}: {}{suffix}", values.join(", "))
+}
 pub const FLARE_MODEL: &str = "gpt-image-2.5-flare";
 pub const FLARE_SNAPSHOT: &str = "gpt-image-2.5-flare-2026-09-08";
 pub const SUNBURST_MODEL: &str = "gpt-image-2.5-sunburst";
@@ -465,28 +483,24 @@ pub fn validate_compression(v: Option<u8>) -> Result<Option<u8>, String> {
 }
 
 pub fn validate_quality(q: &str) -> Result<(), String> {
-    match q {
-        "auto" | "low" | "medium" | "high" | "xhigh" | "max" => Ok(()),
-        other => Err(format!(
-            "quality must be auto|low|medium|high|xhigh|max, got {other}"
-        )),
-    }
+    QUALITIES
+        .contains(&q)
+        .then_some(())
+        .ok_or_else(|| format!("quality must be {}, got {q}", QUALITIES.join("|")))
 }
 
 pub fn validate_background(b: &str) -> Result<(), String> {
-    match b {
-        "auto" | "transparent" | "opaque" => Ok(()),
-        other => Err(format!(
-            "background must be auto|transparent|opaque, got {other}"
-        )),
-    }
+    BACKGROUNDS
+        .contains(&b)
+        .then_some(())
+        .ok_or_else(|| format!("background must be {}, got {b}", BACKGROUNDS.join("|")))
 }
 
 pub fn validate_format(f: &str) -> Result<(), String> {
-    match f {
-        "png" | "jpeg" | "webp" | "gif" | "svg" => Ok(()),
-        other => Err(format!("format must be png|jpeg|webp|gif|svg, got {other}")),
-    }
+    FORMATS
+        .contains(&f)
+        .then_some(())
+        .ok_or_else(|| format!("format must be {}, got {f}", FORMATS.join("|")))
 }
 
 pub fn validate_size(s: &str) -> Result<(), String> {
@@ -524,7 +538,7 @@ pub fn validate_generate(p: &GenerateParams) -> Result<(), String> {
     validate_compression(p.output_compression)?;
     validate_n(p.n)?;
     if let Some(c) = &p.complexity {
-        if !matches!(c.as_str(), "low" | "medium" | "high") {
+        if !COMPLEXITIES.contains(&c.as_str()) {
             return Err(format!("complexity must be low|medium|high, got {c}"));
         }
     }

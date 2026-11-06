@@ -110,7 +110,7 @@ pub enum SubCommands {
     /// HackerNews (news.ycombinator.com) operations
     HN(crate::hn::App),
 
-    /// ChatGPT Images 2.5 generation, editing and variations
+    #[command(about = mcptools_core::images::about())]
     Images(crate::images::App),
 
     Lane(crate::lane::App),
@@ -134,7 +134,16 @@ fn main() -> Result<()> {
     env_logger::init();
     color_eyre::install()?;
 
-    let matches = App::command().get_matches();
+    let command = App::command();
+    let hidden = command
+        .get_arguments()
+        .filter(|arg| arg.get_id().as_str().starts_with("execute_"))
+        .cloned()
+        .map(|arg| arg.hide(true))
+        .collect::<Vec<_>>();
+    let matches = command
+        .mut_subcommand("images", |images| images.args(hidden))
+        .get_matches();
     let mut app = App::from_arg_matches(&matches)?;
     let defaulted =
         |name| matches.value_source(name) == Some(clap::parser::ValueSource::DefaultValue);
