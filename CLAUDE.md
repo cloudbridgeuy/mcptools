@@ -90,6 +90,7 @@ For detailed usage of each feature, see the context files:
 - **[Diagram Daemon](.claude/context/diagram-serve.md)** - Flags, token access, saves, retention, on-demand lifecycle (no boot service), security, licensing, and troubleshooting
 - **[Lanes](.claude/context/lanes.md)** - Native Git read-only listing/cleanup planning and guarded Worktrunk creation; operator-only `MCPTOOLS_LANE_REPOS` authorization
 - **[MCP Server](.claude/context/mcp-server.md)** - Server configuration; available tools
+- **[Gateway Recipes](.claude/context/gateway-recipes.md)** - Context7 setup; Slack pending GUZ-1504
 - **[Upgrade](.claude/context/upgrade.md)** - Self-update mechanism; platform support
 - **[Testing & Env Vars](.claude/context/testing.md)** - All environment variables; scripting
 - **[Lint](.claude/context/lint.md)** - Unified lint pipeline; skip flags; git hook management
