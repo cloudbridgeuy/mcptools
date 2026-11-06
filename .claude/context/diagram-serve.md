@@ -222,13 +222,15 @@ The address record `diagrams/.daemon-address!` can be stale. Host and port envir
 
 ### Configuration
 
+The `MCPTOOLS_DIAGRAM_*` settings below also use the matching lowercase keys in `[diagram]`. CLI flags and per-call arguments override environment, then file values, then defaults. Host and port values precede the daemon address record and the loopback:5199 fallback. The host setting does not authorize a daemon bind; manual serving requires `--host` or `--tailscale`. File key `[diagram].port` accepts 1–65535; explicit `--port 0` selects an ephemeral bind.
+
 | Setting | Effect and default |
 |---------|--------------------|
 | `--host <IP>` | Manual bind to a specific IP; no default. Does not enforce tailnet membership. |
 | `--tailscale` | Select the local Tailscale IPv4 address instead of `--host`. Requires the `tailscale` executable. |
 | `--port <u16>` | Manual listener port, default 5199; 0 selects an ephemeral port. |
 | `MCPTOOLS_DIAGRAM_HOST` | URL and readiness-probe host override; does not change the spawned daemon's Tailscale bind. |
-| `MCPTOOLS_DIAGRAM_PORT` | URL/probe port override and on-demand `--port`. The spawned daemon defaults to 5199; URLs fall back through the address record first. Does not set a manual serve command's port. |
+| `MCPTOOLS_DIAGRAM_PORT` | URL/probe port override and on-demand `--port`. The spawned daemon defaults to 5199; URLs fall back through the address record first. For manual serving, `--port` takes precedence, then environment, file, and 5199. |
 | `MCPTOOLS_DIAGRAM_SHARE_SECONDS` | Share TTL, default 1800; unsigned seconds, clamped to 60–86400. Per-call `share_seconds` wins. Invalid values fail share creation. |
 | `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` | Share inspection interval, default 60; zero or invalid values use the default. |
 | `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` | Idle grace, default 120; zero or invalid values use the default. |

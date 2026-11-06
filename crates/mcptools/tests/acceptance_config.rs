@@ -702,3 +702,280 @@ async fn images_complete_backend_settings_skip_invalid_config() {
     assert!(error.contains("not signed in"), "{error}");
     assert!(!error.contains("Invalid config"), "{error}");
 }
+
+#[test]
+fn runtime_sections_are_checked() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[mcp]\ndiscovery = true\ncode_mode = false\nexecute_timeout_secs = 9\nexecute_memory_mb = 32\nexecute_output_kb = 8\n[general]\nverbose = true\n[diagram]\nhost = '127.0.0.1'\nport = 5199\nshare_seconds = 600\nttl_seconds = 3600\nidle_check_seconds = 60\nidle_grace_seconds = 120\n[md]\ntimeout = 15\n").unwrap();
+    let output = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for text in [
+        "[mcp]\nunknown = true",
+        "[mcp]\ndiscovery = 'yes'",
+        "[mcp]\nexecute_timeout_secs = 0",
+        "[mcp]\nexecute_memory_mb = 0",
+        "[mcp]\nexecute_output_kb = 0",
+        "[diagram]\nport = 65536",
+        "[diagram]\nshare_seconds = 59",
+        "[md]\ntimeout = '30'",
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let output = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "accepted {text}");
+    }
+}
+
+fn mcp_runtime_request(
+    home: &Path,
+    config: &Path,
+    env: &[(&str, &str)],
+    flags: &[&str],
+    method: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::Stdio;
+    let mut cmd = command(home);
+    cmd.env("MCPTOOLS_CONFIG", config)
+        .args(["mcp", "stdio"])
+        .args(flags)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    for key in [
+        "MCPTOOLS_DISCOVERY",
+        "MCPTOOLS_CODE_MODE",
+        "MCPTOOLS_EXECUTE_TIMEOUT_SECS",
+        "MCPTOOLS_EXECUTE_MEMORY_MB",
+        "MCPTOOLS_EXECUTE_OUTPUT_KB",
+    ] {
+        cmd.env_remove(key);
+    }
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let mut child = cmd.spawn().unwrap();
+    let mut input = child.stdin.take().unwrap();
+    writeln!(
+        input,
+        "{}",
+        serde_json::json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params})
+    )
+    .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    drop(input);
+    assert!(child.wait().unwrap().success());
+    serde_json::from_str(&line).unwrap()
+}
+
+#[test]
+fn mcp_file_env_and_flag_precedence() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[mcp]\ndiscovery = true\nexecute_output_kb = 1\n").unwrap();
+    let request = |env: &[(&str, &str)], flags: &[&str]| {
+        mcp_runtime_request(
+            home.path(),
+            &path,
+            env,
+            flags,
+            "tools/list",
+            serde_json::json!({}),
+        )["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let file = request(&[], &[]);
+    assert!(file.contains(&"find_tools".into()) && !file.contains(&"jira_search".into()));
+    let env = request(&[("MCPTOOLS_DISCOVERY", "off")], &[]);
+    assert!(env.contains(&"jira_search".into()));
+    let flag = request(&[("MCPTOOLS_DISCOVERY", "off")], &["--discovery"]);
+    assert!(!flag.contains(&"jira_search".into()));
+    std::fs::write(&path, "[mcp]\ncode_mode = true\nexecute_output_kb = 1\n").unwrap();
+    let code_mode = request(&[], &[]);
+    assert!(code_mode.contains(&"execute".into()) && !code_mode.contains(&"jira_search".into()));
+    let code_mode_env = request(&[("MCPTOOLS_CODE_MODE", "false")], &[]);
+    assert!(code_mode_env.contains(&"jira_search".into()));
+    let code_mode_flag = request(&[("MCPTOOLS_CODE_MODE", "false")], &["--code-mode"]);
+    assert!(!code_mode_flag.contains(&"jira_search".into()));
+    let output = |env: &[(&str, &str)], flags: &[&str]| {
+        mcp_runtime_request(
+            home.path(),
+            &path,
+            env,
+            flags,
+            "tools/call",
+            serde_json::json!({"name":"execute", "arguments":{"code":"'x'.repeat(1500)"}}),
+        )
+        .to_string()
+    };
+    assert!(output(&[], &[]).contains("OutputLimit"));
+    assert!(!output(&[("MCPTOOLS_EXECUTE_OUTPUT_KB", "2")], &[]).contains("OutputLimit"));
+    assert!(output(
+        &[("MCPTOOLS_EXECUTE_OUTPUT_KB", "2")],
+        &["--execute-output-kb", "1"]
+    )
+    .contains("OutputLimit"));
+}
+
+#[test]
+fn md_timeout_env_and_flag_precede_file() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[md]\ntimeout = 10\n").unwrap();
+    for flags in [vec![], vec!["--timeout", "0"]] {
+        let mut cmd = command(home.path());
+        cmd.env("MCPTOOLS_CONFIG", &path)
+            .env("MD_TIMEOUT", if flags.is_empty() { "0" } else { "10" })
+            .args(["md", "fetch", "http://example.test"])
+            .args(flags);
+        let output = cmd.output().unwrap();
+        assert!(String::from_utf8_lossy(&output.stderr).contains("timed out after 0 seconds"));
+    }
+}
+
+#[test]
+fn lane_repos_is_rejected_by_config_check() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    for text in [
+        "lane_repos = ['/tmp']",
+        "lane-repos = ['/tmp']",
+        "[mcp]\nlane_repos = ['/tmp']",
+        "[mcp]\nlane-repos = ['/tmp']",
+        "[lane]\nrepos = ['/tmp']",
+        "[general]\nlane_repos = ['/tmp']",
+        "[diagram]\nlane_repos = ['/tmp']",
+        "[md]\nlane_repos = ['/tmp']",
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let output = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "accepted {text}");
+    }
+}
+
+#[test]
+fn general_verbose_file_and_environment_precedence() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[general]\nverbose = true\n").unwrap();
+    for (env, expected) in [(None, true), (Some("false"), false)] {
+        let mut cmd = command(home.path());
+        cmd.env("MCPTOOLS_CONFIG", &path)
+            .env_remove("LINEAR_API_KEY")
+            .env_remove("MCPTOOLS_VERBOSE")
+            .args(["linear", "auth", "status"]);
+        if let Some(value) = env {
+            cmd.env("MCPTOOLS_VERBOSE", value);
+        }
+        let output = cmd.output().unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).contains("Running Linear command"),
+            expected
+        );
+    }
+}
+
+#[test]
+fn diagram_serve_uses_file_env_and_flag_ports() {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    let port = || {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    for mode in 0..3 {
+        let file_port = port();
+        let env_port = port();
+        let flag_port = port();
+        std::fs::write(&path, format!("[diagram]\nport = {file_port}\n")).unwrap();
+        let mut cmd = command(home.path());
+        cmd.env("MCPTOOLS_CONFIG", &path)
+            .env("XDG_DATA_HOME", home.path())
+            .env_remove("MCPTOOLS_DIAGRAM_PORT")
+            .args(["diagram", "serve", "--host", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if mode > 0 {
+            cmd.env("MCPTOOLS_DIAGRAM_PORT", env_port.to_string());
+        }
+        if mode == 2 {
+            cmd.args(["--port", &flag_port.to_string()]);
+        }
+        let mut child = cmd.spawn().unwrap();
+        let record = home.path().join("mcptools/diagrams/.daemon-address!");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let address = loop {
+            if let Ok(address) = std::fs::read_to_string(&record) {
+                break address;
+            }
+            assert!(
+                child.try_wait().unwrap().is_none() && Instant::now() < deadline,
+                "daemon failed to start"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        child.kill().unwrap();
+        child.wait().unwrap();
+        std::fs::remove_file(record).unwrap();
+        assert_eq!(
+            address.parse::<std::net::SocketAddr>().unwrap().port(),
+            [file_port, env_port, flag_port][mode]
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn md_timeout_file_env_and_flag_precedence() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    let chrome = home.path().join("chrome");
+    std::fs::write(&path, "[md]\ntimeout = 1\n").unwrap();
+    std::fs::write(&chrome, "#!/bin/sh\nexec sleep 30\n").unwrap();
+    std::fs::set_permissions(&chrome, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for mode in 0..3 {
+        let mut cmd = command(home.path());
+        cmd.env("MCPTOOLS_CONFIG", &path)
+            .env("CHROME", &chrome)
+            .env_remove("MD_TIMEOUT")
+            .args(["md", "fetch", "http://example.test"]);
+        if mode > 0 {
+            cmd.env("MD_TIMEOUT", "2");
+        }
+        if mode == 2 {
+            cmd.args(["--timeout", "3"]);
+        }
+        let output = cmd.output().unwrap();
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains(&format!("timed out after {} seconds", mode + 1)),
+            "{error}"
+        );
+    }
+}

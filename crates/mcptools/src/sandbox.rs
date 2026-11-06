@@ -47,6 +47,12 @@ pub async fn run(code: &str, limits: Limits, bindings: Bindings) -> Run {
 }
 
 async fn run_inner(code: String, limits: Limits, bindings: Bindings) -> Run {
+    let Some(deadline) = Instant::now().checked_add(limits.timeout) else {
+        return Run {
+            logs: Vec::new(),
+            outcome: Err(message_error("Execute timeout is too large".into())),
+        };
+    };
     let logs = Rc::new(RefCell::new(LogBuffer::new(limits.output_bytes)));
     let stop: Rc<Cell<Option<StopReason>>> = Rc::new(Cell::new(None));
     let outcome: Result<serde_json::Value, SandboxError> = {
@@ -54,7 +60,6 @@ async fn run_inner(code: String, limits: Limits, bindings: Bindings) -> Run {
             Err(err) => Err(err),
             Ok(runtime) => {
                 runtime.set_memory_limit(limits.memory_bytes).await;
-                let deadline = Instant::now() + limits.timeout;
                 let handler_stop = stop.clone();
                 runtime
                     .set_interrupt_handler(Some(Box::new(move || {
@@ -69,7 +74,7 @@ async fn run_inner(code: String, limits: Limits, bindings: Bindings) -> Run {
                     })))
                     .await;
                 let drive = eval(&runtime, &logs, &stop, code, bindings);
-                let timed = tokio::time::timeout(limits.timeout, drive).await;
+                let timed = tokio::time::timeout_at(deadline.into(), drive).await;
                 if let Some(reason) = stop.get() {
                     Err(reason.to_error(&limits))
                 } else {
@@ -268,6 +273,17 @@ mod tests {
         let run = run("1 + 1", Limits::default(), empty_bindings()).await;
         let outcome = run.outcome.unwrap();
         assert_eq!(outcome, serde_json::json!(2));
+        assert!(run.logs.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn excessive_timeout_returns_error_without_panicking() {
+        let limits = small_limits(Duration::from_secs(i64::MAX as u64));
+        let run = run("1", limits, empty_bindings()).await;
+        assert_eq!(
+            run.outcome,
+            Err(message_error("Execute timeout is too large".into()))
+        );
         assert!(run.logs.is_empty());
     }
 

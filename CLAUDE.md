@@ -40,7 +40,7 @@ export ATLASSIAN_EMAIL="your-email@company.com"
 export ATLASSIAN_API_TOKEN="your-api-token"
 ```
 
-**Service-Specific Overrides**
+**Environment and Config**
 
 | Service | Variables | Fallback |
 |---------|-----------|----------|
@@ -49,6 +49,10 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` | None (required) |
 | Linear | `LINEAR_API_KEY` | `[linear].api_key` in config |
 | Images | `OPENAI_API_KEY`, `OPENAI_IMAGES_MODEL`, `OPENAI_BASE_URL`, `MCPTOOLS_IMAGES_API`, `MCPTOOLS_IMAGES_MAINLINE` | `[images]` in config |
+| General | `MCPTOOLS_VERBOSE` | `[general].verbose` |
+| MCP | `MCPTOOLS_DISCOVERY`, `MCPTOOLS_CODE_MODE`, `MCPTOOLS_EXECUTE_TIMEOUT_SECS`, `MCPTOOLS_EXECUTE_MEMORY_MB`, `MCPTOOLS_EXECUTE_OUTPUT_KB` | `[mcp]`: `discovery`, `code_mode`, `execute_timeout_secs`, `execute_memory_mb`, `execute_output_kb` |
+| Diagram | `MCPTOOLS_DIAGRAM_HOST`, `MCPTOOLS_DIAGRAM_PORT`, `MCPTOOLS_DIAGRAM_SHARE_SECONDS`, `MCPTOOLS_DIAGRAM_TTL_SECONDS`, `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS`, `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` | `[diagram]`: `host`, `port`, `share_seconds`, `ttl_seconds`, `idle_check_seconds`, `idle_grace_seconds` |
+| Markdown | `MD_TIMEOUT` | `[md].timeout` |
 
 **Jev**
 
@@ -243,9 +247,9 @@ Call find_tools (task, --domain, or --list-domains). A domain list is how you pr
 - [Atlassian Quick Start](docs/ATLASSIAN_QUICK_START.md) - Quick reference
 
 
-Atlassian and Linear settings can also be stored in `~/.config/mcptools/config.toml`.
+Persistent settings can also be stored in `~/.config/mcptools/config.toml`; see the [config key mapping](.claude/context/mcp-server.md#local-stdio-upstream-gateway). `MCPTOOLS_LANE_REPOS` remains operator-controlled environment only so agent-writable config cannot grant lane access.
 Set `MCPTOOLS_CONFIG` to use another file. Protect credentials with `chmod 600`.
-Environment values override file values; service settings override shared settings within each source.
+CLI flags and per-call arguments override environment values, then file values, then built-in defaults; service settings override shared settings within each source.
 
 ```toml
 [linear]

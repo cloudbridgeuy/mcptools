@@ -127,7 +127,11 @@ fn sweep_with_share(
 pub async fn run(directory: PathBuf) -> Result<()> {
     let value = match std::env::var("MCPTOOLS_DIAGRAM_TTL_SECONDS") {
         Ok(value) => Some(value),
-        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotPresent) => crate::config::optional()?
+            .unwrap_or_default()
+            .diagram
+            .ttl_seconds
+            .map(|value| value.to_string()),
         Err(error) => return Err(error.into()),
     };
     let ttl = ttl(value.as_deref())?;

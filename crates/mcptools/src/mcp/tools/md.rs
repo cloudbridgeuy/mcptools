@@ -104,10 +104,15 @@ pub async fn handle_md_fetch(
             data: None,
         })?;
 
+    let timeout = crate::md::timeout(args.timeout).map_err(|error| JsonRpcError {
+        code: -32603,
+        message: error.to_string(),
+        data: None,
+    })?;
     let fetch_data = tokio::task::spawn_blocking(move || {
         crate::md::fetch_and_convert_data(crate::md::FetchConfig {
             url: args.url,
-            timeout: args.timeout.unwrap_or(30),
+            timeout,
             raw_html: args.raw_html.unwrap_or(false),
             selector: args.selector,
             strategy,
@@ -164,9 +169,14 @@ pub async fn handle_md_toc(
         }
     };
 
+    let timeout = crate::md::timeout(args.timeout).map_err(|error| JsonRpcError {
+        code: -32603,
+        message: error.to_string(),
+        data: None,
+    })?;
     let toc_options = crate::md::TocOptions {
         url: args.url,
-        timeout: args.timeout.unwrap_or(30),
+        timeout,
         selector: args.selector,
         strategy,
         index: args.index,

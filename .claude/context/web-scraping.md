@@ -75,7 +75,7 @@ mcptools md fetch https://example.com --json
 | Flag | Env Var | Default | Description |
 |------|---------|---------|-------------|
 | `<URL>` | `MD_URL` | required | URL to fetch |
-| `--timeout`, `-t` | `MD_TIMEOUT` | 30 | Timeout in seconds |
+| `--timeout`, `-t` | `MD_TIMEOUT` | 30 | Timeout in seconds; file key `[md].timeout` |
 | `--json` | - | false | Output as JSON |
 | `--raw-html` | - | false | Output raw HTML instead of Markdown |
 | `--include-metadata` | - | false | Include title, URL, HTML size, fetch time |
@@ -190,7 +190,7 @@ Setext titles use only the nonblank text line immediately before the underline, 
 
 ## Environment Variables
 
-All CLI flags can be set via environment variables for scripting/testing:
+Environment variables can supply CLI arguments. `MD_TIMEOUT` also has file key `[md].timeout`; CLI or per-call timeout overrides environment, then file, then the default:
 
 | Variable | Description |
 |----------|-------------|
@@ -203,5 +203,6 @@ All CLI flags can be set via environment variables for scripting/testing:
 | `MD_OFFSET` | Character offset |
 | `MD_LIMIT` | Characters per page |
 | `MD_PAGE` | Page number |
+| `MD_OUTPUT` | TOC output format |
 
 Requires current stable Chrome/Chromium (156+). `CHROME` selects the executable.

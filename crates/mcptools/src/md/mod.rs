@@ -76,6 +76,21 @@ pub struct FetchConfig {
     pub paginated: bool,
 }
 
+pub fn timeout(value: Option<u64>) -> Result<u64> {
+    if let Some(value) = value {
+        return Ok(value);
+    }
+    match std::env::var("MD_TIMEOUT") {
+        Ok(value) => Ok(value.parse()?),
+        Err(std::env::VarError::NotPresent) => Ok(crate::config::optional()?
+            .unwrap_or_default()
+            .md
+            .timeout
+            .unwrap_or(30)),
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub async fn run(app: App, _global: crate::Global) -> Result<()> {
     match app.command {
         Commands::Fetch(options) => fetch::fetch(options).await,

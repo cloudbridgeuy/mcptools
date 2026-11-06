@@ -58,8 +58,18 @@ file override is an actionable error. The path convention is the same on macOS
 and Linux, not macOS Application Support.
 
 The sectioned TOML configuration layers defaults with one global file. There
-is no per-store or repository layer. Supported sections are `[gateway]`, `[atlassian]`, `[linear]`, and `[jev]`.
-Unknown sections and keys fail validation.
+is no per-store or repository layer. Supported sections are `[gateway]`, `[atlassian]`, `[linear]`, `[jev]`, `[images]`, `[general]`, `[mcp]`, `[diagram]`, and `[md]`.
+Unknown sections and keys fail validation. CLI flags and per-call arguments override environment values, then file values, then built-in defaults.
+
+| File keys | Environment variables |
+|-----------|-----------------------|
+| `[general].verbose` | `MCPTOOLS_VERBOSE` |
+| `[mcp].discovery`, `code_mode` | `MCPTOOLS_DISCOVERY`, `MCPTOOLS_CODE_MODE` |
+| `[mcp].execute_timeout_secs`, `execute_memory_mb`, `execute_output_kb` | `MCPTOOLS_EXECUTE_TIMEOUT_SECS`, `MCPTOOLS_EXECUTE_MEMORY_MB`, `MCPTOOLS_EXECUTE_OUTPUT_KB` |
+| `[diagram].host`, `port`, `share_seconds`, `ttl_seconds`, `idle_check_seconds`, `idle_grace_seconds` | Corresponding `MCPTOOLS_DIAGRAM_*` variables |
+| `[md].timeout` | `MD_TIMEOUT` |
+
+`MCPTOOLS_LANE_REPOS` remains operator-controlled environment only: an agent that can write user config must not grant itself lane access. Unknown-field validation rejects root `lane-repos` or `lane_repos`, `[mcp].lane_repos`, and `[lane]`. `CHROME` remains the executable override; `RALPH_INBOX` remains operator-controlled because it grants an external notification write target. `LLM_STREAM_BIN` is test-only. Platform selectors such as `MCPTOOLS_CONFIG`, `XDG_CONFIG_HOME`, `HOME`, `XDG_DATA_HOME`, `APPDATA`, and `PATH` remain environment only, as do terminal autodetection variables `TERM`, `TERM_PROGRAM`, `KITTY_WINDOW_ID`, and `TMUX`. `PORT` sets the Linear chart `--serve` port per invocation (default 0, ephemeral) and is outside this migration; `CALENDSYNC_DEV_URL` is development-only. `HN_ITEM`, `HN_LIMIT`, `MD_URL`, `MD_SELECTOR`, `MD_STRATEGY`, `MD_INDEX`, `MD_PAGINATED`, `MD_OFFSET`, `MD_LIMIT`, `MD_PAGE`, and `MD_OUTPUT` remain per-invocation environment arguments.
 
 ```toml
 [[gateway.upstreams]]

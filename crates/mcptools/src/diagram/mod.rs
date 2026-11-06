@@ -51,7 +51,7 @@ pub async fn ensure_running() -> bool {
             .create(true)
             .append(true)
             .open(directory.join("daemon.log"))?;
-        let port = std::env::var("MCPTOOLS_DIAGRAM_PORT").unwrap_or_else(|_| "5199".into());
+        let port = port(None)?.to_string();
         let mut command = std::process::Command::new(std::env::current_exe()?);
         command
             .args(["diagram", "serve", "--tailscale", "--port", &port])
@@ -100,9 +100,24 @@ enum Commands {
         host: Option<IpAddr>,
         #[arg(long)]
         tailscale: bool,
-        #[arg(long, default_value_t = 5199)]
-        port: u16,
+        #[arg(long)]
+        port: Option<u16>,
     },
+}
+
+fn port(value: Option<u16>) -> crate::prelude::Result<u16> {
+    if let Some(value) = value {
+        return Ok(value);
+    }
+    match std::env::var("MCPTOOLS_DIAGRAM_PORT") {
+        Ok(value) => Ok(value.parse()?),
+        Err(std::env::VarError::NotPresent) => Ok(crate::config::optional()?
+            .unwrap_or_default()
+            .diagram
+            .port
+            .unwrap_or(5199)),
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub async fn run(app: App) -> crate::prelude::Result<()> {
@@ -127,7 +142,7 @@ pub async fn run(app: App) -> crate::prelude::Result<()> {
             } else {
                 host.expect("host required without tailscale")
             };
-            serve::run(host, port).await
+            serve::run(host, self::port(port)?).await
         }
     }
 }

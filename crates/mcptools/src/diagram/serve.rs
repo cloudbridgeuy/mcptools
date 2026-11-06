@@ -38,6 +38,25 @@ pub async fn run(host: IpAddr, port: u16) -> Result<()> {
     let mut record = tempfile::NamedTempFile::new_in(&directory)?;
     std::io::Write::write_all(&mut record, bound.to_string().as_bytes())?;
     record.persist(directory.join(".daemon-address!"))?;
+    let check_env = std::env::var_os("MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS")
+        .map(|value| value.into_string().unwrap_or_default());
+    let grace_env = std::env::var_os("MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS")
+        .map(|value| value.into_string().unwrap_or_default());
+    let file = if check_env.is_none() || grace_env.is_none() {
+        crate::config::optional()?.unwrap_or_default().diagram
+    } else {
+        Default::default()
+    };
+    let check = mcptools_core::config::Diagram::idle_seconds(
+        check_env.as_deref(),
+        file.idle_check_seconds,
+        60,
+    );
+    let grace = mcptools_core::config::Diagram::idle_seconds(
+        grace_env.as_deref(),
+        file.idle_grace_seconds,
+        120,
+    );
     let mut retention = tokio::spawn(super::retention::run(directory.clone()));
     let app = Router::new()
         .fallback(handler)
@@ -53,7 +72,7 @@ pub async fn run(host: IpAddr, port: u16) -> Result<()> {
         .with_graceful_shutdown(async move {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {}
-                _ = idle(idle_directory) => {}
+                _ = idle(idle_directory, check, grace) => {}
             }
         })
         .into_future();
@@ -82,16 +101,7 @@ pub async fn run(host: IpAddr, port: u16) -> Result<()> {
     Ok(())
 }
 
-async fn idle(directory: PathBuf) {
-    let seconds = |name, default| {
-        std::env::var(name)
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(default)
-    };
-    let check = seconds("MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS", 60);
-    let grace = seconds("MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS", 120);
+async fn idle(directory: PathBuf, check: u64, grace: u64) {
     let mut since = None;
     let mut interval = tokio::time::interval(Duration::from_secs(check));
     loop {

@@ -1,14 +1,32 @@
 # Testing & Environment Variables
 
-All CLI arguments can be provided via environment variables, useful for scripting, testing, and CI/CD pipelines.
+Environment variables support scripting, testing, and CI/CD pipelines. Persistent settings can also use the file keys below.
+
+`MCPTOOLS_LANE_REPOS` stays operator-controlled environment only so agent-writable config cannot grant lane access. `RALPH_INBOX` stays operator-controlled because it grants an external notification write target. `CHROME` selects the runtime executable; `LLM_STREAM_BIN` is test-only. These have no config keys. `PORT` sets the Linear chart `--serve` port per invocation (default 0, ephemeral) and is outside this migration; `CALENDSYNC_DEV_URL` is development-only.
 
 ## Global Variables
 
 | Variable | Description |
 |----------|-------------|
-| `MCPTOOLS_VERBOSE` | Enable verbose output (default: false) |
-| `MCPTOOLS_DISCOVERY` | List only `find_tools` via `tools/list`. Accepts `y`, `yes`, `t`, `true`, `on`, `1` (on) and `n`, `no`, `f`, `false`, `off`, `0` (off), any case; other values exit 2 (default: false) |
-| `MCPTOOLS_CODE_MODE` | List `find_tools,execute` via `tools/list`; wins over `MCPTOOLS_DISCOVERY`. Same accepted values, other values exit 2 (default: false) |
+| `MCPTOOLS_VERBOSE` | Enable verbose output (default: false); `[general].verbose` |
+| `MCPTOOLS_DISCOVERY` | List only `find_tools` via `tools/list`. Accepts `y`, `yes`, `t`, `true`, `on`, `1` (on) and `n`, `no`, `f`, `false`, `off`, `0` (off), any case; other values exit 2 (default: false); `[mcp].discovery` |
+| `MCPTOOLS_CODE_MODE` | List `find_tools,execute` via `tools/list`; wins over `MCPTOOLS_DISCOVERY`. Same accepted values, other values exit 2 (default: false); `[mcp].code_mode` |
+| `MCPTOOLS_EXECUTE_TIMEOUT_SECS` | Execute timeout; `[mcp].execute_timeout_secs` (default: 30) |
+| `MCPTOOLS_EXECUTE_MEMORY_MB` | Execute memory; `[mcp].execute_memory_mb` (default: 64) |
+| `MCPTOOLS_EXECUTE_OUTPUT_KB` | Execute output; `[mcp].execute_output_kb` (default: 256) |
+
+## Diagram Variables
+
+| Variable | File key |
+|----------|----------|
+| `MCPTOOLS_DIAGRAM_HOST` | `[diagram].host` |
+| `MCPTOOLS_DIAGRAM_PORT` | `[diagram].port` |
+| `MCPTOOLS_DIAGRAM_SHARE_SECONDS` | `[diagram].share_seconds` |
+| `MCPTOOLS_DIAGRAM_TTL_SECONDS` | `[diagram].ttl_seconds` |
+| `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS` | `[diagram].idle_check_seconds` |
+| `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` | `[diagram].idle_grace_seconds` |
+
+See [diagram configuration](diagram-serve.md#configuration) for defaults and behavior.
 
 ## Atlassian Variables
 
@@ -59,7 +77,7 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 | Variable | Description |
 |----------|-------------|
 | `MD_URL` | URL to fetch |
-| `MD_TIMEOUT` | Timeout in seconds (default: 30) |
+| `MD_TIMEOUT` | Timeout in seconds (default: 30); `[md].timeout` |
 | `MD_SELECTOR` | CSS selector |
 | `MD_STRATEGY` | Selection strategy (first, last, all, n) |
 | `MD_INDEX` | Index for 'n' strategy |
@@ -67,6 +85,7 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 | `MD_OFFSET` | Character offset |
 | `MD_LIMIT` | Characters per page |
 | `MD_PAGE` | Page number |
+| `MD_OUTPUT` | TOC output format |
 
 ## UI Annotations Variables
 
@@ -172,9 +191,10 @@ mcptools atlassian jira search "assignee = currentUser()"
 
 ## Precedence
 
-1. CLI arguments (highest priority)
+1. CLI flags or per-call arguments (highest priority)
 2. Environment variables
-3. Default values (lowest priority)
+3. Config file values
+4. Built-in defaults (lowest priority)
 
 Service-specific variables (e.g., `JIRA_*`) take precedence over shared variables (`ATLASSIAN_*`).
 

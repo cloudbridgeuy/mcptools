@@ -65,11 +65,16 @@ fn now() -> std::io::Result<u64> {
 fn share_window(seconds: Option<u64>) -> Result<ShareWindow> {
     let seconds = match seconds {
         Some(seconds) => Some(seconds),
-        None => std::env::var("MCPTOOLS_DIAGRAM_SHARE_SECONDS")
-            .ok()
-            .map(|value| value.parse::<u64>())
-            .transpose()
-            .wrap_err("MCPTOOLS_DIAGRAM_SHARE_SECONDS must be unsigned seconds")?,
+        None => match std::env::var("MCPTOOLS_DIAGRAM_SHARE_SECONDS") {
+            Ok(value) => mcptools_core::config::Diagram::seconds(Some(&value), None)
+                .wrap_err("MCPTOOLS_DIAGRAM_SHARE_SECONDS must be unsigned seconds")?,
+            Err(_) => {
+                crate::config::optional()?
+                    .unwrap_or_default()
+                    .diagram
+                    .share_seconds
+            }
+        },
     };
     Ok(ShareWindow {
         expires_at_unix_secs: now()?.saturating_add(plan_share::clamp_ttl(seconds)),
@@ -153,8 +158,13 @@ pub fn save(
 }
 
 pub fn endpoint() -> Result<(String, String)> {
-    let host = std::env::var("MCPTOOLS_DIAGRAM_HOST").ok();
-    let port = std::env::var("MCPTOOLS_DIAGRAM_PORT").ok();
+    let mut host = std::env::var("MCPTOOLS_DIAGRAM_HOST").ok();
+    let mut port = std::env::var("MCPTOOLS_DIAGRAM_PORT").ok();
+    if host.is_none() || port.is_none() {
+        let file = crate::config::optional()?.unwrap_or_default().diagram;
+        host = host.or(file.host);
+        port = port.or(file.port.map(|value| value.to_string()));
+    }
     let record = std::fs::read_to_string(data_dir()?.join("diagrams/.daemon-address!")).ok();
     Ok(mcptools_core::diagram_endpoint::endpoint(
         host.as_deref(),

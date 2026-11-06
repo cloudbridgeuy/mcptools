@@ -11,6 +11,86 @@ pub struct AppConfig {
     pub linear: Linear,
     pub jev: Jev,
     pub images: Images,
+    pub mcp: Mcp,
+    pub general: General,
+    pub diagram: Diagram,
+    pub md: Md,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Mcp {
+    pub discovery: Option<bool>,
+    pub code_mode: Option<bool>,
+    pub execute_timeout_secs: Option<u64>,
+    pub execute_memory_mb: Option<u64>,
+    pub execute_output_kb: Option<u64>,
+}
+
+impl Mcp {
+    pub fn with_fallback(self, file: Self) -> Self {
+        Self {
+            discovery: self.discovery.or(file.discovery),
+            code_mode: self.code_mode.or(file.code_mode),
+            execute_timeout_secs: self.execute_timeout_secs.or(file.execute_timeout_secs),
+            execute_memory_mb: self.execute_memory_mb.or(file.execute_memory_mb),
+            execute_output_kb: self.execute_output_kb.or(file.execute_output_kb),
+        }
+    }
+
+    pub fn needs_file(&self) -> bool {
+        self.discovery.is_none()
+            || self.code_mode.is_none()
+            || self.execute_timeout_secs.is_none()
+            || self.execute_memory_mb.is_none()
+            || self.execute_output_kb.is_none()
+    }
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct General {
+    pub verbose: Option<bool>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Diagram {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub share_seconds: Option<u64>,
+    pub ttl_seconds: Option<u64>,
+    pub idle_check_seconds: Option<u64>,
+    pub idle_grace_seconds: Option<u64>,
+}
+
+impl Diagram {
+    pub fn idle_seconds(environment: Option<&str>, file: Option<u64>, default: u64) -> u64 {
+        match environment {
+            Some(value) => value
+                .parse::<u64>()
+                .ok()
+                .filter(|value| *value > 0)
+                .unwrap_or(default),
+            None => file.unwrap_or(default),
+        }
+    }
+
+    pub fn seconds(
+        environment: Option<&str>,
+        file: Option<u64>,
+    ) -> Result<Option<u64>, std::num::ParseIntError> {
+        environment
+            .map(str::parse)
+            .transpose()
+            .map(|value| value.or(file))
+    }
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Md {
+    pub timeout: Option<u64>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -246,6 +326,56 @@ pub fn parse(text: &str) -> Result<AppConfig, Error> {
         .is_some_and(|value| crate::images::validate_quality(value).is_err())
     {
         return Err(Error("invalid images.quality".into()));
+    }
+    for (name, value, max) in [
+        (
+            "mcp.execute_timeout_secs",
+            config.mcp.execute_timeout_secs,
+            u64::MAX,
+        ),
+        (
+            "mcp.execute_memory_mb",
+            config.mcp.execute_memory_mb,
+            (usize::MAX / (1024 * 1024)) as u64,
+        ),
+        (
+            "mcp.execute_output_kb",
+            config.mcp.execute_output_kb,
+            (usize::MAX / 1024) as u64,
+        ),
+        (
+            "diagram.idle_check_seconds",
+            config.diagram.idle_check_seconds,
+            u64::MAX,
+        ),
+        (
+            "diagram.idle_grace_seconds",
+            config.diagram.idle_grace_seconds,
+            u64::MAX,
+        ),
+        ("md.timeout", config.md.timeout, u64::MAX),
+    ] {
+        if value.is_some_and(|value| value == 0 || value > max) {
+            return Err(Error(format!("invalid {name}")));
+        }
+    }
+    if config
+        .diagram
+        .share_seconds
+        .is_some_and(|value| !(60..=86400).contains(&value))
+    {
+        return Err(Error("invalid diagram.share_seconds".into()));
+    }
+    if config.diagram.port == Some(0) {
+        return Err(Error("invalid diagram.port".into()));
+    }
+    if let Some(host) = config.diagram.host.as_deref() {
+        let meta = crate::plan_store::PlanMeta {
+            id: "config".into(),
+            token: "0".repeat(32),
+            rev: 1,
+        };
+        crate::plan_store::plan_url(&meta, Some(host), None).map_err(Error)?;
     }
     gateway::validate_config(&config.gateway).map_err(|error| Error(error.to_string()))?;
     Ok(config)
@@ -642,6 +772,109 @@ mod images_regressions {
                 .to_string();
             assert!(error.contains(field));
             assert!(!error.contains("secret-value"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod runtime_config_regressions {
+    use super::*;
+
+    #[test]
+    fn runtime_sections_round_trip() {
+        let config = parse("[mcp]\ndiscovery = true\ncode_mode = false\nexecute_timeout_secs = 9\nexecute_memory_mb = 32\nexecute_output_kb = 8\n[general]\nverbose = true\n[diagram]\nhost = '127.0.0.1'\nport = 5199\nshare_seconds = 600\nttl_seconds = 3600\nidle_check_seconds = 60\nidle_grace_seconds = 120\n[md]\ntimeout = 15\n").unwrap();
+        let value = toml::Value::try_from(config).unwrap();
+        assert_eq!(value["mcp"]["discovery"].as_bool(), Some(true));
+        assert_eq!(value["mcp"]["code_mode"].as_bool(), Some(false));
+        assert_eq!(value["mcp"]["execute_timeout_secs"].as_integer(), Some(9));
+        assert_eq!(value["mcp"]["execute_memory_mb"].as_integer(), Some(32));
+        assert_eq!(value["mcp"]["execute_output_kb"].as_integer(), Some(8));
+        assert_eq!(value["general"]["verbose"].as_bool(), Some(true));
+        assert_eq!(value["diagram"]["host"].as_str(), Some("127.0.0.1"));
+        for (key, expected) in [
+            ("port", 5199),
+            ("share_seconds", 600),
+            ("ttl_seconds", 3600),
+            ("idle_check_seconds", 60),
+            ("idle_grace_seconds", 120),
+        ] {
+            assert_eq!(value["diagram"][key].as_integer(), Some(expected));
+        }
+        assert_eq!(value["md"]["timeout"].as_integer(), Some(15));
+    }
+
+    #[test]
+    fn mcp_file_environment_and_flag_precedence() {
+        let parsed = parse("[mcp]\ndiscovery = true\ncode_mode = true\nexecute_timeout_secs = 9\nexecute_memory_mb = 32\nexecute_output_kb = 8").unwrap();
+        let resolved = Mcp {
+            discovery: Some(false),
+            execute_output_kb: Some(2),
+            ..Mcp::default()
+        }
+        .with_fallback(parsed.mcp.clone());
+        assert_eq!(resolved.discovery, Some(false));
+        assert_eq!(resolved.code_mode, Some(true));
+        assert_eq!(resolved.execute_output_kb, Some(2));
+        let file = toml::Value::try_from(parsed).unwrap();
+        for key in ["discovery", "code_mode"] {
+            let value = file["mcp"][key].as_bool();
+            assert_eq!(resolve(None, None, value, None), Some(true));
+            assert_eq!(resolve(None, Some(false), value, None), Some(false));
+            assert_eq!(resolve(Some(true), Some(false), value, None), Some(true));
+        }
+        for key in [
+            "execute_timeout_secs",
+            "execute_memory_mb",
+            "execute_output_kb",
+        ] {
+            let value = file["mcp"][key].as_integer();
+            assert!(resolve(None, None, value, None).is_some());
+            assert_eq!(resolve(None, Some(2), value, None), Some(2));
+            assert_eq!(resolve(Some(3), Some(2), value, None), Some(3));
+        }
+    }
+
+    #[test]
+    fn diagram_seconds_keep_environment_semantics() {
+        assert_eq!(Diagram::idle_seconds(None, Some(5), 60), 5);
+        assert_eq!(Diagram::idle_seconds(Some("7"), Some(5), 60), 7);
+        assert_eq!(Diagram::idle_seconds(Some("0"), Some(5), 60), 60);
+        assert_eq!(Diagram::idle_seconds(Some("invalid"), Some(5), 60), 60);
+        assert_eq!(Diagram::seconds(None, Some(0)).unwrap(), Some(0));
+        assert_eq!(Diagram::seconds(Some("20"), Some(5)).unwrap(), Some(20));
+        assert!(Diagram::seconds(Some("invalid"), Some(5)).is_err());
+    }
+
+    #[test]
+    fn lane_repos_is_rejected_in_every_runtime_section() {
+        for text in [
+            "lane_repos = ['/tmp']",
+            "lane-repos = ['/tmp']",
+            "[mcp]\nlane_repos = ['/tmp']",
+            "[mcp]\nlane-repos = ['/tmp']",
+            "[lane]\nrepos = ['/tmp']",
+            "[general]\nlane_repos = ['/tmp']",
+            "[diagram]\nlane_repos = ['/tmp']",
+            "[md]\nlane_repos = ['/tmp']",
+        ] {
+            assert!(parse(text).is_err(), "accepted {text}");
+        }
+    }
+
+    #[test]
+    fn runtime_sections_reject_invalid_fields() {
+        for text in [
+            "[mcp]\nunknown = true",
+            "[mcp]\ndiscovery = 'yes'",
+            "[mcp]\nexecute_timeout_secs = 0",
+            "[mcp]\nexecute_memory_mb = 0",
+            "[mcp]\nexecute_output_kb = 0",
+            "[general]\nverbose = 1",
+            "[diagram]\nport = 65536",
+            "[diagram]\nshare_seconds = 59",
+            "[md]\ntimeout = '30'",
+        ] {
+            assert!(parse(text).is_err(), "accepted {text}");
         }
     }
 }
