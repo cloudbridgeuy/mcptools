@@ -199,3 +199,22 @@ fn sandbox_options_are_only_on_mcp_help() {
         assert!(text.contains(option), "{text}");
     }
 }
+
+#[test]
+fn api_key_value_is_not_in_help() {
+    let secret = "sk-help-leak-check";
+    for command in ["generate", "edit", "vary"] {
+        let home = tempfile::tempdir().unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_mcptools"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("OPENAI_API_KEY", secret)
+            .current_dir(home.path())
+            .args(["images", command, "--help"])
+            .output()
+            .unwrap();
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("--api-key"), "{text}");
+        assert!(!text.contains(secret), "{text}");
+    }
+}

@@ -20,10 +20,6 @@ pub fn model_help() -> String {
 pub fn values_help(label: &str, values: &[&str], suffix: &str) -> String {
     format!("{label}: {}{suffix}", values.join(", "))
 }
-pub const FLARE_MODEL: &str = "gpt-image-2.5-flare";
-pub const FLARE_SNAPSHOT: &str = "gpt-image-2.5-flare-2026-09-08";
-pub const SUNBURST_MODEL: &str = "gpt-image-2.5-sunburst";
-pub const SUNBURST_SNAPSHOT: &str = "gpt-image-2.5-sunburst-2026-09-08";
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 pub const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 pub const CHAT_MAINLINE_DEFAULT: &str = "gpt-5.6-sol";

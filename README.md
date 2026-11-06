@@ -14,7 +14,7 @@ Useful MCP Tools to use with LLM Coding Agents
 - **HackerNews**: Access HN posts, comments, and stories (`hn_read_item`, `hn_list_items`)
 - **Web Scraping**: Fetch pages as Markdown with CSS selection and pagination (`md_fetch`, `md_toc`); render Markdown as self-contained offline HTML with Mermaid (`md_render`)
 - **PDF Navigation**: Parse PDF documents into navigable trees, read sections, peek at content, and extract images (`pdf_toc`, `pdf_read`, `pdf_peek`, `pdf_images`, `pdf_image`, `pdf_info`)
-- **Images**: Generate, edit, and vary images with ChatGPT Images 2.5 via subscription or API key (`images_generate`, `images_edit`, `images_vary`)
+- **Images**: Generate, edit, and vary images with GPT Image 2.6 via subscription or API key (`images_generate`, `images_edit`, `images_vary`)
 - **UI Annotations**: Query and manage UI annotations from a calendsync dev server (`ui_annotations_list`, `ui_annotations_get`, `ui_annotations_resolve`, `ui_annotations_clear`)
 - **Plan canvas**: Share an editable tldraw plan with a phone and return saved changes to an agent (`plan_write`, `plan_url`, `plan_close`, `plan_diff`, `plan_png`). See [Plan canvas](#plan-canvas).
 
@@ -1017,7 +1017,7 @@ Get document metadata including title, author, page count, and creator.
 
 ### Images Tools
 
-Generate, edit, and vary images with the GPT Image 2.5 models (`gpt-image-2.5-flare` default, `gpt-image-2.5-sunburst` for premium precision). Defaults to the ChatGPT subscription (llm-stream `auth.json`); pass `api: "openai"` with `OPENAI_API_KEY` for the metered API.
+Generate, edit, and vary images with the GPT Image models (`gpt-image-2.6-flare` default; `gpt-image-2.6-sunburst`, `gpt-image-2.5-flare`, and `gpt-image-2.5-sunburst` also supported). Defaults to the ChatGPT subscription (llm-stream `auth.json`); pass `api: "openai"` with `OPENAI_API_KEY` for the metered API.
 
 #### images_generate
 
@@ -1026,7 +1026,7 @@ Generate images from a text prompt. Saves files and returns paths plus metadata.
 **Parameters:**
 
 - `prompt` (string, required) - Text description of the image
-- `model` (string, optional) - Image model (default: `gpt-image-2.5-flare`)
+- `model` (string, optional) - Image model (default: `gpt-image-2.6-flare`)
 - `size` (string, optional) - `auto`, `1024x1024`, `1536x1024`, `1024x1536`, or custom `WIDTHxHEIGHT`
 - `quality` (string, optional) - `auto`, `low`, `medium`, `high`, `xhigh`, `max`
 - `outputFormat` (string, optional) - `png`, `jpeg`, `webp` (default: `png`)
@@ -1474,7 +1474,7 @@ mcptools images generate "a lighthouse" --api openai --model gpt-image-2.5-sunbu
 | `MCPTOOLS_IMAGES_API` | `chatgpt` | Backend: `chatgpt` (subscription) or `openai` (API key) |
 | `LLM_STREAM_CONFIG_DIR` | `~/.config/llm-stream` | Config dir holding subscription `auth.json` |
 | `MCPTOOLS_IMAGES_MAINLINE` | `gpt-5.6-sol` | Chat model fronting the image tool (subscription) |
-| `OPENAI_IMAGES_MODEL` | `gpt-image-2.5-flare` | Image model |
+| `OPENAI_IMAGES_MODEL` | `gpt-image-2.6-flare` | Image model |
 | `OPENAI_API_KEY` | — | Key for `--api openai` |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Base URL for `--api openai` |
 

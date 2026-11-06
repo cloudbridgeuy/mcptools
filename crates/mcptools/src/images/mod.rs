@@ -45,6 +45,7 @@ pub struct BackendOpts {
     #[clap(
         long,
         env = "OPENAI_API_KEY",
+        hide_env_values = true,
         help = "OpenAI API key; [images].api_key in config.toml"
     )]
     pub api_key: Option<String>,
