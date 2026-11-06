@@ -1,3 +1,14 @@
+pub fn gateway_config(
+) -> Result<Option<mcptools_core::jev::GatewayConfig>, mcptools_core::jev::ConfigError> {
+    let var = |key: &str| std::env::var(key).ok();
+    let file = if mcptools_core::jev::needs_file(var)? {
+        crate::config::jev().map_err(|_| mcptools_core::jev::ConfigError::UnknownProvider)?
+    } else {
+        mcptools_core::config::Jev::default()
+    };
+    mcptools_core::jev::gateway_config_with_file(var, &file)
+}
+
 pub const JEV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 #[derive(Debug, thiserror::Error)]

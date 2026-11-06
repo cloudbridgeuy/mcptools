@@ -179,12 +179,7 @@ pub async fn find_tools(
     task: &str,
     k: usize,
 ) -> Result<FoundTools, mcptools_core::find_tools::FindToolsError> {
-    find_tools_with(
-        mcptools_core::jev::gateway_config(|key| std::env::var(key).ok()),
-        task,
-        k,
-    )
-    .await
+    find_tools_with(crate::jev::gateway_config(), task, k).await
 }
 
 fn list_domain_names() -> Vec<String> {

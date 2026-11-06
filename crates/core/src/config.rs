@@ -9,6 +9,16 @@ pub struct AppConfig {
     pub gateway: gateway::Config,
     pub atlassian: Atlassian,
     pub linear: Linear,
+    pub jev: Jev,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Jev {
+    pub provider: Option<String>,
+    pub endpoint: Option<String>,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -132,6 +142,9 @@ pub fn parse(text: &str) -> Result<AppConfig, Error> {
         };
         Error(format!("TOML at line {line}, column {column}: {message}"))
     })?;
+    if let Some(provider) = &config.jev.provider {
+        crate::jev::parse_provider(provider).map_err(|error| Error(error.to_string()))?;
+    }
     gateway::validate_config(&config.gateway).map_err(|error| Error(error.to_string()))?;
     Ok(config)
 }
@@ -279,6 +292,78 @@ mod linear_regressions {
         ] {
             let error = parse(text).err().unwrap().to_string();
             assert!(error.contains(expected), "{error}");
+            assert!(!error.contains("secret-value"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod jev_regressions {
+    use super::*;
+
+    #[test]
+    fn file_values_and_environment_precedence() {
+        let config = parse("[jev]\nprovider = 'opencode'\nendpoint = 'file-endpoint'\nmodel = 'file-model'\napi_key = 'file-key'\n").unwrap();
+        let resolve = |env: &[(&str, &str)]| {
+            crate::jev::gateway_config_with_file(
+                |key| {
+                    env.iter()
+                        .find(|(name, _)| *name == key)
+                        .map(|(_, value)| value.to_string())
+                },
+                &config.jev,
+            )
+            .unwrap()
+            .unwrap()
+        };
+        let file = resolve(&[]);
+        assert_eq!(
+            (&*file.endpoint, &*file.model, file.api_key.expose()),
+            ("file-endpoint", "file-model", "file-key")
+        );
+        let env = resolve(&[
+            ("JEV_PROVIDER", "vercel"),
+            ("JEV_ENDPOINT", "env-endpoint"),
+            ("JEV_MODEL", "env-model"),
+            ("JEV_API_KEY", "env-key"),
+            ("AI_GATEWAY_API_KEY", "provider-key"),
+        ]);
+        assert_eq!(
+            (&*env.endpoint, &*env.model, env.api_key.expose()),
+            ("env-endpoint", "env-model", "env-key")
+        );
+        for (provider, variable) in [
+            ("opencode", "OPENCODE_API_KEY"),
+            ("openrouter", "OPENROUTER_API_KEY"),
+            ("vercel", "AI_GATEWAY_API_KEY"),
+            ("typesafe", "TYPESAFE_API_KEY"),
+        ] {
+            assert_eq!(
+                resolve(&[("JEV_PROVIDER", provider), (variable, "provider-key")])
+                    .api_key
+                    .expose(),
+                "provider-key"
+            );
+        }
+        assert!(crate::jev::gateway_config_with_file(
+            |_| None,
+            &Jev {
+                provider: None,
+                ..config.jev.clone()
+            }
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn invalid_jev_fields_and_provider_hide_values() {
+        for text in [
+            "[jev]\nunknown = 'secret-value'\n",
+            "[jev]\napi_key = ['secret-value']\n",
+            "[jev]\nprovider = 'secret-value'\n",
+        ] {
+            let error = parse(text).err().unwrap().to_string();
             assert!(!error.contains("secret-value"));
         }
     }

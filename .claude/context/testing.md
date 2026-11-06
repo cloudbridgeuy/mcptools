@@ -87,9 +87,11 @@ All CLI arguments can be provided via environment variables, useful for scriptin
 
 ## Jev Variables
 
+Jev also reads `[jev]` fields `provider`, `endpoint`, `model`, and `api_key` from `~/.config/mcptools/config.toml` (or `MCPTOOLS_CONFIG`). Environment values override file values; `JEV_API_KEY` takes precedence over the selected provider's key variable, then `api_key`. Run `chmod 600` on files containing keys.
+
 | Variable | Description |
 |----------|-------------|
-| `JEV_PROVIDER` | `opencode`, `openrouter`, `vercel` or `typesafe` to enable Jev (unset selects local) |
+| `JEV_PROVIDER` | `opencode`, `openrouter`, `vercel` or `typesafe` to enable Jev (unset in env and file selects local) |
 | `JEV_ENDPOINT` | Override gateway endpoint (defaults from provider) |
 | `JEV_MODEL` | Override model (defaults from provider) |
 | `JEV_API_KEY` | API key (falls back to the provider's conventional variable) |

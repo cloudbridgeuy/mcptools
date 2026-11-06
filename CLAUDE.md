@@ -51,16 +51,18 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 
 **Jev**
 
+Jev also reads `[jev]` fields `provider`, `endpoint`, `model`, and `api_key` from `~/.config/mcptools/config.toml` (or `MCPTOOLS_CONFIG`). Environment values override file values; `JEV_API_KEY` takes precedence over the selected provider's key variable, then `api_key`. Run `chmod 600` on files containing keys.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `JEV_PROVIDER` | unset | `opencode`, `openrouter`, `vercel` or `typesafe` to enable Jev classifier |
+| `JEV_PROVIDER` | unset | `opencode`, `openrouter`, `vercel` or `typesafe`; unset in env and file disables Jev |
 | `JEV_ENDPOINT` | provider preset | Override endpoint URL |
 | `JEV_MODEL` | provider preset | Override model name |
 | `JEV_API_KEY` | (none) | API key; falls back to the provider's conventional key var |
-| `OPENCODE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=opencode` |
-| `OPENROUTER_API_KEY` | - | Conventional key var when `JEV_PROVIDER=openrouter` |
-| `AI_GATEWAY_API_KEY` | - | Conventional key var when `JEV_PROVIDER=vercel` |
-| `TYPESAFE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=typesafe` |
+| `OPENCODE_API_KEY` | - | Conventional key var when provider is `opencode` |
+| `OPENROUTER_API_KEY` | - | Conventional key var when provider is `openrouter` |
+| `AI_GATEWAY_API_KEY` | - | Conventional key var when provider is `vercel` |
+| `TYPESAFE_API_KEY` | - | Conventional key var when provider is `typesafe` |
 
 ## Detailed Documentation
 

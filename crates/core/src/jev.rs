@@ -80,33 +80,56 @@ pub enum ConfigError {
     MissingKey,
 }
 
+pub fn parse_provider(name: &str) -> Result<Provider, ConfigError> {
+    match name {
+        "opencode" => Ok(Provider::OpenCode),
+        "openrouter" => Ok(Provider::OpenRouter),
+        "vercel" => Ok(Provider::Vercel),
+        "typesafe" => Ok(Provider::TypeSafe),
+        _ => Err(ConfigError::UnknownProvider),
+    }
+}
+
 pub fn gateway_config(
     var: impl Fn(&str) -> Option<String>,
 ) -> Result<Option<GatewayConfig>, ConfigError> {
-    match var("JEV_PROVIDER") {
-        None => Ok(None),
-        Some(name) => {
-            let provider = match name.as_str() {
-                "opencode" => Provider::OpenCode,
-                "openrouter" => Provider::OpenRouter,
-                "vercel" => Provider::Vercel,
-                "typesafe" => Provider::TypeSafe,
-                _ => return Err(ConfigError::UnknownProvider),
-            };
-            let preset = provider.preset();
-            let endpoint = var("JEV_ENDPOINT").unwrap_or_else(|| preset.endpoint.to_string());
-            let model = var("JEV_MODEL").unwrap_or_else(|| preset.model.to_string());
-            let key = var("JEV_API_KEY").or_else(|| var(preset.key_var));
-            match key {
-                Some(k) => Ok(Some(GatewayConfig {
-                    endpoint,
-                    model,
-                    api_key: Secret::new(k),
-                })),
-                None => Err(ConfigError::MissingKey),
-            }
-        }
+    gateway_config_with_file(var, &crate::config::Jev::default())
+}
+
+pub fn needs_file(var: impl Fn(&str) -> Option<String>) -> Result<bool, ConfigError> {
+    let env = gateway_config(&var);
+    if matches!(env, Err(ConfigError::UnknownProvider)) {
+        return Err(ConfigError::UnknownProvider);
     }
+    Ok(!(var("JEV_PROVIDER").is_some()
+        && var("JEV_ENDPOINT").is_some()
+        && var("JEV_MODEL").is_some()
+        && matches!(env, Ok(Some(_)))))
+}
+
+pub fn gateway_config_with_file(
+    var: impl Fn(&str) -> Option<String>,
+    file: &crate::config::Jev,
+) -> Result<Option<GatewayConfig>, ConfigError> {
+    let Some(name) = var("JEV_PROVIDER").or_else(|| file.provider.clone()) else {
+        return Ok(None);
+    };
+    let preset = parse_provider(&name)?.preset();
+    let endpoint = var("JEV_ENDPOINT")
+        .or_else(|| file.endpoint.clone())
+        .unwrap_or_else(|| preset.endpoint.to_string());
+    let model = var("JEV_MODEL")
+        .or_else(|| file.model.clone())
+        .unwrap_or_else(|| preset.model.to_string());
+    let key = var("JEV_API_KEY")
+        .or_else(|| var(preset.key_var))
+        .or_else(|| file.api_key.clone())
+        .ok_or(ConfigError::MissingKey)?;
+    Ok(Some(GatewayConfig {
+        endpoint,
+        model,
+        api_key: Secret::new(key),
+    }))
 }
 
 pub fn build_request(

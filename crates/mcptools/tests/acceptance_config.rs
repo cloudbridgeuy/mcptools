@@ -393,3 +393,106 @@ async fn jira_file_service_and_environment_shared_precedence() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("Cannot resolve config path"));
     }
 }
+
+#[test]
+fn jev_file_and_invalid_fields_are_checked_without_exposing_secrets() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[jev]\nprovider = 'opencode'\nendpoint = 'https://example.test'\nmodel = 'model'\napi_key = 'secret-value'\n").unwrap();
+    let checked = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    for text in [
+        "[jev]\nunknown = 'secret-value'\n",
+        "[jev]\napi_key = ['secret-value']\n",
+        "[jev]\nprovider = 'secret-value'\n",
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let checked = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(!checked.status.success());
+        assert!(!String::from_utf8_lossy(&checked.stderr).contains("secret-value"));
+        assert!(!String::from_utf8_lossy(&checked.stdout).contains("secret-value"));
+    }
+}
+
+mod common;
+
+#[tokio::test]
+async fn jev_runtime_file_and_environment_configuration() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[jev]\nprovider = 'opencode'\n").unwrap();
+    let config_path = path.to_str().unwrap();
+    let mut server = common::spawn_server(&[("MCPTOOLS_CONFIG", config_path)]).unwrap();
+    let response = server
+        .tools_call("find_tools", serde_json::json!({"task":"close ticket"}))
+        .await
+        .to_string();
+    assert!(response.contains("invalid_config"), "{response}");
+    std::fs::write(
+        &path,
+        "[jev]\nprovider = 'opencode'\napi_key = 'file-key'\n",
+    )
+    .unwrap();
+    let mut server = common::spawn_server(&[
+        ("MCPTOOLS_CONFIG", config_path),
+        ("JEV_PROVIDER", "unknown"),
+    ])
+    .unwrap();
+    let response = server
+        .tools_call("find_tools", serde_json::json!({"task":"close ticket"}))
+        .await
+        .to_string();
+    assert!(response.contains("invalid_config"), "{response}");
+    assert!(!response.contains("file-key"));
+    std::fs::write(
+        &path,
+        "[jev]\nprovider = 'opencode'\nendpoint = 'invalid://file'\n",
+    )
+    .unwrap();
+    let mut server = common::spawn_server(&[
+        ("MCPTOOLS_CONFIG", config_path),
+        ("OPENCODE_API_KEY", "provider-key"),
+    ])
+    .unwrap();
+    let response = server
+        .tools_call("find_tools", serde_json::json!({"task":"close ticket"}))
+        .await
+        .to_string();
+    assert!(response.contains("unreachable"), "{response}");
+    assert!(!response.contains("provider-key"));
+    std::fs::write(&path, "[jev]\nprovider = 'opencode'\nendpoint = 'invalid://file'\nmodel = 'file'\napi_key = 'file-key'\n").unwrap();
+    let mut server = common::spawn_server(&[("MCPTOOLS_CONFIG", config_path)]).unwrap();
+    let response = server
+        .tools_call("find_tools", serde_json::json!({"task":"close ticket"}))
+        .await
+        .to_string();
+    assert!(response.contains("unreachable"), "{response}");
+    assert!(!response.contains("file-key"));
+    let mut server = common::spawn_server(&[
+        ("MCPTOOLS_CONFIG", config_path),
+        ("JEV_PROVIDER", "vercel"),
+        ("JEV_ENDPOINT", "invalid://env"),
+        ("JEV_MODEL", "env"),
+        ("AI_GATEWAY_API_KEY", "env-key"),
+    ])
+    .unwrap();
+    std::fs::write(&path, "invalid = true\n").unwrap();
+    let response = server
+        .tools_call("find_tools", serde_json::json!({"task":"close ticket"}))
+        .await
+        .to_string();
+    assert!(response.contains("unreachable"), "{response}");
+    assert!(!response.contains("env-key"));
+}

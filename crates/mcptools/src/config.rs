@@ -42,6 +42,10 @@ pub fn linear() -> Result<mcptools_core::config::Linear> {
     Ok(optional()?.unwrap_or_default().linear)
 }
 
+pub fn jev() -> Result<mcptools_core::config::Jev> {
+    Ok(optional()?.unwrap_or_default().jev)
+}
+
 fn optional() -> Result<Option<AppConfig>> {
     let Some(path) = mcptools_core::config::optional_config_path(
         std::env::var_os("MCPTOOLS_CONFIG").as_deref(),

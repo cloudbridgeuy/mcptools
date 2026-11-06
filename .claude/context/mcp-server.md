@@ -58,9 +58,8 @@ file override is an actionable error. The path convention is the same on macOS
 and Linux, not macOS Application Support.
 
 The sectioned TOML configuration layers defaults with one global file. There
-is no per-store or repository layer. Only `[gateway]` is implemented; other
-sections and unknown keys fail validation until supported. Existing Jira,
-Linear, Jev and image environment settings are unchanged.
+is no per-store or repository layer. Supported sections are `[gateway]`, `[atlassian]`, `[linear]`, and `[jev]`.
+Unknown sections and keys fail validation.
 
 ```toml
 [[gateway.upstreams]]
@@ -385,20 +384,22 @@ All four deny access when the operator-controlled server environment `MCPTOOLS_L
 - Local backend: each score is matched-weighted-IDF over twice the task IDF sum, with name 2.0 / domain 1.5 / summary 1.0 weights, so values near 0.2 are normal. Compare tools relative to each other, not against an absolute cutoff.
 - Cross-domain leakage is expected: Jira tools can surface for a Linear task when the top-1 match is right but `none` stays near 0.8.
 - Jev backend contrast: scores are verbatim classifier probabilities, kept at or above 0.05 with at most 3 tools returned, so extremes like 1.0 or 0 are normal.
-- Jev enables via `JEV_PROVIDER` plus `JEV_API_KEY` or the provider's conventional key var (see table).
+- Jev enables with a provider and API key from the file or environment (see table).
 
 **Jev environment variables**
 
+Jev also reads `[jev]` fields `provider`, `endpoint`, `model`, and `api_key` from `~/.config/mcptools/config.toml` (or `MCPTOOLS_CONFIG`). Environment values override file values; `JEV_API_KEY` takes precedence over the selected provider's key variable, then `api_key`. Run `chmod 600` on files containing keys.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `JEV_PROVIDER` | unset | `opencode`, `openrouter`, `vercel` or `typesafe` to enable Jev classifier |
+| `JEV_PROVIDER` | unset | `opencode`, `openrouter`, `vercel` or `typesafe`; unset in env and file disables Jev |
 | `JEV_ENDPOINT` | provider preset | Override endpoint URL |
 | `JEV_MODEL` | provider preset | Override model name |
 | `JEV_API_KEY` | (none) | API key; falls back to the provider's conventional key var |
-| `OPENCODE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=opencode` |
-| `OPENROUTER_API_KEY` | - | Conventional key var when `JEV_PROVIDER=openrouter` |
-| `AI_GATEWAY_API_KEY` | - | Conventional key var when `JEV_PROVIDER=vercel` |
-| `TYPESAFE_API_KEY` | - | Conventional key var when `JEV_PROVIDER=typesafe` |
+| `OPENCODE_API_KEY` | - | Conventional key var when provider is `opencode` |
+| `OPENROUTER_API_KEY` | - | Conventional key var when provider is `openrouter` |
+| `AI_GATEWAY_API_KEY` | - | Conventional key var when provider is `vercel` |
+| `TYPESAFE_API_KEY` | - | Conventional key var when provider is `typesafe` |
 
 ### Execute
 
