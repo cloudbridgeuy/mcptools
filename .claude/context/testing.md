@@ -208,3 +208,5 @@ base_url = "https://api.bitbucket.org/2.0"
 username = "user"
 app_password = "password"
 ```
+
+Images reads `[images]` settings from the mcptools config file. CLI or MCP arguments override environment, then file values, then built-in defaults. Subscription auth prefers `auth.json` beside the mcptools config and falls back to llm-stream credentials. Explicit config directories take precedence.

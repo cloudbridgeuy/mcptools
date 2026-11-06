@@ -46,7 +46,7 @@ pub fn jev() -> Result<mcptools_core::config::Jev> {
     Ok(optional()?.unwrap_or_default().jev)
 }
 
-fn optional() -> Result<Option<AppConfig>> {
+pub fn optional() -> Result<Option<AppConfig>> {
     let Some(path) = mcptools_core::config::optional_config_path(
         std::env::var_os("MCPTOOLS_CONFIG").as_deref(),
         std::env::var_os("XDG_CONFIG_HOME").as_deref(),

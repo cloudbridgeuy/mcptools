@@ -163,25 +163,48 @@ pub fn classify_tokens(tokens: Option<TokenSet>, now_secs: u64) -> TokenState {
     }
 }
 
-pub fn resolve_config_dir(explicit: Option<&str>) -> std::path::PathBuf {
-    if let Some(dir) = explicit.filter(|d| !d.is_empty()) {
-        return expand_tilde(dir);
+pub fn resolve_config_dir(
+    explicit: Option<&str>,
+    environment: Option<&str>,
+    config: Option<&std::path::Path>,
+    home: Option<&std::path::Path>,
+) -> (std::path::PathBuf, Option<std::path::PathBuf>) {
+    let expand = |path: &str| {
+        path.strip_prefix("~/")
+            .and_then(|rest| home.map(|home| home.join(rest)))
+            .unwrap_or_else(|| path.into())
+    };
+    if let Some(path) = explicit
+        .filter(|path| !path.is_empty())
+        .or(environment.filter(|path| !path.is_empty()))
+    {
+        return (expand(path), None);
     }
-    if let Ok(dir) = std::env::var("LLM_STREAM_CONFIG_DIR") {
-        if !dir.is_empty() {
-            return expand_tilde(&dir);
-        }
+    let legacy = home.map(|home| home.join(".config/llm-stream"));
+    let own = config
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_owned);
+    match (own, legacy) {
+        (Some(own), legacy) => (own, legacy),
+        (None, Some(legacy)) => (legacy, None),
+        (None, None) => ("~/.config/llm-stream".into(), None),
     }
-    expand_tilde("~/.config/llm-stream")
 }
 
-fn expand_tilde(path: &str) -> std::path::PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return std::path::PathBuf::from(home).join(rest);
-        }
+/// Directory whose `auth.json` is read and, after a refresh, rewritten.
+///
+/// The own directory wins when its `auth.json` exists; otherwise the legacy
+/// directory (when present) is both source and write target, so a refresh never
+/// creates the own file from legacy credentials.
+pub fn auth_source_dir<'a>(
+    config_dir: &'a std::path::Path,
+    legacy_dir: Option<&'a std::path::Path>,
+    config_has_auth: bool,
+) -> &'a std::path::Path {
+    match legacy_dir {
+        Some(legacy) if !config_has_auth => legacy,
+        _ => config_dir,
     }
-    std::path::PathBuf::from(path)
 }
 
 pub fn data_url(mime: &str, b64: &str) -> String {

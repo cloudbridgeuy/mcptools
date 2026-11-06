@@ -3,9 +3,10 @@ mod preview;
 
 use crate::open::maybe_open;
 use crate::prelude::{println, *};
+use mcptools_core::config::{ImageBackend, Images, ResolvedImages};
 use mcptools_core::images::{
-    self, EditParams, GenerateParams, ImagesResponse, CHAT_MAINLINE_DEFAULT, CODEX_RESPONSES_URL,
-    DEFAULT_BASE_URL, DEFAULT_MODEL, MAX_INPUT_IMAGES, VARY_PROMPT,
+    self, EditParams, GenerateParams, ImagesResponse, CODEX_RESPONSES_URL, MAX_INPUT_IMAGES,
+    VARY_PROMPT,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -28,21 +29,16 @@ pub enum Api {
 
 #[derive(Debug, clap::Args)]
 pub struct BackendOpts {
-    #[clap(
-        long,
-        value_enum,
-        env = "MCPTOOLS_IMAGES_API",
-        default_value = "chatgpt"
-    )]
-    pub api: Api,
+    #[clap(long, value_enum, env = "MCPTOOLS_IMAGES_API")]
+    pub api: Option<Api>,
     #[clap(long, env = "LLM_STREAM_CONFIG_DIR")]
     pub config_dir: Option<String>,
     #[clap(long, env = "OPENAI_API_KEY")]
     pub api_key: Option<String>,
-    #[clap(long, env = "OPENAI_BASE_URL", default_value = DEFAULT_BASE_URL)]
-    pub base_url: String,
-    #[clap(long, env = "MCPTOOLS_IMAGES_MAINLINE", default_value = CHAT_MAINLINE_DEFAULT)]
-    pub mainline: String,
+    #[clap(long, env = "OPENAI_BASE_URL")]
+    pub base_url: Option<String>,
+    #[clap(long, env = "MCPTOOLS_IMAGES_MAINLINE")]
+    pub mainline: Option<String>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -50,14 +46,13 @@ pub struct OutOpts {
     #[clap(
         long,
         env = "OPENAI_IMAGES_MODEL",
-        default_value = DEFAULT_MODEL,
         help = "Image model; gpt-image-2.6-flare and gpt-image-2.6-sunburst supported via --api openai"
     )]
-    pub model: String,
-    #[clap(long, default_value = "auto")]
-    pub size: String,
-    #[clap(long, default_value = "auto")]
-    pub quality: String,
+    pub model: Option<String>,
+    #[clap(long)]
+    pub size: Option<String>,
+    #[clap(long)]
+    pub quality: Option<String>,
     #[clap(long = "format", default_value = "png")]
     pub format: String,
     #[clap(long)]
@@ -153,6 +148,7 @@ pub struct VaryOptions {
 pub enum Backend {
     ChatGpt {
         config_dir: std::path::PathBuf,
+        legacy_dir: Option<std::path::PathBuf>,
         mainline: String,
     },
     OpenAi {
@@ -161,19 +157,58 @@ pub enum Backend {
     },
 }
 
-fn backend_of(o: &BackendOpts) -> Result<Backend> {
-    match o.api {
-        Api::Chatgpt => Ok(Backend::ChatGpt {
-            config_dir: images::resolve_config_dir(o.config_dir.as_deref()),
-            mainline: o.mainline.clone(),
-        }),
-        Api::Openai => Ok(Backend::OpenAi {
-            api_key: o.api_key.clone().filter(|k| !k.is_empty()).ok_or_else(|| {
-                eyre!("Missing OpenAI API key. Set OPENAI_API_KEY or pass --api-key.")
-            })?,
-            base_url: o.base_url.clone(),
-        }),
+pub(crate) fn settings(supplied: Images) -> Result<ResolvedImages> {
+    let file = if supplied.needs_file() {
+        crate::config::optional()?.unwrap_or_default().images
+    } else {
+        Images::default()
+    };
+    Ok(supplied.resolve(file)?)
+}
+
+pub(crate) fn backend_of(config_dir: Option<&str>, settings: ImageBackend) -> Result<Backend> {
+    match settings {
+        ImageBackend::ChatGpt { mainline } => {
+            let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+            let config = mcptools_core::config::optional_config_path(
+                std::env::var_os("MCPTOOLS_CONFIG").as_deref(),
+                std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+                home.as_deref(),
+                &std::env::current_dir()?,
+            );
+            let environment = std::env::var("LLM_STREAM_CONFIG_DIR").ok();
+            let (config_dir, legacy_dir) = images::resolve_config_dir(
+                config_dir,
+                environment.as_deref(),
+                config.as_deref(),
+                home.as_deref(),
+            );
+            Ok(Backend::ChatGpt {
+                config_dir,
+                legacy_dir,
+                mainline,
+            })
+        }
+        ImageBackend::OpenAi { api_key, base_url } => Ok(Backend::OpenAi { api_key, base_url }),
     }
+}
+
+fn prepare(out: &OutOpts, backend: &BackendOpts) -> Result<ResolvedImages> {
+    settings(Images {
+        api: backend.api.as_ref().map(|api| {
+            match api {
+                Api::Chatgpt => "chatgpt",
+                Api::Openai => "openai",
+            }
+            .into()
+        }),
+        api_key: backend.api_key.clone(),
+        base_url: backend.base_url.clone(),
+        mainline: backend.mainline.clone(),
+        model: out.model.clone(),
+        size: out.size.clone(),
+        quality: out.quality.clone(),
+    })
 }
 
 pub async fn run(app: App, _global: crate::Global) -> Result<()> {
@@ -222,9 +257,9 @@ fn print_saved(saved: &SavedOutput, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn validate_out(o: &OutOpts, number: u8) -> Result<()> {
-    images::validate_size(&o.size).map_err(|e| eyre!(e))?;
-    images::validate_quality(&o.quality).map_err(|e| eyre!(e))?;
+fn validate_out(o: &OutOpts, settings: &ResolvedImages, number: u8) -> Result<()> {
+    images::validate_size(&settings.size).map_err(|e| eyre!(e))?;
+    images::validate_quality(&settings.quality).map_err(|e| eyre!(e))?;
     images::validate_format(&o.format).map_err(|e| eyre!(e))?;
     images::validate_background(&o.background).map_err(|e| eyre!(e))?;
     images::validate_compression(o.compression).map_err(|e| eyre!(e))?;
@@ -249,12 +284,17 @@ fn validate_fidelity(f: &Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn gen_params(prompt: String, number: u8, o: &OutOpts) -> GenerateParams {
+fn gen_params(
+    prompt: String,
+    number: u8,
+    o: &OutOpts,
+    settings: &ResolvedImages,
+) -> GenerateParams {
     GenerateParams {
         prompt,
-        model: o.model.clone(),
-        size: o.size.clone(),
-        quality: o.quality.clone(),
+        model: settings.model.clone(),
+        size: settings.size.clone(),
+        quality: settings.quality.clone(),
         output_format: o.format.clone(),
         output_compression: o.compression,
         frame_count: None,
@@ -266,12 +306,18 @@ fn gen_params(prompt: String, number: u8, o: &OutOpts) -> GenerateParams {
     }
 }
 
-fn edit_params(prompt: String, number: u8, fidelity: Option<String>, o: &OutOpts) -> EditParams {
+fn edit_params(
+    prompt: String,
+    number: u8,
+    fidelity: Option<String>,
+    o: &OutOpts,
+    settings: &ResolvedImages,
+) -> EditParams {
     EditParams {
         prompt,
-        model: o.model.clone(),
-        size: o.size.clone(),
-        quality: o.quality.clone(),
+        model: settings.model.clone(),
+        size: settings.size.clone(),
+        quality: settings.quality.clone(),
         output_format: o.format.clone(),
         output_compression: o.compression,
         background: o.background.clone(),
@@ -294,13 +340,14 @@ fn start_spinner(msg: &str) -> indicatif::ProgressBar {
 }
 
 async fn generate_cli(o: GenerateOptions) -> Result<SavedOutput> {
-    validate_out(&o.out, o.number)?;
-    let mut params = gen_params(o.prompt, o.number, &o.out);
+    let settings = prepare(&o.out, &o.backend)?;
+    validate_out(&o.out, &settings, o.number)?;
+    let mut params = gen_params(o.prompt, o.number, &o.out, &settings);
     params.frame_count = o.frames;
     params.frame_duration_ms = o.frame_ms;
     params.complexity = o.complexity;
     images::validate_generate(&params).map_err(|e| eyre!(e))?;
-    let backend = backend_of(&o.backend)?;
+    let backend = backend_of(o.backend.config_dir.as_deref(), settings.backend)?;
     if matches!(backend, Backend::ChatGpt { .. }) && o.number != 1 {
         return Err(eyre!("--api chatgpt generates one image per call; drop -n"));
     }
@@ -311,17 +358,19 @@ async fn generate_cli(o: GenerateOptions) -> Result<SavedOutput> {
 }
 
 async fn edit_cli(o: EditOptions) -> Result<SavedOutput> {
-    validate_out(&o.out, o.number)?;
+    let settings = prepare(&o.out, &o.backend)?;
+    validate_out(&o.out, &settings, o.number)?;
     validate_fidelity(&o.input_fidelity)?;
     images::validate_edit_format(&o.out.format).map_err(|e| eyre!(e))?;
     images::validate_image_count(o.images.len()).map_err(|e| eyre!(e))?;
-    let backend = backend_of(&o.backend)?;
+    let params = edit_params(o.prompt, o.number, o.input_fidelity, &o.out, &settings);
+    let backend = backend_of(o.backend.config_dir.as_deref(), settings.backend)?;
     if matches!(backend, Backend::ChatGpt { .. }) && o.number != 1 {
         return Err(eyre!("--api chatgpt generates one image per call; drop -n"));
     }
     let spinner = start_spinner("Editing image...");
     let result = edit_data(
-        edit_params(o.prompt, o.number, o.input_fidelity, &o.out),
+        params,
         o.images,
         o.mask,
         o.markup,
@@ -335,11 +384,12 @@ async fn edit_cli(o: EditOptions) -> Result<SavedOutput> {
 }
 
 async fn vary_cli(o: VaryOptions) -> Result<SavedOutput> {
-    validate_out(&o.out, o.number)?;
+    let settings = prepare(&o.out, &o.backend)?;
+    validate_out(&o.out, &settings, o.number)?;
     validate_fidelity(&o.input_fidelity)?;
     images::validate_edit_format(&o.out.format).map_err(|e| eyre!(e))?;
     images::validate_image_count(o.images.len()).map_err(|e| eyre!(e))?;
-    let backend = backend_of(&o.backend)?;
+    let backend = backend_of(o.backend.config_dir.as_deref(), settings.backend)?;
     if matches!(backend, Backend::ChatGpt { .. }) && o.number != 1 {
         return Err(eyre!("--api chatgpt generates one image per call; drop -n"));
     }
@@ -347,9 +397,9 @@ async fn vary_cli(o: VaryOptions) -> Result<SavedOutput> {
     let result = vary_data(
         o.images,
         o.prompt,
-        o.out.model.clone(),
-        o.out.size.clone(),
-        o.out.quality.clone(),
+        settings.model,
+        settings.size,
+        settings.quality,
         o.out.format.clone(),
         o.out.compression,
         o.out.background.clone(),
@@ -624,6 +674,7 @@ pub async fn generate_data(
         }
         Backend::ChatGpt {
             config_dir,
+            legacy_dir,
             mainline,
         } => {
             let tool = images::build_image_tool(
@@ -639,7 +690,7 @@ pub async fn generate_data(
                 None,
             );
             let body = images::build_responses_body(&mainline, &params.prompt, &[], tool);
-            let tokens = auth::ensure_valid(&config_dir).await?;
+            let tokens = auth::ensure_valid(&config_dir, legacy_dir.as_deref()).await?;
             let client = reqwest::Client::new();
             let b64 = post_responses(&client, &tokens, &body).await?;
             save_subscription_image(
@@ -750,6 +801,7 @@ pub async fn edit_data(
         }
         Backend::ChatGpt {
             config_dir,
+            legacy_dir,
             mainline,
         } => {
             let mut urls = Vec::with_capacity(image_paths.len());
@@ -773,7 +825,7 @@ pub async fn edit_data(
                 mask_url.as_deref(),
             );
             let body = images::build_responses_body(&mainline, &params.prompt, &urls, tool);
-            let tokens = auth::ensure_valid(&config_dir).await?;
+            let tokens = auth::ensure_valid(&config_dir, legacy_dir.as_deref()).await?;
             let client = reqwest::Client::new();
             let b64 = post_responses(&client, &tokens, &body).await?;
             save_subscription_image(
@@ -850,6 +902,12 @@ mod tests {
             &server.uri(),
             "--output-dir",
             dir.path().to_str().unwrap(),
+            "--model",
+            images::DEFAULT_MODEL,
+            "--size",
+            "auto",
+            "--quality",
+            "auto",
             "--format",
             "gif",
             "--frames",
@@ -938,6 +996,12 @@ mod tests {
             "test",
             "--base-url",
             &base_url,
+            "--model",
+            images::DEFAULT_MODEL,
+            "--size",
+            "auto",
+            "--quality",
+            "auto",
         ];
         let Commands::Edit(options) = App::try_parse_from(args).unwrap().command else {
             panic!()
@@ -966,7 +1030,23 @@ mod tests {
             .contains("markup must be a PNG"));
         assert_eq!(server.received_requests().await.unwrap().len(), 1);
         let args = [
-            "images", "edit", "otter", "--image", image, "--markup", markup, "--api", "chatgpt",
+            "images",
+            "edit",
+            "otter",
+            "--image",
+            image,
+            "--markup",
+            markup,
+            "--api",
+            "chatgpt",
+            "--mainline",
+            images::CHAT_MAINLINE_DEFAULT,
+            "--model",
+            images::DEFAULT_MODEL,
+            "--size",
+            "auto",
+            "--quality",
+            "auto",
         ];
         let Commands::Edit(options) = App::try_parse_from(args).unwrap().command else {
             panic!()
@@ -988,23 +1068,7 @@ mod tests {
 
     #[test]
     fn cli_commands_default_to_image_26_flare() {
-        let command = App::command();
         for name in ["generate", "edit", "vary"] {
-            let subcommand = command.find_subcommand(name).unwrap();
-            let model = subcommand
-                .get_arguments()
-                .find(|arg| arg.get_id() == "model")
-                .unwrap();
-            assert_eq!(
-                model
-                    .get_default_values()
-                    .first()
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
-                "gpt-image-2.6-flare"
-            );
-
             let mut args = vec!["images", name];
             if name != "vary" {
                 args.push("otter");
@@ -1013,11 +1077,18 @@ mod tests {
                 args.extend(["--image", "input.png"]);
             }
             let app = App::try_parse_from(args).unwrap();
-            let model = match app.command {
-                Commands::Generate(o) => o.out.model,
-                Commands::Edit(o) => o.out.model,
-                Commands::Vary(o) => o.out.model,
+            let out = match app.command {
+                Commands::Generate(o) => o.out,
+                Commands::Edit(o) => o.out,
+                Commands::Vary(o) => o.out,
             };
+            let model = Images {
+                model: out.model,
+                ..Images::default()
+            }
+            .resolve(Images::default())
+            .unwrap()
+            .model;
             let expected = std::env::var("OPENAI_IMAGES_MODEL")
                 .unwrap_or_else(|_| "gpt-image-2.6-flare".to_string());
             assert_eq!(model, expected);
@@ -1057,6 +1128,10 @@ mod tests {
                     "test",
                     "--base-url",
                     &base_url,
+                    "--size",
+                    "auto",
+                    "--quality",
+                    "auto",
                 ]);
                 let app = App::try_parse_from(args).unwrap();
                 match app.command {

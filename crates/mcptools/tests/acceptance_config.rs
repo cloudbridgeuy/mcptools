@@ -496,3 +496,209 @@ async fn jev_runtime_file_and_environment_configuration() {
     assert!(response.contains("unreachable"), "{response}");
     assert!(!response.contains("env-key"));
 }
+
+#[test]
+fn images_file_and_precedence_and_invalid_fields() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[images]\napi = 'openai'\napi_key = 'file-key'\nsize = '1024x1024'\nquality = 'high'\n",
+    )
+    .unwrap();
+    let checked = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    for field in ["api", "size", "quality"] {
+        std::fs::write(&path, format!("[images]\n{field} = 'secret-value'\n")).unwrap();
+        let checked = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(!checked.status.success());
+        assert!(!String::from_utf8_lossy(&checked.stderr).contains("secret-value"));
+    }
+}
+
+#[test]
+fn images_auth_prefers_own_then_falls_back_to_legacy() {
+    let home = tempfile::tempdir().unwrap();
+    let own = home.path().join("own");
+    let legacy = home.path().join(".config/llm-stream");
+    std::fs::create_dir_all(&own).unwrap();
+    std::fs::create_dir_all(&legacy).unwrap();
+    std::fs::write(own.join("auth.json"), "own-invalid").unwrap();
+    std::fs::write(legacy.join("auth.json"), "legacy-invalid").unwrap();
+    let run = || {
+        command(home.path())
+            .env("MCPTOOLS_CONFIG", own.join("config.toml"))
+            .env_remove("MCPTOOLS_IMAGES_API")
+            .env_remove("LLM_STREAM_CONFIG_DIR")
+            .args(["images", "generate", "test"])
+            .output()
+            .unwrap()
+    };
+    let own_error = String::from_utf8_lossy(&run().stderr).into_owned();
+    assert!(
+        own_error.contains(own.join("auth.json").to_str().unwrap()),
+        "{own_error}"
+    );
+    std::fs::remove_file(own.join("auth.json")).unwrap();
+    let legacy_error = String::from_utf8_lossy(&run().stderr).into_owned();
+    assert!(
+        legacy_error.contains(legacy.join("auth.json").to_str().unwrap()),
+        "{legacy_error}"
+    );
+}
+
+#[tokio::test]
+async fn images_file_env_and_flag_precedence() {
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"created": 1, "data": [{"b64_json": "R0lGODlh"}]}),
+            ),
+        )
+        .expect(3)
+        .mount(&server)
+        .await;
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, format!("[images]\napi = 'openai'\napi_key = 'file-key'\nbase_url = '{}'\nmodel = 'file-model'\nsize = '1024x1024'\nquality = 'high'\n", server.uri())).unwrap();
+    for mode in 0..3 {
+        let mut cmd = command(home.path());
+        cmd.env("MCPTOOLS_CONFIG", &path)
+            .env_remove("MCPTOOLS_IMAGES_API")
+            .env_remove("OPENAI_API_KEY")
+            .env_remove("OPENAI_BASE_URL")
+            .env_remove("OPENAI_IMAGES_MODEL")
+            .env_remove("MCPTOOLS_IMAGES_MAINLINE")
+            .args([
+                "images",
+                "generate",
+                "test",
+                "--output-dir",
+                home.path().to_str().unwrap(),
+            ]);
+        if mode > 0 {
+            cmd.env("OPENAI_IMAGES_MODEL", "env-model")
+                .env("OPENAI_API_KEY", "env-key");
+        }
+        if mode == 2 {
+            cmd.args([
+                "--model",
+                "flag-model",
+                "--api-key",
+                "flag-key",
+                "--quality",
+                "low",
+            ]);
+        }
+        let output = tokio::task::spawn_blocking(move || cmd.output().unwrap())
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let requests = server.received_requests().await.unwrap();
+    for (request, (model, key, quality)) in requests.iter().zip([
+        ("file-model", "file-key", "high"),
+        ("env-model", "env-key", "high"),
+        ("flag-model", "flag-key", "low"),
+    ]) {
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+        assert_eq!(body["model"], model);
+        assert_eq!(body["size"], "1024x1024");
+        assert_eq!(body["quality"], quality);
+        assert_eq!(
+            request
+                .headers
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!("Bearer {key}")
+        );
+    }
+}
+
+#[tokio::test]
+async fn images_complete_backend_settings_skip_invalid_config() {
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"created": 1, "data": []})),
+        )
+        .expect(3)
+        .mount(&server)
+        .await;
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "invalid = true\n").unwrap();
+    let image = home.path().join("input.png");
+    std::fs::write(&image, b"image").unwrap();
+    for operation in ["generate", "edit", "vary"] {
+        let mut cmd = command(home.path());
+        cmd.env("MCPTOOLS_CONFIG", &path)
+            .env("MCPTOOLS_IMAGES_API", "openai")
+            .env("OPENAI_API_KEY", "key")
+            .env("OPENAI_BASE_URL", server.uri())
+            .env("OPENAI_IMAGES_MODEL", "model")
+            .env_remove("MCPTOOLS_IMAGES_MAINLINE")
+            .args(["images", operation]);
+        if operation != "vary" {
+            cmd.arg("test");
+        }
+        if operation != "generate" {
+            cmd.args(["--image", image.to_str().unwrap()]);
+        }
+        cmd.args(["--size", "auto", "--quality", "auto"]);
+        let output = tokio::task::spawn_blocking(move || cmd.output().unwrap())
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let output = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .env_remove("LLM_STREAM_CONFIG_DIR")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENAI_BASE_URL")
+        .args([
+            "images",
+            "generate",
+            "test",
+            "--api",
+            "chatgpt",
+            "--mainline",
+            "mainline",
+            "--model",
+            "model",
+            "--size",
+            "auto",
+            "--quality",
+            "auto",
+        ])
+        .output()
+        .unwrap();
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("not signed in"), "{error}");
+    assert!(!error.contains("Invalid config"), "{error}");
+}

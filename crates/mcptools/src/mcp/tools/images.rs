@@ -1,9 +1,7 @@
 use super::JsonRpcError;
-use mcptools_core::images::{CHAT_MAINLINE_DEFAULT, DEFAULT_BASE_URL, DEFAULT_MODEL};
+use mcptools_core::config::{Images, ResolvedImages};
 use schemars::JsonSchema;
 use serde::Deserialize;
-
-use crate::images::{Api, Backend, BackendOpts};
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ImagesGenerateArgs {
@@ -158,50 +156,38 @@ fn exec_err(e: impl std::fmt::Display) -> JsonRpcError {
     }
 }
 
-fn backend_of(a: &BackendArgs) -> Result<Backend, JsonRpcError> {
-    let opts = BackendOpts {
-        api: match a.api.as_deref().unwrap_or("chatgpt") {
-            "openai" => Api::Openai,
-            "chatgpt" => Api::Chatgpt,
-            other => {
-                return Err(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid api '{other}': want chatgpt|openai"),
-                    data: None,
-                })
-            }
-        },
-        config_dir: a.config_dir.clone(),
-        api_key: a
-            .api_key
-            .clone()
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok()),
-        base_url: a
-            .base_url
-            .clone()
-            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
-        mainline: a
-            .mainline
-            .clone()
-            .unwrap_or_else(|| CHAT_MAINLINE_DEFAULT.to_string()),
-    };
-    match opts.api {
-        Api::Chatgpt => Ok(Backend::ChatGpt {
-            config_dir: mcptools_core::images::resolve_config_dir(opts.config_dir.as_deref()),
-            mainline: opts.mainline,
-        }),
-        Api::Openai => {
-            let key = opts.api_key.filter(|k| !k.is_empty()).ok_or(JsonRpcError {
-                code: -32603,
-                message: "Missing OpenAI API key. Set OPENAI_API_KEY.".to_string(),
-                data: None,
-            })?;
-            Ok(Backend::OpenAi {
-                api_key: key,
-                base_url: opts.base_url,
-            })
-        }
+fn resolved(
+    a: &BackendArgs,
+    model: Option<String>,
+    size: Option<String>,
+    quality: Option<String>,
+) -> Result<ResolvedImages, JsonRpcError> {
+    let environment = |key| std::env::var(key).ok();
+    let supplied = Images {
+        api: a.api.clone(),
+        api_key: a.api_key.clone(),
+        base_url: a.base_url.clone(),
+        mainline: a.mainline.clone(),
+        model,
+        size,
+        quality,
     }
+    .with_fallback(Images {
+        api: environment("MCPTOOLS_IMAGES_API"),
+        api_key: environment("OPENAI_API_KEY"),
+        base_url: environment("OPENAI_BASE_URL"),
+        mainline: environment("MCPTOOLS_IMAGES_MAINLINE"),
+        model: environment("OPENAI_IMAGES_MODEL"),
+        ..Images::default()
+    });
+    if supplied
+        .api
+        .as_deref()
+        .is_some_and(|api| !matches!(api, "chatgpt" | "openai"))
+    {
+        return Err(invalid("api must be chatgpt or openai"));
+    }
+    crate::images::settings(supplied).map_err(exec_err)
 }
 
 fn out_dir(dir: Option<String>) -> std::path::PathBuf {
@@ -215,11 +201,21 @@ pub async fn handle_images_generate(
 ) -> Result<serde_json::Value, JsonRpcError> {
     let args: ImagesGenerateArgs =
         serde_json::from_value(arguments.unwrap_or(serde_json::Value::Null)).map_err(invalid)?;
+    let backend_args = BackendArgs {
+        api: args.api,
+        config_dir: args.config_dir,
+        api_key: args.api_key,
+        base_url: args.base_url,
+        mainline: args.mainline,
+    };
+    let settings = resolved(&backend_args, args.model, args.size, args.quality)?;
+    let backend = crate::images::backend_of(backend_args.config_dir.as_deref(), settings.backend)
+        .map_err(exec_err)?;
     let params = mcptools_core::images::GenerateParams {
         prompt: args.prompt,
-        model: args.model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-        size: args.size.unwrap_or_else(|| "auto".to_string()),
-        quality: args.quality.unwrap_or_else(|| "auto".to_string()),
+        model: settings.model,
+        size: settings.size,
+        quality: settings.quality,
         output_format: args.output_format.unwrap_or_else(|| "png".to_string()),
         output_compression: args.output_compression,
         frame_count: args.frame_count,
@@ -230,20 +226,9 @@ pub async fn handle_images_generate(
         n: args.n.unwrap_or(1),
     };
     mcptools_core::images::validate_generate(&params).map_err(invalid)?;
-    let saved = crate::images::generate_data(
-        params,
-        backend_of(&BackendArgs {
-            api: args.api,
-            config_dir: args.config_dir,
-            api_key: args.api_key,
-            base_url: args.base_url,
-            mainline: args.mainline,
-        })?,
-        None,
-        out_dir(args.output_dir),
-    )
-    .await
-    .map_err(exec_err)?;
+    let saved = crate::images::generate_data(params, backend, None, out_dir(args.output_dir))
+        .await
+        .map_err(exec_err)?;
     super::to_dual_result(saved)
 }
 
@@ -267,11 +252,21 @@ pub async fn handle_images_edit(
     if let Some(mask) = &args.mask {
         mcptools_core::images::validate_edit_filename(mask).map_err(invalid)?;
     }
+    let backend_args = BackendArgs {
+        api: args.api,
+        config_dir: args.config_dir,
+        api_key: args.api_key,
+        base_url: args.base_url,
+        mainline: args.mainline,
+    };
+    let settings = resolved(&backend_args, args.model, args.size, args.quality)?;
+    let backend = crate::images::backend_of(backend_args.config_dir.as_deref(), settings.backend)
+        .map_err(exec_err)?;
     let params = mcptools_core::images::EditParams {
         prompt: args.prompt,
-        model: args.model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-        size: args.size.unwrap_or_else(|| "auto".to_string()),
-        quality: args.quality.unwrap_or_else(|| "auto".to_string()),
+        model: settings.model,
+        size: settings.size,
+        quality: settings.quality,
         output_format: args.output_format.unwrap_or_else(|| "png".to_string()),
         output_compression: args.output_compression,
         background: args.background.unwrap_or_else(|| "auto".to_string()),
@@ -287,13 +282,7 @@ pub async fn handle_images_edit(
             .collect(),
         args.mask.map(std::path::PathBuf::from),
         args.markup.map(std::path::PathBuf::from),
-        backend_of(&BackendArgs {
-            api: args.api,
-            config_dir: args.config_dir,
-            api_key: args.api_key,
-            base_url: args.base_url,
-            mainline: args.mainline,
-        })?,
+        backend,
         None,
         out_dir(args.output_dir),
     )
@@ -319,28 +308,32 @@ pub async fn handle_images_vary(
     for image in &args.images {
         mcptools_core::images::validate_edit_filename(image).map_err(invalid)?;
     }
+    let backend_args = BackendArgs {
+        api: args.api,
+        config_dir: args.config_dir,
+        api_key: args.api_key,
+        base_url: args.base_url,
+        mainline: args.mainline,
+    };
+    let settings = resolved(&backend_args, args.model, args.size, args.quality)?;
+    let backend = crate::images::backend_of(backend_args.config_dir.as_deref(), settings.backend)
+        .map_err(exec_err)?;
     let saved = crate::images::vary_data(
         args.images
             .into_iter()
             .map(std::path::PathBuf::from)
             .collect(),
         args.prompt,
-        args.model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-        args.size.unwrap_or_else(|| "auto".to_string()),
-        args.quality.unwrap_or_else(|| "auto".to_string()),
+        settings.model,
+        settings.size,
+        settings.quality,
         args.output_format.unwrap_or_else(|| "png".to_string()),
         args.output_compression,
         args.background.unwrap_or_else(|| "auto".to_string()),
         args.moderation,
         args.input_fidelity,
         args.n.unwrap_or(1),
-        backend_of(&BackendArgs {
-            api: args.api,
-            config_dir: args.config_dir,
-            api_key: args.api_key,
-            base_url: args.base_url,
-            mainline: args.mainline,
-        })?,
+        backend,
         None,
         out_dir(args.output_dir),
     )

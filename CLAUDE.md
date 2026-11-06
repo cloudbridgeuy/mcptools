@@ -48,6 +48,7 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | Confluence | `CONFLUENCE_BASE_URL`, `CONFLUENCE_EMAIL`, `CONFLUENCE_API_TOKEN`, `CONFLUENCE_QUERY` | `ATLASSIAN_*` |
 | Bitbucket | `BITBUCKET_BASE_URL`, `BITBUCKET_USERNAME`, `BITBUCKET_APP_PASSWORD` | None (required) |
 | Linear | `LINEAR_API_KEY` | `[linear].api_key` in config |
+| Images | `OPENAI_API_KEY`, `OPENAI_IMAGES_MODEL`, `OPENAI_BASE_URL`, `MCPTOOLS_IMAGES_API`, `MCPTOOLS_IMAGES_MAINLINE` | `[images]` in config |
 
 **Jev**
 

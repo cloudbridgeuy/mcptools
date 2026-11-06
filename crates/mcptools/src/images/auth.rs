@@ -89,14 +89,55 @@ pub async fn refresh(config_dir: &std::path::Path, tokens: &TokenSet) -> Result<
     Ok(fresh)
 }
 
-pub async fn ensure_valid(config_dir: &std::path::Path) -> Result<TokenSet> {
+pub async fn ensure_valid(
+    config_dir: &std::path::Path,
+    legacy_dir: Option<&std::path::Path>,
+) -> Result<TokenSet> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    match mcptools_core::images::classify_tokens(load(config_dir)?, now) {
+    let source = mcptools_core::images::auth_source_dir(
+        config_dir,
+        legacy_dir,
+        auth_path(config_dir).exists(),
+    );
+    match mcptools_core::images::classify_tokens(load(source)?, now) {
         TokenState::Valid(set) => Ok(set),
-        TokenState::Expired(set) => refresh(config_dir, &set).await,
+        TokenState::Expired(set) => refresh(source, &set).await,
         TokenState::Missing => Err(eyre!(mcptools_core::images::NOT_SIGNED_IN)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saving_tokens_keeps_legacy_and_sets_private_permissions() {
+        let root = tempfile::tempdir().unwrap();
+        let own = root.path().join("own");
+        let legacy = root.path().join("legacy");
+        let tokens = TokenSet {
+            access_token: "access".into(),
+            refresh_token: "refresh".into(),
+            id_token: "id".into(),
+            account_id: None,
+        };
+        save(&legacy, &tokens).unwrap();
+        let original = std::fs::read(auth_path(&legacy)).unwrap();
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::write(auth_path(&own), "old").unwrap();
+        std::fs::set_permissions(auth_path(&own), std::fs::Permissions::from_mode(0o644)).unwrap();
+        save(&own, &load(&legacy).unwrap().unwrap()).unwrap();
+        assert_eq!(std::fs::read(auth_path(&legacy)).unwrap(), original);
+        assert_eq!(
+            std::fs::metadata(auth_path(&own))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
 }

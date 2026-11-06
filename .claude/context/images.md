@@ -2,7 +2,7 @@
 
 Generates, edits, and varies images with `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, `gpt-image-2.6-flare` (default), and `gpt-image-2.6-sunburst`. The 2.6 models work with both the ChatGPT subscription and the API key (`--api openai`, MCP: `api=openai`). Two backends: the ChatGPT subscription (default, `--api chatgpt`) through the Codex Responses backend with the `image_generation` tool, and the metered OpenAI Image API (`--api openai`) with `OPENAI_API_KEY`.
 
-Subscription auth reuses llm-stream credentials: `mcptools` reads `<config_dir>/auth.json` (default `~/.config/llm-stream`), refreshes the access token when near expiry, and writes back with mode `0600`. First sign-in happens via `llm-stream --login`; there is no `images login` command.
+Subscription auth reads `auth.json` from `--config-dir`, then `LLM_STREAM_CONFIG_DIR`, then the directory beside the mcptools config file. If no explicit directory is set and the mcptools `auth.json` is absent, it reads `~/.config/llm-stream/auth.json`. Refresh writes back to the exact `auth.json` it was read from (explicit directory, mcptools directory, or legacy `~/.config/llm-stream`) with mode `0600`; a legacy read never creates the mcptools `auth.json`, so a later `llm-stream --login` is still picked up. First sign-in happens via `llm-stream --login`.
 
 ## CLI Usage
 
@@ -52,7 +52,7 @@ Tool names: `images_generate`, `images_edit`, `images_vary`
 | `n` | integer | no | `1` |
 | `outputDir` | string | no | `.` |
 | `api` | string | no | `chatgpt` |
-| `configDir` | string | no | `~/.config/llm-stream` |
+| `configDir` | string | no | Directory beside the mcptools config file |
 | `mainline` | string | no | `gpt-5.6-sol` |
 
 Size accepts `auto`, `1024x1024`, `1536x1024`, `1024x1536`, or custom `WIDTHxHEIGHT` (multiples of 16). Quality accepts `auto`, `low`, `medium`, `high`, `xhigh`, `max`. Returns saved paths plus model/size/quality metadata as text JSON (no base64 inline).
@@ -65,12 +65,14 @@ Follows the Functional Core - Imperative Shell pattern:
 - **Shell** (`crates/mcptools/src/images/`): `mod.rs` — CLI, dual-backend dispatch (`Backend::ChatGpt` / `Backend::OpenAi`), Codex SSE transport, multipart edit uploads, file output, spinner, `--open`; `auth.rs` — credential load/save (0600) and OAuth refresh against `auth.openai.com`
 - **MCP** (`crates/mcptools/src/mcp/tools/images.rs`): Tool handlers bridging MCP to the shell data functions
 
+Image settings can be placed in `[images]` in `~/.config/mcptools/config.toml` or the file named by `MCPTOOLS_CONFIG`. Fields: `api`, `api_key`, `base_url`, `mainline`, `model`, `size`, and `quality`. CLI flags or MCP arguments override environment variables, which override file values and built-in defaults. Complete settings for the selected backend skip reading the file. `mcptools config check` validates `api`, `size`, and `quality`. Use `chmod 600` for files containing keys.
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MCPTOOLS_IMAGES_API` | `chatgpt` | Backend: `chatgpt` (subscription) or `openai` (API key) |
-| `LLM_STREAM_CONFIG_DIR` | `~/.config/llm-stream` | Config dir holding subscription `auth.json` |
+| `LLM_STREAM_CONFIG_DIR` | — | Override directory holding subscription `auth.json` |
 | `MCPTOOLS_IMAGES_MAINLINE` | `gpt-5.6-sol` | Chat model fronting the image tool (subscription) |
 | `OPENAI_IMAGES_MODEL` | `gpt-image-2.6-flare` | Image model |
 | `OPENAI_API_KEY` | — | Key for `--api openai` |
