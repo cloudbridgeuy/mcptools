@@ -399,7 +399,9 @@ fn failed_refresh_requires_cli_login_without_interaction() {
     std::fs::remove_file(&fixture.browser).unwrap();
     let output = fixture.command(&["mcp", "catalog"]);
     clean(&output);
-    assert!(!output.status.success());
+    assert!(output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("remote_echo"));
+    assert!(!fixture.dir.path().join("upstreams.cache.json").exists());
     assert!(String::from_utf8_lossy(&output.stderr).contains("gateway login"));
     assert!(!fixture.browser.exists());
     assert_eq!(

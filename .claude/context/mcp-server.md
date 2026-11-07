@@ -129,24 +129,8 @@ Forwarding always sends the original upstream name. Empty names, malformed
 object input schemas, duplicate names after normalization (such as `a-b` and
 `a_b`), and collisions with built-in tools or hidden aliases fail startup.
 
-On a cache miss, startup sends `initialize`, `notifications/initialized` and
-paginated `tools/list`. Tools are cached next to the selected config in
-`upstreams.cache.json`, also for custom config filenames. The config must not
-itself be named `upstreams.cache.json`.
-Cache writes are atomic with owner-only permissions. The cache stores tool
-schemas and a configuration fingerprint, not the command environment values or HTTP header values. HTTP header names participate in the fingerprint.
-Cached names are original upstream names; normalization and collision checks
-run on every startup, including with caches written before normalization.
-The pure cache decision covers prefix, command, URL, header names, arguments,
-environment and read-only policy. Header value changes and formatting-only
-changes do not invalidate it. Invalid cache
-JSON triggers rediscovery; I/O failures fail startup. Configuration is fixed
-for the session: restart mcptools after a change. Changed upstream binaries
-or remote tool lists do not invalidate the cache; delete the cache to refresh.
-
-A valid cache lets catalog, declarations and `find_tools` run without starting
-upstreams. Each upstream starts on its first permitted call, then stays alive
-for the mcptools session. A process started for discovery is reused for calls.
+Every startup, catalog and declarations command performs live initialization and discovery; core policy skips runtime connection/catalog failures with one secret-free stderr warning per prefix (including the OAuth login hint), while invalid configuration and tool-name clashes remain fatal.
+Skipped tools are omitted even when cached, no cache is written after any upstream failure, and fully successful discovery writes an atomic owner-only `upstreams.cache.json` beside the selected config; live clients are reused for calls.
 EOF, handled termination signals, errors and abrupt owner death release an
 independent reaper lease. Each completed request acknowledges a process-tree
 snapshot before returning. The reaper checks process identities and stops the
@@ -206,8 +190,6 @@ normalization collisions. Core tests also failed at
 `crates/core/src/gateway.rs:234` and `:251`: arbitrary-character mapping with
 original-name read-only policy, and normalized/reserved-name collisions.
 The fake upstream provides both hyphenated and dotted names without network.
-Cache coverage checks original-name storage, normalized cache hits, config
-invalidation, and startup rejection of collisions in a version-1 cache.
 The manual Context7 check with a temporary `MCPTOOLS_CONFIG` returned Tokio
 library matches, including `/tokio-rs/tokio`, from plain-global
 `context7_resolve_library_id` inside `execute` with no write permission.

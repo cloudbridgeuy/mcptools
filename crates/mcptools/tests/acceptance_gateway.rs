@@ -1,7 +1,7 @@
 #![cfg(unix)]
 
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -129,7 +129,7 @@ fn discovery_cache_and_config_invalidation() {
             .iter()
             .filter(|e| e["method"] == "tools/list")
             .count(),
-        1
+        2
     );
     assert!(std::fs::read_dir(fixture.dir.path()).unwrap().count() >= 3);
     fixture.configure(false, "changed");
@@ -143,8 +143,154 @@ fn discovery_cache_and_config_invalidation() {
             .iter()
             .filter(|e| e["method"] == "tools/list")
             .count(),
-        2
+        3
     );
+}
+
+fn broken_upstream_is_isolated(settings: &str, oauth: bool) {
+    let fixture = Fixture::new(true);
+    let content = format!(
+        "{}\n[[gateway.upstreams]]\nprefix = 'broken'\n{settings}\n",
+        std::fs::read_to_string(&fixture.config).unwrap()
+    );
+    std::fs::write(&fixture.config, &content).unwrap();
+    for args in [
+        vec!["mcp", "catalog"],
+        vec!["mcp", "declarations", "fake_echo"],
+    ] {
+        let output = fixture
+            .command()
+            .env("XDG_DATA_HOME", fixture.dir.path().join("data"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("fake_echo"), "{stdout}");
+        assert!(!stdout.contains("broken_"), "{stdout}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("secret-header-value"), "{stderr}");
+        assert_eq!(stderr.lines().count(), 1, "{stderr}");
+        assert!(
+            stderr.contains("warning: skipping upstream broken:"),
+            "{stderr}"
+        );
+        if oauth {
+            assert!(
+                stderr.contains("run mcptools gateway login broken"),
+                "{stderr}"
+            );
+        }
+        assert!(!fixture.dir.path().join("upstreams.cache.json").exists());
+    }
+    let config = mcptools_core::config::parse(&content).unwrap();
+    let stale = json!({
+        "version": 1,
+        "fingerprint": mcptools_core::gateway::fingerprint(&config.gateway),
+        "tools": [
+            [{"name":"echo","inputSchema":{"type":"object"}}],
+            [{"name":"echo","inputSchema":{"type":"object"}}]
+        ]
+    })
+    .to_string();
+    let cache_path = fixture.dir.path().join("upstreams.cache.json");
+    std::fs::write(&cache_path, &stale).unwrap();
+    let catalog = fixture
+        .command()
+        .env("XDG_DATA_HOME", fixture.dir.path().join("data"))
+        .args(["mcp", "catalog"])
+        .output()
+        .unwrap();
+    assert!(catalog.status.success());
+    let stdout = String::from_utf8_lossy(&catalog.stdout);
+    assert!(stdout.contains("fake_echo"));
+    assert!(stdout.contains("linear_issue_list"));
+    assert!(!stdout.contains("broken_echo"));
+    assert_eq!(std::fs::read_to_string(&cache_path).unwrap(), stale);
+    let mut child = fixture
+        .command()
+        .env("XDG_DATA_HOME", fixture.dir.path().join("data"))
+        .args(["mcp", "stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let mut session = Session {
+        input: child.stdin.take(),
+        output: BufReader::new(child.stdout.take().unwrap()),
+        child,
+    };
+    writeln!(
+        session.input.as_mut().unwrap(),
+        "{}",
+        json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})
+    )
+    .unwrap();
+    let mut line = String::new();
+    assert!(
+        session.output.read_line(&mut line).unwrap() > 0,
+        "server exited before tools/list"
+    );
+    let listed: Value = serde_json::from_str(&line).unwrap();
+    assert!(listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "find_tools"));
+    assert!(listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "linear_issue_list"));
+    assert!(session.child.try_wait().unwrap().is_none());
+    let found = session.call("find_tools", json!({"domain":"fake"}));
+    assert_eq!(found["structuredContent"]["tools"][0]["name"], "fake_echo");
+    let missing = session.call("find_tools", json!({"domain":"broken"}));
+    assert!(!missing.to_string().contains("broken_echo"));
+    session.finish();
+    let mut warning = String::new();
+    BufReader::new(stderr).read_to_string(&mut warning).unwrap();
+    assert_eq!(warning.lines().count(), 1, "{warning}");
+    assert!(!warning.contains("secret-header-value"), "{warning}");
+    assert!(
+        warning.contains("warning: skipping upstream broken:"),
+        "{warning}"
+    );
+    assert_eq!(std::fs::read_to_string(&cache_path).unwrap(), stale);
+}
+
+#[test]
+fn exited_stdio_upstream_does_not_hide_healthy_tools() {
+    broken_upstream_is_isolated("command = '/bin/sh'\nargs = ['-c', 'exit 0']", false);
+}
+
+#[test]
+fn missing_oauth_login_does_not_hide_healthy_tools() {
+    broken_upstream_is_isolated("url = 'http://127.0.0.1:1/mcp'\nauth = 'oauth'", true);
+}
+
+#[test]
+fn missing_stdio_command_does_not_hide_healthy_tools() {
+    broken_upstream_is_isolated("command = '/nonexistent/mcptools-upstream'", false);
+}
+
+#[test]
+fn unreachable_http_upstream_does_not_hide_healthy_tools() {
+    broken_upstream_is_isolated("url = 'http://127.0.0.1:1/mcp'", false);
+}
+
+#[test]
+fn failed_catalog_fetch_does_not_hide_healthy_tools() {
+    broken_upstream_is_isolated(&format!(
+        "command = '/bin/sh'\nargs = {}\n[gateway.upstreams.env]\nFIXTURE_LOG = '/dev/null'\nFIXTURE_FAIL_LIST = '1'",
+        json!(["-c", "sleep 0.05; exec python3 \"$@\"", "gateway-fixture", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/upstream.py")])
+    ), false);
 }
 
 #[test]
@@ -241,7 +387,7 @@ fn read_only_override() {
             .iter()
             .filter(|event| event.get("pid").is_some())
             .count(),
-        1
+        2
     );
     let result = session.call(
         "call_tool",
@@ -270,7 +416,7 @@ fn read_only_override() {
             .iter()
             .filter(|event| event["method"] == "tools/list")
             .count(),
-        1
+        2
     );
     session.finish();
 }
@@ -388,9 +534,7 @@ fn normalization_collision_fails_startup() {
         let output = fixture.command().args(["mcp", "catalog"]).output().unwrap();
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("duplicate tool name: fake_a_b"));
-        if cached {
-            assert!(fixture.events().is_empty());
-        }
+        assert!(!fixture.events().is_empty());
     }
 }
 

@@ -4,7 +4,7 @@ mod oauth;
 pub use oauth::{run, App};
 
 use crate::prelude::*;
-use mcptools_core::gateway::{self, Cache, GatewayTool, Upstream, UpstreamTool};
+use mcptools_core::gateway::{self, Cache, GatewayTool, StartupFailure, Upstream, UpstreamTool};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Stdio;
@@ -56,43 +56,37 @@ pub async fn initialize() -> Result<()> {
         return Err(eyre!("Local upstreams require Unix process supervision"));
     }
     let cache_path = mcptools_core::config::cache_path(&path)?;
-    let cached = match std::fs::read(&cache_path) {
-        Ok(bytes) => serde_json::from_slice::<Cache>(&bytes).ok(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
-    };
-    let (discovered, clients, refresh) =
-        if let Some(cache) = cached.filter(|cache| gateway::reusable_cache(&config, cache)) {
-            let clients = config.upstreams.iter().map(|_| Mutex::new(None)).collect();
-            (cache.tools, clients, false)
-        } else {
-            let mut discovered = Vec::new();
-            let mut clients: Vec<Mutex<Option<Client>>> = Vec::new();
-            for upstream in &config.upstreams {
-                let mut client = match Client::start(upstream).await {
-                    Ok(client) => client,
-                    Err(error) => {
-                        stop_clients(clients).await;
-                        return Err(error);
-                    }
-                };
-                let tools = match client.discover().await {
-                    Ok(tools) => tools,
-                    Err(error) => {
-                        client.stop().await;
-                        stop_clients(clients).await;
-                        return Err(error);
-                    }
-                };
-                discovered.push(tools);
+    let mut outcomes = Vec::new();
+    let mut clients = Vec::new();
+    for upstream in &config.upstreams {
+        let started = tokio::time::timeout(REQUEST_TIMEOUT, Client::start(upstream)).await;
+        let mut client = match started {
+            Ok(Ok(client)) => client,
+            _ => {
+                outcomes.push(Err(StartupFailure::Connect));
+                clients.push(Mutex::new(None));
+                continue;
+            }
+        };
+        match tokio::time::timeout(REQUEST_TIMEOUT, client.discover()).await {
+            Ok(Ok(tools)) => {
+                outcomes.push(Ok(tools));
                 clients.push(Mutex::new(Some(client)));
             }
-            (discovered, clients, true)
-        };
+            _ => {
+                client.stop().await;
+                outcomes.push(Err(StartupFailure::Discover));
+                clients.push(Mutex::new(None));
+            }
+        }
+    }
     let result = (|| -> Result<Vec<GatewayTool>> {
-        let tools =
-            gateway::merge_tools(&config, &discovered, crate::mcp::tools::reserved_names())?;
-        if refresh {
+        let catalog =
+            gateway::startup_catalog(&config, outcomes, crate::mcp::tools::reserved_names())?;
+        for warning in catalog.warnings {
+            std::eprintln!("{warning}");
+        }
+        if let Some(discovered) = catalog.cacheable {
             let cache = Cache {
                 version: 1,
                 fingerprint: gateway::fingerprint(&config),
@@ -107,7 +101,7 @@ pub async fn initialize() -> Result<()> {
             staged.as_file_mut().sync_all()?;
             staged.persist(&cache_path).map_err(|error| eyre!(error))?;
         }
-        Ok(tools)
+        Ok(catalog.tools)
     })();
     let tools = match result {
         Ok(tools) => tools,

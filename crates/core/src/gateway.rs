@@ -70,6 +70,58 @@ pub struct Cache {
 #[error("Invalid upstream configuration or catalog: {0}")]
 pub struct Error(pub String);
 
+#[derive(Clone, Copy)]
+pub enum StartupFailure {
+    Connect,
+    Discover,
+}
+
+pub struct StartupCatalog {
+    pub tools: Vec<GatewayTool>,
+    pub cacheable: Option<Vec<Vec<UpstreamTool>>>,
+    pub warnings: Vec<String>,
+}
+
+pub fn startup_catalog(
+    config: &Config,
+    outcomes: Vec<Result<Vec<UpstreamTool>, StartupFailure>>,
+    existing_names: impl IntoIterator<Item = String>,
+) -> Result<StartupCatalog, Error> {
+    validate_config(config)?;
+    if outcomes.len() != config.upstreams.len() {
+        return Err(Error("missing upstream startup outcome".into()));
+    }
+    let mut discovered = Vec::new();
+    let mut warnings = Vec::new();
+    for (upstream, outcome) in config.upstreams.iter().zip(outcomes) {
+        match outcome {
+            Ok(tools) => discovered.push(tools),
+            Err(failure) => {
+                let reason = match failure {
+                    StartupFailure::Connect => "connection or initialization failed",
+                    StartupFailure::Discover => "catalog fetch failed",
+                };
+                let hint = if upstream.auth.as_deref() == Some("oauth") {
+                    format!("; run mcptools gateway login {}", upstream.prefix)
+                } else {
+                    String::new()
+                };
+                warnings.push(format!(
+                    "warning: skipping upstream {}: {reason}{hint}",
+                    upstream.prefix
+                ));
+                discovered.push(Vec::new());
+            }
+        }
+    }
+    let tools = merge_tools(config, &discovered, existing_names)?;
+    Ok(StartupCatalog {
+        tools,
+        cacheable: warnings.is_empty().then_some(discovered),
+        warnings,
+    })
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum HttpResponseType {
     Json,
@@ -366,6 +418,37 @@ pub fn merge_catalog(mut existing: Vec<CatalogEntry>, tools: &[GatewayTool]) -> 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn startup_skips_runtime_failures_without_caching_or_changing_indices() {
+        let config = config(json!({"upstreams":[
+            {"prefix":"broken","url":"https://example.test","auth":"oauth","client_secret":"secret-value","client_id":"id"},
+            {"prefix":"healthy","command":"x"}
+        ]})).unwrap();
+        for failure in [StartupFailure::Connect, StartupFailure::Discover] {
+            let tools =
+                serde_json::from_value(json!([{"name":"echo","inputSchema":{"type":"object"}}]))
+                    .unwrap();
+            let catalog = startup_catalog(&config, vec![Err(failure), Ok(tools)], []).unwrap();
+            assert_eq!(catalog.tools[0].name, "healthy_echo");
+            assert_eq!(catalog.tools[0].upstream, 1);
+            assert!(catalog.cacheable.is_none());
+            assert_eq!(catalog.warnings.len(), 1);
+            assert!(catalog.warnings[0].contains("run mcptools gateway login broken"));
+            assert!(!catalog.warnings[0].contains("secret-value"));
+        }
+    }
+
+    #[test]
+    fn startup_keeps_invalid_configuration_and_tool_clashes_fatal() {
+        let mut config = config(json!({"upstreams":[{"prefix":"a","command":"x"}]})).unwrap();
+        let tools =
+            serde_json::from_value(json!([{"name":"echo","inputSchema":{"type":"object"}}]))
+                .unwrap();
+        assert!(startup_catalog(&config, vec![Ok(tools)], ["a_echo".into()]).is_err());
+        config.upstreams[0].prefix = "invalid_prefix".into();
+        assert!(startup_catalog(&config, vec![Err(StartupFailure::Connect)], []).is_err());
+    }
 
     #[test]
     fn http_session_headers_and_response_types() {

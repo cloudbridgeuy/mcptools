@@ -20,13 +20,16 @@ fn http_discovery_case(reject_catalog: bool) {
     let server = thread::spawn(move || {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut methods = Vec::new();
-        while std::time::Instant::now() < deadline && methods.len() < 4 {
+        while std::time::Instant::now() < deadline
+            && methods.len() < if reject_catalog { 4 } else { 8 }
+        {
             let Ok((mut stream, _)) = listener.accept() else {
                 thread::sleep(std::time::Duration::from_millis(10));
                 continue;
             };
+            stream.set_nonblocking(false).unwrap();
             stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                 .unwrap();
             let mut bytes = Vec::new();
             let mut chunk = [0; 4096];
@@ -139,11 +142,12 @@ fn http_discovery_case(reject_catalog: bool) {
             "tools/list",
             "DELETE"
         ]
+        .repeat(if reject_catalog { 1 } else { 2 })
     );
 }
 
 #[test]
-fn http_errors_report_status_without_response_secrets() {
+fn http_errors_skip_upstream_without_response_secrets() {
     for status in [401, 404, 503] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -162,11 +166,13 @@ fn http_errors_report_status_without_response_secrets() {
             .output()
             .unwrap();
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(!output.status.success());
+        assert!(output.status.success());
         assert!(
-            error.contains("remote") && error.contains(&status.to_string()),
+            error.contains("warning: skipping upstream remote:"),
             "{error}"
         );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("remote_echo"));
+        assert!(!dir.path().join("upstreams.cache.json").exists());
         assert!(!error.contains("secret-token"));
         assert!(!String::from_utf8_lossy(&output.stdout).contains("secret-token"));
         server.join().unwrap();
@@ -188,7 +194,7 @@ fn config_check_rejects_insecure_http_without_secret_output() {
 }
 
 #[test]
-fn cached_read_only_call_starts_lazy_session_and_accepts_open_sse() {
+fn cached_read_only_call_revalidates_live_catalog_and_accepts_open_sse() {
     use std::io::{BufRead, BufReader};
     use std::process::Stdio;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -199,6 +205,7 @@ fn cached_read_only_call_starts_lazy_session_and_accepts_open_sse() {
         for expected in [
             "initialize",
             "notifications/initialized",
+            "tools/list",
             "tools/call",
             "tools/call",
             "DELETE",
@@ -246,6 +253,9 @@ fn cached_read_only_call_starts_lazy_session_and_accepts_open_sse() {
                         assert_eq!(request["params"]["name"], "echo");
                         serde_json::json!({"content":[{"type":"text","text":"ok"}]})
                     }
+                    "tools/list" => {
+                        serde_json::json!({"tools":[{"name":"echo","inputSchema":{"type":"object"}},{"name":"write","inputSchema":{"type":"object"}}]})
+                    }
                     _ => serde_json::Value::Null,
                 };
                 if expected == "notifications/initialized" {
@@ -254,7 +264,7 @@ fn cached_read_only_call_starts_lazy_session_and_accepts_open_sse() {
                         "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     )
                     .unwrap();
-                } else if expected == "tools/call" && request["id"] == 3 {
+                } else if expected == "tools/call" && request["id"] == 4 {
                     let event = format!(
                         "data: {}\n\n",
                         serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":result})
@@ -291,7 +301,7 @@ fn cached_read_only_call_starts_lazy_session_and_accepts_open_sse() {
     let mut line = String::new();
     output.read_line(&mut line).unwrap();
     assert!(line.contains("allowWrites"), "{line}");
-    assert_eq!(connections.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(connections.load(std::sync::atomic::Ordering::SeqCst), 3);
     writeln!(input, "{}", serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"call_tool","arguments":{"name":"remote_echo","input":{}}}})).unwrap();
     line.clear();
     output.read_line(&mut line).unwrap();
@@ -343,11 +353,12 @@ fn http_timeout_reports_prefix_without_secret() {
         .output()
         .unwrap();
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success());
+    assert!(output.status.success());
     assert!(
-        error.contains("remote") && error.to_ascii_lowercase().contains("timed out"),
+        error.contains("warning: skipping upstream remote:"),
         "{error}"
     );
+    assert!(!dir.path().join("upstreams.cache.json").exists());
     assert!(!error.contains("secret-token"));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("secret-token"));
     server.join().unwrap();
