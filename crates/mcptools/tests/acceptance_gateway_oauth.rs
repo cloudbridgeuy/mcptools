@@ -265,6 +265,50 @@ fn dynamic_registration_login_pkce_storage_logout_and_redaction() {
 }
 
 #[test]
+fn host_resource_is_used_for_authorization_storage_and_refresh() {
+    let fixture = Fixture::new("host-resource", true);
+    let output = fixture.command(&["gateway", "login", "remote"]);
+    clean(&output);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let browser: Value = serde_json::from_slice(&std::fs::read(&fixture.browser).unwrap()).unwrap();
+    assert_eq!(browser["resource"], fixture.base);
+    let stored = files(&fixture.dir.path().join("data"));
+    assert_eq!(stored.len(), 1);
+    let tokens: Value = serde_json::from_slice(&std::fs::read(&stored[0]).unwrap()).unwrap();
+    assert_eq!(tokens["resource"], fixture.base);
+    for _ in 0..2 {
+        let output = fixture.command(&["mcp", "catalog"]);
+        clean(&output);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let events = fixture.events();
+    let requests: Vec<_> = events
+        .iter()
+        .filter(|event| event["method"] == "token")
+        .collect();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["form"]["grant_type"], "authorization_code");
+    assert_eq!(requests[1]["form"]["grant_type"], "refresh_token");
+    for request in requests {
+        assert_eq!(request["form"]["resource"], fixture.base);
+    }
+    assert!(events.iter().any(
+        |event| event["authorization"] == "Bearer access-secret-refreshed"
+            && event["path"] == "/mcp"
+    ));
+    let tokens: Value = serde_json::from_slice(&std::fs::read(&stored[0]).unwrap()).unwrap();
+    assert_eq!(tokens["resource"], fixture.base);
+}
+
+#[test]
 fn configured_client_skips_registration() {
     let fixture = Fixture::new("normal", true);
     fixture.login();

@@ -170,10 +170,31 @@ pub fn metadata_url(resource: &str, metadata: &str) -> Result<Url, &'static str>
     Ok(metadata)
 }
 
-pub fn issuer<'a>(metadata: &'a Value, resource: &str) -> Result<&'a str, &'static str> {
-    if field(metadata, "resource")? != resource {
+pub fn resource_matches(resource: &str, upstream: &str) -> bool {
+    let (Some(resource), Some(upstream)) = (safe_url(resource), safe_url(upstream)) else {
+        return false;
+    };
+    resource.scheme() == upstream.scheme()
+        && resource.host() == upstream.host()
+        && resource.port_or_known_default() == upstream.port_or_known_default()
+        && upstream
+            .path()
+            .strip_prefix(resource.path())
+            .is_some_and(|suffix| {
+                suffix.is_empty() || resource.path().ends_with('/') || suffix.starts_with('/')
+            })
+}
+
+pub fn resource<'a>(metadata: &'a Value, upstream: &str) -> Result<&'a str, &'static str> {
+    let resource = field(metadata, "resource")?;
+    if !resource_matches(resource, upstream) {
         return Err("OAuth resource mismatch");
     }
+    Ok(resource)
+}
+
+pub fn issuer<'a>(metadata: &'a Value, upstream: &str) -> Result<&'a str, &'static str> {
+    resource(metadata, upstream)?;
     let text = metadata["authorization_servers"]
         .as_array()
         .and_then(|values| values.first())
@@ -182,7 +203,7 @@ pub fn issuer<'a>(metadata: &'a Value, resource: &str) -> Result<&'a str, &'stat
     let issuer = safe_url(text)
         .filter(|url| url.query().is_none())
         .ok_or("Invalid OAuth issuer")?;
-    if safe_url(resource).ok_or("Invalid OAuth resource")?.scheme() == "https"
+    if safe_url(upstream).ok_or("Invalid OAuth resource")?.scheme() == "https"
         && issuer.scheme() != "https"
     {
         return Err("Invalid OAuth issuer");
@@ -378,6 +399,48 @@ mod tests {
             refresh_action(None, 42, Some(401), false),
             RefreshAction::Send
         );
+    }
+
+    #[test]
+    fn resource_metadata_accepts_same_origin_path_segment_prefixes() {
+        for resource in [
+            "https://mcp.slack.com/mcp",
+            "https://mcp.slack.com",
+            "https://mcp.slack.com/",
+        ] {
+            let metadata = serde_json::json!({"resource":resource,"authorization_servers":["https://mcp.slack.com"]});
+            assert_eq!(
+                issuer(&metadata, "https://mcp.slack.com/mcp"),
+                Ok("https://mcp.slack.com"),
+                "resource: {resource}"
+            );
+        }
+        for resource in ["https://example.com/api", "https://example.com/api/"] {
+            let metadata = serde_json::json!({"resource":resource,"authorization_servers":["https://example.com"]});
+            assert_eq!(
+                issuer(&metadata, "https://example.com/api/mcp"),
+                Ok("https://example.com"),
+                "resource: {resource}"
+            );
+        }
+    }
+
+    #[test]
+    fn resource_metadata_rejects_partial_segments_and_other_origins() {
+        for resource in [
+            "https://mcp.slack.com/m",
+            "https://mcp.slack.com/mcp/child",
+            "https://other.example/mcp",
+            "https://mcp.slack.com:8443/mcp",
+            "http://mcp.slack.com/mcp",
+        ] {
+            let metadata = serde_json::json!({"resource":resource,"authorization_servers":["https://mcp.slack.com"]});
+            assert_eq!(
+                issuer(&metadata, "https://mcp.slack.com/mcp"),
+                Err("OAuth resource mismatch"),
+                "resource: {resource}"
+            );
+        }
     }
 
     #[test]

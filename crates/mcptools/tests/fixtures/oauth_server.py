@@ -32,8 +32,8 @@ class Handler(BaseHTTPRequestHandler):
         base = 'http://127.0.0.1:' + str(self.server.server_port)
         issuer = base + '/tenant' if mode == 'oidc-path' else base
         self.record({'method': 'GET', 'path': path})
-        if path == '/.well-known/oauth-protected-resource/mcp':
-            self.send(200, {'resource': base + '/mcp', 'authorization_servers': [issuer]})
+        if path == ('/.well-known/oauth-protected-resource' if mode == 'host-resource' else '/.well-known/oauth-protected-resource/mcp'):
+            self.send(200, {'resource': base if mode == 'host-resource' else base + '/mcp', 'authorization_servers': [issuer]})
         elif path in (('/tenant/.well-known/openid-configuration',) if mode == 'oidc-path' else ('/.well-known/oauth-authorization-server', '/.well-known/openid-configuration')):
             metadata = {'issuer': issuer, 'authorization_endpoint': base + '/authorize', 'token_endpoint': base + '/token', 'code_challenge_methods_supported': ['S256']}
             if slack:
@@ -50,9 +50,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == '/mcp':
             auth = self.headers.get('Authorization', '')
-            self.record({'method': 'MCP', 'authorization': auth})
-            if auth != 'Bearer access-secret-refreshed' and (not auth or mode in ('expired', 'unauthorized', 'refresh-fail') or slack):
-                self.send(401, headers={'WWW-Authenticate': 'Bearer resource_metadata="' + base + '/.well-known/oauth-protected-resource/mcp"'})
+            self.record({'method': 'MCP', 'path': path, 'authorization': auth})
+            if auth != 'Bearer access-secret-refreshed' and (not auth or mode in ('expired', 'unauthorized', 'refresh-fail', 'host-resource') or slack):
+                metadata_path = '/.well-known/oauth-protected-resource' if mode == 'host-resource' else '/.well-known/oauth-protected-resource/mcp'
+                self.send(401, headers={'WWW-Authenticate': 'Bearer resource_metadata="' + base + metadata_path + '"'})
                 return
             request = json.loads(body)
             method = request['method']
@@ -78,6 +79,12 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/token':
             form = {key: values[0] for key, values in parse_qs(body).items()}
             self.record({'method': 'token', 'form': form})
+            if mode == 'host-resource':
+                with open(browser_log) as file:
+                    authorization = json.load(file)
+                if form.get('resource') != base or authorization.get('resource') != base:
+                    self.send(400, {'error': 'invalid_target'})
+                    return
             if slack:
                 refresh = form.get('grant_type') == 'refresh_token'
                 secret = 'rotated-client-secret-value' if refresh and mode == 'slack-rotate' else 'configured-client-secret-value'

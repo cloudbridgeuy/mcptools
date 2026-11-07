@@ -69,7 +69,10 @@ fn token_path(upstream: &Upstream) -> Result<PathBuf> {
 pub fn load(upstream: &Upstream) -> Result<Tokens> {
     let bytes = std::fs::read(token_path(upstream)?).map_err(|_| login_error(upstream))?;
     let tokens: Tokens = serde_json::from_slice(&bytes).map_err(|_| login_error(upstream))?;
-    if Some(tokens.resource.as_str()) != upstream.url.as_deref()
+    if upstream
+        .url
+        .as_deref()
+        .is_none_or(|url| !oauth::resource_matches(&tokens.resource, url))
         || oauth::safe_url(&tokens.token_endpoint).is_none()
         || tokens.access_token.is_empty()
     {
@@ -187,6 +190,7 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
         oauth::metadata_url(resource, &metadata_url).map_err(|error| eyre!(error))?;
     let metadata = get_json(&client, metadata_url.as_str()).await?;
     let issuer_text = oauth::issuer(&metadata, resource).map_err(|error| eyre!(error))?;
+    let resource = oauth::resource(&metadata, resource).map_err(|error| eyre!(error))?;
     let [discovery, openid] = oauth::discovery_urls(issuer_text).map_err(|error| eyre!(error))?;
     let server = match get_json(&client, discovery.as_str()).await {
         Ok(server) => server,
