@@ -336,18 +336,67 @@ pub fn challenge(verifier: &str) -> String {
 }
 
 pub fn callback(target: &str, state: &str, path: &str) -> Option<String> {
-    if target.split('?').next()? != path {
-        return None;
+    callback_result(target, state, path).ok()
+}
+
+fn callback_result(target: &str, state: &str, path: &str) -> Result<String, &'static str> {
+    if target.split('?').next() != Some(path) {
+        return Err("Invalid callback path");
     }
-    let url = Url::parse(&format!("http://127.0.0.1{target}")).ok()?;
+    let url =
+        Url::parse(&format!("http://127.0.0.1{target}")).map_err(|_| "Invalid callback request")?;
     if url.path() != path || url.fragment().is_some() {
-        return None;
+        return Err("Invalid callback request");
     }
     let values: Vec<_> = url.query_pairs().collect();
     let states: Vec<_> = values.iter().filter(|(key, _)| key == "state").collect();
     let codes: Vec<_> = values.iter().filter(|(key, _)| key == "code").collect();
-    (states.len() == 1 && states[0].1 == state && codes.len() == 1 && !codes[0].1.is_empty())
-        .then(|| codes[0].1.to_string())
+    if states.len() != 1 || states[0].1 != state {
+        return Err("State mismatch");
+    }
+    if values.iter().any(|(key, _)| key == "error") {
+        return Err("Authorization was declined by the provider");
+    }
+    if codes.len() != 1 || codes[0].1.is_empty() {
+        return Err("Missing authorization code");
+    }
+    Ok(codes[0].1.to_string())
+}
+
+pub fn callback_response(
+    prefix: &str,
+    target: &str,
+    state: &str,
+    path: &str,
+) -> (Option<String>, String) {
+    let result = callback_result(target, state, path);
+    let prefix = escape_html(prefix);
+    let (status, title, message) = match &result {
+        Ok(_) => (
+            "200 OK",
+            "Signed in",
+            format!("You are signed in to {prefix}. You can close this window."),
+        ),
+        Err(reason) => (
+            "400 Bad Request",
+            "Sign-in failed",
+            format!("{reason}. Please re-run <code>mcptools gateway login {prefix}</code>."),
+        ),
+    };
+    let body = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title} - mcptools</title><style>body{{font:1rem/1.6 system-ui,sans-serif;background:#f4f6f8;color:#17212b;margin:0;padding:2rem}}main{{max-width:32rem;margin:10vh auto;background:#fff;padding:2rem;border-radius:1rem;box-shadow:0 2px 12px #0001}}h1{{font-size:1.5rem;margin-top:0}}code{{overflow-wrap:anywhere}}</style></head><body><main><h1>{title}</h1><p>{message}</p></main></body></html>"
+    );
+    let response = format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    (result.ok(), response)
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 pub fn metadata_challenge(header: &str) -> Option<String> {
@@ -359,6 +408,54 @@ pub fn metadata_challenge(header: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn callback_success_page_escapes_prefix_and_counts_bytes() {
+        let (code, response) = callback_response(
+            "<x>é",
+            "/callback?state=state-secret&code=code-secret",
+            "state-secret",
+            "/callback",
+        );
+        assert_eq!(code.as_deref(), Some("code-secret"));
+        let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+        assert!(body.contains("You are signed in to &lt;x&gt;é"));
+        assert!(body.contains("You can close this window."));
+        assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(headers.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(headers.contains(&format!("Content-Length: {}\r\n", body.len())));
+        for secret in ["code-secret", "state-secret", "<x>"] {
+            assert!(!body.contains(secret));
+        }
+        assert!(body.contains("<style>"));
+        assert!(!body.contains("<script"));
+    }
+
+    #[test]
+    fn callback_error_pages_explain_without_echoing_secrets() {
+        for (query, reason) in [
+            ("state=wrong-state&code=code-secret", "State mismatch"),
+            ("state=state-secret&code=code-secret&error=provider-secret&error_description=description-secret", "Authorization was declined by the provider"),
+            ("state=state-secret", "Missing authorization code"),
+        ] {
+            let (code, response) = callback_response("<x>", &format!("/callback?{query}"), "state-secret", "/callback");
+            let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+            assert!(body.contains(reason), "{reason}: {body}");
+            assert!(code.is_none());
+            assert!(headers.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+            assert!(headers.contains("Content-Type: text/html; charset=utf-8"));
+            assert!(headers.contains(&format!("Content-Length: {}\r\n", body.len())));
+            assert!(body.contains("mcptools gateway login &lt;x&gt;"));
+            for secret in ["code-secret", "state-secret", "wrong-state", "provider-secret", "description-secret", "<x>"] {
+                assert!(!body.contains(secret));
+            }
+        }
+    }
+
+    #[test]
+    fn html_escaping_covers_markup_and_quotes() {
+        assert_eq!(escape_html("<x> & \"'é"), "&lt;x&gt; &amp; &quot;&#39;é");
+    }
 
     fn tokens() -> Tokens {
         Tokens {

@@ -70,14 +70,28 @@ impl Fixture {
         std::fs::create_dir(&bin).unwrap();
         for name in ["open", "xdg-open"] {
             let path = bin.join(name);
-            std::fs::copy(
-                concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/tests/fixtures/oauth_browser.py"
-                ),
-                &path,
-            )
+            let script = std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/oauth_browser.py"
+            ))
             .unwrap();
+            let recorder = r#"import urllib.request
+import urllib.error
+responses = []
+original_urlopen = urllib.request.urlopen
+def record_urlopen(*args, **kwargs):
+    try:
+        response = original_urlopen(*args, **kwargs)
+    except urllib.error.HTTPError as error:
+        response = error
+    responses.append({'status': response.status, 'headers': dict(response.headers), 'body': response.read().decode()})
+    with open(os.environ['OAUTH_BROWSER_LOG'] + '.responses', 'w') as file:
+        json.dump(responses, file)
+    if isinstance(response, urllib.error.HTTPError):
+        raise response
+    return response
+urllib.request.urlopen = record_urlopen"#;
+            std::fs::write(&path, script.replace("import urllib.request", recorder)).unwrap();
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         Self {
@@ -209,6 +223,31 @@ fn dynamic_registration_login_pkce_storage_logout_and_redaction() {
     fixture.login();
     let browser: Value = serde_json::from_slice(&std::fs::read(&fixture.browser).unwrap()).unwrap();
     assert_eq!(browser["client_id"], "registered-client");
+    let responses: Value = serde_json::from_slice(
+        &std::fs::read(fixture.browser.with_extension("json.responses")).unwrap(),
+    )
+    .unwrap();
+    let response = &responses[0];
+    assert!(response["body"]
+        .as_str()
+        .unwrap()
+        .contains("You are signed in to remote"));
+    assert!(response["body"]
+        .as_str()
+        .unwrap()
+        .contains("You can close this window."));
+    assert_eq!(
+        response["headers"]["Content-Type"],
+        "text/html; charset=utf-8"
+    );
+    assert_eq!(
+        response["headers"]["Content-Length"]
+            .as_str()
+            .unwrap()
+            .parse::<usize>()
+            .unwrap(),
+        response["body"].as_str().unwrap().len()
+    );
     assert_eq!(browser["code_challenge_method"], "S256");
     assert_eq!(browser["resource"], format!("{}/mcp", fixture.base));
     assert_eq!(browser["scope"], "read write");
@@ -453,6 +492,33 @@ fn state_mismatch_and_wrong_redirect_are_rejected_before_valid_callback() {
                 .count(),
             1
         );
+    }
+}
+
+#[test]
+fn callback_state_error_page_explains_retry_without_secrets() {
+    let fixture = Fixture::new("wrong-state", true);
+    fixture.login();
+    let browser: Value = serde_json::from_slice(&std::fs::read(&fixture.browser).unwrap()).unwrap();
+    let responses: Value = serde_json::from_slice(
+        &std::fs::read(fixture.browser.with_extension("json.responses")).unwrap(),
+    )
+    .unwrap();
+    let response = &responses[0];
+    let body = response["body"].as_str().unwrap();
+    assert!(body.contains("State mismatch"));
+    assert!(body.contains("mcptools gateway login remote"));
+    assert_eq!(response["status"], 400);
+    assert_eq!(
+        response["headers"]["Content-Type"],
+        "text/html; charset=utf-8"
+    );
+    for secret in [
+        "code-secret-value",
+        "incorrect-state",
+        browser["state"].as_str().unwrap(),
+    ] {
+        assert!(!body.contains(secret));
     }
 }
 

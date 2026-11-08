@@ -260,19 +260,13 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
                 .and_then(|line| line.strip_prefix("GET "))
                 .and_then(|line| line.split_once(' '))
                 .map(|(target, _)| target);
-            let code =
-                target.and_then(|target| oauth::callback(target, &state, callback_url.path()));
-            let status = if code.is_some() {
-                "200 OK"
-            } else {
-                "400 Bad Request"
-            };
-            let _ = socket
-                .write_all(
-                    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                        .as_bytes(),
-                )
-                .await;
+            let (code, response) = oauth::callback_response(
+                &upstream.prefix,
+                target.unwrap_or_default(),
+                &state,
+                callback_url.path(),
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
             if let Some(code) = code {
                 break Ok::<_, color_eyre::eyre::Report>(code);
             }
