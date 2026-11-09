@@ -18,21 +18,28 @@ readOnly = ["resolve-library-id", "query-docs"]
 ```
 
 No API key is required. For higher rate limits, add this optional table directly
-below the upstream, replacing `<key>` with your Context7 API key:
+below the upstream:
 
 ```toml
 [gateway.upstreams.headers]
-Authorization = "Bearer <key>"
+Authorization = "Bearer ${CONTEXT7_API_KEY}"
 ```
 
-Header values are literal: environment-variable references are not expanded
-(GUZ-1494). Keep keys out of version control and restrict config access:
+Export `CONTEXT7_API_KEY` in the process environment that starts mcptools.
+The key stays out of config.toml. `${NAME}` references require a nonempty value
+at upstream startup; a missing value skips Context7 with a name-only warning.
+`mcptools config check` validates syntax and warns about missing variables but
+still succeeds, so it can run without secrets. `$$` writes a literal `$`,
+`$${NAME}` writes literal `${NAME}`, and unbraced `$NAME` is not expanded.
+Defaults, nesting and shell expansion are not supported. Resolved environment
+values are redacted from upstream output and never saved in the catalog cache.
+Keep keys out of version control and restrict config access:
 
 ```bash
 chmod 600 "$(mcptools config path)"
 ```
 
-Restart mcptools after config changes. Check the config and catalog:
+Restart mcptools after config or environment changes. Check the config and catalog:
 
 ```bash
 mcptools config check
@@ -59,7 +66,9 @@ args = ["-y", "@upstash/context7-mcp"]
 **Common errors**
 
 - **401:** remove an invalid optional Authorization header to use keyless access,
-  or replace it with a valid `Bearer <key>` value, then restart mcptools.
+  or set `CONTEXT7_API_KEY` to a valid key, then restart mcptools.
+- **Missing variable:** export `CONTEXT7_API_KEY` in the harness environment,
+  not only in an unrelated terminal, then restart mcptools.
 - **Stale catalog:** restart after config changes. If remote tools changed,
   delete `upstreams.cache.json` next to the selected config, then rerun the catalog
   command. See [cache details](mcp-server.md#upstream-gateway).

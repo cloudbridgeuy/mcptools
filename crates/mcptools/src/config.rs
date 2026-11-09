@@ -63,8 +63,19 @@ pub fn run(app: App) -> Result<()> {
     match app.command {
         Commands::Path => println!("{}", path.display()),
         Commands::Check => match load(&path)? {
-            Some(_) => {
+            Some(config) => {
                 mcptools_core::config::cache_path(&path)?;
+                for upstream in &config.gateway.upstreams {
+                    for (header, value) in &upstream.headers {
+                        let template = mcptools_core::gateway::HeaderTemplate::parse(value)
+                            .map_err(|reason| eyre!(reason))?;
+                        for name in template.variables() {
+                            if std::env::var(name).map_or(true, |value| value.is_empty()) {
+                                std::eprintln!("warning: upstream {} header {header}: environment variable {name} is unset, empty or not Unicode; required at upstream startup", upstream.prefix);
+                            }
+                        }
+                    }
+                }
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;

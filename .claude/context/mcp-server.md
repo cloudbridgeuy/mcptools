@@ -93,12 +93,25 @@ prefix = "remote"
 url = "https://example.com/mcp"
 readOnly = ["search"]
 [gateway.upstreams.headers]
-Authorization = "Bearer token"
+Authorization = "Bearer ${REMOTE_MCP_TOKEN}"
 ```
 
 URLs must use HTTPS, except loopback HTTP. Set exactly one of `command` or `url`;
-an empty `command` with a URL is invalid. Header values are literal. HTTP
-sessions support JSON and event-stream responses, retain the initialization
+an empty `command` with a URL is invalid. HTTP header values support `${NAME}`,
+where NAME matches `[A-Za-z_][A-Za-z0-9_]*`. The gateway reads the process
+environment each time it starts an upstream, including reconnects. Export the
+variable in the environment that starts mcptools; `[gateway.upstreams.env]`
+does not supply HTTP variables. Missing, empty or non-Unicode values skip only
+that upstream, with a warning naming its prefix, header and variable, never a
+value. `$$` writes a literal `$` (`$${NAME}` writes literal `${NAME}`);
+unbraced `$NAME` stays literal. No defaults, nesting or recursive expansion
+is supported. Malformed references fail `config check`. A valid reference with
+a missing variable produces a name-only warning but check still succeeds:
+syntax can be checked without deploying secrets. Check does not start upstreams.
+Expansion applies only to HTTP header values, not URLs, commands, args, env or
+OAuth settings. Resolved values are not written into config or cache. Only
+header names contribute to the cache fingerprint, so secret rotation does not
+change it. HTTP sessions support JSON and event-stream responses, retain the initialization
 session ID, and send best-effort DELETE on normal exit and request errors.
 Protocol headers override configured headers. OAuth requires explicit login;
 legacy SSE is not supported. The gateway uses its own client for both transports. Protect the
@@ -110,7 +123,9 @@ HTTP tool results are redacted for credential headers: `Authorization`,
 and for `<scheme> <credential>` values such as `Bearer abc` the bare credential
 is redacted too. Header-derived candidates shorter than 8 characters are not
 collected. Other headers (for example `X-Team`) do not supply redaction
-candidates. OAuth access tokens, refresh tokens and client secrets are also
+candidates. Referenced environment values are additionally redacted, including
+short values and references in non-credential headers. OAuth access tokens,
+refresh tokens and client secrets are also
 redacted when nonempty, without the header minimum length. The client retains
 old and new secrets across refresh. Redacted result keys that collide fail the
 call.

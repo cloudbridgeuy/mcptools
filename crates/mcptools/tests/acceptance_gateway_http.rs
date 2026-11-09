@@ -5,15 +5,20 @@ use std::thread;
 
 #[test]
 fn http_discovery_and_cache_keep_header_secret() {
-    http_discovery_case(false);
+    http_discovery_case(false, false);
+}
+
+#[test]
+fn http_header_env_resolves_and_escapes_without_disclosing_secrets() {
+    http_discovery_case(false, true);
 }
 
 #[test]
 fn rejected_http_catalog_closes_initialized_session() {
-    http_discovery_case(true);
+    http_discovery_case(true, false);
 }
 
-fn http_discovery_case(reject_catalog: bool) {
+fn http_discovery_case(reject_catalog: bool, template: bool) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -51,9 +56,15 @@ fn http_discovery_case(reject_catalog: bool) {
                 if bytes.len() < end + 4 + length {
                     continue;
                 }
-                assert!(headers
-                    .to_ascii_lowercase()
-                    .contains("authorization: secret-token"));
+                assert!(headers.to_ascii_lowercase().contains(if template {
+                    "authorization: bearer secret-token"
+                } else {
+                    "authorization: secret-token"
+                }));
+                if template {
+                    assert!(headers.contains("x-literal: $cash ${MCPTOOLS_GUZ1494_MISSING} $"));
+                    assert!(headers.contains("x-team: tiny"));
+                }
                 if !headers.starts_with("DELETE ") {
                     assert!(headers
                         .to_ascii_lowercase()
@@ -88,7 +99,7 @@ fn http_discovery_case(reject_catalog: bool) {
                 methods.push(method.to_owned());
                 let body = match method {
                     "initialize" => serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}}).to_string(),
-                    "tools/list" => format!("event: message\r\ndata: {}\r\n\r\n", serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":{"tools":[{"name":"echo","description":"secret-token","inputSchema":if reject_catalog { serde_json::Value::Null } else { serde_json::json!({"type":"object"}) }}]}})),
+                    "tools/list" => format!("event: message\r\ndata: {}\r\n\r\n", serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":{"tools":[{"name":"echo","description":if template { "Bearer secret-token tiny" } else { "secret-token" },"inputSchema":if reject_catalog { serde_json::Value::Null } else { serde_json::json!({"type":"object"}) }}]}})),
                     _ => String::new(),
                 };
                 let status = if method.starts_with("notifications/") {
@@ -110,9 +121,14 @@ fn http_discovery_case(reject_catalog: bool) {
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("config.toml");
     std::fs::write(&config, format!("[[gateway.upstreams]]\nprefix = 'remote'\nurl = 'http://{address}/mcp'\n[gateway.upstreams.headers]\nAuthorization = 'secret-token'\nContent-Type = 'text/plain'\n")).unwrap();
+    if template {
+        std::fs::write(&config, format!("[[gateway.upstreams]]\nprefix = 'remote'\nurl = 'http://{address}/mcp'\n[gateway.upstreams.headers]\nAuthorization = 'Bearer ${{MCPTOOLS_GUZ1494_TOKEN}}'\nX-Team = '${{MCPTOOLS_GUZ1494_SHORT}}'\nX-Literal = '$$cash $${{MCPTOOLS_GUZ1494_MISSING}} $'\nContent-Type = 'text/plain'\n")).unwrap();
+    }
     for _ in 0..if reject_catalog { 1 } else { 2 } {
         let output = Command::new(env!("CARGO_BIN_EXE_mcptools"))
             .env("MCPTOOLS_CONFIG", &config)
+            .env("MCPTOOLS_GUZ1494_TOKEN", "secret-token")
+            .env("MCPTOOLS_GUZ1494_SHORT", "tiny")
             .args(["mcp", "catalog"])
             .output()
             .unwrap();
@@ -126,13 +142,17 @@ fn http_discovery_case(reject_catalog: bool) {
         }
         assert!(!String::from_utf8_lossy(&output.stdout).contains("secret-token"));
         assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-token"));
+        if template {
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("tiny"));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains("tiny"));
+        }
     }
     if !reject_catalog {
-        assert!(
-            !std::fs::read_to_string(dir.path().join("upstreams.cache.json"))
-                .unwrap()
-                .contains("secret-token")
-        );
+        let cache = std::fs::read_to_string(dir.path().join("upstreams.cache.json")).unwrap();
+        assert!(!cache.contains("secret-token"));
+        if template {
+            assert!(!cache.contains("tiny"));
+        }
     }
     assert_eq!(
         server.join().unwrap(),
@@ -144,6 +164,71 @@ fn http_discovery_case(reject_catalog: bool) {
         ]
         .repeat(if reject_catalog { 1 } else { 2 })
     );
+}
+
+#[test]
+fn http_header_env_missing_or_empty_skips_with_safe_names() {
+    for value in [None, Some("")] {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        std::fs::write(&config, format!("[[gateway.upstreams]]\nprefix = 'remote'\nurl = 'http://127.0.0.1:1/mcp'\n[gateway.upstreams.headers]\nAuthorization = 'Bearer ${{MCPTOOLS_GUZ1494_TOKEN}}/${{MCPTOOLS_GUZ1494_MISSING}}'\n[[gateway.upstreams]]\nprefix = 'healthy'\ncommand = '/bin/sh'\nargs = {}\n[gateway.upstreams.env]\nFIXTURE_LOG = '/dev/null'\n", serde_json::json!(["-c", "sleep 0.05; exec python3 \"$@\"", "gateway-fixture", concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/upstream.py")]))).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mcptools"));
+        command
+            .env_remove("MCPTOOLS_GUZ1494_MISSING")
+            .env("MCPTOOLS_GUZ1494_TOKEN", "secret-token");
+        if let Some(value) = value {
+            command.env("MCPTOOLS_GUZ1494_MISSING", value);
+        }
+        let output = command
+            .env("MCPTOOLS_CONFIG", &config)
+            .args(["mcp", "catalog"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("skipping upstream remote"), "{error}");
+        assert!(error.contains("Authorization"), "{error}");
+        assert!(error.contains("MCPTOOLS_GUZ1494_MISSING"), "{error}");
+        assert!(!error.contains("Bearer"), "{error}");
+        assert!(!error.contains("secret-token"));
+        let catalog = String::from_utf8_lossy(&output.stdout);
+        assert!(catalog.contains("healthy_echo"), "{catalog}");
+        assert!(!catalog.contains("secret-token"));
+        assert!(!dir.path().join("upstreams.cache.json").exists());
+    }
+}
+
+#[test]
+fn http_header_env_config_check_validates_syntax_without_environment() {
+    for template in [
+        "Bearer ${MCPTOOLS_GUZ1494_MISSING}",
+        "Bearer ${",
+        "Bearer ${1X}",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        std::fs::write(&config, format!("[[gateway.upstreams]]\nprefix = 'remote'\nurl = 'https://example.com/mcp'\n[gateway.upstreams.headers]\nAuthorization = '{template}'\n")).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_mcptools"))
+            .env("MCPTOOLS_CONFIG", &config)
+            .env_remove("MCPTOOLS_GUZ1494_MISSING")
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            template.ends_with("MISSING}"),
+            "malformed header template accepted"
+        );
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(!error.contains("Bearer"));
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("Bearer"));
+        if output.status.success() {
+            assert!(error.contains("MCPTOOLS_GUZ1494_MISSING"), "{error}");
+        } else {
+            assert!(error.contains("remote"), "{error}");
+            assert!(error.contains("Authorization"), "{error}");
+        }
+    }
 }
 
 #[test]

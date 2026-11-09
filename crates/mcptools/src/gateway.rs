@@ -62,6 +62,11 @@ pub async fn initialize() -> Result<()> {
         let started = tokio::time::timeout(REQUEST_TIMEOUT, Client::start(upstream)).await;
         let mut client = match started {
             Ok(Ok(client)) => client,
+            Ok(Err(error)) if error.downcast_ref::<gateway::Error>().is_some() => {
+                outcomes.push(Err(StartupFailure::Headers(error.to_string())));
+                clients.push(Mutex::new(None));
+                continue;
+            }
             _ => {
                 outcomes.push(Err(StartupFailure::Connect));
                 clients.push(Mutex::new(None));

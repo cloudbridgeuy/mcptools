@@ -70,10 +70,11 @@ pub struct Cache {
 #[error("Invalid upstream configuration or catalog: {0}")]
 pub struct Error(pub String);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum StartupFailure {
     Connect,
     Discover,
+    Headers(String),
 }
 
 pub struct StartupCatalog {
@@ -98,8 +99,9 @@ pub fn startup_catalog(
             Ok(tools) => discovered.push(tools),
             Err(failure) => {
                 let reason = match failure {
-                    StartupFailure::Connect => "connection or initialization failed",
-                    StartupFailure::Discover => "catalog fetch failed",
+                    StartupFailure::Connect => "connection or initialization failed".into(),
+                    StartupFailure::Discover => "catalog fetch failed".into(),
+                    StartupFailure::Headers(reason) => reason,
                 };
                 let hint = if upstream.auth.as_deref() == Some("oauth") {
                     format!("; run mcptools gateway login {}", upstream.prefix)
@@ -224,6 +226,84 @@ pub fn http_result(value: Value, id: u64, secrets: &[String]) -> Result<Value, &
     Ok(result)
 }
 
+pub struct HeaderTemplate<'a> {
+    parts: Vec<HeaderPart<'a>>,
+}
+
+enum HeaderPart<'a> {
+    Literal(&'a str),
+    Variable(&'a str),
+}
+
+impl<'a> HeaderTemplate<'a> {
+    pub fn parse(mut text: &'a str) -> Result<Self, &'static str> {
+        let mut parts = Vec::new();
+        while let Some(index) = text.find('$') {
+            parts.push(HeaderPart::Literal(&text[..index]));
+            text = &text[index + 1..];
+            if let Some(rest) = text.strip_prefix('$') {
+                parts.push(HeaderPart::Literal("$"));
+                text = rest;
+            } else if let Some(rest) = text.strip_prefix('{') {
+                let end = rest.find('}').ok_or("unterminated environment reference")?;
+                let name = &rest[..end];
+                if name.is_empty()
+                    || !name.as_bytes()[0].is_ascii_alphabetic() && !name.starts_with('_')
+                    || !name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                {
+                    return Err("invalid environment reference name");
+                }
+                parts.push(HeaderPart::Variable(name));
+                text = &rest[end + 1..];
+            } else {
+                parts.push(HeaderPart::Literal("$"));
+            }
+        }
+        parts.push(HeaderPart::Literal(text));
+        Ok(Self { parts })
+    }
+
+    pub fn variables(&self) -> BTreeSet<&'a str> {
+        self.parts
+            .iter()
+            .filter_map(|part| match part {
+                HeaderPart::Variable(name) => Some(*name),
+                HeaderPart::Literal(_) => None,
+            })
+            .collect()
+    }
+
+    pub fn resolve(&self, environment: &BTreeMap<String, String>) -> Result<String, String> {
+        let mut result = String::new();
+        for part in &self.parts {
+            result.push_str(match part {
+                HeaderPart::Literal(text) => text,
+                HeaderPart::Variable(name) => environment
+                    .get(*name)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| (*name).to_owned())?,
+            });
+        }
+        Ok(result)
+    }
+}
+
+pub fn resolve_http_headers(
+    upstream: &Upstream,
+    environment: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, Error> {
+    upstream.headers.iter().map(|(name, value)| {
+        let template = HeaderTemplate::parse(value).map_err(|reason| Error(format!("upstream {} header {name}: {reason}", upstream.prefix)))?;
+        let resolved = template.resolve(environment).map_err(|variable| Error(format!("upstream {} header {name}: environment variable {variable} is unset, empty or not Unicode", upstream.prefix)))?;
+        if reqwest::header::HeaderValue::from_str(&resolved).is_err() {
+            return Err(Error(format!("upstream {} header {name}: invalid resolved HTTP header", upstream.prefix)));
+        }
+        Ok((name.clone(), resolved))
+    }).collect()
+}
+
 fn redact_http_secrets(value: &mut Value, secrets: &[String]) -> Result<(), &'static str> {
     match value {
         Value::String(text) => {
@@ -312,6 +392,7 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
                     if reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_err() || reqwest::header::HeaderValue::from_str(value).is_err() {
                         return Err(Error(format!("gateway.upstreams[{index}].headers contains an invalid header")));
                     }
+                    HeaderTemplate::parse(value).map_err(|reason| Error(format!("upstream {} header {name}: {reason}", upstream.prefix)))?;
                 }
             }
             _ => return Err(Error(format!("gateway.upstreams[{index}] must specify either command or url with matching options"))),
@@ -560,6 +641,69 @@ mod tests {
                 secrets.contains(&expected.to_string()),
                 "{expected} {secrets:?}"
             );
+        }
+    }
+
+    #[test]
+    fn http_header_templates_resolve_from_a_map_without_recursive_expansion() {
+        let environment = BTreeMap::from([
+            ("TOKEN".into(), "${OTHER}".into()),
+            ("_suffix2".into(), "value".into()),
+        ]);
+        let template =
+            HeaderTemplate::parse("Bearer ${TOKEN}/${_suffix2}/${TOKEN} $$ $cash $${OTHER} café")
+                .unwrap();
+        assert_eq!(template.variables(), BTreeSet::from(["TOKEN", "_suffix2"]));
+        assert_eq!(
+            template.resolve(&environment).unwrap(),
+            "Bearer ${OTHER}/value/${OTHER} $ $cash ${OTHER} café"
+        );
+        for literal in ["plain", "$cash", "$", "café", ""] {
+            let template = HeaderTemplate::parse(literal).unwrap();
+            assert!(template.variables().is_empty());
+            assert_eq!(template.resolve(&BTreeMap::new()).unwrap(), literal);
+        }
+    }
+
+    #[test]
+    fn http_header_templates_missing_empty_and_invalid_values_are_safe() {
+        let config = config(json!({"upstreams": [{"prefix": "remote", "url": "https://example.com", "headers": {"Authorization": "Bearer ${TOKEN}"}}]})).unwrap();
+        for environment in [
+            BTreeMap::new(),
+            BTreeMap::from([("TOKEN".into(), String::new())]),
+            BTreeMap::from([("TOKEN".into(), "secret\nvalue".into())]),
+        ] {
+            let error = resolve_http_headers(&config.upstreams[0], &environment)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("remote"));
+            assert!(error.contains("Authorization"));
+            assert!(!error.contains("Bearer"));
+            assert!(!error.contains("secret"));
+            if environment.get("TOKEN").is_none_or(String::is_empty) {
+                assert!(error.contains("TOKEN"));
+            }
+        }
+        let mut resolved = config.clone();
+        resolved.upstreams[0].headers = resolve_http_headers(
+            &config.upstreams[0],
+            &BTreeMap::from([("TOKEN".into(), "resolved-secret".into())]),
+        )
+        .unwrap();
+        assert_eq!(fingerprint(&config), fingerprint(&resolved));
+    }
+
+    #[test]
+    fn http_header_templates_reject_malformed_references() {
+        for template in ["${", "${1X}", "${}", "${TOKEN:-default}", "${${TOKEN}}"] {
+            let result = config(
+                json!({"upstreams": [{"prefix": "remote", "url": "https://example.com", "headers": {"Authorization": template}}]}),
+            );
+            assert!(result.is_err(), "malformed header template accepted");
+            let error = result.err().unwrap().to_string();
+            assert!(error.contains("remote"));
+            assert!(error.contains("Authorization"));
+            assert!(!error.contains(template));
         }
     }
 

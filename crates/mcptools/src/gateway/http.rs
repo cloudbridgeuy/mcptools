@@ -19,8 +19,20 @@ pub struct Client {
 
 impl Client {
     pub async fn start(upstream: &Upstream) -> Result<Self> {
+        let mut environment = std::collections::BTreeMap::new();
+        for value in upstream.headers.values() {
+            let template = gateway::HeaderTemplate::parse(value).map_err(|reason| eyre!(reason))?;
+            for name in template.variables() {
+                if let Ok(value) = std::env::var(name) {
+                    environment.insert(name.to_owned(), value);
+                }
+            }
+        }
+        let resolved = gateway::resolve_http_headers(upstream, &environment)?;
+        let mut secrets = gateway::http_secrets(&resolved);
+        secrets.extend(environment.into_values().filter(|value| !value.is_empty()));
         let mut headers = reqwest::header::HeaderMap::new();
-        for (name, value) in &upstream.headers {
+        for (name, value) in &resolved {
             let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
                 .map_err(|_| eyre!("Invalid upstream headers"))?;
             let mut value = reqwest::header::HeaderValue::from_str(value)
@@ -54,7 +66,7 @@ impl Client {
             session: None,
             protocol: None,
             next_id: 0,
-            secrets: gateway::http_secrets(&upstream.headers),
+            secrets,
             upstream: upstream.clone(),
             tokens: if upstream.auth.as_deref() == Some("oauth") {
                 Some(super::oauth::load(upstream)?)
