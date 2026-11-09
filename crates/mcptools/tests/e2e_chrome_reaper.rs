@@ -41,17 +41,25 @@ impl Drop for BrowserGuard {
     }
 }
 
-fn chrome() -> PathBuf {
-    let path = std::env::var_os("CHROME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            headless_chrome::browser::default_executable().expect("Chrome required")
-        });
+/// Returns the Chrome binary, or `None` (after printing a skip message) only
+/// when `CHROME` is unset and no Chrome is installed. An explicit `CHROME`
+/// that cannot run, or a Chrome older than the supported major, still fails.
+fn chrome(test: &str) -> Option<PathBuf> {
+    let path = match std::env::var_os("CHROME") {
+        Some(path) => PathBuf::from(path),
+        None => match headless_chrome::browser::default_executable() {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!("skipping {test}: Chrome not found: {error}");
+                return None;
+            }
+        },
+    };
     let output = Command::new(&path).arg("--version").output().unwrap();
     mcptools_core::md::parse_chrome_major(&String::from_utf8_lossy(&output.stdout))
         .and_then(mcptools_core::md::validate_chrome_major)
         .expect("Chrome 156+ required; no skip");
-    path
+    Some(path)
 }
 
 fn records(data: &Path) -> PathBuf {
@@ -69,14 +77,16 @@ fn wait_gone(pid: u32) {
     }
 }
 
-async fn sigkill_reaps_chrome(stop_chrome: bool) {
+async fn sigkill_reaps_chrome(test: &str, stop_chrome: bool) {
     use std::os::unix::fs::PermissionsExt;
+    let Some(binary) = chrome(test) else {
+        return;
+    };
     let data = tempfile::tempdir().unwrap();
     let pidfile = data.path().join("pid");
     let wrapper = data.path().join("chrome");
     std::fs::write(&wrapper, "#!/bin/sh\nif [ \"$1\" != \"--version\" ]; then echo $$ > \"$MD_BROWSER_LAUNCH_LOG\"; fi\nexec \"$MD_BROWSER_BINARY\" \"$@\"\n").unwrap();
     std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let binary = chrome();
     let stub = MockServer::start().await;
     Mock::given(wiremock::matchers::method("GET"))
         .respond_with(
@@ -147,22 +157,29 @@ async fn sigkill_reaps_chrome(stop_chrome: bool) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sigkill_reaps_chrome_within_three_seconds() {
-    sigkill_reaps_chrome(false).await;
+    sigkill_reaps_chrome("sigkill_reaps_chrome_within_three_seconds", false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sigkill_escalates_for_stopped_chrome_within_three_seconds() {
-    sigkill_reaps_chrome(true).await;
+    sigkill_reaps_chrome(
+        "sigkill_escalates_for_stopped_chrome_within_three_seconds",
+        true,
+    )
+    .await;
 }
 
 #[test]
 fn startup_sweep_kills_orphan_but_keeps_unrelated_pid_record() {
+    let Some(binary) = chrome("startup_sweep_kills_orphan_but_keeps_unrelated_pid_record") else {
+        return;
+    };
     let data = tempfile::tempdir().unwrap();
     let directory = records(data.path());
     std::fs::create_dir_all(&directory).unwrap();
     let profile = directory.join("profile-test");
     let mut browser = BrowserGuard(
-        Command::new(chrome())
+        Command::new(binary)
             .args([
                 "--headless=new",
                 "--remote-debugging-port=0",
