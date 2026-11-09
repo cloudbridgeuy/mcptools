@@ -2,7 +2,7 @@
 
 mcptools can run as an MCP (Model Context Protocol) server.
 
-The built-in registry has 112 tools: 109 catalog tools and 3 meta tools.
+The built-in registry has 114 tools: 111 catalog tools and 3 meta tools.
 Configured upstream tools extend the catalog, not `tools/list`.
 `plan_write` stores a diagram (Write; requires `allowWrites: true`);
 `plan_url` reads its persisted URL (Read). `plan_diff` reads changes and advances
@@ -582,3 +582,6 @@ Use the actual hostname reported by `tailscale serve`, register that exact redir
 Protected-resource metadata may identify the exact upstream URL or a same-scheme, same-host, same-port path-segment prefix, including Slack's host-level resource; authorization, token exchange, stored credentials, and refresh use that metadata resource unchanged, while MCP calls retain the configured upstream URL. Stored credentials must satisfy the same resource-matching rule.
 
 Credentials are stored per upstream in `XDG_DATA_HOME/mcptools/oauth` (or `~/.local/share/mcptools/oauth`) in files restricted to the user. Run `mcptools gateway logout <prefix>` to remove credentials. Expired tokens and HTTP 401 responses trigger one refresh; if refresh fails, run login again. MCP requests never start interactive login. Use HTTPS for remote endpoints; loopback HTTP is allowed for local development.
+
+`http_request` sends requests only to exact comma-separated hosts in `MCPTOOLS_HTTP_ALLOWED_HOSTS`, an environment-only setting. Empty denies all. All methods require `allowWrites`. Redirects are returned without following. Supply `body` or `bodyPath`; the latter streams a regular file. Responses are UTF-8, limited to 1 MiB and 10 seconds. `file_stat` returns a regular file size in bytes for upload preparation.
+`bodyPath` can read any regular file the user can read; the allowlist controls destinations, not file access. Set narrow exact hosts; wildcard entries such as `*.slack.com` do not grant access.

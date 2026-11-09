@@ -862,6 +862,18 @@ mod runtime_config_regressions {
     }
 
     #[test]
+    fn http_allowed_hosts_is_environment_only() {
+        for text in [
+            "http_allowed_hosts = ['example.com']",
+            "[mcp]\nhttp_allowed_hosts = ['example.com']",
+            "[http]\nallowed_hosts = ['example.com']",
+            "[general]\nhttp_allowed_hosts = ['example.com']",
+        ] {
+            assert!(parse(text).is_err());
+        }
+    }
+
+    #[test]
     fn runtime_sections_reject_invalid_fields() {
         for text in [
             "[mcp]\nunknown = true",

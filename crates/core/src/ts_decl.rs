@@ -289,7 +289,11 @@ fn ts_type_at(schema: &Value, prefix: &str, level: usize) -> String {
             "array" => array_type(obj, prefix, level),
             "object" => match obj.get("properties").and_then(Value::as_object) {
                 Some(_) => inline_object(schema, prefix, level),
-                None => "unknown".to_string(),
+                None => obj
+                    .get("additionalProperties")
+                    .filter(|value| value.is_object())
+                    .map(|value| format!("Record<string, {}>", ts_type_at(value, prefix, level)))
+                    .unwrap_or_else(|| "unknown".to_string()),
             },
             _ => "unknown".to_string(),
         },
@@ -399,6 +403,14 @@ mod tests {
         assert_eq!(
             ty(json!({"type": "object", "properties": {"a": {"type": "string"}}})),
             "{\n  a?: string;\n}"
+        );
+    }
+
+    #[test]
+    fn typed_additional_properties_become_record() {
+        assert_eq!(
+            ty(json!({"type": "object", "additionalProperties": {"type": "string"}})),
+            "Record<string, string>"
         );
     }
 

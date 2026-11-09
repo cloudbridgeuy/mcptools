@@ -107,3 +107,5 @@ pub mod diagram_endpoint;
 pub mod gateway;
 
 pub mod oauth;
+
+pub mod http_request;

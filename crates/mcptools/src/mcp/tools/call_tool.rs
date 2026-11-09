@@ -138,6 +138,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn http_get_requires_allow_writes() {
+        let result = call(
+            json!({"name":"http_request", "input":{"method":"GET", "url":"http://127.0.0.1/"}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["isError"], json!(true));
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("allowWrites"));
+    }
+
+    #[tokio::test]
     async fn write_tool_requires_allow_writes() {
         let result = call(json!({"name": "jira_create", "input": {}}))
             .await

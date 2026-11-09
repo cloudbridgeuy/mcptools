@@ -19,6 +19,8 @@ fn roundtrip<T: serde::de::DeserializeOwned + serde::Serialize>(
 
 fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value {
     match tool {
+        "http_request" => roundtrip::<mcptools_core::http_request::Response>(value),
+        "file_stat" => roundtrip::<mcptools_core::http_request::StatOutput>(value),
         "plan_close" => roundtrip::<mcptools_core::plan_store::CloseOutput>(value),
         "plan_write" => roundtrip::<mcptools_core::plan_store::WriteOutput>(value),
         "plan_url" => roundtrip::<mcptools_core::plan_store::UrlOutput>(value),

@@ -5,6 +5,7 @@ mod call_tool;
 mod execute;
 pub mod find_tools;
 mod hn;
+mod http_request;
 mod images;
 mod lane;
 mod linear;
@@ -15,6 +16,8 @@ pub mod schema;
 
 #[cfg(test)]
 mod conformance_tests;
+#[cfg(test)]
+mod http_tests;
 
 use serde::{Deserialize, Serialize};
 
@@ -232,6 +235,24 @@ pub fn builtin_tools() -> Vec<Tool> {
             destructive: false,
             input_schema: schema::input_schema_for::<mcptools_core::plan_store::ShareArgs>(),
             output_schema: schema::output_schema_for::<mcptools_core::plan_store::UrlOutput>(),
+        },
+        Tool {
+            name: "http_request".into(),
+            description: "Send an HTTP request to an exact host in MCPTOOLS_HTTP_ALLOWED_HOSTS. Requires allowWrites even for GET. Redirects are not followed. bodyPath streams a regular file with its exact length; body and bodyPath are exclusive. Responses are limited to 1 MiB and 10 seconds. No credentials are added.".into(),
+            summary: "Send an allowlisted HTTP request",
+            kind: ToolKind::Write,
+            destructive: false,
+            input_schema: schema::input_schema_for::<mcptools_core::http_request::RequestArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::http_request::Response>(),
+        },
+        Tool {
+            name: "file_stat".into(),
+            description: "Get the byte size of a regular file.".into(),
+            summary: "Get a file size in bytes",
+            kind: ToolKind::Read,
+            destructive: false,
+            input_schema: schema::input_schema_for::<mcptools_core::http_request::StatArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::http_request::StatOutput>(),
         },
         Tool {
             name: "lane_list".into(),
@@ -1410,6 +1431,8 @@ pub async fn dispatch_tool_call(
         "plan_close" => plan::handle_plan_close(params.arguments).await,
         "plan_diff" => plan::handle_plan_diff(params.arguments).await,
         "plan_png" => plan::handle_plan_png(params.arguments).await,
+        "http_request" => http_request::request(params.arguments).await,
+        "file_stat" => http_request::stat(params.arguments).await,
         "lane_list" => lane::list(params.arguments).await,
         "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
         "lane_cleanup_apply" => lane::cleanup_apply(params.arguments).await,
@@ -1666,7 +1689,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 109);
+        assert_eq!(catalog.len(), 111);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1697,7 +1720,9 @@ mod catalog_tests {
             BTreeSet::from([
                 "bitbucket",
                 "confluence",
+                "file",
                 "hn",
+                "http",
                 "images",
                 "jira",
                 "lane",
@@ -1732,7 +1757,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 112);
+        assert_eq!(super::registered_tools().len(), 114);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1807,7 +1832,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 112);
+        assert_eq!(names(serve_flags(false)).len(), 114);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1936,7 +1961,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 112);
+        assert_eq!(tools.len(), 114);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -1971,6 +1996,7 @@ mod catalog_tests {
     #[test]
     fn registered_names_match_oracle_sets() {
         let write: std::collections::BTreeSet<&str> = [
+            "http_request",
             "md_render",
             "plan_close",
             "plan_diff",
@@ -2029,6 +2055,7 @@ mod catalog_tests {
                 .into_iter()
                 .collect();
         let read: std::collections::BTreeSet<&str> = [
+            "file_stat",
             "plan_png",
             "plan_url",
             "lane_list",
@@ -2093,7 +2120,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 112);
+        assert_eq!(union.len(), 114);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();
