@@ -608,16 +608,41 @@ fn fixed_callback_port_never_falls_back() {
 #[test]
 fn fixed_callback_port_without_proxy_uses_loopback() {
     let fixture = Fixture::new("normal", true);
-    let mut config = std::fs::OpenOptions::new()
-        .append(true)
-        .open(fixture.dir.path().join("config.toml"))
+    let config_path = fixture.dir.path().join("config.toml");
+    let base_config = std::fs::read_to_string(&config_path).unwrap();
+    let mut used_port = 0;
+    let mut last_stderr = String::new();
+    for _ in 0..3 {
+        // Probe a free port; it can be taken before login binds it, so retry.
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        std::fs::write(
+            &config_path,
+            format!("{base_config}redirect_port = {port}\n"),
+        )
         .unwrap();
-    writeln!(config, "redirect_port = {}", fixture.callback_port).unwrap();
-    fixture.login();
+        let output = fixture.command(&["gateway", "login", "remote"]);
+        clean(&output);
+        last_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        if output.status.success() {
+            assert!(String::from_utf8_lossy(&output.stdout).contains("/authorize?"));
+            used_port = port;
+            break;
+        }
+        assert!(
+            last_stderr.contains("callback port"),
+            "login failed: {last_stderr}"
+        );
+    }
+    assert!(
+        used_port != 0,
+        "login failed after 3 attempts: {last_stderr}"
+    );
     let browser: Value = serde_json::from_slice(&std::fs::read(&fixture.browser).unwrap()).unwrap();
     assert_eq!(
         browser["redirect_uri"],
-        format!("http://127.0.0.1:{}/callback", fixture.callback_port)
+        format!("http://127.0.0.1:{used_port}/callback")
     );
 }
 
