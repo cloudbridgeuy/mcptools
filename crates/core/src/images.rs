@@ -768,15 +768,61 @@ pub fn build_generate_body(p: &GenerateParams) -> serde_json::Value {
     body
 }
 
+pub fn redact_error_body(body: &str, secret: &str) -> String {
+    static KEYS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\bsk-(?:[A-Za-z0-9_-]|\*|\.{3}|…)+").expect("valid key pattern")
+    });
+    static ECHOES: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"([A-Za-z0-9_+/=-]*(?:\.[A-Za-z0-9_+/=-]+)*)(?:\*+|\.{3}|…)([A-Za-z0-9_+/=-]*(?:\.[A-Za-z0-9_+/=-]+)*)")
+            .expect("valid credential echo pattern")
+    });
+    let mut spans: Vec<_> = KEYS
+        .find_iter(body)
+        .filter(|key| key.as_str().chars().count() >= 8)
+        .map(|key| (key.start(), key.end()))
+        .collect();
+    if secret.chars().count() >= 8 {
+        spans.extend(
+            body.match_indices(secret)
+                .map(|(start, value)| (start, start + value.len())),
+        );
+        for echo in ECHOES.captures_iter(body) {
+            let prefix = &echo[1];
+            let suffix = &echo[2];
+            let value = echo.get(0).expect("matched echo");
+            if value.as_str().chars().count() >= 8
+                && (!prefix.is_empty() || !suffix.is_empty())
+                && prefix.len() + suffix.len() <= secret.len()
+                && secret.starts_with(prefix)
+                && secret.ends_with(suffix)
+            {
+                spans.push((value.start(), value.end()));
+            }
+        }
+    }
+    spans.sort_unstable();
+    let mut redacted = String::with_capacity(body.len());
+    let mut cursor = 0;
+    for (start, end) in spans {
+        if start >= cursor {
+            redacted.push_str(&body[cursor..start]);
+            redacted.push_str("[REDACTED]");
+        }
+        cursor = cursor.max(end);
+    }
+    redacted.push_str(&body[cursor..]);
+    redacted
+}
+
 pub fn error_hint(status: u16, body: &str) -> String {
     if body.contains("moderation_blocked") {
-        return "Request blocked by moderation. Revise the prompt or input images.".to_string();
+        return format!("Request blocked by moderation (HTTP {status}). Revise the prompt or input images. Body: {body}");
     }
     if body.contains("organization_verification") || status == 403 {
         return format!("OpenAI rejected the request (HTTP {status}). Organization verification may be required for GPT Image models. Body: {body}");
     }
     if status == 401 {
-        return "Unauthorized (HTTP 401). Check OPENAI_API_KEY.".to_string();
+        return format!("Unauthorized (HTTP 401). Check OPENAI_API_KEY. Body: {body}");
     }
     format!("OpenAI request failed (HTTP {status}): {body}")
 }

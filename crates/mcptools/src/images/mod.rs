@@ -539,6 +539,7 @@ async fn post_openai_generate(
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
+        let text = images::redact_error_body(&text, key);
         return Err(eyre!(images::error_hint(status.as_u16(), &text)));
     }
     resp.json()
@@ -617,6 +618,7 @@ async fn post_openai_edit(
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
+        let text = images::redact_error_body(&text, key);
         return Err(eyre!(images::error_hint(status.as_u16(), &text)));
     }
     resp.json()
@@ -641,13 +643,14 @@ async fn read_data_url(path: &std::path::Path) -> Result<String> {
 
 async fn post_responses(
     client: &reqwest::Client,
+    url: &str,
     tokens: &images::TokenSet,
     body: &serde_json::Value,
 ) -> Result<String> {
     let mut stream_body = body.clone();
     stream_body["stream"] = serde_json::json!(true);
     let mut req = client
-        .post(CODEX_RESPONSES_URL)
+        .post(url)
         .bearer_auth(&tokens.access_token)
         .header("accept", "text/event-stream")
         .header("openai-beta", "responses=experimental")
@@ -663,15 +666,16 @@ async fn post_responses(
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
+        let text = images::redact_error_body(&text, &tokens.access_token);
         return Err(eyre!("ChatGPT request failed (HTTP {status}): {text}"));
     }
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-        if let Ok(b64) = images::extract_image_b64(&v) {
-            return Ok(b64);
-        }
+        return images::extract_image_b64(&v)
+            .map_err(|e| eyre!(images::redact_error_body(&e, &tokens.access_token)));
     }
     let events = images::parse_sse_payloads(&text);
-    images::extract_stream_image(&events).map_err(|e| eyre!(e))
+    images::extract_stream_image(&events)
+        .map_err(|e| eyre!(images::redact_error_body(&e, &tokens.access_token)))
 }
 
 async fn save_subscription_image(
@@ -762,7 +766,7 @@ pub async fn generate_data(
             let body = images::build_responses_body(&mainline, &params.prompt, &[], tool);
             let tokens = auth::ensure_valid(&config_dir, legacy_dir.as_deref()).await?;
             let client = reqwest::Client::new();
-            let b64 = post_responses(&client, &tokens, &body).await?;
+            let b64 = post_responses(&client, CODEX_RESPONSES_URL, &tokens, &body).await?;
             save_subscription_image(
                 &b64,
                 params.model,
@@ -897,7 +901,7 @@ pub async fn edit_data(
             let body = images::build_responses_body(&mainline, &params.prompt, &urls, tool);
             let tokens = auth::ensure_valid(&config_dir, legacy_dir.as_deref()).await?;
             let client = reqwest::Client::new();
-            let b64 = post_responses(&client, &tokens, &body).await?;
+            let b64 = post_responses(&client, CODEX_RESPONSES_URL, &tokens, &body).await?;
             save_subscription_image(
                 &b64,
                 params.model,
@@ -949,6 +953,68 @@ mod tests {
     use super::*;
     use clap::{CommandFactory, Parser};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn chatgpt_errors_redact_bearer_tokens() {
+        let server = MockServer::start().await;
+        let tokens = images::TokenSet {
+            access_token: "bearerPrefix123456789bearerSuffix".into(),
+            refresh_token: String::new(),
+            id_token: String::new(),
+            account_id: None,
+        };
+        let message = "Invalid token bearerPrefix123456789bearerSuffix; echo bearerPrefix...bearerSuffix; other sk-testCredential123.";
+        let expected = "Invalid token [REDACTED]; echo [REDACTED]; other [REDACTED].";
+        for (status, body) in [
+            (
+                401,
+                serde_json::json!({"error": {"message": message}}).to_string(),
+            ),
+            (
+                200,
+                serde_json::json!({"error": {"message": message}}).to_string(),
+            ),
+            (
+                200,
+                format!(
+                    "data: {}\n\n",
+                    serde_json::json!({"type": "error", "error": {"message": message}})
+                ),
+            ),
+            (
+                200,
+                format!(
+                    "data: {}\n\n",
+                    serde_json::json!({"type": "response.failed", "response": {"error": {"message": message}}})
+                ),
+            ),
+        ] {
+            server.reset().await;
+            Mock::given(wiremock::matchers::method("POST"))
+                .and(wiremock::matchers::header(
+                    "authorization",
+                    format!("Bearer {}", tokens.access_token),
+                ))
+                .respond_with(ResponseTemplate::new(status).set_body_string(body))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let error = post_responses(
+                &reqwest::Client::new(),
+                &server.uri(),
+                &tokens,
+                &serde_json::json!({}),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+            server.verify().await;
+            assert!(error.contains(expected), "{error}");
+            if status != 200 {
+                assert!(error.contains("HTTP 401"), "{error}");
+            }
+        }
+    }
 
     #[tokio::test]
     async fn cli_gif_sends_options_and_saves_bytes() {
