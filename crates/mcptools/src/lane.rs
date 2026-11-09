@@ -1612,37 +1612,38 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
         std::fs::create_dir(&storage).unwrap();
         let parent = storage.join("feature");
         symlink(outside.path(), &parent).unwrap();
-        assert!(
-            create(&runner, root.clone(), args(&root, "feature/missing/topic"))
-                .await
-                .unwrap_err()
-                .contains("escapes")
-        );
+        let err = create(&runner, root.clone(), args(&root, "feature/missing/topic"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("escapes"), "expected escapes, got: {err}");
         assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
         std::fs::remove_file(&parent).unwrap();
         symlink(root.join("missing"), &parent).unwrap();
-        assert!(create(&runner, root.clone(), args(&root, "feature/topic"))
+        let err = create(&runner, root.clone(), args(&root, "feature/topic"))
             .await
-            .unwrap_err()
-            .contains("Dangling"));
+            .unwrap_err();
+        assert!(err.contains("Dangling"), "expected Dangling, got: {err}");
         std::fs::remove_file(&parent).unwrap();
         symlink(&root, &parent).unwrap();
-        assert!(create(&runner, root.clone(), args(&root, "feature/topic"))
+        let err = create(&runner, root.clone(), args(&root, "feature/topic"))
             .await
-            .unwrap_err()
-            .contains("symlinks"));
+            .unwrap_err();
+        assert!(err.contains("symlinks"), "expected symlinks, got: {err}");
         std::fs::remove_file(&parent).unwrap();
         std::fs::write(&parent, "occupied").unwrap();
-        assert!(create(&runner, root.clone(), args(&root, "feature/topic"))
+        let err = create(&runner, root.clone(), args(&root, "feature/topic"))
             .await
-            .unwrap_err()
-            .contains("directory"));
+            .unwrap_err();
+        assert!(err.contains("directory"), "expected directory, got: {err}");
         std::fs::remove_file(&parent).unwrap();
         std::fs::create_dir_all(parent.join("topic")).unwrap();
-        assert!(create(&runner, root.clone(), args(&root, "feature/topic"))
+        let err = create(&runner, root.clone(), args(&root, "feature/topic"))
             .await
-            .unwrap_err()
-            .contains("already exists"));
+            .unwrap_err();
+        assert!(
+            err.contains("already exists"),
+            "expected already exists, got: {err}"
+        );
         assert_eq!(
             runner
                 .run(
@@ -1656,18 +1657,19 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
                     ]
                 )
                 .await
-                .unwrap()
+                .unwrap_or_else(|e| panic!("git show-ref failed: {e}"))
                 .code,
             Some(1)
         );
         fake_wt(&mut runner, "");
         let created = create(&runner, root.clone(), args(&root, "feature/new/deep"))
             .await
-            .unwrap();
+            .unwrap_or_else(|e| panic!("create feature/new/deep failed: {e}"));
         assert_eq!(Path::new(&created.path), storage.join("feature/new/deep"));
-        assert!(list(&runner, root)
+        let listed = list(&runner, root)
             .await
-            .unwrap()
+            .unwrap_or_else(|e| panic!("list failed: {e}"));
+        assert!(listed
             .lanes
             .iter()
             .any(|lane| lane.id.as_deref() == Some(&created.id) && lane.managed));
