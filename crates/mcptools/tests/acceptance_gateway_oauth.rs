@@ -587,7 +587,7 @@ fn confidential_login_refresh_and_secret_redaction() {
 #[test]
 fn fixed_callback_port_never_falls_back() {
     let fixture = Fixture::new("normal", true);
-    let busy = std::net::TcpListener::bind(("127.0.0.1", fixture.callback_port)).unwrap();
+    let busy = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let mut config = std::fs::OpenOptions::new()
         .append(true)
         .open(fixture.dir.path().join("config.toml"))
