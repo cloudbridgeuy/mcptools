@@ -142,4 +142,93 @@ driving their browser.
 - **Version drift:** auto-update is enabled by default, so the binary can change
   while the gateway runs. The Chrome extension version can lag the CLI version.
 
-## Slack: pending GUZ-1504
+## Slack
+
+Search Slack and read channel history through Slack's official remote MCP server.
+Sending messages is optional and posts as the signed-in user.
+
+**App and HTTPS callback**
+
+At [Slack apps](https://api.slack.com/apps), create or select an app and obtain its
+client ID and client secret. The app must also be enabled for Slack MCP access.
+Slack requires a confidential OAuth client and an HTTPS redirect URI.
+
+With Tailscale HTTPS enabled and your browser connected to the tailnet, proxy the
+fixed local callback port:
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:8765
+```
+
+Use the HTTPS hostname reported by Tailscale in place of
+`<your-mac>.<tailnet>.ts.net` below. Under the app's **OAuth & Permissions**, add
+`https://<your-mac>.<tailnet>.ts.net/callback` as a redirect URL and press
+**Save URLs**. It must match `redirect_uri` exactly. Keep `redirect_port = 8765`
+aligned with the proxy target. See [OAuth transport details](mcp-server.md#oauth-http-upstreams).
+
+**Scopes and config**
+
+Add these **User Token Scopes**, not bot scopes, in the Slack app and list the
+same scopes in config. Each login requests only the configured scopes:
+
+```toml
+[[gateway.upstreams]]
+prefix = "slack"
+url = "https://mcp.slack.com/mcp"
+auth = "oauth"
+client_id = "<slack-client-id>"
+client_secret = "<slack-client-secret>"
+redirect_port = 8765
+redirect_uri = "https://<your-mac>.<tailnet>.ts.net/callback"
+scopes = ["search:read.public", "search:read.private", "channels:history", "channels:read"]
+readOnly = ["slack_search_public"]
+```
+
+Add this block to the config printed by `mcptools config path`, replacing all
+placeholders. For private-channel history, add `groups:history`; for DM history,
+add `im:history`; for sending, add `chat:write`. Add each scope in both places,
+accept the app reinstall, and log in again. `search:read` is not a Slack MCP scope.
+
+Client IDs and secrets are literal values, not environment references. Keep the
+secret out of version control and restrict config access:
+
+```bash
+chmod 600 "$(mcptools config path)"
+mcptools config check
+mcptools gateway login slack
+```
+
+Finish authorization within 3 minutes. Check the terminal for login success,
+then restart the MCP client and inspect the catalog:
+
+```bash
+mcptools mcp catalog | grep slack
+mcptools mcp declarations slack_slack_search_public slack_slack_send_message
+```
+
+Tool names are doubled: `slack_slack_search_public` and
+`slack_slack_send_message`. Use the declarations for call inputs. Only public
+search is allowed without `allowWrites` in this config. Other tools, including
+sending, need `allowWrites: true` through `call_tool` or `execute`. `readOnly`
+entries use upstream names, such as `slack_search_public`, without the gateway
+prefix; do not add send tools to this list.
+
+Setup verified live on 2026-11-08: HTTPS callback, OAuth login, and Slack calls.
+
+**Common errors and limits**
+
+- **HTTP 400, "App is not enabled for Slack MCP server access.":** enable MCP
+  access for the app and accept the reinstall.
+- **Missing scope or access:** check User Token Scopes and config `scopes`, accept
+  the reinstall, then log in again. Bot scopes do not replace user scopes.
+- **Redirect error or timeout:** save the exact HTTPS URL in Slack, check the
+  Tailscale proxy and free port 8765, then retry login within 3 minutes.
+- **401:** log in again if automatic token refresh fails, then restart the MCP
+  client. Restart after config changes to refresh the catalog.
+- **Unknown OAuth config field:** install a current binary with
+  `cargo xtask install` from the checkout, then rerun `mcptools config check`.
+- **File uploads unsupported:** `slack_slack_get_file_upload_url` and
+  `slack_slack_complete_file_upload` exist, but uploading bytes to the signed URL
+  requires a plain HTTP POST that the gateway cannot perform.
+- **Untested:** user-group mentions and automatic HTTP 429 retries. Do not rely
+  on either.
