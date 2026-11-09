@@ -26,10 +26,17 @@ pub async fn stat(arguments: Option<Value>) -> Result<Value, JsonRpcError> {
 }
 
 pub async fn request(arguments: Option<Value>) -> Result<Value, JsonRpcError> {
+    let allowed = std::env::var("MCPTOOLS_HTTP_ALLOWED_HOSTS").unwrap_or_default();
+    request_with_allowlist(arguments, &allowed).await
+}
+
+pub async fn request_with_allowlist(
+    arguments: Option<Value>,
+    allowed: &str,
+) -> Result<Value, JsonRpcError> {
     let args: RequestArgs = serde_json::from_value(arguments.unwrap_or(Value::Null))
         .map_err(|_| failure("Invalid http_request arguments"))?;
-    let allowed = std::env::var("MCPTOOLS_HTTP_ALLOWED_HOSTS").unwrap_or_default();
-    let (method, url) = http_request::validate(&args, &allowed).map_err(failure)?;
+    let (method, url) = http_request::validate(&args, allowed).map_err(failure)?;
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(http_request::redirect_policy())
