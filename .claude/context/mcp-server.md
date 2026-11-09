@@ -591,5 +591,10 @@ Credentials are stored per upstream in `XDG_DATA_HOME/mcptools/oauth` (or `~/.lo
 allowed_hosts = ["files.slack.com"]
 ```
 
-All methods require `allowWrites`. Redirects are returned without following. Supply `body` or `bodyPath`; the latter streams a regular file. Responses are UTF-8, limited to 1 MiB and 10 seconds. `file_stat` returns a regular file size in bytes for upload preparation.
-`bodyPath` can read any regular file the user can read; the allowlist controls destinations, not file access. Set narrow exact hosts; wildcard entries such as `*.slack.com` do not grant access.
+All methods, including GET, require `allowWrites`. Only HTTP(S) URLs are accepted. URLs with credentials and caller-supplied Host, Content-Length or Transfer-Encoding headers are rejected. No credentials are attached automatically; proxy environment settings are ignored. Redirects are returned without following. Call input cannot extend the allowlist.
+
+Supply `method`, `url`, optional `headers`, and either inline UTF-8 `body` or `bodyPath` (never both). Request bodies are capped at 32 MiB; `bodyPath` streams at most the regular file's initial byte size and sets Content-Length automatically. Requests time out after 10 seconds. Responses return `status`, `headers` and UTF-8 `body`, capped at 1 MiB; oversize and non-UTF-8 responses fail. Selected response headers: content-type, content-length, location, retry-after, etag and last-modified. Cookies and other response headers are omitted.
+
+`file_stat({path})` returns `{size, isFile}`: byte size and regular-file status, following symbolic links. Missing or inaccessible paths fail. Check `isFile` before using `size` for an upload; directory size is not file content length.
+
+**Exfiltration risk:** `bodyPath` has no root restriction and follows symlinks. An agent with write permission can send any readable local regular file, including secrets, to an allowed host. Use only narrow, operator-approved exact hosts, never broad shared destinations. This is not a filesystem sandbox. Root restrictions are deferred because image outputs can be anywhere; a robust policy needs operator-owned roots and symlink/race handling.

@@ -187,6 +187,20 @@ async fn execute_chain_streams_file_with_exact_length() {
     let file = tempfile::NamedTempFile::new().unwrap();
     let bytes = [0, 255, 128, 1, 2, 13, 10];
     std::fs::write(file.path(), bytes).unwrap();
+    for (domain, name) in [("http", "http_request"), ("file", "file_stat")] {
+        let found = super::find_tools::handle_find_tools(
+            Some(json!({"domain":domain})),
+            &global(),
+            flags(),
+        )
+        .await
+        .unwrap();
+        assert!(found["structuredContent"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == name));
+    }
     let (url, task) = server(
         b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".to_vec(),
         0,
@@ -201,6 +215,7 @@ async fn execute_chain_streams_file_with_exact_length() {
     .await
     .unwrap();
     assert_eq!(result["structuredContent"]["result"]["status"], 200);
+    assert_eq!(result["structuredContent"]["result"]["body"], "ok");
     assert_streamed_request(&task.await.unwrap(), &bytes);
 }
 
@@ -269,4 +284,83 @@ async fn fifo_body_is_rejected_without_waiting_for_a_writer() {
         }
     };
     assert!(result.unwrap_err().message.contains("not a regular file"));
+}
+
+#[tokio::test]
+async fn request_bodies_are_capped_before_connecting() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    file.as_file().set_len(32 * 1024 * 1024 + 1).unwrap();
+    for body in [
+        json!({"body": "x".repeat(32 * 1024 * 1024 + 1)}),
+        json!({"bodyPath": file.path()}),
+    ] {
+        let mut input = json!({"method":"POST", "url":"http://127.0.0.1:1/"});
+        input
+            .as_object_mut()
+            .unwrap()
+            .extend(body.as_object().unwrap().clone());
+        assert_eq!(
+            call(input).await.unwrap_err().message,
+            "HTTP request body exceeds 32 MiB"
+        );
+    }
+}
+
+#[tokio::test]
+async fn file_stat_reports_size_and_regular_file_status() {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), b"bytes").unwrap();
+    let output = super::http_request::stat(Some(json!({"path":file.path()})))
+        .await
+        .unwrap();
+    assert_eq!(output["structuredContent"], json!({"size":5,"isFile":true}));
+    let directory = tempfile::tempdir().unwrap();
+    let output = super::http_request::stat(Some(json!({"path":directory.path()})))
+        .await
+        .unwrap();
+    assert_eq!(output["structuredContent"]["isFile"], false);
+}
+
+#[tokio::test]
+async fn unset_allowlist_and_input_cannot_grant_access_or_connect() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    assert!(call_allowed(json!({"method":"GET", "url":url}), "")
+        .await
+        .unwrap_err()
+        .message
+        .contains("not allowed"));
+    for field in ["allowedHosts", "allowlist", "MCPTOOLS_HTTP_ALLOWED_HOSTS"] {
+        let mut input = json!({"method":"GET", "url":url});
+        input[field] = json!(["127.0.0.1"]);
+        assert!(call_allowed(input, "")
+            .await
+            .unwrap_err()
+            .message
+            .contains("Invalid http_request arguments"));
+    }
+    assert!(
+        call_allowed(json!({"method":"GET", "url":url}), "localhost")
+            .await
+            .is_err()
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn response_headers_are_selected_without_cookies() {
+    let (url, task) = server(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nSet-Cookie: secret=value\r\nContent-Length: 2\r\n\r\nok".to_vec(), 0).await;
+    let result = call(json!({"method":"GET", "url":url})).await.unwrap();
+    assert_eq!(
+        result["structuredContent"]["headers"]["content-type"],
+        "text/plain"
+    );
+    assert!(result["structuredContent"]["headers"]
+        .get("set-cookie")
+        .is_none());
+    task.await.unwrap();
 }

@@ -227,9 +227,21 @@ Setup verified live on 2026-11-08: HTTPS callback, OAuth login, and Slack calls.
   client. Restart after config changes to refresh the catalog.
 - **Unknown OAuth config field:** install a current binary with
   `cargo xtask install` from the checkout, then rerun `mcptools config check`.
-- **File uploads unsupported:** `slack_slack_get_file_upload_url` and
-  `slack_slack_complete_file_upload` exist, but uploading bytes to the signed URL
-  requires a plain HTTP POST that the gateway cannot perform.
+- **File uploads:** one `execute` run can call `file_stat({path})`, check
+  `isFile`, pass `size` as the exact `content_length` to
+  `slack_slack_get_file_upload_url`, POST the file with
+  `http_request({method: "POST", url: signedUrl, bodyPath: path})`, check the
+  HTTP status, then call `slack_slack_complete_file_upload`. Inspect the Slack
+  declarations for their input shapes. Set `allowWrites: true` on execute
+  (and `allowSpend: true` if generating an image in the same script).
+  Set `[http].allowed_hosts` in config to the signed URL's exact host, or use
+  `MCPTOOLS_HTTP_ALLOWED_HOSTS` as a comma-separated environment override.
+  An empty list or empty override denies all; call input cannot authorize
+  hosts. No wildcards or redirects. Uploads are limited to 32 MiB
+  and 10 seconds, with a 1 MiB UTF-8 response cap. No credentials are added.
+  `bodyPath` can upload any readable local regular file, including secrets:
+  there is no root restriction. Keep host permissions narrow. The live
+  generated-image upload to the user's own Slack DM remains unverified.
 - **Untested:** user-group mentions and automatic HTTP 429 retries. Do not rely
   on either.
 

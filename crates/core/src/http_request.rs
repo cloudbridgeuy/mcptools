@@ -20,8 +20,10 @@ pub struct StatArgs {
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct StatOutput {
     pub size: u64,
+    pub is_file: bool,
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -33,6 +35,23 @@ pub struct Response {
 
 pub fn redirect_policy() -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::none()
+}
+
+pub const MAX_REQUEST_BYTES: u64 = 32 * 1024 * 1024;
+
+pub fn validate_body_size(size: u64) -> Result<(), &'static str> {
+    if size > MAX_REQUEST_BYTES {
+        Err("HTTP request body exceeds 32 MiB")
+    } else {
+        Ok(())
+    }
+}
+
+pub fn selected_response_header(name: &str) -> bool {
+    matches!(
+        name,
+        "content-type" | "content-length" | "location" | "retry-after" | "etag" | "last-modified"
+    )
 }
 
 pub fn validate(
@@ -73,6 +92,9 @@ pub fn validate(
     }
     if args.body.is_some() && args.body_path.is_some() {
         return Err("body and bodyPath are mutually exclusive");
+    }
+    if let Some(body) = &args.body {
+        validate_body_size(body.len() as u64)?;
     }
     for (name, value) in &args.headers {
         let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())

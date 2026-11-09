@@ -17,11 +17,9 @@ pub async fn stat(arguments: Option<Value>) -> Result<Value, JsonRpcError> {
     let metadata = tokio::fs::metadata(args.path)
         .await
         .map_err(|_| failure("Cannot stat file"))?;
-    if !metadata.is_file() {
-        return Err(failure("Path is not a regular file"));
-    }
     super::to_dual_result(StatOutput {
         size: metadata.len(),
+        is_file: metadata.is_file(),
     })
 }
 
@@ -67,6 +65,7 @@ pub async fn request_with_allowlist(
         if !metadata.is_file() {
             return Err(failure("Request body path is not a regular file"));
         }
+        http_request::validate_body_size(metadata.len()).map_err(failure)?;
         let file = tokio::fs::File::open(path)
             .await
             .map_err(|_| failure("Cannot open request body file"))?;
@@ -77,12 +76,14 @@ pub async fn request_with_allowlist(
         if !metadata.is_file() {
             return Err(failure("Request body path is not a regular file"));
         }
-        let stream = futures::stream::try_unfold(file, |mut file| async move {
-            let mut buffer = vec![0; 65536];
-            let size = file.read(&mut buffer).await?;
-            buffer.truncate(size);
-            Ok::<_, std::io::Error>((size != 0).then_some((buffer, file)))
-        });
+        http_request::validate_body_size(metadata.len()).map_err(failure)?;
+        let stream =
+            futures::stream::try_unfold(file.take(metadata.len()), |mut file| async move {
+                let mut buffer = vec![0; 65536];
+                let size = file.read(&mut buffer).await?;
+                buffer.truncate(size);
+                Ok::<_, std::io::Error>((size != 0).then_some((buffer, file)))
+            });
         request = request
             .header(reqwest::header::CONTENT_LENGTH, metadata.len())
             .body(reqwest::Body::wrap_stream(stream));
@@ -97,6 +98,7 @@ pub async fn request_with_allowlist(
     let headers = response
         .headers()
         .iter()
+        .filter(|(name, _)| http_request::selected_response_header(name.as_str()))
         .map(|(name, value)| {
             (
                 name.to_string(),

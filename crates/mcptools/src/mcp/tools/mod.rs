@@ -238,7 +238,7 @@ pub fn builtin_tools() -> Vec<Tool> {
         },
         Tool {
             name: "http_request".into(),
-            description: "Send an HTTP request to an exact host in config.toml [http].allowed_hosts, overridden by MCPTOOLS_HTTP_ALLOWED_HOSTS. Empty denies all; broken config refuses requests. Requires allowWrites even for GET. Redirects are not followed. bodyPath streams a regular file with its exact length; body and bodyPath are exclusive. Responses are limited to 1 MiB and 10 seconds. No credentials are added.".into(),
+            description: "Send an HTTP request to an exact host in config.toml [http].allowed_hosts, overridden by MCPTOOLS_HTTP_ALLOWED_HOSTS. Empty denies all; broken config refuses requests. Requires allowWrites even for GET. Redirects are not followed. bodyPath streams any readable regular file with its exact length; beware local file exfiltration. body and bodyPath are exclusive, capped at 32 MiB. Responses are UTF-8, capped at 1 MiB; requests time out after 10 seconds. Returns content-type, content-length, location, retry-after, etag and last-modified response headers only. No credentials are added.".into(),
             summary: "Send an allowlisted HTTP request",
             kind: ToolKind::Write,
             destructive: false,
@@ -247,7 +247,7 @@ pub fn builtin_tools() -> Vec<Tool> {
         },
         Tool {
             name: "file_stat".into(),
-            description: "Get the byte size of a regular file.".into(),
+            description: "Get a path's byte size and isFile regular-file status. Follows symbolic links. Missing or unreadable paths fail.".into(),
             summary: "Get a file size in bytes",
             kind: ToolKind::Read,
             destructive: false,
