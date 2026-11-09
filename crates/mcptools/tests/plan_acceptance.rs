@@ -58,6 +58,51 @@ impl Drop for OnDemandCleanup {
     }
 }
 
+/// Accepts on `listener` in a deadline-bounded thread that writes a few bytes, then connects to
+/// `address` and reads them back. Returns the listener (joined) and whether the round trip worked.
+fn probe_reachable(
+    listener: std::net::TcpListener,
+    address: std::net::SocketAddr,
+) -> (std::net::TcpListener, Result<(), String>) {
+    use std::io::{Read, Write};
+    if let Err(error) = listener.set_nonblocking(true) {
+        return (listener, Err(format!("set_nonblocking: {error}")));
+    }
+    let acceptor = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let _ = stream.set_nonblocking(false);
+                    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                    let _ = stream.write_all(b"ping");
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => break,
+            }
+        }
+        listener
+    });
+    let result = (|| {
+        let mut stream = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(1))
+            .map_err(|error| format!("connect: {error}"))?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .map_err(|error| format!("set_read_timeout: {error}"))?;
+        let mut buffer = [0u8; 4];
+        match stream.read(&mut buffer) {
+            Ok(0) => Err("read: connection closed with 0 bytes".to_owned()),
+            Ok(_) => Ok(()),
+            Err(error) => Err(format!("read: {error}")),
+        }
+    })();
+    let listener = acceptor.join().expect("probe acceptor thread");
+    (listener, result)
+}
+
 #[tokio::test]
 async fn on_demand_write_url_reuse_and_close() {
     let Ok(output) = Command::new("tailscale").args(["ip", "-4"]).output() else {
@@ -72,7 +117,14 @@ async fn on_demand_write_url_reuse_and_close() {
         return;
     };
     let address = listener.local_addr().unwrap();
+    let (listener, reachable) = probe_reachable(listener, address);
     drop(listener);
+    if let Err(reason) = reachable {
+        eprintln!(
+            "skipping on_demand_write_url_reuse_and_close: Tailscale IP {ip} unreachable: {reason}"
+        );
+        return;
+    }
     let port = address.port().to_string();
     let home = tempfile::tempdir().unwrap();
     let path = home.path().to_str().unwrap();
