@@ -232,3 +232,82 @@ Setup verified live on 2026-11-08: HTTPS callback, OAuth login, and Slack calls.
   requires a plain HTTP POST that the gateway cannot perform.
 - **Untested:** user-group mentions and automatic HTTP 429 retries. Do not rely
   on either.
+
+## Sentry
+
+Search issues, events, traces and docs through Sentry's official remote MCP
+server. Tool names are `sentry_<upstream>`, such as `sentry_search_issues`; unlike
+Slack's, they are not doubled.
+
+Sentry uses OAuth with dynamic client registration and PKCE S256 as a public
+client. No `client_id`, `client_secret` or `redirect_uri` is needed, and the
+default loopback callback works.
+
+Add to the config printed by `mcptools config path`:
+
+```toml
+[[gateway.upstreams]]
+prefix = "sentry"
+url = "https://mcp.sentry.dev/mcp"
+auth = "oauth"
+readOnly = [
+  "whoami", "find_organizations", "find_teams", "find_projects", "find_releases",
+  "get_release_details", "find_dashboards", "get_dashboard_details", "find_monitors",
+  "get_monitor_details", "find_uptime_monitors", "get_uptime_monitor_details",
+  "find_metric_monitors", "get_metric_monitor_details", "find_alert_rules",
+  "get_alert_rule", "get_alert_options", "get_issue_details", "get_event_stacktrace",
+  "get_issue_activity", "get_issue_breadcrumbs", "get_issue_user_reports",
+  "get_issue_tag_values", "get_trace_details", "get_span_details", "get_replay_details",
+  "get_event_attachment", "search_errors", "search_logs", "search_traces",
+  "search_metrics", "search_profiles", "search_replays", "find_dsns", "search_docs",
+  "get_doc", "search_issues", "search_issue_events", "find_dropped_events",
+  "get_profile", "get_profile_details", "get_sentry_mcp_info", "get_sentry_resource",
+  "get_snapshot", "get_snapshot_image", "get_latest_base_snapshot",
+  "get_agent_conversation_details", "search_agent_conversations",
+]
+```
+
+Check the config, then log in and finish authorization within 3 minutes:
+
+```bash
+mcptools config check
+mcptools gateway login sentry
+```
+
+Restart the MCP client, then inspect the catalog:
+
+```bash
+mcptools mcp catalog | grep sentry
+mcptools mcp declarations sentry_search_issues sentry_get_issue_details
+```
+
+`readOnly` entries use upstream names without the gateway prefix. Every other
+tool needs `allowWrites: true` through `call_tool` or `execute`: create, update
+and delete for monitors, alerts, teams, projects and DSNs; `update_issue`,
+`link_issue`, `unlink_issue`, `add_issue_note`, `add_team_to_project`,
+`remove_team_from_project`, `onboarding_status_update` and
+`submit_feedback_to_sentry_team`. `analyze_issue_with_seer` is deliberately left
+out of `readOnly`: it starts a Seer analysis run (a side effect that may consume quota).
+
+Setup verified live on 2026-11-09: OAuth login and catalog listing. Tool calls not
+yet verified.
+
+**Common errors and limits**
+
+- **Redirect URI rejected (untested):** fall back to the Slack-style HTTPS
+  `redirect_uri` plus `redirect_port` through Tailscale, as in [Slack](#slack).
+  See [OAuth transport details](mcp-server.md#oauth-http-upstreams).
+- **401:** log in again, then restart the MCP client.
+- **AI-powered search (untested):** `search_errors`, `search_logs`, `search_traces`,
+  `search_issues` and similar may depend on Sentry's server-side LLM.
+- **Self-hosted Sentry:** the hosted remote server targets sentry.io. Untested stdio
+  fallback; replace `url` and `auth` with these fields, keeping `prefix` and `readOnly`:
+
+```toml
+command = "npx"
+args = ["-y", "@sentry/mcp-server@latest"]
+
+[gateway.upstreams.env]
+SENTRY_AUTH_TOKEN = "<token>"
+SENTRY_HOST = "sentry.example.com"
+```
