@@ -147,7 +147,7 @@ impl Runner {
                 Ok(Output {
                     stdout: String::from_utf8(stdout).map_err(|_| "Non-UTF-8 subprocess output")?,
                     stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                    code: status.code(),
+                    status,
                 })
             }
             failure => {
@@ -172,7 +172,7 @@ impl Runner {
             "config", "--get-regexp",
             r"^(filter\..*\.(clean|smudge|process)|diff\..*\.(command|textconv)|merge\..*\.driver|include\.path|includeif\..*\.path|extensions\.partialclone|remote\..*\.promisor)$",
         ]).await?;
-        match output.code {
+        match output.status.code() {
             Some(1) if output.stdout.is_empty() => Ok(()),
             Some(0) => Err(
                 "Configured Git filters, diff commands, merge drivers, includes, or promisor remotes are unsupported"
@@ -193,7 +193,7 @@ impl Runner {
         )
         .await
         .ok()
-        .and_then(|output| match output.code {
+        .and_then(|output| match output.status.code() {
             Some(0) => Some(true),
             Some(1) => Some(false),
             _ => None,
@@ -230,17 +230,18 @@ impl Drop for Process {
 struct Output {
     stdout: String,
     stderr: String,
-    code: Option<i32>,
+    status: std::process::ExitStatus,
 }
 
 impl Output {
     fn success(self) -> Result<String> {
-        if self.code == Some(0) {
+        if self.status.success() {
             Ok(self.stdout)
         } else {
             Err(format!(
-                "Lane subprocess failed (exit {:?}): {}; stdout: {}",
-                self.code,
+                "Lane subprocess failed (exit {:?}, status {}): {}; stdout: {}",
+                self.status.code(),
+                self.status,
                 self.stderr.trim(),
                 self.stdout.trim()
             ))
@@ -598,7 +599,8 @@ async fn inspect_lanes(
                             &["merge-base", "--is-ancestor", &record.creation_head, head],
                         )
                         .await?
-                        .code
+                        .status
+                        .code()
                         == Some(0)
                     {
                         lane.id = Some(record.id.clone());
@@ -782,8 +784,26 @@ struct SwitchOutput {
     from_remote: Option<String>,
 }
 
+async fn lock_common_directory(common: &Path, timeout: Duration) -> Result<std::fs::File> {
+    let file = std::fs::File::open(common).map_err(|error| error.to_string())?;
+    tokio::time::timeout(timeout, async {
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(file),
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => return Err(format!("Cannot lock Git common directory: {error}")),
+            }
+        }
+    })
+    .await
+    .map_err(|_| "Timed out waiting to lock Git common directory".to_string())?
+}
+
 pub async fn create(runner: &Runner, root: PathBuf, args: CreateArgs) -> Result<CreateOutput> {
     let repo = Repository::open(runner, root).await?;
+    let _lock = lock_common_directory(&repo.common, runner.timeout).await?;
     runner.executable_config(&repo.root).await?;
     let branch_ref = mcptools_core::lane::ref_input(&args.branch)?;
     let base_ref = mcptools_core::lane::ref_input(&args.base)?;
@@ -799,7 +819,7 @@ pub async fn create(runner: &Runner, root: PathBuf, args: CreateArgs) -> Result<
             &["show-ref", "--verify", "--quiet", &branch_ref],
         )
         .await?;
-    if existing.code != Some(1) {
+    if existing.status.code() != Some(1) {
         return Err("New branch already exists or cannot be checked".into());
     }
     let base_head = runner
@@ -973,7 +993,7 @@ grep -q '^full = false$' "$4"
 grep -q '^summary = false$' "$4"
 grep -q '^json-schema = 2$' "$4"
 target=$(sed -n 's/^worktree-path = "\(.*\)"$/\1/p' "$4")
-git -C "$2" worktree add -b "${{12}}" -- "$target" "$8" >/dev/null 2>&1
+git -C "$2" worktree add -b "${{12}}" -- "$target" "$8" >/dev/null
 {after_create}
 printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"base_branch":"%s"}}\n' "${{12}}" "$target" "$8"
 "#
@@ -1278,7 +1298,8 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
                 )
                 .await
                 .unwrap()
-                .code,
+                .status
+                .code(),
             Some(1)
         );
         for (index, blocker) in [
@@ -1658,7 +1679,8 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
                 )
                 .await
                 .unwrap_or_else(|e| panic!("git show-ref failed: {e}"))
-                .code,
+                .status
+                .code(),
             Some(1)
         );
         fake_wt(&mut runner, "");
@@ -1828,6 +1850,48 @@ printf '{{"action":"created","branch":"%s","path":"%s","created_branch":true,"ba
                 1
             );
         }
+    }
+
+    #[tokio::test]
+    async fn common_directory_locks_serialize_per_repository_and_cancel_waiters() {
+        let first = tempfile::tempdir().expect("first repository");
+        let other = tempfile::tempdir().expect("other repository");
+        let held = lock_common_directory(first.path(), TIMEOUT)
+            .await
+            .expect("first lock");
+        let mut waiting = Box::pin(lock_common_directory(first.path(), TIMEOUT));
+        assert!(futures::poll!(&mut waiting).is_pending());
+        let independent = lock_common_directory(other.path(), TIMEOUT)
+            .await
+            .expect("different repository must not wait");
+        assert!(futures::poll!(&mut waiting).is_pending());
+        drop(waiting);
+        assert!(
+            lock_common_directory(first.path(), Duration::from_millis(20))
+                .await
+                .expect_err("held repository must not overlap")
+                .contains("Timed out waiting to lock")
+        );
+        drop(held);
+        let released = lock_common_directory(first.path(), TIMEOUT)
+            .await
+            .expect("cancelled waiter must not retain a lock");
+        drop((released, independent));
+    }
+
+    #[tokio::test]
+    async fn subprocess_signal_is_reported() {
+        let runner = Runner::new().expect("runner");
+        let program = runner.home.path().join("signalled");
+        executable(&program, "#!/bin/sh\nkill -TERM $$\n");
+        let error = runner
+            .run(&program.into_os_string(), runner.home.path(), &[])
+            .await
+            .expect("wait for subprocess")
+            .success()
+            .expect_err("subprocess must fail");
+        assert!(error.contains("exit None"), "{error}");
+        assert!(error.contains("signal: 15"), "{error}");
     }
 
     #[tokio::test]

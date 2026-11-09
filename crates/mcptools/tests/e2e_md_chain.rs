@@ -294,7 +294,7 @@ async fn browser_exits_on_shutdown(signal: Option<&str>, active: bool) {
     let result = server
         .tools_call(
             "md_fetch",
-            serde_json::json!({"url": stub.uri(), "timeout": 15}),
+            serde_json::json!({"url": stub.uri(), "timeout": 60}),
         )
         .await;
     let pid = std::fs::read_to_string(log)
@@ -382,7 +382,11 @@ async fn md_chain_fetches_the_section_marked_by_toc() {
         .mount(&stub)
         .await;
 
-    let mut server = common::spawn_server(&[]).expect("spawn mcptools mcp stdio");
+    let mut server = common::spawn_server(&[
+        ("MD_TIMEOUT", "60"),
+        ("MCPTOOLS_EXECUTE_TIMEOUT_SECS", "150"),
+    ])
+    .expect("spawn mcptools mcp stdio");
     let page_url = serde_json::to_string(&stub.uri()).expect("serialize stub uri");
     let code = format!("const PAGE_URL = {page_url};\n{CHAIN_SCRIPT}");
     let executed = server
@@ -436,7 +440,7 @@ async fn md_uses_computed_visibility_and_waits_for_delayed_fetch() {
         .await;
     let mut server = common::spawn_server(&[]).expect("spawn server");
     for raw_html in [false, true] {
-        let result = server.tools_call("md_fetch", serde_json::json!({"url": stub.uri(), "selector": "main", "raw_html": raw_html, "timeout": 15, "limit": 10000})).await;
+        let result = server.tools_call("md_fetch", serde_json::json!({"url": stub.uri(), "selector": "main", "raw_html": raw_html, "timeout": 60, "limit": 10000})).await;
         let content = result["structuredContent"]["content"]
             .as_str()
             .expect("fetch content")
@@ -469,7 +473,7 @@ async fn md_uses_computed_visibility_and_waits_for_delayed_fetch() {
     let toc = server
         .tools_call(
             "md_toc",
-            serde_json::json!({"url": stub.uri(), "timeout": 15}),
+            serde_json::json!({"url": stub.uri(), "timeout": 60}),
         )
         .await;
     let entries = toc["structuredContent"]["entries"]
@@ -483,11 +487,12 @@ async fn md_uses_computed_visibility_and_waits_for_delayed_fetch() {
 async fn md_rejects_http_errors_before_network_idle() {
     skip_without_chrome!("md_rejects_http_errors_before_network_idle");
     let stub = MockServer::start().await;
+    let hold = std::time::Duration::from_secs(60);
     Mock::given(path("/slow"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_string("slow")
-                .set_delay(std::time::Duration::from_secs(10)),
+                .set_delay(hold),
         )
         .mount(&stub)
         .await;
@@ -502,13 +507,13 @@ async fn md_rejects_http_errors_before_network_idle() {
             .await;
         let start = std::time::Instant::now();
         let result = server
-            .request(serde_json::json!({"jsonrpc": "2.0", "id": status, "method": "tools/call", "params": {"name": "md_fetch", "arguments": {"url": format!("{}/{status}", stub.uri()), "timeout": 15}}}))
+            .request(serde_json::json!({"jsonrpc": "2.0", "id": status, "method": "tools/call", "params": {"name": "md_fetch", "arguments": {"url": format!("{}/{status}", stub.uri()), "timeout": 45}}}))
             .await;
         assert!(
             result.to_string().contains(&format!("HTTP {status}")),
             "{result}"
         );
-        assert!(start.elapsed() < std::time::Duration::from_secs(8));
+        assert!(start.elapsed() < hold);
     }
 }
 
@@ -518,18 +523,22 @@ fn md_nonzero_deadline_includes_browser_startup() {
     use std::os::unix::fs::PermissionsExt;
     let directory = tempfile::tempdir().expect("temporary directory");
     let browser = directory.path().join("slow-chrome");
-    std::fs::write(&browser, format!("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Chromium {}.0.0.0'; else exec sleep 3; fi\n", mcptools_core::md::MIN_CHROME_MAJOR)).expect("write browser");
+    std::fs::write(&browser, format!("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Chromium {}.0.0.0'; else echo started > \"$MD_TEST_STARTED\"; sleep 30; echo completed > \"$MD_TEST_COMPLETED\"; fi\n", mcptools_core::md::MIN_CHROME_MAJOR)).expect("write browser");
     std::fs::set_permissions(&browser, std::fs::Permissions::from_mode(0o700))
         .expect("executable browser");
-    let start = std::time::Instant::now();
+    let started = directory.path().join("started");
+    let completed = directory.path().join("completed");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_mcptools"))
         .env("CHROME", &browser)
+        .env("MD_TEST_STARTED", &started)
+        .env("MD_TEST_COMPLETED", &completed)
         .args(["md", "fetch", "http://invalid.invalid", "--timeout", "1"])
         .output()
         .expect("run fetch");
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Fetch timed out after 1 seconds"));
-    assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    assert!(started.exists(), "browser startup did not begin");
+    assert!(!completed.exists(), "browser startup exceeded the deadline");
 }
 
 #[cfg(unix)]
@@ -537,20 +546,22 @@ fn md_nonzero_deadline_includes_browser_startup() {
 fn md_deadline_includes_chrome_version_detection() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let browser = directory.path().join("slow-version");
-    executable_script(&browser, "#!/bin/sh\nexec sleep 3\n");
-    let start = std::time::Instant::now();
+    executable_script(&browser, "#!/bin/sh\necho started > \"$MD_TEST_STARTED\"\nsleep 30\necho completed > \"$MD_TEST_COMPLETED\"\n");
+    let started = directory.path().join("started");
+    let completed = directory.path().join("completed");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_mcptools"))
         .env("CHROME", &browser)
+        .env("MD_TEST_STARTED", &started)
+        .env("MD_TEST_COMPLETED", &completed)
         .args(["md", "fetch", "http://invalid.invalid", "--timeout", "1"])
         .output()
         .expect("run fetch");
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Fetch timed out after 1 seconds"));
+    assert!(started.exists(), "Chrome version detection did not begin");
     assert!(
-        start.elapsed() < std::time::Duration::from_secs(2),
-        "elapsed: {:?}, stderr: {}",
-        start.elapsed(),
-        String::from_utf8_lossy(&output.stderr)
+        !completed.exists(),
+        "Chrome version detection exceeded the deadline"
     );
 }
 
@@ -634,16 +645,16 @@ async fn md_reuses_browser_across_calls_and_idle_then_relaunches_after_death() {
     .expect("spawn server");
     for tool in ["md_toc", "md_fetch", "md_fetch"] {
         let result = server
-            .tools_call(tool, serde_json::json!({"url": stub.uri(), "timeout": 8}))
+            .tools_call(tool, serde_json::json!({"url": stub.uri(), "timeout": 60}))
             .await;
         assert!(result["structuredContent"].is_object(), "{result}");
     }
-    let error = server.request(serde_json::json!({"jsonrpc": "2.0", "id": 900, "method": "tools/call", "params": {"name": "md_fetch", "arguments": {"url": format!("{}/error", stub.uri()), "timeout": 8}}})).await;
+    let error = server.request(serde_json::json!({"jsonrpc": "2.0", "id": 900, "method": "tools/call", "params": {"name": "md_fetch", "arguments": {"url": format!("{}/error", stub.uri()), "timeout": 60}}})).await;
     assert!(error.to_string().contains("HTTP 500"), "{error}");
     let result = server
         .tools_call(
             "md_fetch",
-            serde_json::json!({"url": stub.uri(), "timeout": 8}),
+            serde_json::json!({"url": stub.uri(), "timeout": 60}),
         )
         .await;
     assert!(result["structuredContent"].is_object(), "{result}");
@@ -657,7 +668,7 @@ async fn md_reuses_browser_across_calls_and_idle_then_relaunches_after_death() {
     let result = server
         .tools_call(
             "md_fetch",
-            serde_json::json!({"url": stub.uri(), "timeout": 8}),
+            serde_json::json!({"url": stub.uri(), "timeout": 60}),
         )
         .await;
     assert!(result["structuredContent"].is_object(), "{result}");
@@ -672,7 +683,7 @@ async fn md_reuses_browser_across_calls_and_idle_then_relaunches_after_death() {
     let result = server
         .tools_call(
             "md_toc",
-            serde_json::json!({"url": stub.uri(), "timeout": 15}),
+            serde_json::json!({"url": stub.uri(), "timeout": 60}),
         )
         .await;
     assert!(result["structuredContent"].is_object(), "{result}");

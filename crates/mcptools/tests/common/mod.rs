@@ -91,7 +91,10 @@ impl McpServer {
                 serde_json::json!({"name": name, "arguments": args}),
             ))
             .await;
-        response["result"].clone()
+        response
+            .get("result")
+            .unwrap_or_else(|| panic!("missing result for {name}: {response}"))
+            .clone()
     }
 
     #[allow(dead_code)]
