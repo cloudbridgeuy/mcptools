@@ -11,10 +11,23 @@ pub struct AppConfig {
     pub linear: Linear,
     pub jev: Jev,
     pub images: Images,
+    pub http: Http,
     pub mcp: Mcp,
     pub general: General,
     pub diagram: Diagram,
     pub md: Md,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Http {
+    pub allowed_hosts: Vec<String>,
+}
+
+impl Http {
+    pub fn allowed_hosts(&self, environment: Option<&str>) -> String {
+        environment.map_or_else(|| self.allowed_hosts.join(","), str::to_owned)
+    }
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -300,6 +313,18 @@ pub fn parse(text: &str) -> Result<AppConfig, Error> {
         };
         Error(format!("TOML at line {line}, column {column}: {message}"))
     })?;
+    if config.http.allowed_hosts.iter().any(|host| {
+        host.contains(['*', ','])
+            || !reqwest::Url::parse(&format!("http://{host}/")).is_ok_and(|url| {
+                url.host_str()
+                    .is_some_and(|parsed| parsed.eq_ignore_ascii_case(host))
+            })
+    }) {
+        return Err(Error(
+            "invalid http.allowed_hosts: expected exact hosts without wildcards, schemes or ports"
+                .into(),
+        ));
+    }
     if let Some(provider) = &config.jev.provider {
         crate::jev::parse_provider(provider).map_err(|error| Error(error.to_string()))?;
     }
@@ -862,11 +887,46 @@ mod runtime_config_regressions {
     }
 
     #[test]
-    fn http_allowed_hosts_is_environment_only() {
+    fn http_allowed_hosts_file_and_empty_defaults() {
+        let config = parse("[http]\nallowed_hosts = ['EXAMPLE.com', 'files.slack.com']").unwrap();
+        assert_eq!(
+            config.http.allowed_hosts(None),
+            "EXAMPLE.com,files.slack.com"
+        );
+        assert_eq!(config.http.allowed_hosts(Some("other.com")), "other.com");
+        assert_eq!(config.http.allowed_hosts(Some("")), "");
+        let value = toml::Value::try_from(config).unwrap();
+        assert_eq!(
+            value["http"]["allowed_hosts"][0].as_str(),
+            Some("EXAMPLE.com")
+        );
+        for text in ["", "[http]", "[http]\nallowed_hosts = []"] {
+            assert_eq!(parse(text).unwrap().http.allowed_hosts(None), "");
+        }
+    }
+
+    #[test]
+    fn http_allowed_hosts_reject_invalid_entries_and_unknown_keys() {
+        for host in [
+            "",
+            " ",
+            "*.com",
+            "https://example.com",
+            "example.com:443",
+            "example.com/path",
+            "example.com,other.com",
+            "user@example.com",
+        ] {
+            assert!(
+                parse(&format!("[http]\nallowed_hosts = ['{host}']")).is_err(),
+                "accepted {host}"
+            );
+        }
         for text in [
             "http_allowed_hosts = ['example.com']",
             "[mcp]\nhttp_allowed_hosts = ['example.com']",
-            "[http]\nallowed_hosts = ['example.com']",
+            "[http]\nunknown = ['example.com']",
+            "[http]\nallowed_hosts = 'example.com'",
             "[general]\nhttp_allowed_hosts = ['example.com']",
         ] {
             assert!(parse(text).is_err());

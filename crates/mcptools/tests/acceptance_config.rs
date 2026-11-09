@@ -738,6 +738,53 @@ fn runtime_sections_are_checked() {
     }
 }
 
+#[test]
+fn http_allowed_hosts_config_check() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    for text in [
+        "[http]\nallowed_hosts = ['EXAMPLE.com', 'files.slack.com']",
+        "[http]\nallowed_hosts = []",
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let output = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for value in [
+        "['*.com']",
+        "['https://example.com']",
+        "['example.com:443']",
+        "['']",
+        "['example.com', '']",
+        "'example.com'",
+        "[42]",
+    ] {
+        std::fs::write(&path, format!("[http]\nallowed_hosts = {value}")).unwrap();
+        let output = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "accepted {value}");
+    }
+    std::fs::write(&path, "[http]\nunknown = true").unwrap();
+    let output = command(home.path())
+        .env("MCPTOOLS_CONFIG", &path)
+        .args(["config", "check"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown"));
+}
+
 fn mcp_runtime_request(
     home: &Path,
     config: &Path,

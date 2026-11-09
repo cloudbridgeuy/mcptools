@@ -1,4 +1,4 @@
-use super::http_request::{request_with_allowlist, stat};
+use super::http_request::{allowed_hosts, request_with_allowlist, stat};
 use super::{execute, ServeFlags};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -59,6 +59,81 @@ async fn server(response: Vec<u8>, delay: u64) -> (String, tokio::task::JoinHand
     (url, task)
 }
 
+fn file_allowlist(text: &str, environment: Option<&str>) -> Result<String, super::JsonRpcError> {
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), text).unwrap();
+    allowed_hosts(
+        environment.map(std::ffi::OsStr::new),
+        crate::config::load(file.path()),
+    )
+}
+
+#[tokio::test]
+async fn file_allowlist_allows_exact_host() {
+    let allowed = file_allowlist("[http]\nallowed_hosts = ['LOCALHOST']", None).unwrap();
+    let (url, task) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(), 0).await;
+    let result = call_allowed(
+        json!({"method":"GET", "url":url.replace("127.0.0.1", "localhost")}),
+        &allowed,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["structuredContent"]["status"], 200);
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn environment_replaces_file_allowlist_including_empty() {
+    let text = "[http]\nallowed_hosts = ['localhost']";
+    for environment in ["127.0.0.1", ""] {
+        let allowed = file_allowlist(text, Some(environment)).unwrap();
+        let error = call_allowed(json!({"method":"GET", "url":"http://localhost/"}), &allowed)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("not allowed"));
+    }
+    let allowed = file_allowlist(text, Some(" 127.0.0.1, example.org ")).unwrap();
+    let (url, task) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(), 0).await;
+    let result = call_allowed(json!({"method":"GET", "url":url}), &allowed)
+        .await
+        .unwrap();
+    assert_eq!(result["structuredContent"]["status"], 200);
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn missing_or_empty_allowlist_refuses_requests() {
+    for text in ["", "[http]", "[http]\nallowed_hosts = []"] {
+        let allowed = file_allowlist(text, None).unwrap();
+        let error = call_allowed(json!({"method":"GET", "url":"http://localhost/"}), &allowed)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("not allowed"));
+    }
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let missing = file.path().with_extension("missing");
+    let allowed = allowed_hosts(None, crate::config::load(&missing)).unwrap();
+    let error = call_allowed(json!({"method":"GET", "url":"http://localhost/"}), &allowed)
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("not allowed"));
+}
+
+#[test]
+fn broken_config_refuses_even_with_environment_allowlist() {
+    for text in [
+        "[http",
+        "[http]\nallowed_hosts = ['127.0.0.1', '*.com']",
+        "[http]\nunknown = true",
+    ] {
+        let error = file_allowlist(text, Some("127.0.0.1")).unwrap_err();
+        assert_eq!(
+            error.message, "Cannot load HTTP host allowlist from config",
+            "request used broken config: {text}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn allowlist_denies_empty_and_other_hosts() {
     let (url, task) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(), 0).await;
@@ -68,7 +143,7 @@ async fn allowlist_denies_empty_and_other_hosts() {
             .unwrap_err();
         assert_eq!(
             error.message,
-            "HTTP host is not allowed by MCPTOOLS_HTTP_ALLOWED_HOSTS"
+            "HTTP host is not allowed by [http].allowed_hosts or MCPTOOLS_HTTP_ALLOWED_HOSTS override"
         );
     }
     task.abort();

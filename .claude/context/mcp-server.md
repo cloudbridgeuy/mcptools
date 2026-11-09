@@ -58,7 +58,7 @@ file override is an actionable error. The path convention is the same on macOS
 and Linux, not macOS Application Support.
 
 The sectioned TOML configuration layers defaults with one global file. There
-is no per-store or repository layer. Supported sections are `[gateway]`, `[atlassian]`, `[linear]`, `[jev]`, `[images]`, `[general]`, `[mcp]`, `[diagram]`, and `[md]`.
+is no per-store or repository layer. Supported sections are `[gateway]`, `[atlassian]`, `[linear]`, `[jev]`, `[images]`, `[http]`, `[general]`, `[mcp]`, `[diagram]`, and `[md]`.
 Unknown sections and keys fail validation. CLI flags and per-call arguments override environment values, then file values, then built-in defaults.
 
 | File keys | Environment variables |
@@ -68,6 +68,7 @@ Unknown sections and keys fail validation. CLI flags and per-call arguments over
 | `[mcp].execute_timeout_secs`, `execute_memory_mb`, `execute_output_kb` | `MCPTOOLS_EXECUTE_TIMEOUT_SECS`, `MCPTOOLS_EXECUTE_MEMORY_MB`, `MCPTOOLS_EXECUTE_OUTPUT_KB` |
 | `[diagram].host`, `port`, `share_seconds`, `ttl_seconds`, `idle_check_seconds`, `idle_grace_seconds` | Corresponding `MCPTOOLS_DIAGRAM_*` variables |
 | `[md].timeout` | `MD_TIMEOUT` |
+| `[http].allowed_hosts` | `MCPTOOLS_HTTP_ALLOWED_HOSTS` (comma-separated override) |
 
 `MCPTOOLS_LANE_REPOS` remains operator-controlled environment only: an agent that can write user config must not grant itself lane access. Unknown-field validation rejects root `lane-repos` or `lane_repos`, `[mcp].lane_repos`, and `[lane]`. `CHROME` remains the executable override; `RALPH_INBOX` remains operator-controlled because it grants an external notification write target. `LLM_STREAM_BIN` is test-only. Platform selectors such as `MCPTOOLS_CONFIG`, `XDG_CONFIG_HOME`, `HOME`, `XDG_DATA_HOME`, `APPDATA`, and `PATH` remain environment only, as do terminal autodetection variables `TERM`, `TERM_PROGRAM`, `KITTY_WINDOW_ID`, and `TMUX`. `PORT` sets the Linear chart `--serve` port per invocation (default 0, ephemeral) and is outside this migration; `CALENDSYNC_DEV_URL` is development-only. `HN_ITEM`, `HN_LIMIT`, `MD_URL`, `MD_SELECTOR`, `MD_STRATEGY`, `MD_INDEX`, `MD_PAGINATED`, `MD_OFFSET`, `MD_LIMIT`, `MD_PAGE`, and `MD_OUTPUT` remain per-invocation environment arguments.
 
@@ -583,5 +584,12 @@ Protected-resource metadata may identify the exact upstream URL or a same-scheme
 
 Credentials are stored per upstream in `XDG_DATA_HOME/mcptools/oauth` (or `~/.local/share/mcptools/oauth`) in files restricted to the user. Run `mcptools gateway logout <prefix>` to remove credentials. Expired tokens and HTTP 401 responses trigger one refresh; if refresh fails, run login again. MCP requests never start interactive login. Use HTTPS for remote endpoints; loopback HTTP is allowed for local development.
 
-`http_request` sends requests only to exact comma-separated hosts in `MCPTOOLS_HTTP_ALLOWED_HOSTS`, an environment-only setting. Empty denies all. All methods require `allowWrites`. Redirects are returned without following. Supply `body` or `bodyPath`; the latter streams a regular file. Responses are UTF-8, limited to 1 MiB and 10 seconds. `file_stat` returns a regular file size in bytes for upload preparation.
+`http_request` sends requests only to exact, case-insensitive hosts in `[http].allowed_hosts` in `config.toml`. `MCPTOOLS_HTTP_ALLOWED_HOSTS`, when set, replaces the file list with comma-separated hosts; an empty override denies all. The default list is empty and denies all. Broken config refuses requests, including when the environment override is set. `config check` rejects wildcards, schemes, ports, empty entries, and unknown `[http]` keys.
+
+```toml
+[http]
+allowed_hosts = ["files.slack.com"]
+```
+
+All methods require `allowWrites`. Redirects are returned without following. Supply `body` or `bodyPath`; the latter streams a regular file. Responses are UTF-8, limited to 1 MiB and 10 seconds. `file_stat` returns a regular file size in bytes for upload preparation.
 `bodyPath` can read any regular file the user can read; the allowlist controls destinations, not file access. Set narrow exact hosts; wildcard entries such as `*.slack.com` do not grant access.

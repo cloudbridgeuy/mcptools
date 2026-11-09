@@ -26,8 +26,21 @@ pub async fn stat(arguments: Option<Value>) -> Result<Value, JsonRpcError> {
 }
 
 pub async fn request(arguments: Option<Value>) -> Result<Value, JsonRpcError> {
-    let allowed = std::env::var("MCPTOOLS_HTTP_ALLOWED_HOSTS").unwrap_or_default();
+    let environment = std::env::var_os("MCPTOOLS_HTTP_ALLOWED_HOSTS");
+    let allowed = allowed_hosts(environment.as_deref(), crate::config::optional())?;
     request_with_allowlist(arguments, &allowed).await
+}
+
+pub fn allowed_hosts(
+    environment: Option<&std::ffi::OsStr>,
+    config: crate::prelude::Result<Option<mcptools_core::config::AppConfig>>,
+) -> Result<String, JsonRpcError> {
+    let config = config
+        .map_err(|_| failure("Cannot load HTTP host allowlist from config"))?
+        .unwrap_or_default();
+    Ok(config
+        .http
+        .allowed_hosts(environment.map(|value| value.to_str().unwrap_or_default())))
 }
 
 pub async fn request_with_allowlist(

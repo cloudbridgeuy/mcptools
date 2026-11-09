@@ -238,7 +238,7 @@ pub fn builtin_tools() -> Vec<Tool> {
         },
         Tool {
             name: "http_request".into(),
-            description: "Send an HTTP request to an exact host in MCPTOOLS_HTTP_ALLOWED_HOSTS. Requires allowWrites even for GET. Redirects are not followed. bodyPath streams a regular file with its exact length; body and bodyPath are exclusive. Responses are limited to 1 MiB and 10 seconds. No credentials are added.".into(),
+            description: "Send an HTTP request to an exact host in config.toml [http].allowed_hosts, overridden by MCPTOOLS_HTTP_ALLOWED_HOSTS. Empty denies all; broken config refuses requests. Requires allowWrites even for GET. Redirects are not followed. bodyPath streams a regular file with its exact length; body and bodyPath are exclusive. Responses are limited to 1 MiB and 10 seconds. No credentials are added.".into(),
             summary: "Send an allowlisted HTTP request",
             kind: ToolKind::Write,
             destructive: false,

@@ -69,7 +69,7 @@ pub fn validate(
         .filter(|s| !s.is_empty())
         .any(|s| s.eq_ignore_ascii_case(host))
     {
-        return Err("HTTP host is not allowed by MCPTOOLS_HTTP_ALLOWED_HOSTS");
+        return Err("HTTP host is not allowed by [http].allowed_hosts or MCPTOOLS_HTTP_ALLOWED_HOSTS override");
     }
     if args.body.is_some() && args.body_path.is_some() {
         return Err("body and bodyPath are mutually exclusive");
