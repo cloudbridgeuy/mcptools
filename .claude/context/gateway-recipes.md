@@ -311,3 +311,89 @@ args = ["-y", "@sentry/mcp-server@latest"]
 SENTRY_AUTH_TOKEN = "<token>"
 SENTRY_HOST = "sentry.example.com"
 ```
+
+## Honeycomb
+
+Query traces, datasets, SLOs, boards and triggers through Honeycomb's hosted MCP
+server. Tool names are `honeycomb_<upstream>`, such as `honeycomb_run_query`.
+
+Honeycomb uses OAuth 2.1 with dynamic client registration. No `client_id`,
+`client_secret` or `redirect_uri` is needed, and the default loopback callback
+works. Add to the config printed by `mcptools config path`:
+
+```toml
+[[gateway.upstreams]]
+prefix = "honeycomb"
+url = "https://mcp.honeycomb.io/mcp"
+auth = "oauth"
+readOnly = [
+  "find_columns", "find_queries", "get_aiconversation", "get_dataset",
+  "get_dataset_columns", "get_environment", "get_query_results", "get_service_map",
+  "get_signals", "get_slos", "get_span_details", "get_trace", "get_triggers",
+  "get_workspace_context", "list_aiconversations", "list_boards", "list_memories",
+  "list_recipients", "list_spans", "migration_guide", "read_memory", "refinery_docs",
+  "run_bubbleup", "run_query", "semconv",
+]
+```
+
+Restrict config access, check it, then log in and finish authorization within
+3 minutes:
+
+```bash
+chmod 600 "$(mcptools config path)"
+mcptools config check
+mcptools gateway login honeycomb
+```
+
+Restart the MCP client, then inspect the catalog:
+
+```bash
+mcptools mcp catalog | grep honeycomb
+mcptools mcp declarations honeycomb_get_workspace_context honeycomb_run_query
+```
+
+From your MCP client's `call_tool` interface:
+
+```javascript
+call_tool({name: "honeycomb_get_workspace_context", input: {}})
+```
+
+`readOnly` entries use upstream names without the gateway prefix. Two tools stay
+write-gated and need `allowWrites: true`: `honeycomb_feedback` (submits feedback
+to Honeycomb) and `honeycomb_record_onboarding_state` (writes onboarding state).
+`run_query` and `run_bubbleup` execute queries, which appear in Honeycomb query
+history, but do not change configuration. To gate them too, drop them from
+`readOnly`.
+
+**EU region:** replace `url` with `https://mcp.eu1.honeycomb.io/mcp`; keep the
+rest unchanged. Source:
+[Honeycomb MCP configuration guide](https://docs.honeycomb.io/integrations/mcp/configuration-guide).
+
+**Headless alternative (unverified):** a Management API key (team owners only,
+with MCP scopes) can replace OAuth. Remove `auth = "oauth"`, since it cannot be
+combined with a static Authorization header (see
+[mcp-server.md](mcp-server.md#upstream-gateway)), and add:
+
+```toml
+[gateway.upstreams.headers]
+Authorization = "Bearer <KEY_ID>:<SECRET>"
+```
+
+Verified live on 2026-11-09 with mcptools `7b704b4`: OAuth login via dynamic
+registration, 27 tools in the catalog, and `honeycomb_get_workspace_context`
+returned workspace context through `mcp stdio --discovery --code-mode`.
+`honeycomb_feedback` without `allowWrites` was refused by the gateway. Other tool
+calls were not exercised.
+
+**Common errors and limits**
+
+- **Stale catalog:** restart after config changes. If remote tools changed, delete
+  `upstreams.cache.json` next to the selected config, then rerun the catalog
+  command. See [cache details](mcp-server.md#upstream-gateway).
+- **Login or registration failure:** rerun `mcptools gateway login honeycomb`
+  within 3 minutes, then restart the MCP client. Confirm the region matches your
+  Honeycomb account (US versus EU URL).
+- **401:** log in again if automatic token refresh fails, then restart the MCP
+  client.
+- **Plan requirement (unverified):** third-party guides say Honeycomb Intelligence
+  must be enabled for the account. Not confirmed here.
