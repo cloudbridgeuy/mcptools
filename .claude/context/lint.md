@@ -50,6 +50,8 @@ The pre-commit hook runs `cargo xtask lint --staged-only`, which implies `--fix`
 5. `cargo machete` (optional: skipped if not installed)
 6. `typos` (checks all files for spelling errors)
 
+The test stage defaults to `RUST_TEST_THREADS=1` when the variable is absent. An inherited value takes precedence, including in `--staged-only` mode.
+
 ## Architecture
 
 Located in `xtask/src/scripts/lint/`:

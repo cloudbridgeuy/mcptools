@@ -3,6 +3,7 @@ pub mod hooks;
 use crate::cli::LintArgs;
 use color_eyre::eyre::Result;
 use duct::cmd;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
 
@@ -134,6 +135,10 @@ fn check_display_name(program: &str, args: &[&str]) -> String {
     format!("{} {}", program, args.join(" "))
 }
 
+fn test_threads_override(id: CheckId, inherited: Option<&OsStr>) -> Option<OsString> {
+    (id == CheckId::Test && inherited.is_none()).then(|| OsString::from("1"))
+}
+
 /// Determine whether command output indicates the tool is not installed.
 fn is_tool_not_found(output: &str) -> bool {
     let lower = output.to_lowercase();
@@ -263,14 +268,16 @@ pub fn run(args: &LintArgs) -> Result<()> {
     Ok(())
 }
 
-/// Execute a single check and return its result. Handles optional-tool logic.
-///
-/// When `override_args` is `Some`, those args are used instead of the check's
-/// default args (used for `--fix` mode).
 fn run_check(check: &Check, name: String, override_args: Option<&[&str]>) -> Result<CheckResult> {
     let args: &[&str] = override_args.unwrap_or(check.args);
 
-    let output = cmd(check.program, args)
+    let mut command = cmd(check.program, args);
+    if let Some(value) =
+        test_threads_override(check.id, std::env::var_os("RUST_TEST_THREADS").as_deref())
+    {
+        command = command.env("RUST_TEST_THREADS", value);
+    }
+    let output = command
         .stderr_to_stdout()
         .stdout_capture()
         .unchecked()
@@ -328,6 +335,39 @@ fn restage_files(files: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_cargo_test_defaults_to_one_thread() {
+        let check = CHECKS
+            .iter()
+            .find(|check| check.id == CheckId::Test)
+            .unwrap();
+        assert_eq!(check.program, "cargo");
+        assert_eq!(check.args, &["test", "--all-targets"]);
+        assert_eq!(
+            test_threads_override(check.id, None),
+            Some(OsString::from("1"))
+        );
+    }
+
+    #[test]
+    fn test_threads_preserve_inherited_values_and_other_checks() {
+        for value in [OsString::from("4"), OsString::from("")] {
+            assert_eq!(test_threads_override(CheckId::Test, Some(&value)), None);
+        }
+        for check in CHECKS.iter().filter(|check| check.id != CheckId::Test) {
+            assert_eq!(test_threads_override(check.id, None), None);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_threads_preserve_non_unicode_inherited_value() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let value = OsString::from_vec(vec![0xff]);
+        assert_eq!(test_threads_override(CheckId::Test, Some(&value)), None);
+    }
 
     #[test]
     fn test_is_tool_not_found_detects_missing_tool() {
