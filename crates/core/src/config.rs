@@ -36,16 +36,23 @@ pub struct Mcp {
     pub discovery: Option<bool>,
     pub code_mode: Option<bool>,
     pub execute_timeout_secs: Option<u64>,
+    pub tool_timeout_secs: Option<u64>,
     pub execute_memory_mb: Option<u64>,
     pub execute_output_kb: Option<u64>,
 }
 
 impl Mcp {
+    /// Shared network timeout in seconds: the configured value, else the call site default.
+    pub fn tool_timeout(configured: Option<u64>, default_secs: u64) -> u64 {
+        configured.unwrap_or(default_secs)
+    }
+
     pub fn with_fallback(self, file: Self) -> Self {
         Self {
             discovery: self.discovery.or(file.discovery),
             code_mode: self.code_mode.or(file.code_mode),
             execute_timeout_secs: self.execute_timeout_secs.or(file.execute_timeout_secs),
+            tool_timeout_secs: self.tool_timeout_secs.or(file.tool_timeout_secs),
             execute_memory_mb: self.execute_memory_mb.or(file.execute_memory_mb),
             execute_output_kb: self.execute_output_kb.or(file.execute_output_kb),
         }
@@ -55,6 +62,7 @@ impl Mcp {
         self.discovery.is_none()
             || self.code_mode.is_none()
             || self.execute_timeout_secs.is_none()
+            || self.tool_timeout_secs.is_none()
             || self.execute_memory_mb.is_none()
             || self.execute_output_kb.is_none()
     }
@@ -356,6 +364,11 @@ pub fn parse(text: &str) -> Result<AppConfig, Error> {
         (
             "mcp.execute_timeout_secs",
             config.mcp.execute_timeout_secs,
+            u64::MAX,
+        ),
+        (
+            "mcp.tool_timeout_secs",
+            config.mcp.tool_timeout_secs,
             u64::MAX,
         ),
         (
@@ -829,6 +842,27 @@ mod runtime_config_regressions {
     }
 
     #[test]
+    fn tool_timeout_parses_merges_and_defaults() {
+        let file = parse("[mcp]\ntool_timeout_secs = 12").unwrap().mcp;
+        assert_eq!(file.tool_timeout_secs, Some(12));
+        let supplied = Mcp {
+            tool_timeout_secs: Some(4),
+            ..Mcp::default()
+        };
+        assert_eq!(
+            supplied.with_fallback(file.clone()).tool_timeout_secs,
+            Some(4)
+        );
+        assert_eq!(
+            Mcp::default().with_fallback(file).tool_timeout_secs,
+            Some(12)
+        );
+        assert!(Mcp::default().needs_file());
+        assert_eq!(Mcp::tool_timeout(None, 10), 10);
+        assert_eq!(Mcp::tool_timeout(Some(7), 10), 7);
+    }
+
+    #[test]
     fn mcp_file_environment_and_flag_precedence() {
         let parsed = parse("[mcp]\ndiscovery = true\ncode_mode = true\nexecute_timeout_secs = 9\nexecute_memory_mb = 32\nexecute_output_kb = 8").unwrap();
         let resolved = Mcp {
@@ -939,6 +973,7 @@ mod runtime_config_regressions {
             "[mcp]\nunknown = true",
             "[mcp]\ndiscovery = 'yes'",
             "[mcp]\nexecute_timeout_secs = 0",
+            "[mcp]\ntool_timeout_secs = 0",
             "[mcp]\nexecute_memory_mb = 0",
             "[mcp]\nexecute_output_kb = 0",
             "[general]\nverbose = 1",

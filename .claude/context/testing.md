@@ -11,6 +11,7 @@ Environment variables support scripting, testing, and CI/CD pipelines. Persisten
 | `MCPTOOLS_VERBOSE` | Enable verbose output (default: false); `[general].verbose` |
 | `MCPTOOLS_DISCOVERY` | List only `find_tools` via `tools/list`. Accepts `y`, `yes`, `t`, `true`, `on`, `1` (on) and `n`, `no`, `f`, `false`, `off`, `0` (off), any case; other values exit 2 (default: false); `[mcp].discovery` |
 | `MCPTOOLS_CODE_MODE` | List `find_tools,execute` via `tools/list`; wins over `MCPTOOLS_DISCOVERY`. Same accepted values, other values exit 2 (default: false); `[mcp].code_mode` |
+| `MCPTOOLS_TOOL_TIMEOUT_SECS` | Shared MCP tool network timeout (gateway upstreams, http_request, Linear); `[mcp].tool_timeout_secs`, `--tool-timeout-secs`; unset keeps each call site default (30s/30s/10s/10s) |
 | `MCPTOOLS_EXECUTE_TIMEOUT_SECS` | Execute timeout; `[mcp].execute_timeout_secs` (default: 30) |
 | `MCPTOOLS_EXECUTE_MEMORY_MB` | Execute memory; `[mcp].execute_memory_mb` (default: 64) |
 | `MCPTOOLS_EXECUTE_OUTPUT_KB` | Execute output; `[mcp].execute_output_kb` (default: 256) |

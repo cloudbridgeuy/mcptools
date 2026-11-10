@@ -41,6 +41,32 @@ pub struct App {
 
     #[clap(flatten)]
     global: Global,
+
+    #[clap(flatten)]
+    tool_timeout: ToolTimeout,
+}
+
+/// Shared timeout for MCP tool network calls (flag > env > file > call site default).
+#[derive(Debug, Clone, clap::Parser)]
+pub struct ToolTimeout {
+    #[clap(
+        long,
+        env = "MCPTOOLS_TOOL_TIMEOUT_SECS",
+        global = true,
+        value_name = "SECS",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub tool_timeout_secs: Option<u64>,
+}
+
+static TOOL_TIMEOUT_SECS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// Configured shared tool timeout, or `default_secs` when unset.
+pub fn tool_timeout(default_secs: u64) -> Duration {
+    Duration::from_secs(mcptools_core::config::Mcp::tool_timeout(
+        TOOL_TIMEOUT_SECS.get().copied(),
+        default_secs,
+    ))
 }
 
 #[derive(Debug, Clone, clap::Parser)]
@@ -159,6 +185,7 @@ fn main() -> Result<()> {
             .then_some(mcp.flags.code_mode),
             execute_timeout_secs: (!defaulted("execute_timeout_secs"))
                 .then_some(app.global.execute_timeout_secs),
+            tool_timeout_secs: app.tool_timeout.tool_timeout_secs,
             execute_memory_mb: (!defaulted("execute_memory_mb"))
                 .then_some(app.global.execute_memory_mb),
             execute_output_kb: (!defaulted("execute_output_kb"))
@@ -170,6 +197,9 @@ fn main() -> Result<()> {
             Default::default()
         };
         let resolved = supplied.with_fallback(file);
+        if let Some(secs) = resolved.tool_timeout_secs {
+            let _ = TOOL_TIMEOUT_SECS.set(secs);
+        }
         mcp.flags.discovery = resolved.discovery.unwrap_or(false);
         mcp.flags.code_mode = resolved.code_mode.unwrap_or(false);
         app.global.execute_timeout_secs = resolved.execute_timeout_secs.unwrap_or(30);
@@ -289,6 +319,20 @@ mod tests {
         assert_eq!(limits.timeout, default.timeout);
         assert_eq!(limits.memory_bytes, default.memory_bytes);
         assert_eq!(limits.output_bytes, default.output_bytes);
+    }
+
+    #[test]
+    fn tool_timeout_flag_parses_and_rejects_zero() {
+        let parsed = ToolTimeout::try_parse_from(["mcptools", "--tool-timeout-secs", "7"]).unwrap();
+        assert_eq!(parsed.tool_timeout_secs, Some(7));
+        assert!(ToolTimeout::try_parse_from(["mcptools", "--tool-timeout-secs", "0"]).is_err());
+        assert_eq!(
+            ToolTimeout::try_parse_from(["mcptools"])
+                .unwrap()
+                .tool_timeout_secs,
+            None
+        );
+        assert_eq!(tool_timeout(10), Duration::from_secs(10));
     }
 
     #[test]

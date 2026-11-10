@@ -65,6 +65,7 @@ Unknown sections and keys fail validation. CLI flags and per-call arguments over
 |-----------|-----------------------|
 | `[general].verbose` | `MCPTOOLS_VERBOSE` |
 | `[mcp].discovery`, `code_mode` | `MCPTOOLS_DISCOVERY`, `MCPTOOLS_CODE_MODE` |
+| `[mcp].tool_timeout_secs` | `MCPTOOLS_TOOL_TIMEOUT_SECS` |
 | `[mcp].execute_timeout_secs`, `execute_memory_mb`, `execute_output_kb` | `MCPTOOLS_EXECUTE_TIMEOUT_SECS`, `MCPTOOLS_EXECUTE_MEMORY_MB`, `MCPTOOLS_EXECUTE_OUTPUT_KB` |
 | `[diagram].host`, `port`, `share_seconds`, `ttl_seconds`, `idle_check_seconds`, `idle_grace_seconds` | Corresponding `MCPTOOLS_DIAGRAM_*` variables |
 | `[md].timeout` | `MD_TIMEOUT` |

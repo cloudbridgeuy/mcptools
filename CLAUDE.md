@@ -51,7 +51,7 @@ export ATLASSIAN_API_TOKEN="your-api-token"
 | Images | `OPENAI_API_KEY`, `OPENAI_IMAGES_MODEL`, `OPENAI_BASE_URL`, `MCPTOOLS_IMAGES_API`, `MCPTOOLS_IMAGES_MAINLINE` | `[images]` in config |
 | HTTP | `MCPTOOLS_HTTP_ALLOWED_HOSTS` | `[http].allowed_hosts` in config; empty denies all |
 | General | `MCPTOOLS_VERBOSE` | `[general].verbose` |
-| MCP | `MCPTOOLS_DISCOVERY`, `MCPTOOLS_CODE_MODE`, `MCPTOOLS_EXECUTE_TIMEOUT_SECS`, `MCPTOOLS_EXECUTE_MEMORY_MB`, `MCPTOOLS_EXECUTE_OUTPUT_KB` | `[mcp]`: `discovery`, `code_mode`, `execute_timeout_secs`, `execute_memory_mb`, `execute_output_kb` |
+| MCP | `MCPTOOLS_DISCOVERY`, `MCPTOOLS_CODE_MODE`, `MCPTOOLS_EXECUTE_TIMEOUT_SECS`, `MCPTOOLS_TOOL_TIMEOUT_SECS`, `MCPTOOLS_EXECUTE_MEMORY_MB`, `MCPTOOLS_EXECUTE_OUTPUT_KB` | `[mcp]`: `discovery`, `code_mode`, `execute_timeout_secs`, `tool_timeout_secs`, `execute_memory_mb`, `execute_output_kb` |
 | Diagram | `MCPTOOLS_DIAGRAM_HOST`, `MCPTOOLS_DIAGRAM_PORT`, `MCPTOOLS_DIAGRAM_SHARE_SECONDS`, `MCPTOOLS_DIAGRAM_TTL_SECONDS`, `MCPTOOLS_DIAGRAM_IDLE_CHECK_SECONDS`, `MCPTOOLS_DIAGRAM_IDLE_GRACE_SECONDS` | `[diagram]`: `host`, `port`, `share_seconds`, `ttl_seconds`, `idle_check_seconds`, `idle_grace_seconds` |
 | Markdown | `MD_TIMEOUT` | `[md].timeout` |
 

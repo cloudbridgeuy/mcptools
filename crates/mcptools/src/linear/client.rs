@@ -8,7 +8,7 @@ pub const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 const JITTER_MS: u64 = 100;
 
 pub fn build_client(cfg: &LinearConfig) -> Result<reqwest::Client> {
-    build_client_with_timeout(cfg, std::time::Duration::from_secs(10))
+    build_client_with_timeout(cfg, crate::tool_timeout(10))
 }
 
 pub fn build_client_with_timeout(

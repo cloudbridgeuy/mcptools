@@ -51,7 +51,7 @@ pub async fn request_with_allowlist(
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(http_request::redirect_policy())
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(crate::tool_timeout(10))
         .build()
         .map_err(|_| failure("Cannot create HTTP client"))?;
     let mut request = client.request(method, url);

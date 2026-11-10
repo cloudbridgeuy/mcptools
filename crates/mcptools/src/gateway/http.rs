@@ -52,7 +52,7 @@ impl Client {
         headers.remove("MCP-Protocol-Version");
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(30))
+            .timeout(crate::tool_timeout(30))
             .build()
             .map_err(|_| eyre!("Cannot create upstream client"))?;
         let mut client = Self {

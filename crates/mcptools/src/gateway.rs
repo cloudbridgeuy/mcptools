@@ -16,7 +16,9 @@ use tokio::sync::Mutex;
 
 static GATEWAY: OnceLock<Gateway> = OnceLock::new();
 const MESSAGE_LIMIT: u64 = 4 * 1024 * 1024;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+fn request_timeout() -> Duration {
+    crate::tool_timeout(30)
+}
 
 struct Gateway {
     tools: Vec<GatewayTool>,
@@ -59,7 +61,7 @@ pub async fn initialize() -> Result<()> {
     let mut outcomes = Vec::new();
     let mut clients = Vec::new();
     for upstream in &config.upstreams {
-        let started = tokio::time::timeout(REQUEST_TIMEOUT, Client::start(upstream)).await;
+        let started = tokio::time::timeout(request_timeout(), Client::start(upstream)).await;
         let mut client = match started {
             Ok(Ok(client)) => client,
             Ok(Err(error)) if error.downcast_ref::<gateway::Error>().is_some() => {
@@ -73,7 +75,7 @@ pub async fn initialize() -> Result<()> {
                 continue;
             }
         };
-        match tokio::time::timeout(REQUEST_TIMEOUT, client.discover()).await {
+        match tokio::time::timeout(request_timeout(), client.discover()).await {
             Ok(Ok(tools)) => {
                 outcomes.push(Ok(tools));
                 clients.push(Mutex::new(Some(client)));
@@ -329,7 +331,7 @@ impl StdioClient {
     }
 
     async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
-        tokio::time::timeout(REQUEST_TIMEOUT, async {
+        tokio::time::timeout(request_timeout(), async {
             let result = self.exchange(method, params).await?;
             self.lease
                 .as_mut()
