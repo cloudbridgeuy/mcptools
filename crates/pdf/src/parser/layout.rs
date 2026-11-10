@@ -384,21 +384,17 @@ pub fn extract_page_spans(
             "Tm" => {
                 handle_tm(&op.operands, &mut state);
             }
-            "Td" => {
-                if op.operands.len() >= 2 {
+            "Td" if op.operands.len() >= 2 => {
                     let tx = get_number_from_value(&op.operands[0]).unwrap_or(0.0);
                     let ty = get_number_from_value(&op.operands[1]).unwrap_or(0.0);
                     state.translate_line(tx, ty);
-                }
             }
-            "TD" => {
+            "TD" if op.operands.len() >= 2 => {
                 // TD is equivalent to: -ty TL ; tx ty Td
-                if op.operands.len() >= 2 {
                     let tx = get_number_from_value(&op.operands[0]).unwrap_or(0.0);
                     let ty = get_number_from_value(&op.operands[1]).unwrap_or(0.0);
                     state.leading = -ty;
                     state.translate_line(tx, ty);
-                }
             }
             "T*" => {
                 // Move to start of next line: equivalent to 0 -TL Td

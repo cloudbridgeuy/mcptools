@@ -58,9 +58,9 @@ fn help_never_displays_secret_environment_values() {
                 command.env(name, format!("dummy-secret-value-{name}"));
             }
             let output = command.output().unwrap();
-            if !output.status.success()
-                && !(path.last().is_some_and(|name| name == "help")
-                    && output.status.code() == Some(2))
+            if !(output.status.success()
+                || (path.last().is_some_and(|name| name == "help")
+                    && output.status.code() == Some(2)))
             {
                 failures.push(format!("{} {flag}: help failed", path.join(" ")));
             }
