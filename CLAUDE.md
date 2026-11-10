@@ -78,6 +78,7 @@ For detailed usage of each feature, see the context files:
 - **[Jira](.claude/context/jira.md)** - Search, create, update, inspect transitions, and manage issue links; saved queries; MCP tools
 - **[Linear](.claude/context/linear.md)** - Issues (including delete to trash) and discovery; MCP project creation, partial property updates, published progress report creation/listing, workspace project statuses
 - **[Confluence](.claude/context/confluence.md)** - Search, read, create, and update pages; CQL queries
+- **[GitHub](.claude/context/github.md)** - Deterministic pull request review, CI, and stack status
 - **[Bitbucket](.claude/context/bitbucket.md)** - Pull requests; list workspaces, repos, branches, and deploy keys
 - **[HackerNews](.claude/context/hackernews.md)** - Read posts/comments; list stories
 - **[Web Scraping](.claude/context/web-scraping.md)** - Fetch pages as Markdown; extract TOC; render offline HTML with Mermaid

@@ -48,7 +48,7 @@ fn mcp_contract_all() {
         .and_then(|v| v.get("tools"))
         .and_then(|v| v.as_array())
         .unwrap();
-    assert_eq!(tools.len(), 115, "unexpected tools/list length");
+    assert_eq!(tools.len(), 116, "unexpected tools/list length");
     let mut passed = 0;
     for tool in tools {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();
@@ -82,7 +82,12 @@ fn mcp_contract_all() {
             errors.is_empty(),
             "sample failed schema in {name}: {errors:?}"
         );
-        let text = serde_json::to_string_pretty(&recorded).unwrap();
+        let visible = if name == "github_pr_view" {
+            &recorded["pullRequests"]
+        } else {
+            &recorded
+        };
+        let text = serde_json::to_string_pretty(visible).unwrap();
         let result = serde_json::json!({
             "content": [{"type": "text", "text": text}],
             "structuredContent": recorded,
@@ -99,7 +104,11 @@ fn mcp_contract_all() {
         .unwrap();
         assert_eq!(
             &parsed,
-            result.get("structuredContent").unwrap(),
+            if name == "github_pr_view" {
+                &result["structuredContent"]["pullRequests"]
+            } else {
+                result.get("structuredContent").unwrap()
+            },
             "dual round-trip failed in {name}"
         );
         passed += 1;

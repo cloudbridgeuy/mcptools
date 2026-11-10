@@ -1,0 +1,59 @@
+{
+  "pullRequests": [
+    {
+      "number": 2,
+      "title": "FAKE-2 synthetic",
+      "url": "https://example.invalid/pr/2",
+      "state": "open",
+      "isDraft": false,
+      "mergeable": true,
+      "head": {
+        "branch": "fake-2",
+        "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "base": {
+        "branch": "fake-1",
+        "stackParent": 1
+      },
+      "ticketKeys": [
+        "FAKE-2"
+      ],
+      "reviews": {
+        "latestByReviewer": [
+          {
+            "login": "fake-reviewer",
+            "state": "APPROVED",
+            "submittedAt": "2026-01-02",
+            "id": 2
+          }
+        ]
+      },
+      "threads": {
+        "total": 1,
+        "unresolved": 1,
+        "unresolvedIds": [
+          "thread-fake"
+        ]
+      },
+      "ci": {
+        "summary": {
+          "pass": 0,
+          "pending": 0,
+          "fail": 1,
+          "skipped": 0
+        },
+        "failing": [
+          {
+            "name": "migrations-run",
+            "source": "check_run",
+            "url": "https://ci.invalid/migrations"
+          }
+        ],
+        "inheritedFromStackParent": [
+          "migrations-run"
+        ]
+      },
+      "stage": "ci_failing"
+    }
+  ]
+}

@@ -200,7 +200,9 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "linear_relation_remove" => roundtrip::<mcptools_core::linear::RelationRemoveOutput>(value),
         "find_tools" => roundtrip::<super::find_tools::FindToolsOutput>(value),
         "execute" => roundtrip::<mcptools_core::sandbox::ExecuteOutput>(value),
-        "call_tool" => roundtrip::<serde_json::Map<String, serde_json::Value>>(value),
+        "call_tool" | "github_pr_view" => {
+            roundtrip::<serde_json::Map<String, serde_json::Value>>(value)
+        }
         _ => panic!("unknown tool in roundtrip_by_tool: {tool}"),
     }
 }

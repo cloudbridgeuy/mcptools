@@ -4,6 +4,7 @@ mod atlassian;
 mod call_tool;
 mod execute;
 pub mod find_tools;
+mod github;
 mod hn;
 mod http_request;
 mod images;
@@ -566,6 +567,15 @@ pub fn builtin_tools() -> Vec<Tool> {
             description: "Load and display the contents of a saved Jira query. Returns the query name and the JQL query text.".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraQueryLoadArgs>(),
             summary: "Show the JQL text of a saved Jira query",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
+            output_schema: github::output_schema(),
+            name: "github_pr_view".to_string(),
+            description: "Read deterministic GitHub pull request review, thread, CI and stack status. Requires a configured read-only GitHub gateway with bearer authorization.".to_string(),
+            input_schema: schema::input_schema_for::<github::Args>(),
+            summary: "Inspect GitHub PR reviews, CI checks and stack ancestry",
             kind: ToolKind::Read,
             destructive: false,
         },
@@ -1418,244 +1428,287 @@ fn invalid_tool_name(name: &str) -> JsonRpcError {
     }
 }
 
-pub async fn dispatch_tool_call(
+pub fn dispatch_tool_call(
     params: CallToolParams,
     global: &crate::Global,
     flags: ServeFlags,
-) -> Result<serde_json::Value, JsonRpcError> {
-    let tools = registered_tools();
-    let name = aliases::resolve(&params.name, &tools)?;
-    if crate::gateway::tools().iter().any(|tool| tool.name == name) {
-        return crate::gateway::call(name, params.arguments)
-            .await
-            .map_err(|error| JsonRpcError {
-                code: -32603,
-                message: error.to_string(),
+) -> futures::future::BoxFuture<'_, Result<serde_json::Value, JsonRpcError>> {
+    Box::pin(async move {
+        let tools = registered_tools();
+        let name = aliases::resolve(&params.name, &tools)?;
+        if crate::gateway::tools().iter().any(|tool| tool.name == name) {
+            return crate::gateway::call(name, params.arguments)
+                .await
+                .map_err(|error| JsonRpcError {
+                    code: -32603,
+                    message: error.to_string(),
+                    data: None,
+                });
+        }
+        match name {
+            "plan_write" => plan::handle_plan_write(params.arguments).await,
+            "plan_url" => plan::handle_plan_url(params.arguments).await,
+            "plan_close" => plan::handle_plan_close(params.arguments).await,
+            "plan_diff" => plan::handle_plan_diff(params.arguments).await,
+            "plan_png" => plan::handle_plan_png(params.arguments).await,
+            "github_pr_view" => github::view(params.arguments).await,
+            "http_request" => http_request::request(params.arguments).await,
+            "file_stat" => http_request::stat(params.arguments).await,
+            "lane_list" => lane::list(params.arguments).await,
+            "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
+            "lane_cleanup_apply" => lane::cleanup_apply(params.arguments).await,
+            "lane_create" => lane::create(params.arguments).await,
+            "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
+            "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
+            "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
+            "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
+            "jira_transition_list" => {
+                atlassian::handle_jira_transition_list(params.arguments, global).await
+            }
+            "jira_link_list" => atlassian::handle_jira_link_list(params.arguments, global).await,
+            "jira_link_type_list" => {
+                atlassian::handle_jira_link_type_list(params.arguments, global).await
+            }
+            "jira_link_create" => {
+                atlassian::handle_jira_link_create(params.arguments, global).await
+            }
+            "jira_link_delete" => {
+                atlassian::handle_jira_link_delete(params.arguments, global).await
+            }
+            "jira_comment_add" => {
+                atlassian::handle_jira_comment_add(params.arguments, global).await
+            }
+            "jira_comment_list" => {
+                atlassian::handle_jira_comment_list(params.arguments, global).await
+            }
+            "jira_comment_update" => {
+                atlassian::handle_jira_comment_update(params.arguments, global).await
+            }
+            "jira_comment_delete" => {
+                atlassian::handle_jira_comment_delete(params.arguments, global).await
+            }
+            "jira_sprint_list" => {
+                atlassian::handle_jira_sprint_list(params.arguments, global).await
+            }
+            "jira_board_list" => atlassian::handle_jira_board_list(params.arguments, global).await,
+            "jira_attachment_list" => {
+                atlassian::handle_jira_attachment_list(params.arguments, global).await
+            }
+            "jira_attachment_download" => {
+                atlassian::handle_jira_attachment_download(params.arguments, global).await
+            }
+            "jira_attachment_upload" => {
+                atlassian::handle_jira_attachment_upload(params.arguments, global).await
+            }
+            "jira_query_list" => atlassian::handle_jira_query_list(params.arguments, global).await,
+            "jira_query_save" => atlassian::handle_jira_query_save(params.arguments, global).await,
+            "jira_query_delete" => {
+                atlassian::handle_jira_query_delete(params.arguments, global).await
+            }
+            "jira_query_load" => atlassian::handle_jira_query_load(params.arguments, global).await,
+            "confluence_search" => {
+                atlassian::handle_confluence_search(params.arguments, global).await
+            }
+            "confluence_page_get" => {
+                atlassian::handle_confluence_page_get(params.arguments, global).await
+            }
+            "confluence_page_create" => {
+                atlassian::handle_confluence_page_create(params.arguments, global).await
+            }
+            "confluence_page_update" => {
+                atlassian::handle_confluence_page_update(params.arguments, global).await
+            }
+            "bitbucket_pr_list" => {
+                atlassian::handle_bitbucket_pr_list(params.arguments, global).await
+            }
+            "bitbucket_pr_read" => {
+                atlassian::handle_bitbucket_pr_read(params.arguments, global).await
+            }
+            "bitbucket_pr_create" => {
+                atlassian::handle_bitbucket_pr_create(params.arguments, global).await
+            }
+            "bitbucket_pr_update" => {
+                atlassian::handle_bitbucket_pr_update(params.arguments, global).await
+            }
+            "bitbucket_pr_comment_add" => {
+                atlassian::handle_bitbucket_pr_comment_add(params.arguments, global).await
+            }
+            "bitbucket_pr_comment_list" => {
+                atlassian::handle_bitbucket_pr_comment_list(params.arguments, global).await
+            }
+            "bitbucket_pr_comment_update" => {
+                atlassian::handle_bitbucket_pr_comment_update(params.arguments, global).await
+            }
+            "bitbucket_pr_comment_delete" => {
+                atlassian::handle_bitbucket_pr_comment_delete(params.arguments, global).await
+            }
+            "bitbucket_pr_comment_resolve" => {
+                atlassian::handle_bitbucket_pr_comment_resolve(params.arguments, global).await
+            }
+            "bitbucket_pr_comment_reopen" => {
+                atlassian::handle_bitbucket_pr_comment_reopen(params.arguments, global).await
+            }
+            "bitbucket_workspace_list" => {
+                atlassian::handle_bitbucket_workspace_list(params.arguments, global).await
+            }
+            "bitbucket_repo_list" => {
+                atlassian::handle_bitbucket_repo_list(params.arguments, global).await
+            }
+            "bitbucket_repo_branches" => {
+                atlassian::handle_bitbucket_repo_branches(params.arguments, global).await
+            }
+            "bitbucket_repo_branch_create" => {
+                atlassian::handle_bitbucket_repo_branch_create(params.arguments, global).await
+            }
+            "bitbucket_repo_branch_delete" => {
+                atlassian::handle_bitbucket_repo_branch_delete(params.arguments, global).await
+            }
+            "bitbucket_deploy_key_list" => {
+                atlassian::handle_bitbucket_deploy_key_list(params.arguments, global).await
+            }
+            "bitbucket_deploy_key_add" => {
+                atlassian::handle_bitbucket_deploy_key_add(params.arguments, global).await
+            }
+            "bitbucket_deploy_key_remove" => {
+                atlassian::handle_bitbucket_deploy_key_remove(params.arguments, global).await
+            }
+            "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
+            "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
+            "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
+            "md_render" => md::handle_md_render(params.arguments).await,
+            "md_toc" => md::handle_md_toc(params.arguments, global).await,
+            "images_generate" => images::handle_images_generate(params.arguments, global).await,
+            "images_edit" => images::handle_images_edit(params.arguments, global).await,
+            "images_vary" => images::handle_images_vary(params.arguments, global).await,
+            "ui_annotations_list" => {
+                annotations::handle_ui_annotations_list(params.arguments, global).await
+            }
+            "ui_annotations_get" => {
+                annotations::handle_ui_annotations_get(params.arguments, global).await
+            }
+            "ui_annotations_resolve" => {
+                annotations::handle_ui_annotations_resolve(params.arguments, global).await
+            }
+            "ui_annotations_clear" => {
+                annotations::handle_ui_annotations_clear(params.arguments, global).await
+            }
+            "pdf_toc" => pdf::handle_pdf_toc(params.arguments, global).await,
+            "pdf_read" => pdf::handle_pdf_read(params.arguments, global).await,
+            "pdf_peek" => pdf::handle_pdf_peek(params.arguments, global).await,
+            "pdf_images" => pdf::handle_pdf_images(params.arguments, global).await,
+            "pdf_image" => pdf::handle_pdf_image(params.arguments, global).await,
+            "pdf_info" => pdf::handle_pdf_info(params.arguments, global).await,
+            "linear_auth_status" => {
+                linear::handle_linear_auth_status(params.arguments, global).await
+            }
+            "linear_issue_get" => linear::handle_linear_issue_get(params.arguments, global).await,
+            "linear_issue_list" => linear::handle_linear_issue_list(params.arguments, global).await,
+            "linear_status_list" => {
+                linear::handle_linear_status_list(params.arguments, global).await
+            }
+            "linear_issue_graph" => {
+                linear::handle_linear_issue_graph(params.arguments, global).await
+            }
+            "linear_comment_list" => {
+                linear::handle_linear_comment_list(params.arguments, global).await
+            }
+            "linear_relation_list" => {
+                linear::handle_linear_relation_list(params.arguments, global).await
+            }
+            "linear_team_list" => linear::handle_linear_team_list(params.arguments, global).await,
+            "linear_team_get" => linear::handle_linear_team_get(params.arguments, global).await,
+            "linear_project_list" => {
+                linear::handle_linear_project_list(params.arguments, global).await
+            }
+            "linear_project_get" => {
+                linear::handle_linear_project_get(params.arguments, global).await
+            }
+            "linear_initiative_list" => {
+                linear::handle_linear_initiative_list(params.arguments, global).await
+            }
+            "linear_initiative_get" => {
+                linear::handle_linear_initiative_get(params.arguments, global).await
+            }
+            "linear_document_list" => {
+                linear::handle_linear_document_list(params.arguments, global).await
+            }
+            "linear_document_get" => {
+                linear::handle_linear_document_get(params.arguments, global).await
+            }
+            "linear_document_create" => {
+                linear::handle_linear_document_create(params.arguments, global).await
+            }
+            "linear_document_update" => {
+                linear::handle_linear_document_update(params.arguments, global).await
+            }
+            "linear_initiative_project_add" => {
+                linear::handle_linear_initiative_project_add(params.arguments, global).await
+            }
+            "linear_project_status_list" => {
+                linear::handle_linear_project_status_list(params.arguments, global).await
+            }
+            "linear_project_milestone_list" => {
+                linear::handle_linear_project_milestone_list(params.arguments, global).await
+            }
+            "linear_project_milestone_create" => {
+                linear::handle_linear_project_milestone_create(params.arguments, global).await
+            }
+            "linear_project_milestone_update" => {
+                linear::handle_linear_project_milestone_update(params.arguments, global).await
+            }
+            "linear_project_create" => {
+                linear::handle_linear_project_create(params.arguments, global).await
+            }
+            "linear_project_update" => {
+                linear::handle_linear_project_update(params.arguments, global).await
+            }
+            "linear_project_update_create" => {
+                linear::handle_linear_project_update_create(params.arguments, global).await
+            }
+            "linear_project_update_list" => {
+                linear::handle_linear_project_update_list(params.arguments, global).await
+            }
+            "linear_user_list" => linear::handle_linear_user_list(params.arguments, global).await,
+            "linear_state_list" => linear::handle_linear_state_list(params.arguments, global).await,
+            "linear_label_list" => linear::handle_linear_label_list(params.arguments, global).await,
+            "linear_cycle_list" => linear::handle_linear_cycle_list(params.arguments, global).await,
+            "linear_issue_create" => {
+                linear::handle_linear_issue_create(params.arguments, global).await
+            }
+            "linear_issue_update" => {
+                linear::handle_linear_issue_update(params.arguments, global).await
+            }
+            "linear_issue_delete" => {
+                linear::handle_linear_issue_delete(params.arguments, global).await
+            }
+            "linear_issue_restore" => {
+                linear::handle_linear_issue_restore(params.arguments, global).await
+            }
+            "linear_comment_create" => {
+                linear::handle_linear_comment_create(params.arguments, global).await
+            }
+            "linear_comment_update" => {
+                linear::handle_linear_comment_update(params.arguments, global).await
+            }
+            "linear_comment_delete" => {
+                linear::handle_linear_comment_delete(params.arguments, global).await
+            }
+            "linear_relation_add" => {
+                linear::handle_linear_relation_add(params.arguments, global).await
+            }
+            "linear_relation_remove" => {
+                linear::handle_linear_relation_remove(params.arguments, global).await
+            }
+            "find_tools" => find_tools::handle_find_tools(params.arguments, global, flags).await,
+            "execute" => execute::handle_execute(params.arguments, global, flags).await,
+            "call_tool" => call_tool::handle_call_tool(params.arguments, global, flags).await,
+            _ => Err(JsonRpcError {
+                code: -32602,
+                message: format!("Unknown tool: {}", params.name),
                 data: None,
-            });
-    }
-    match name {
-        "plan_write" => plan::handle_plan_write(params.arguments).await,
-        "plan_url" => plan::handle_plan_url(params.arguments).await,
-        "plan_close" => plan::handle_plan_close(params.arguments).await,
-        "plan_diff" => plan::handle_plan_diff(params.arguments).await,
-        "plan_png" => plan::handle_plan_png(params.arguments).await,
-        "http_request" => http_request::request(params.arguments).await,
-        "file_stat" => http_request::stat(params.arguments).await,
-        "lane_list" => lane::list(params.arguments).await,
-        "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
-        "lane_cleanup_apply" => lane::cleanup_apply(params.arguments).await,
-        "lane_create" => lane::create(params.arguments).await,
-        "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
-        "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
-        "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
-        "jira_update" => atlassian::handle_jira_update(params.arguments, global).await,
-        "jira_transition_list" => {
-            atlassian::handle_jira_transition_list(params.arguments, global).await
+            }),
         }
-        "jira_link_list" => atlassian::handle_jira_link_list(params.arguments, global).await,
-        "jira_link_type_list" => {
-            atlassian::handle_jira_link_type_list(params.arguments, global).await
-        }
-        "jira_link_create" => atlassian::handle_jira_link_create(params.arguments, global).await,
-        "jira_link_delete" => atlassian::handle_jira_link_delete(params.arguments, global).await,
-        "jira_comment_add" => atlassian::handle_jira_comment_add(params.arguments, global).await,
-        "jira_comment_list" => atlassian::handle_jira_comment_list(params.arguments, global).await,
-        "jira_comment_update" => {
-            atlassian::handle_jira_comment_update(params.arguments, global).await
-        }
-        "jira_comment_delete" => {
-            atlassian::handle_jira_comment_delete(params.arguments, global).await
-        }
-        "jira_sprint_list" => atlassian::handle_jira_sprint_list(params.arguments, global).await,
-        "jira_board_list" => atlassian::handle_jira_board_list(params.arguments, global).await,
-        "jira_attachment_list" => {
-            atlassian::handle_jira_attachment_list(params.arguments, global).await
-        }
-        "jira_attachment_download" => {
-            atlassian::handle_jira_attachment_download(params.arguments, global).await
-        }
-        "jira_attachment_upload" => {
-            atlassian::handle_jira_attachment_upload(params.arguments, global).await
-        }
-        "jira_query_list" => atlassian::handle_jira_query_list(params.arguments, global).await,
-        "jira_query_save" => atlassian::handle_jira_query_save(params.arguments, global).await,
-        "jira_query_delete" => atlassian::handle_jira_query_delete(params.arguments, global).await,
-        "jira_query_load" => atlassian::handle_jira_query_load(params.arguments, global).await,
-        "confluence_search" => atlassian::handle_confluence_search(params.arguments, global).await,
-        "confluence_page_get" => {
-            atlassian::handle_confluence_page_get(params.arguments, global).await
-        }
-        "confluence_page_create" => {
-            atlassian::handle_confluence_page_create(params.arguments, global).await
-        }
-        "confluence_page_update" => {
-            atlassian::handle_confluence_page_update(params.arguments, global).await
-        }
-        "bitbucket_pr_list" => atlassian::handle_bitbucket_pr_list(params.arguments, global).await,
-        "bitbucket_pr_read" => atlassian::handle_bitbucket_pr_read(params.arguments, global).await,
-        "bitbucket_pr_create" => {
-            atlassian::handle_bitbucket_pr_create(params.arguments, global).await
-        }
-        "bitbucket_pr_update" => {
-            atlassian::handle_bitbucket_pr_update(params.arguments, global).await
-        }
-        "bitbucket_pr_comment_add" => {
-            atlassian::handle_bitbucket_pr_comment_add(params.arguments, global).await
-        }
-        "bitbucket_pr_comment_list" => {
-            atlassian::handle_bitbucket_pr_comment_list(params.arguments, global).await
-        }
-        "bitbucket_pr_comment_update" => {
-            atlassian::handle_bitbucket_pr_comment_update(params.arguments, global).await
-        }
-        "bitbucket_pr_comment_delete" => {
-            atlassian::handle_bitbucket_pr_comment_delete(params.arguments, global).await
-        }
-        "bitbucket_pr_comment_resolve" => {
-            atlassian::handle_bitbucket_pr_comment_resolve(params.arguments, global).await
-        }
-        "bitbucket_pr_comment_reopen" => {
-            atlassian::handle_bitbucket_pr_comment_reopen(params.arguments, global).await
-        }
-        "bitbucket_workspace_list" => {
-            atlassian::handle_bitbucket_workspace_list(params.arguments, global).await
-        }
-        "bitbucket_repo_list" => {
-            atlassian::handle_bitbucket_repo_list(params.arguments, global).await
-        }
-        "bitbucket_repo_branches" => {
-            atlassian::handle_bitbucket_repo_branches(params.arguments, global).await
-        }
-        "bitbucket_repo_branch_create" => {
-            atlassian::handle_bitbucket_repo_branch_create(params.arguments, global).await
-        }
-        "bitbucket_repo_branch_delete" => {
-            atlassian::handle_bitbucket_repo_branch_delete(params.arguments, global).await
-        }
-        "bitbucket_deploy_key_list" => {
-            atlassian::handle_bitbucket_deploy_key_list(params.arguments, global).await
-        }
-        "bitbucket_deploy_key_add" => {
-            atlassian::handle_bitbucket_deploy_key_add(params.arguments, global).await
-        }
-        "bitbucket_deploy_key_remove" => {
-            atlassian::handle_bitbucket_deploy_key_remove(params.arguments, global).await
-        }
-        "hn_read_item" => hn::handle_hn_read_item(params.arguments, global).await,
-        "hn_list_items" => hn::handle_hn_list_items(params.arguments, global).await,
-        "md_fetch" => md::handle_md_fetch(params.arguments, global).await,
-        "md_render" => md::handle_md_render(params.arguments).await,
-        "md_toc" => md::handle_md_toc(params.arguments, global).await,
-        "images_generate" => images::handle_images_generate(params.arguments, global).await,
-        "images_edit" => images::handle_images_edit(params.arguments, global).await,
-        "images_vary" => images::handle_images_vary(params.arguments, global).await,
-        "ui_annotations_list" => {
-            annotations::handle_ui_annotations_list(params.arguments, global).await
-        }
-        "ui_annotations_get" => {
-            annotations::handle_ui_annotations_get(params.arguments, global).await
-        }
-        "ui_annotations_resolve" => {
-            annotations::handle_ui_annotations_resolve(params.arguments, global).await
-        }
-        "ui_annotations_clear" => {
-            annotations::handle_ui_annotations_clear(params.arguments, global).await
-        }
-        "pdf_toc" => pdf::handle_pdf_toc(params.arguments, global).await,
-        "pdf_read" => pdf::handle_pdf_read(params.arguments, global).await,
-        "pdf_peek" => pdf::handle_pdf_peek(params.arguments, global).await,
-        "pdf_images" => pdf::handle_pdf_images(params.arguments, global).await,
-        "pdf_image" => pdf::handle_pdf_image(params.arguments, global).await,
-        "pdf_info" => pdf::handle_pdf_info(params.arguments, global).await,
-        "linear_auth_status" => linear::handle_linear_auth_status(params.arguments, global).await,
-        "linear_issue_get" => linear::handle_linear_issue_get(params.arguments, global).await,
-        "linear_issue_list" => linear::handle_linear_issue_list(params.arguments, global).await,
-        "linear_status_list" => linear::handle_linear_status_list(params.arguments, global).await,
-        "linear_issue_graph" => linear::handle_linear_issue_graph(params.arguments, global).await,
-        "linear_comment_list" => linear::handle_linear_comment_list(params.arguments, global).await,
-        "linear_relation_list" => {
-            linear::handle_linear_relation_list(params.arguments, global).await
-        }
-        "linear_team_list" => linear::handle_linear_team_list(params.arguments, global).await,
-        "linear_team_get" => linear::handle_linear_team_get(params.arguments, global).await,
-        "linear_project_list" => linear::handle_linear_project_list(params.arguments, global).await,
-        "linear_project_get" => linear::handle_linear_project_get(params.arguments, global).await,
-        "linear_initiative_list" => {
-            linear::handle_linear_initiative_list(params.arguments, global).await
-        }
-        "linear_initiative_get" => {
-            linear::handle_linear_initiative_get(params.arguments, global).await
-        }
-        "linear_document_list" => {
-            linear::handle_linear_document_list(params.arguments, global).await
-        }
-        "linear_document_get" => linear::handle_linear_document_get(params.arguments, global).await,
-        "linear_document_create" => {
-            linear::handle_linear_document_create(params.arguments, global).await
-        }
-        "linear_document_update" => {
-            linear::handle_linear_document_update(params.arguments, global).await
-        }
-        "linear_initiative_project_add" => {
-            linear::handle_linear_initiative_project_add(params.arguments, global).await
-        }
-        "linear_project_status_list" => {
-            linear::handle_linear_project_status_list(params.arguments, global).await
-        }
-        "linear_project_milestone_list" => {
-            linear::handle_linear_project_milestone_list(params.arguments, global).await
-        }
-        "linear_project_milestone_create" => {
-            linear::handle_linear_project_milestone_create(params.arguments, global).await
-        }
-        "linear_project_milestone_update" => {
-            linear::handle_linear_project_milestone_update(params.arguments, global).await
-        }
-        "linear_project_create" => {
-            linear::handle_linear_project_create(params.arguments, global).await
-        }
-        "linear_project_update" => {
-            linear::handle_linear_project_update(params.arguments, global).await
-        }
-        "linear_project_update_create" => {
-            linear::handle_linear_project_update_create(params.arguments, global).await
-        }
-        "linear_project_update_list" => {
-            linear::handle_linear_project_update_list(params.arguments, global).await
-        }
-        "linear_user_list" => linear::handle_linear_user_list(params.arguments, global).await,
-        "linear_state_list" => linear::handle_linear_state_list(params.arguments, global).await,
-        "linear_label_list" => linear::handle_linear_label_list(params.arguments, global).await,
-        "linear_cycle_list" => linear::handle_linear_cycle_list(params.arguments, global).await,
-        "linear_issue_create" => linear::handle_linear_issue_create(params.arguments, global).await,
-        "linear_issue_update" => linear::handle_linear_issue_update(params.arguments, global).await,
-        "linear_issue_delete" => linear::handle_linear_issue_delete(params.arguments, global).await,
-        "linear_issue_restore" => {
-            linear::handle_linear_issue_restore(params.arguments, global).await
-        }
-        "linear_comment_create" => {
-            linear::handle_linear_comment_create(params.arguments, global).await
-        }
-        "linear_comment_update" => {
-            linear::handle_linear_comment_update(params.arguments, global).await
-        }
-        "linear_comment_delete" => {
-            linear::handle_linear_comment_delete(params.arguments, global).await
-        }
-        "linear_relation_add" => linear::handle_linear_relation_add(params.arguments, global).await,
-        "linear_relation_remove" => {
-            linear::handle_linear_relation_remove(params.arguments, global).await
-        }
-        "find_tools" => find_tools::handle_find_tools(params.arguments, global, flags).await,
-        "execute" => execute::handle_execute(params.arguments, global, flags).await,
-        "call_tool" => call_tool::handle_call_tool(params.arguments, global, flags).await,
-        _ => Err(JsonRpcError {
-            code: -32602,
-            message: format!("Unknown tool: {}", params.name),
-            data: None,
-        }),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1699,7 +1752,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 112);
+        assert_eq!(catalog.len(), 113);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1731,6 +1784,7 @@ mod catalog_tests {
                 "bitbucket",
                 "confluence",
                 "file",
+                "github",
                 "hn",
                 "http",
                 "images",
@@ -1767,7 +1821,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 115);
+        assert_eq!(super::registered_tools().len(), 116);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1842,7 +1896,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 115);
+        assert_eq!(names(serve_flags(false)).len(), 116);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1971,7 +2025,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 115);
+        assert_eq!(tools.len(), 116);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -2088,6 +2142,7 @@ mod catalog_tests {
             "jira_attachment_download",
             "jira_query_list",
             "jira_query_load",
+            "github_pr_view",
             "bitbucket_pr_list",
             "bitbucket_pr_read",
             "bitbucket_pr_comment_list",
@@ -2131,7 +2186,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 115);
+        assert_eq!(union.len(), 116);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

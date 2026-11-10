@@ -105,6 +105,7 @@ pub mod upgrade;
 pub mod config;
 pub mod diagram_endpoint;
 pub mod gateway;
+pub mod github;
 
 pub mod oauth;
 

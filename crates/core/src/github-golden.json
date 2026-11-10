@@ -1,0 +1,269 @@
+[
+  {
+    "number": 1,
+    "title": "FAKE-1 synthetic",
+    "url": "https://example.invalid/pr/1",
+    "state": "open",
+    "isDraft": false,
+    "mergeable": true,
+    "head": {
+      "branch": "fake-1",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "base": {
+      "branch": "main"
+    },
+    "ticketKeys": [
+      "FAKE-1"
+    ],
+    "reviews": {
+      "latestByReviewer": []
+    },
+    "threads": {
+      "total": 0,
+      "unresolved": 0,
+      "unresolvedIds": []
+    },
+    "ci": {
+      "summary": {
+        "pass": 30,
+        "pending": 0,
+        "fail": 2,
+        "skipped": 0
+      },
+      "failing": [
+        {
+          "name": "Buildkite",
+          "source": "status",
+          "url": "https://ci.invalid/build"
+        },
+        {
+          "name": "migrations-run",
+          "source": "check_run",
+          "url": "https://ci.invalid/migrations"
+        }
+      ],
+      "inheritedFromStackParent": []
+    },
+    "stage": "ci_failing"
+  },
+  {
+    "number": 2,
+    "title": "FAKE-2 synthetic",
+    "url": "https://example.invalid/pr/2",
+    "state": "open",
+    "isDraft": false,
+    "mergeable": true,
+    "head": {
+      "branch": "fake-2",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "base": {
+      "branch": "fake-1",
+      "stackParent": 1
+    },
+    "ticketKeys": [
+      "FAKE-2"
+    ],
+    "reviews": {
+      "latestByReviewer": []
+    },
+    "threads": {
+      "total": 0,
+      "unresolved": 0,
+      "unresolvedIds": []
+    },
+    "ci": {
+      "summary": {
+        "pass": 0,
+        "pending": 0,
+        "fail": 1,
+        "skipped": 0
+      },
+      "failing": [
+        {
+          "name": "migrations-run",
+          "source": "check_run",
+          "url": "https://ci.invalid/migrations"
+        }
+      ],
+      "inheritedFromStackParent": [
+        "migrations-run"
+      ]
+    },
+    "stage": "ci_failing"
+  },
+  {
+    "number": 3,
+    "title": "FAKE-3 synthetic",
+    "url": "https://example.invalid/pr/3",
+    "state": "open",
+    "isDraft": false,
+    "mergeable": true,
+    "head": {
+      "branch": "fake-3",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "base": {
+      "branch": "fake-2",
+      "stackParent": 2
+    },
+    "ticketKeys": [
+      "FAKE-3"
+    ],
+    "reviews": {
+      "latestByReviewer": []
+    },
+    "threads": {
+      "total": 0,
+      "unresolved": 0,
+      "unresolvedIds": []
+    },
+    "ci": {
+      "summary": {
+        "pass": 0,
+        "pending": 0,
+        "fail": 1,
+        "skipped": 0
+      },
+      "failing": [
+        {
+          "name": "migrations-run",
+          "source": "check_run",
+          "url": "https://ci.invalid/migrations"
+        }
+      ],
+      "inheritedFromStackParent": [
+        "migrations-run"
+      ]
+    },
+    "stage": "ci_failing"
+  },
+  {
+    "number": 4,
+    "title": "FAKE-4 synthetic",
+    "url": "https://example.invalid/pr/4",
+    "state": "open",
+    "isDraft": true,
+    "mergeable": true,
+    "head": {
+      "branch": "fake-4",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "base": {
+      "branch": "main"
+    },
+    "ticketKeys": [
+      "FAKE-4"
+    ],
+    "reviews": {
+      "latestByReviewer": []
+    },
+    "threads": {
+      "total": 0,
+      "unresolved": 0,
+      "unresolvedIds": []
+    },
+    "ci": {
+      "summary": {
+        "pass": 0,
+        "pending": 0,
+        "fail": 0,
+        "skipped": 1
+      },
+      "failing": [],
+      "inheritedFromStackParent": []
+    },
+    "stage": "draft"
+  },
+  {
+    "number": 5,
+    "title": "FAKE-5 synthetic",
+    "url": "https://example.invalid/pr/5",
+    "state": "open",
+    "isDraft": false,
+    "mergeable": true,
+    "head": {
+      "branch": "fake-5",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "base": {
+      "branch": "main"
+    },
+    "ticketKeys": [
+      "FAKE-5"
+    ],
+    "reviews": {
+      "latestByReviewer": [
+        {
+          "login": "fake-reviewer",
+          "state": "CHANGES_REQUESTED",
+          "submittedAt": "2026-01-02",
+          "id": 2
+        }
+      ]
+    },
+    "threads": {
+      "total": 0,
+      "unresolved": 0,
+      "unresolvedIds": []
+    },
+    "ci": {
+      "summary": {
+        "pass": 0,
+        "pending": 1,
+        "fail": 0,
+        "skipped": 0
+      },
+      "failing": [],
+      "inheritedFromStackParent": []
+    },
+    "stage": "changes_requested"
+  },
+  {
+    "number": 6,
+    "title": "FAKE-6 synthetic",
+    "url": "https://example.invalid/pr/6",
+    "state": "open",
+    "isDraft": false,
+    "mergeable": null,
+    "head": {
+      "branch": "fake-6",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "base": {
+      "branch": "main"
+    },
+    "ticketKeys": [
+      "FAKE-6"
+    ],
+    "reviews": {
+      "latestByReviewer": [
+        {
+          "login": "fake-reviewer",
+          "state": "APPROVED",
+          "submittedAt": "2026-01-02",
+          "id": 2
+        }
+      ]
+    },
+    "threads": {
+      "total": 1,
+      "unresolved": 1,
+      "unresolvedIds": [
+        "thread-fake"
+      ]
+    },
+    "ci": {
+      "summary": {
+        "pass": 0,
+        "pending": 0,
+        "fail": 0,
+        "skipped": 0
+      },
+      "failing": [],
+      "inheritedFromStackParent": []
+    },
+    "stage": "approved"
+  }
+]

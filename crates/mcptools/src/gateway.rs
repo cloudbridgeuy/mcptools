@@ -1,6 +1,9 @@
 mod http;
 mod oauth;
 
+#[cfg(test)]
+mod github_tests;
+
 pub use oauth::{run, App};
 
 use crate::prelude::*;
@@ -15,6 +18,10 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::Mutex;
 
 static GATEWAY: OnceLock<Gateway> = OnceLock::new();
+#[cfg(test)]
+static GITHUB_STATUS_BASE: OnceLock<String> = OnceLock::new();
+#[cfg(test)]
+static GITHUB_UPSTREAM_ORIGIN: OnceLock<String> = OnceLock::new();
 const MESSAGE_LIMIT: u64 = 4 * 1024 * 1024;
 /// Fallback when neither the upstream nor `[gateway]` sets `timeout_secs`;
 /// also bounds startup and discovery.
@@ -49,7 +56,11 @@ pub fn tools() -> &'static [GatewayTool] {
 
 pub async fn initialize() -> Result<()> {
     let path = crate::config::path()?;
-    let Some(config) = crate::config::load(&path)? else {
+    initialize_from(&path).await
+}
+
+async fn initialize_from(path: &Path) -> Result<()> {
+    let Some(config) = crate::config::load(path)? else {
         return Ok(());
     };
     let config = config.gateway;
@@ -64,7 +75,7 @@ pub async fn initialize() -> Result<()> {
     {
         return Err(eyre!("Local upstreams require Unix process supervision"));
     }
-    let cache_path = mcptools_core::config::cache_path(&path)?;
+    let cache_path = mcptools_core::config::cache_path(path)?;
     let mut outcomes = Vec::new();
     let mut clients = Vec::new();
     for upstream in &config.upstreams {
@@ -480,4 +491,98 @@ pub fn reap(args: ReaperArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn github_tool(name: &str) -> Result<(&'static Gateway, &'static GatewayTool)> {
+    let gateway = GATEWAY
+        .get()
+        .ok_or_else(|| eyre!("Gateway not initialized"))?;
+    let mut roots = gateway
+        .tools
+        .iter()
+        .filter(|tool| tool.original_name == "pull_request_read" && !tool.requires_writes);
+    let root = roots
+        .next()
+        .ok_or_else(|| eyre!("Missing read-only GitHub upstream tool pull_request_read"))?;
+    if roots.next().is_some() {
+        return Err(eyre!("Multiple read-only GitHub upstreams"));
+    }
+    #[cfg(test)]
+    let origin = GITHUB_UPSTREAM_ORIGIN.get().map_or(
+        mcptools_core::github::GITHUB_UPSTREAM_ORIGIN,
+        String::as_str,
+    );
+    #[cfg(not(test))]
+    let origin = mcptools_core::github::GITHUB_UPSTREAM_ORIGIN;
+    let upstream = &gateway.config.upstreams[root.upstream];
+    if !mcptools_core::github::is_github_upstream(upstream.url.as_deref(), origin) {
+        return Err(eyre!(
+            "GitHub upstream {} must use url {origin}",
+            upstream.prefix
+        ));
+    }
+    let tool = gateway
+        .tools
+        .iter()
+        .find(|tool| {
+            tool.upstream == root.upstream && tool.original_name == name && !tool.requires_writes
+        })
+        .ok_or_else(|| eyre!("Missing read-only GitHub upstream tool {name}"))?;
+    Ok((gateway, tool))
+}
+
+pub async fn github_call(name: &str, arguments: Value) -> Result<Value> {
+    let (_, tool) = github_tool(name)?;
+    call(&tool.name, Some(arguments)).await
+}
+
+pub async fn github_status(owner: &str, repo: &str, sha: &str) -> Result<Value> {
+    let (gateway, tool) = github_tool("pull_request_read")?;
+    let upstream = &gateway.config.upstreams[tool.upstream];
+    let mut environment = std::collections::BTreeMap::new();
+    for value in upstream.headers.values() {
+        let template = gateway::EnvTemplate::parse(value).map_err(|reason| eyre!(reason))?;
+        for name in template.variables() {
+            if let Ok(value) = std::env::var(name) {
+                environment.insert(name.to_owned(), value);
+            }
+        }
+    }
+    let headers = gateway::resolve_http_headers(upstream, &environment)?;
+    let authorization = headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        .map(|(_, value)| value)
+        .filter(|value| value.starts_with("Bearer ") && value.len() > 7)
+        .ok_or_else(|| eyre!("GitHub upstream requires an Authorization: Bearer header"))?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(upstream_timeout(&gateway.config, upstream))
+        .build()?;
+    #[cfg(test)]
+    let base = GITHUB_STATUS_BASE
+        .get()
+        .map_or("https://api.github.com", String::as_str);
+    #[cfg(not(test))]
+    let base = "https://api.github.com";
+    let response = client
+        .get(format!(
+            "{base}/repos/{owner}/{repo}/commits/{sha}/status?per_page=100"
+        ))
+        .header(reqwest::header::AUTHORIZATION, authorization)
+        .header(reqwest::header::USER_AGENT, "mcptools")
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|_| eyre!("GitHub status request failed"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(eyre!(
+            "GitHub status request failed: HTTP {status}; check commit statuses read scope"
+        ));
+    }
+    response
+        .json()
+        .await
+        .map_err(|_| eyre!("Invalid GitHub status response"))
 }
