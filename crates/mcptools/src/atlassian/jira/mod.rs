@@ -6,6 +6,7 @@ pub mod get;
 pub mod link;
 pub mod search;
 pub mod sprint;
+pub mod status;
 pub mod transition;
 pub mod update;
 
@@ -103,6 +104,9 @@ pub enum Commands {
 
     #[command(subcommand)]
     Link(link::LinkCommands),
+
+    #[command(subcommand)]
+    Status(status::StatusCommands),
 }
 
 pub async fn run(
@@ -144,6 +148,7 @@ pub async fn run(
         Commands::Board(cmd) => board::handler(cmd, &config).await,
         Commands::Transitions(cmd) => transition::handler(cmd, &config).await,
         Commands::Link(cmd) => link::handler(cmd, &config).await,
+        Commands::Status(cmd) => status::handler(cmd, &config).await,
     }
 }
 

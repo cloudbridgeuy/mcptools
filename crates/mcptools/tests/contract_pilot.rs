@@ -117,6 +117,7 @@ fn mcp_contract_pilot() {
             "jira_query_save",
             "jira_search",
             "jira_sprint_list",
+            "jira_status_list",
             "jira_transition_list",
             "jira_update",
             "lane_cleanup_apply",

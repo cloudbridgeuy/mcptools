@@ -1026,3 +1026,25 @@ fn md_timeout_file_env_and_flag_precedence() {
         );
     }
 }
+
+#[test]
+fn jira_status_map_config_check_accepts_valid_and_rejects_blank_mapping() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("jira.toml");
+    for (text, valid) in [
+        (
+            "[atlassian.jira.status_map.ENG]\nReview = 'in_progress'\n",
+            true,
+        ),
+        ("[atlassian.jira.status_map.ENG]\nReview = ''\n", false),
+        ("[atlassian.jira.status_map.ENG]\nReview = 1\n", false),
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let output = command(home.path())
+            .env("MCPTOOLS_CONFIG", &path)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.success(), valid);
+    }
+}

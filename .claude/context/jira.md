@@ -539,3 +539,17 @@ base_url = "https://api.bitbucket.org/2.0"
 username = "user"
 app_password = "password"
 ```
+
+## Normalized status list
+
+`mcptools atlassian jira status list --assignee me --open true --project ENG --json` lists all matching issues. The read-only MCP tool `jira_status_list` accepts `assignee`, `project`, `open`, and `jql`; assignee defaults to `me` and open defaults to true. Extra JQL is combined with the other filters.
+
+Configure exact project keys and status names in TOML:
+
+```toml
+[atlassian.jira.status_map.ENG]
+Review = "in_progress"
+Shipped = "done"
+```
+
+Unmapped status names pass through as `normalizedStatus` with `unknownStatus: true`. Jira status categories become `todo`, `in_progress`, or `done`. The latest comment is fetched separately and its excerpt is limited to 200 Unicode characters. Each issue's transitions and comments are fetched in batches of four concurrent issues to limit Jira request load. Pull requests are not fetched: `prRefs` is empty and `prRefsSource` is `none`. Sprint data depends on Jira exposing a field named Sprint in search metadata.

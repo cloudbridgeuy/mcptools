@@ -1,0 +1,125 @@
+{
+  "nodes": [
+    {
+      "key": "ENG-1",
+      "url": "https://jira.example/browse/ENG-1",
+      "summary": "Issue 1",
+      "type": "Task",
+      "priority": "High",
+      "status": {
+        "name": "Review",
+        "category": "in_progress"
+      },
+      "normalizedStatus": "in_progress",
+      "unknownStatus": false,
+      "assignee": {
+        "accountId": "ada",
+        "displayName": "Ada"
+      },
+      "updated": "2026-01-02",
+      "created": "2026-01-01",
+      "transitions": [
+        {
+          "id": "21",
+          "name": "Ship",
+          "toStatus": "Shipped",
+          "hasScreen": true
+        }
+      ],
+      "links": [],
+      "prRefs": [],
+      "prRefsSource": "none",
+      "lastComment": {
+        "author": "Ada",
+        "at": "2026-02-01",
+        "excerpt": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      "sprint": [
+        {
+          "id": 2,
+          "name": "Sprint 2",
+          "state": "active"
+        }
+      ]
+    },
+    {
+      "key": "ENG-2",
+      "url": "https://jira.example/browse/ENG-2",
+      "summary": "Issue 2",
+      "type": "Task",
+      "priority": "High",
+      "status": {
+        "name": "Shipped",
+        "category": "done"
+      },
+      "normalizedStatus": "done",
+      "unknownStatus": false,
+      "assignee": {
+        "accountId": "ada",
+        "displayName": "Ada"
+      },
+      "updated": "2026-01-02",
+      "created": "2026-01-01",
+      "transitions": [],
+      "links": [],
+      "prRefs": [],
+      "prRefsSource": "none",
+      "lastComment": null
+    },
+    {
+      "key": "ENG-3",
+      "url": "https://jira.example/browse/ENG-3",
+      "summary": "Issue 3",
+      "type": "Task",
+      "priority": "High",
+      "status": {
+        "name": "Blocked",
+        "category": "in_progress"
+      },
+      "normalizedStatus": "blocked",
+      "unknownStatus": false,
+      "assignee": {
+        "accountId": "ada",
+        "displayName": "Ada"
+      },
+      "updated": "2026-01-02",
+      "created": "2026-01-01",
+      "transitions": [],
+      "links": [
+        {
+          "type": "is blocked by",
+          "key": "ENG-1",
+          "status": "Review"
+        }
+      ],
+      "prRefs": [],
+      "prRefsSource": "none",
+      "lastComment": null,
+      "parentKey": "ENG-9"
+    },
+    {
+      "key": "ENG-4",
+      "url": "https://jira.example/browse/ENG-4",
+      "summary": "Issue 4",
+      "type": "Task",
+      "priority": "High",
+      "status": {
+        "name": "Waiting",
+        "category": "todo"
+      },
+      "normalizedStatus": "Waiting",
+      "unknownStatus": true,
+      "assignee": {
+        "accountId": "ada",
+        "displayName": "Ada"
+      },
+      "updated": "2026-01-02",
+      "created": "2026-01-01",
+      "transitions": [],
+      "links": [],
+      "prRefs": [],
+      "prRefsSource": "none",
+      "lastComment": null
+    }
+  ]
+}

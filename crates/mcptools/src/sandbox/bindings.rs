@@ -233,7 +233,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn read_only_set_has_expected_names_and_no_writes() {
         let read = bound_names(&registered_tools(), &[ToolKind::Read]);
-        assert_eq!(read.len(), 62);
+        assert_eq!(read.len(), 63);
         assert!(read.contains(&"linear_status_list".to_string()));
         assert!(read.contains(&"file_stat".to_string()));
         assert!(!read.contains(&"http_request".to_string()));
@@ -246,6 +246,7 @@ mod tests {
         assert!(!read.contains(&"lane_cleanup_apply".to_string()));
         assert!(!read.contains(&"lane_create".to_string()));
         assert!(read.contains(&"find_tools".to_string()));
+        assert!(read.contains(&"jira_status_list".to_string()));
         assert!(read.contains(&"jira_search".to_string()));
         assert!(read.contains(&"jira_transition_list".to_string()));
         assert!(read.contains(&"jira_link_list".to_string()));
@@ -284,7 +285,7 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 114);
+        assert_eq!(all.len(), 115);
         assert!(all.contains(&"http_request".to_string()));
         assert!(all.contains(&"file_stat".to_string()));
         assert!(!read.contains(&"md_render".to_string()));

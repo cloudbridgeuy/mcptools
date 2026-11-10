@@ -65,7 +65,7 @@ fn mcp_contract_atlassian() {
             })
         })
         .collect();
-    assert_eq!(atlassian.len(), 44, "unexpected atlassian tools");
+    assert_eq!(atlassian.len(), 45, "unexpected atlassian tools");
     for tool in &atlassian {
         let name = tool.get("name").and_then(|v| v.as_str()).unwrap();
         let schema = tool
@@ -77,6 +77,15 @@ fn mcp_contract_atlassian() {
             "bad schema type in {name}"
         );
     }
+
+    let status = atlassian
+        .iter()
+        .find(|tool| tool["name"] == "jira_status_list")
+        .unwrap();
+    assert_eq!(status["annotations"]["readOnlyHint"], true);
+    assert!(status["inputSchema"]["properties"]
+        .get("allowWrites")
+        .is_none());
 
     let search = atlassian
         .iter()

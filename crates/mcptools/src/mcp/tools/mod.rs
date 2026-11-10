@@ -395,7 +395,7 @@ pub fn builtin_tools() -> Vec<Tool> {
             name: "jira_get".to_string(),
             description: "Get detailed information about a Jira ticket. Returns comprehensive information about a specific issue using its issue key. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraGetArgs>(),
-            summary: "Get one Jira ticket by key",
+            summary: "Get one Jira ticket by key and who is assigned",
             kind: ToolKind::Read,
             destructive: false,
         },
@@ -404,7 +404,7 @@ pub fn builtin_tools() -> Vec<Tool> {
             name: "jira_update".to_string(),
             description: "Update Jira ticket fields: status, priority, issueType, assignee, description (markdown), sprint, labels, component names, dueDate (YYYY-MM-DD), and parent issue key. Labels and components replace full sets; empty arrays clear them. clearLabels, clearComponents, clearDueDate, and clearParent remove values; setting and clearing the same field is rejected. Jira edit metadata and project configuration determine editable fields. Handles status transitions and assignee lookup. Requires JIRA_BASE_URL, JIRA_EMAIL, and JIRA_API_TOKEN environment variables (or ATLASSIAN_* as fallback).".to_string(),
             input_schema: schema::input_schema_for::<atlassian::JiraUpdateArgs>(),
-            summary: "Update status/close/reopen; assignee/sprint/labels/components/date/parent/clear",
+            summary: "Change ticket status done; update/close/reopen/assignee/sprint/fields",
             kind: ToolKind::Write,
             destructive: true,
         },
@@ -1248,6 +1248,15 @@ pub fn builtin_tools() -> Vec<Tool> {
             kind: ToolKind::Write,
             destructive: true,
         },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::atlassian::jira::status::StatusListOutput>(),
+            name: "jira_status_list".into(),
+            description: "List assigned Jira issues with normalized status, transitions, links and latest comment. PR references are not fetched.".into(),
+            input_schema: schema::input_schema_for::<crate::atlassian::jira::status::StatusArgs>(),
+            summary: "Summarize assigned work with workflow transitions",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
     ]
 }
 
@@ -1458,6 +1467,9 @@ pub fn dispatch_tool_call(
             "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
             "lane_cleanup_apply" => lane::cleanup_apply(params.arguments).await,
             "lane_create" => lane::create(params.arguments).await,
+            "jira_status_list" => {
+                atlassian::handle_jira_status_list(params.arguments, global).await
+            }
             "jira_search" => atlassian::handle_jira_search(params.arguments, global).await,
             "jira_create" => atlassian::handle_jira_create(params.arguments, global).await,
             "jira_get" => atlassian::handle_jira_get(params.arguments, global).await,
@@ -1752,7 +1764,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 113);
+        assert_eq!(catalog.len(), 114);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1821,7 +1833,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 116);
+        assert_eq!(super::registered_tools().len(), 117);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1896,7 +1908,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 116);
+        assert_eq!(names(serve_flags(false)).len(), 117);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -2025,7 +2037,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 116);
+        assert_eq!(tools.len(), 117);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -2124,6 +2136,7 @@ mod catalog_tests {
             "plan_url",
             "lane_list",
             "lane_cleanup_plan",
+            "jira_status_list",
             "jira_search",
             "confluence_page_get",
             "confluence_search",
@@ -2186,7 +2199,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 116);
+        assert_eq!(union.len(), 117);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

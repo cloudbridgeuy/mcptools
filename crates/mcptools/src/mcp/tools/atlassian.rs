@@ -2054,3 +2054,30 @@ pub async fn handle_bitbucket_repo_branches(
 
     super::to_dual_result(list_data)
 }
+
+pub async fn handle_jira_status_list(
+    arguments: Option<serde_json::Value>,
+    _global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::atlassian::jira::status::StatusArgs = serde_json::from_value(
+        arguments.unwrap_or_else(|| serde_json::json!({})),
+    )
+    .map_err(|e| JsonRpcError {
+        code: -32602,
+        message: format!("Invalid arguments: {e}"),
+        data: None,
+    })?;
+    let config = crate::atlassian::JiraConfig::from_env().map_err(|e| JsonRpcError {
+        code: -32603,
+        message: format!("Configuration error: {e}"),
+        data: None,
+    })?;
+    let output = crate::atlassian::jira::status::list(&args, &config)
+        .await
+        .map_err(|e| JsonRpcError {
+            code: -32603,
+            message: format!("Tool execution error: {e}"),
+            data: None,
+        })?;
+    super::to_dual_result(output)
+}

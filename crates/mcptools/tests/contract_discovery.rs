@@ -250,7 +250,7 @@ fn no_flag_no_env_lists_all_tools() {
     );
 
     let tools = responses[0]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 116);
+    assert_eq!(tools.len(), 117);
 }
 
 #[test]

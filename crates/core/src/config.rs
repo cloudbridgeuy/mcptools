@@ -226,6 +226,7 @@ pub struct Jira {
     pub board_id: Option<u64>,
     pub query: Option<String>,
     pub issue_key: Option<String>,
+    pub status_map: crate::atlassian::jira::status::StatusMap,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -321,6 +322,21 @@ pub fn parse(text: &str) -> Result<AppConfig, Error> {
         };
         Error(format!("TOML at line {line}, column {column}: {message}"))
     })?;
+    if config
+        .atlassian
+        .jira
+        .status_map
+        .iter()
+        .any(|(project, statuses)| {
+            project.trim().is_empty()
+                || statuses.is_empty()
+                || statuses.iter().any(|(status, normalized)| {
+                    status.trim().is_empty() || normalized.trim().is_empty()
+                })
+        })
+    {
+        return Err(Error("invalid atlassian.jira.status_map".into()));
+    }
     if config.http.allowed_hosts.iter().any(|host| {
         host.contains(['*', ','])
             || !reqwest::Url::parse(&format!("http://{host}/")).is_ok_and(|url| {
@@ -1029,6 +1045,31 @@ mod runtime_config_regressions {
             "[md]\ntimeout = '30'",
         ] {
             assert!(parse(text).is_err(), "accepted {text}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod jira_status_config_tests {
+    use super::parse;
+
+    #[test]
+    fn status_map_parses_and_rejects_empty_keys_and_values() {
+        let config =
+            parse("[atlassian.jira.status_map.ENG]\nReview = 'in_progress'\nShipped = 'done'\n")
+                .unwrap();
+        assert_eq!(
+            config.atlassian.jira.status_map["ENG"]["Review"],
+            "in_progress"
+        );
+        for config in [
+            "[atlassian.jira.status_map.ENG]\nReview = ''",
+            "[atlassian.jira.status_map.ENG]\n'' = 'done'",
+            "[atlassian.jira.status_map.'']\nReview = 'done'",
+            "[atlassian.jira.status_map.ENG]\nReview = 1",
+            "[atlassian.jira.status_map.ENG]",
+        ] {
+            assert!(parse(config).is_err());
         }
     }
 }

@@ -110,6 +110,7 @@ mcptools mcp declarations plan_write plan_url plan_close plan_diff plan_png
 ### Jira
 
 ```bash
+mcptools atlassian jira status list --assignee me --project PROJ --json
 mcptools atlassian jira search "assignee = currentUser() AND status NOT IN (Done, Closed)"
 mcptools atlassian jira get PROJ-123                # alias: `jira read`
 mcptools atlassian jira create "Fix bug" --issue-type Bug
@@ -273,6 +274,10 @@ api_token = "token"
 board_id = 42
 query = "project = EXAMPLE"
 issue_key = "EXAMPLE-1"
+
+[atlassian.jira.status_map.EXAMPLE]
+Review = "in_progress"
+Shipped = "done"
 
 [atlassian.confluence]
 base_url = "https://example.atlassian.net"
