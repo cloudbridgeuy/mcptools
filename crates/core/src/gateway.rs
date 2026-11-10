@@ -226,23 +226,23 @@ pub fn http_result(value: Value, id: u64, secrets: &[String]) -> Result<Value, &
     Ok(result)
 }
 
-pub struct HeaderTemplate<'a> {
-    parts: Vec<HeaderPart<'a>>,
+pub struct EnvTemplate<'a> {
+    parts: Vec<EnvPart<'a>>,
 }
 
-enum HeaderPart<'a> {
+enum EnvPart<'a> {
     Literal(&'a str),
     Variable(&'a str),
 }
 
-impl<'a> HeaderTemplate<'a> {
+impl<'a> EnvTemplate<'a> {
     pub fn parse(mut text: &'a str) -> Result<Self, &'static str> {
         let mut parts = Vec::new();
         while let Some(index) = text.find('$') {
-            parts.push(HeaderPart::Literal(&text[..index]));
+            parts.push(EnvPart::Literal(&text[..index]));
             text = &text[index + 1..];
             if let Some(rest) = text.strip_prefix('$') {
-                parts.push(HeaderPart::Literal("$"));
+                parts.push(EnvPart::Literal("$"));
                 text = rest;
             } else if let Some(rest) = text.strip_prefix('{') {
                 let end = rest.find('}').ok_or("unterminated environment reference")?;
@@ -255,13 +255,13 @@ impl<'a> HeaderTemplate<'a> {
                 {
                     return Err("invalid environment reference name");
                 }
-                parts.push(HeaderPart::Variable(name));
+                parts.push(EnvPart::Variable(name));
                 text = &rest[end + 1..];
             } else {
-                parts.push(HeaderPart::Literal("$"));
+                parts.push(EnvPart::Literal("$"));
             }
         }
-        parts.push(HeaderPart::Literal(text));
+        parts.push(EnvPart::Literal(text));
         Ok(Self { parts })
     }
 
@@ -269,8 +269,8 @@ impl<'a> HeaderTemplate<'a> {
         self.parts
             .iter()
             .filter_map(|part| match part {
-                HeaderPart::Variable(name) => Some(*name),
-                HeaderPart::Literal(_) => None,
+                EnvPart::Variable(name) => Some(*name),
+                EnvPart::Literal(_) => None,
             })
             .collect()
     }
@@ -279,8 +279,8 @@ impl<'a> HeaderTemplate<'a> {
         let mut result = String::new();
         for part in &self.parts {
             result.push_str(match part {
-                HeaderPart::Literal(text) => text,
-                HeaderPart::Variable(name) => environment
+                EnvPart::Literal(text) => text,
+                EnvPart::Variable(name) => environment
                     .get(*name)
                     .filter(|value| !value.is_empty())
                     .ok_or_else(|| (*name).to_owned())?,
@@ -295,7 +295,7 @@ pub fn resolve_http_headers(
     environment: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, String>, Error> {
     upstream.headers.iter().map(|(name, value)| {
-        let template = HeaderTemplate::parse(value).map_err(|reason| Error(format!("upstream {} header {name}: {reason}", upstream.prefix)))?;
+        let template = EnvTemplate::parse(value).map_err(|reason| Error(format!("upstream {} header {name}: {reason}", upstream.prefix)))?;
         let resolved = template.resolve(environment).map_err(|variable| Error(format!("upstream {} header {name}: environment variable {variable} is unset, empty or not Unicode", upstream.prefix)))?;
         if reqwest::header::HeaderValue::from_str(&resolved).is_err() {
             return Err(Error(format!("upstream {} header {name}: invalid resolved HTTP header", upstream.prefix)));
@@ -367,6 +367,14 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
         }
         crate::oauth::validate_settings(upstream)
             .map_err(|error| Error(format!("gateway.upstreams[{index}] {error}")))?;
+        if let Some(secret) = &upstream.client_secret {
+            EnvTemplate::parse(secret).map_err(|reason| {
+                Error(format!(
+                    "upstream {} client_secret: {reason}",
+                    upstream.prefix
+                ))
+            })?;
+        }
         if upstream
             .client_id
             .as_ref()
@@ -392,7 +400,7 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
                     if reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_err() || reqwest::header::HeaderValue::from_str(value).is_err() {
                         return Err(Error(format!("gateway.upstreams[{index}].headers contains an invalid header")));
                     }
-                    HeaderTemplate::parse(value).map_err(|reason| Error(format!("upstream {} header {name}: {reason}", upstream.prefix)))?;
+                    EnvTemplate::parse(value).map_err(|reason| Error(format!("upstream {} header {name}: {reason}", upstream.prefix)))?;
                 }
             }
             _ => return Err(Error(format!("gateway.upstreams[{index}] must specify either command or url with matching options"))),
@@ -651,7 +659,7 @@ mod tests {
             ("_suffix2".into(), "value".into()),
         ]);
         let template =
-            HeaderTemplate::parse("Bearer ${TOKEN}/${_suffix2}/${TOKEN} $$ $cash $${OTHER} café")
+            EnvTemplate::parse("Bearer ${TOKEN}/${_suffix2}/${TOKEN} $$ $cash $${OTHER} café")
                 .unwrap();
         assert_eq!(template.variables(), BTreeSet::from(["TOKEN", "_suffix2"]));
         assert_eq!(
@@ -659,7 +667,7 @@ mod tests {
             "Bearer ${OTHER}/value/${OTHER} $ $cash ${OTHER} café"
         );
         for literal in ["plain", "$cash", "$", "café", ""] {
-            let template = HeaderTemplate::parse(literal).unwrap();
+            let template = EnvTemplate::parse(literal).unwrap();
             assert!(template.variables().is_empty());
             assert_eq!(template.resolve(&BTreeMap::new()).unwrap(), literal);
         }
@@ -705,6 +713,50 @@ mod tests {
             assert!(error.contains("Authorization"));
             assert!(!error.contains(template));
         }
+    }
+
+    #[test]
+    fn oauth_client_secret_templates_resolve_and_reject_malformed_references() {
+        let environment = BTreeMap::from([("SECRET".into(), "${NO_RECURSION}".into())]);
+        for (text, expected) in [
+            ("plain-secret", "plain-secret"),
+            ("${SECRET}$$$cash", "${NO_RECURSION}$$cash"),
+            ("$${SECRET}", "${SECRET}"),
+        ] {
+            let config = config(json!({"upstreams":[{"prefix":"remote","url":"https://example.com","auth":"oauth","client_id":"id","client_secret":text}]})).unwrap();
+            assert_eq!(
+                crate::oauth::resolve_client_secret(&config.upstreams[0], &environment)
+                    .unwrap()
+                    .as_deref(),
+                Some(expected)
+            );
+        }
+        for text in ["${", "${1X}", "${}", "${SECRET:-default}", "${${SECRET}}"] {
+            let result = config(
+                json!({"upstreams":[{"prefix":"remote","url":"https://example.com","auth":"oauth","client_id":"id","client_secret":text}]}),
+            );
+            assert!(result.is_err(), "malformed client_secret template accepted");
+            let error = result.err().unwrap().to_string();
+            assert!(error.contains("remote") && error.contains("client_secret"));
+            assert!(!error.contains(text));
+        }
+        let config = config(json!({"upstreams":[{"prefix":"remote","url":"https://example.com","auth":"oauth","client_id":"id","client_secret":"private-prefix-${SECRET}"}]})).unwrap();
+        for environment in [
+            BTreeMap::new(),
+            BTreeMap::from([("SECRET".into(), String::new())]),
+        ] {
+            let error = crate::oauth::resolve_client_secret(&config.upstreams[0], &environment)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("remote") && error.contains("SECRET"));
+            assert!(!error.contains("private-prefix"));
+        }
+        let mut upstream = config.upstreams[0].clone();
+        upstream.client_secret = None;
+        assert_eq!(
+            crate::oauth::resolve_client_secret(&upstream, &BTreeMap::new()).unwrap(),
+            None
+        );
     }
 
     #[test]

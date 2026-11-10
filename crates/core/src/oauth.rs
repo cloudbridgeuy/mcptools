@@ -110,6 +110,20 @@ pub fn validate_settings(upstream: &crate::gateway::Upstream) -> Result<(), &'st
     Ok(())
 }
 
+pub fn resolve_client_secret(
+    upstream: &crate::gateway::Upstream,
+    environment: &std::collections::BTreeMap<String, String>,
+) -> Result<Option<String>, crate::gateway::Error> {
+    upstream.client_secret.as_deref().map(|secret| {
+        let template = crate::gateway::EnvTemplate::parse(secret).map_err(|reason| {
+            crate::gateway::Error(format!("upstream {} client_secret: {reason}", upstream.prefix))
+        })?;
+        template.resolve(environment).map_err(|variable| {
+            crate::gateway::Error(format!("upstream {} client_secret: environment variable {variable} is unset, empty or not Unicode", upstream.prefix))
+        })
+    }).transpose()
+}
+
 pub fn redirect_uri(upstream: &crate::gateway::Upstream, bound_port: u16) -> String {
     upstream
         .redirect_uri

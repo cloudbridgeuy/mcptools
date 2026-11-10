@@ -26,6 +26,7 @@ struct Fixture {
     browser: PathBuf,
     mode: String,
     callback_port: u16,
+    env_secret: Option<String>,
 }
 
 impl Fixture {
@@ -102,6 +103,7 @@ urllib.request.urlopen = record_urlopen"#;
             browser,
             mode: mode.to_owned(),
             callback_port,
+            env_secret: None,
         }
     }
 
@@ -121,7 +123,11 @@ urllib.request.urlopen = record_urlopen"#;
             .env("OAUTH_CALLBACK_PORT", self.callback_port.to_string())
             .env("PATH", path)
             .env_remove("JEV_PROVIDER")
+            .env_remove("OAUTH_TEST_CLIENT_SECRET")
             .args(args);
+        if let Some(secret) = &self.env_secret {
+            command.env("OAUTH_TEST_CLIENT_SECRET", secret);
+        }
         command
     }
 
@@ -520,6 +526,139 @@ fn callback_state_error_page_explains_retry_without_secrets() {
     ] {
         assert!(!body.contains(secret));
     }
+}
+
+#[test]
+fn env_client_secret_login_refresh_and_redaction() {
+    for mode in ["slack", "slack-basic", "slack-rotate"] {
+        let mut fixture = Fixture::new(mode, true);
+        let path = fixture.dir.path().join("config.toml");
+        let config = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            config.replace(
+                "configured-client-secret-value",
+                "${OAUTH_TEST_CLIENT_SECRET}",
+            ),
+        )
+        .unwrap();
+        fixture.env_secret = Some("configured-client-secret-value".into());
+        fixture.login();
+        if mode == "slack-rotate" {
+            fixture.env_secret = Some("rotated-client-secret-value".into());
+        }
+        let output = fixture.command(&["mcp", "catalog"]);
+        clean(&output);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("remote_echo"));
+        let output = fixture.tool_call();
+        clean(&output);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("[redacted]"));
+        let events = fixture.events();
+        let requests: Vec<_> = events
+            .iter()
+            .filter(|event| event["method"] == "token")
+            .collect();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["form"]["grant_type"], "authorization_code");
+        assert_eq!(requests[1]["form"]["grant_type"], "refresh_token");
+        if mode != "slack-basic" {
+            assert_eq!(
+                requests[0]["form"]["client_secret"],
+                "configured-client-secret-value"
+            );
+            assert_eq!(
+                requests[1]["form"]["client_secret"],
+                fixture.env_secret.as_deref().unwrap()
+            );
+        }
+        for file in files(&fixture.dir.path().join("data")) {
+            let text = std::fs::read_to_string(file).unwrap();
+            assert!(!text.contains("configured-client-secret-value"));
+            assert!(!text.contains("rotated-client-secret-value"));
+        }
+    }
+}
+
+#[test]
+fn env_client_secret_missing_or_empty_names_only() {
+    for secret in [None, Some(String::new())] {
+        let mut fixture = Fixture::new("slack", true);
+        let path = fixture.dir.path().join("config.toml");
+        let config = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            config.replace(
+                "configured-client-secret-value",
+                "private-prefix-${OAUTH_TEST_CLIENT_SECRET}",
+            ),
+        )
+        .unwrap();
+        fixture.env_secret = secret;
+        let output = fixture.command(&["gateway", "login", "remote"]);
+        clean(&output);
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("remote") && error.contains("OAUTH_TEST_CLIENT_SECRET"),
+            "{error}"
+        );
+        assert!(!error.contains("private-prefix"));
+        let output = fixture.command(&["config", "check"]);
+        clean(&output);
+        assert!(output.status.success());
+        let warning = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            warning.contains("remote") && warning.contains("OAUTH_TEST_CLIENT_SECRET"),
+            "{warning}"
+        );
+        assert!(!warning.contains("private-prefix"));
+    }
+}
+
+#[test]
+fn env_client_secret_missing_at_refresh_keeps_credentials_and_names_variable() {
+    let mut fixture = Fixture::new("slack", true);
+    let path = fixture.dir.path().join("config.toml");
+    let config = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        config.replace(
+            "configured-client-secret-value",
+            "${OAUTH_TEST_CLIENT_SECRET}",
+        ),
+    )
+    .unwrap();
+    fixture.env_secret = Some("configured-client-secret-value".into());
+    fixture.login();
+    let stored = files(&fixture.dir.path().join("data"));
+    let before = std::fs::read(&stored[0]).unwrap();
+    fixture.env_secret = None;
+    let output = fixture.command(&["mcp", "catalog"]);
+    clean(&output);
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("remote") && error.contains("OAUTH_TEST_CLIENT_SECRET"),
+        "{error}"
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("remote_echo"));
+    assert_eq!(std::fs::read(&stored[0]).unwrap(), before);
+    assert_eq!(
+        fixture
+            .events()
+            .iter()
+            .filter(|event| event["method"] == "token")
+            .count(),
+        1
+    );
+    let output = fixture.command(&["gateway", "logout", "remote"]);
+    clean(&output);
+    assert!(output.status.success());
+    assert!(!stored[0].exists());
 }
 
 #[test]

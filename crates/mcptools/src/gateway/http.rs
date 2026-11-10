@@ -21,7 +21,7 @@ impl Client {
     pub async fn start(upstream: &Upstream) -> Result<Self> {
         let mut environment = std::collections::BTreeMap::new();
         for value in upstream.headers.values() {
-            let template = gateway::HeaderTemplate::parse(value).map_err(|reason| eyre!(reason))?;
+            let template = gateway::EnvTemplate::parse(value).map_err(|reason| eyre!(reason))?;
             for name in template.variables() {
                 if let Ok(value) = std::env::var(name) {
                     environment.insert(name.to_owned(), value);
@@ -76,9 +76,9 @@ impl Client {
         };
         if let Some(tokens) = &client.tokens {
             client.secrets.extend(tokens.secrets());
-            if let Some(secret) = &upstream.client_secret {
+            if let Some(secret) = super::oauth::resolve_client_secret(upstream)? {
                 client.secrets.push(secret.clone());
-                let authorization = oauth::basic_authorization(&tokens.client_id, secret);
+                let authorization = oauth::basic_authorization(&tokens.client_id, &secret);
                 client
                     .secrets
                     .extend(gateway::http_secrets(&std::collections::BTreeMap::from([

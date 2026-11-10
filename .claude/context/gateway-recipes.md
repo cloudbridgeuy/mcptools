@@ -186,7 +186,7 @@ prefix = "slack"
 url = "https://mcp.slack.com/mcp"
 auth = "oauth"
 client_id = "<slack-client-id>"
-client_secret = "<slack-client-secret>"
+client_secret = "${SLACK_CLIENT_SECRET}"
 redirect_port = 8765
 redirect_uri = "https://<your-mac>.<tailnet>.ts.net/callback"
 scopes = ["search:read.public", "search:read.private", "channels:history", "channels:read"]
@@ -198,8 +198,15 @@ placeholders. For private-channel history, add `groups:history`; for DM history,
 add `im:history`; for sending, add `chat:write`. Add each scope in both places,
 accept the app reinstall, and log in again. `search:read` is not a Slack MCP scope.
 
-Client IDs and secrets are literal values, not environment references. Keep the
-secret out of version control and restrict config access:
+Client IDs remain literal. Export `SLACK_CLIENT_SECRET` in the environment used
+for login and MCP token refresh. `client_secret` supports the same `${NAME}`
+rules as HTTP headers: `$$` escapes `$`, unbraced `$NAME` stays literal,
+malformed references fail config loading, and expansion is not recursive.
+Missing, empty or non-Unicode variables fail the operation with upstream and
+variable names only; `config check` warns without printing values. Plain-text
+secrets still work. Resolved secrets are redacted from upstream results and are
+not saved in credentials or cache. Keep secrets out of version control and
+restrict config access:
 
 ```bash
 chmod 600 "$(mcptools config path)"

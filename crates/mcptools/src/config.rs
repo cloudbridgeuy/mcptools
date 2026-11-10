@@ -67,11 +67,20 @@ pub fn run(app: App) -> Result<()> {
                 mcptools_core::config::cache_path(&path)?;
                 for upstream in &config.gateway.upstreams {
                     for (header, value) in &upstream.headers {
-                        let template = mcptools_core::gateway::HeaderTemplate::parse(value)
+                        let template = mcptools_core::gateway::EnvTemplate::parse(value)
                             .map_err(|reason| eyre!(reason))?;
                         for name in template.variables() {
                             if std::env::var(name).map_or(true, |value| value.is_empty()) {
                                 std::eprintln!("warning: upstream {} header {header}: environment variable {name} is unset, empty or not Unicode; required at upstream startup", upstream.prefix);
+                            }
+                        }
+                    }
+                    if let Some(secret) = &upstream.client_secret {
+                        let template = mcptools_core::gateway::EnvTemplate::parse(secret)
+                            .map_err(|reason| eyre!(reason))?;
+                        for name in template.variables() {
+                            if std::env::var(name).map_or(true, |value| value.is_empty()) {
+                                std::eprintln!("warning: upstream {} client_secret: environment variable {name} is unset, empty or not Unicode; required for OAuth token requests", upstream.prefix);
                             }
                         }
                     }

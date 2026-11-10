@@ -164,6 +164,7 @@ fn random() -> String {
 }
 
 async fn login_upstream(upstream: &Upstream) -> Result<()> {
+    let configured_secret = resolve_client_secret(upstream)?;
     let client = client()?;
     let resource = upstream
         .url
@@ -291,7 +292,7 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
         ("code_verifier", verifier.as_str()),
         ("resource", resource),
     ];
-    let response = token_request(&client, upstream, &tokens, form)
+    let response = token_request(&client, configured_secret.as_deref(), &tokens, form)
         .send()
         .await
         .map_err(|_| eyre!("OAuth token request failed"))?;
@@ -305,14 +306,11 @@ async fn login_upstream(upstream: &Upstream) -> Result<()> {
 
 fn token_request<'a>(
     client: &Client,
-    upstream: &'a Upstream,
+    configured_secret: Option<&'a str>,
     tokens: &'a Tokens,
     mut form: Vec<(&'a str, &'a str)>,
 ) -> reqwest::RequestBuilder {
-    let secret = upstream
-        .client_secret
-        .as_deref()
-        .or(tokens.client_secret.as_deref());
+    let secret = configured_secret.or(tokens.client_secret.as_deref());
     let mut request = client.post(&tokens.token_endpoint);
     match (tokens.client_auth, secret) {
         (oauth::ClientAuth::Basic, Some(secret)) => {
@@ -332,6 +330,7 @@ fn token_request<'a>(
 }
 
 pub async fn refresh(upstream: &Upstream, tokens: &mut Tokens) -> Result<()> {
+    let configured_secret = resolve_client_secret(upstream)?;
     let refresh_token = tokens
         .refresh_token
         .as_deref()
@@ -345,7 +344,7 @@ pub async fn refresh(upstream: &Upstream, tokens: &mut Tokens) -> Result<()> {
     if let Some(redirect) = &upstream.redirect_uri {
         form.push(("redirect_uri", redirect));
     }
-    let response = token_request(&client()?, upstream, tokens, form)
+    let response = token_request(&client()?, configured_secret.as_deref(), tokens, form)
         .send()
         .await
         .map_err(|_| login_error(upstream))?;
@@ -357,4 +356,18 @@ pub async fn refresh(upstream: &Upstream, tokens: &mut Tokens) -> Result<()> {
         .map_err(|_| login_error(upstream))?;
     save(upstream, tokens).map_err(|_| login_error(upstream))?;
     Ok(())
+}
+
+pub(super) fn resolve_client_secret(upstream: &Upstream) -> Result<Option<String>> {
+    let mut environment = std::collections::BTreeMap::new();
+    if let Some(secret) = &upstream.client_secret {
+        let template =
+            mcptools_core::gateway::EnvTemplate::parse(secret).map_err(|reason| eyre!(reason))?;
+        for name in template.variables() {
+            if let Ok(value) = std::env::var(name) {
+                environment.insert(name.to_owned(), value);
+            }
+        }
+    }
+    Ok(oauth::resolve_client_secret(upstream, &environment)?)
 }
