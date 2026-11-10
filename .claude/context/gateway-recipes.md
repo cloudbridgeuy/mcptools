@@ -98,6 +98,7 @@ account name (use your platform's absolute home path):
 prefix = "browse"
 command = "/Users/<user>/.local/bin/browse"
 args = ["mcp"]
+timeout_secs = 120
 readOnly = ["status", "session_list"]
 ```
 
@@ -105,6 +106,13 @@ Only `browse_status` and `browse_session_list` are allowed without `allowWrites`
 Every other Browse tool requires `allowWrites: true` through `call_tool` or
 `execute`. Keep `browse_secrets_run` gated: it runs a local command with captured
 credentials.
+
+`timeout_secs = 120` gives Browse tool calls two minutes. It overrides
+`[gateway].timeout_secs`, which falls back to `[mcp].tool_timeout_secs`, else
+30 seconds. Both gateway settings accept integers from 1 through 3600. Startup
+and discovery use `[mcp].tool_timeout_secs`, else 30 seconds. If calling Browse through `execute`, also set the MCP server's
+`--execute-timeout-secs` or `[mcp].execute_timeout_secs` high enough for the full
+script; the gateway timeout does not extend the execute limit.
 
 Restart the MCP client after `config.toml` changes so its mcptools gateway reloads
 the config. Check the config and catalog:
@@ -142,8 +150,8 @@ driving their browser.
 
 - **No paired browser:** `browse_execute` was observed reaching the gateway's
   upstream timeout instead of returning a clear pairing error. Pair first. The
-  stdio upstream request timeout is 30 seconds (`REQUEST_TIMEOUT` in
-  `crates/mcptools/src/gateway.rs`), verified from source, not measured live here.
+  upstream call timeout defaults to 30 seconds; the config above raises it to
+  120 seconds.
   The no-paired-browser case was not repeated here. A 45-second request gave up
   earlier, while a 25-second run succeeded; these are observations, not the limit.
 - **Missing screenshots:** screenshots are saved in a temporary folder named after

@@ -70,6 +70,7 @@ Unknown sections and keys fail validation. CLI flags and per-call arguments over
 | `[diagram].host`, `port`, `share_seconds`, `ttl_seconds`, `idle_check_seconds`, `idle_grace_seconds` | Corresponding `MCPTOOLS_DIAGRAM_*` variables |
 | `[md].timeout` | `MD_TIMEOUT` |
 | `[http].allowed_hosts` | `MCPTOOLS_HTTP_ALLOWED_HOSTS` (comma-separated override) |
+| `[gateway].timeout_secs`, `[[gateway.upstreams]].timeout_secs` | None (config only) |
 
 `MCPTOOLS_LANE_REPOS` remains operator-controlled environment only: an agent that can write user config must not grant itself lane access. Unknown-field validation rejects root `lane-repos` or `lane_repos`, `[mcp].lane_repos`, and `[lane]`. `CHROME` remains the executable override; `RALPH_INBOX` remains operator-controlled because it grants an external notification write target. `LLM_STREAM_BIN` is test-only. Platform selectors such as `MCPTOOLS_CONFIG`, `XDG_CONFIG_HOME`, `HOME`, `XDG_DATA_HOME`, `APPDATA`, and `PATH` remain environment only, as do terminal autodetection variables `TERM`, `TERM_PROGRAM`, `KITTY_WINDOW_ID`, and `TMUX`. `PORT` sets the Linear chart `--serve` port per invocation (default 0, ephemeral) and is outside this migration; `CALENDSYNC_DEV_URL` is development-only. `HN_ITEM`, `HN_LIMIT`, `MD_URL`, `MD_SELECTOR`, `MD_STRATEGY`, `MD_INDEX`, `MD_PAGINATED`, `MD_OFFSET`, `MD_LIMIT`, `MD_PAGE`, and `MD_OUTPUT` remain per-invocation environment arguments.
 
@@ -131,13 +132,29 @@ redacted when nonempty, without the header minimum length. The client retains
 old and new secrets across refresh. Redacted result keys that collide fail the
 call.
 
-`timeout_secs` (optional, defaults to `[mcp].tool_timeout_secs`, else 30; must be above 0) sets that upstream's per-request timeout, stdio and HTTP; startup and discovery use the shared `[mcp].tool_timeout_secs` default, not this value. Example: `timeout_secs = 120`.
-
 `args`, `env` and `readOnly` default to empty. Environment entries override
 the inherited environment; values are literal, not variable substitutions.
 Add environment entries with `[gateway.upstreams.env]` below an upstream.
 Commands are executed directly, not through a shell. Relative paths use the
 mcptools working directory; use absolute paths for stable configuration.
+Tool calls use the upstream's `timeout_secs`, then `[gateway].timeout_secs`,
+then `[mcp].tool_timeout_secs`, then the built-in 30 seconds. Both gateway
+settings accept integers from 1 through 3600; `config check` rejects zero, other
+types and values above 3600. The limit applies to stdio and HTTP upstreams.
+Startup and discovery use `[mcp].tool_timeout_secs` (else 30 seconds), not the
+gateway values.
+For example, set a shared default before the upstream tables:
+
+```toml
+[gateway]
+timeout_secs = 60
+
+[[gateway.upstreams]]
+prefix = "slow"
+command = "/absolute/path/to/server"
+timeout_secs = 120
+```
+
 Prefixes must be unique ASCII letters/digits, starting with a letter; no
 underscores. Exposed tool names are `<prefix>_` followed by the upstream name
 with each character outside `[A-Za-z0-9_]` replaced by `_`. For example,
@@ -191,8 +208,9 @@ and `transport-child-process`, but adds another protocol model/transport layer
 and dependencies; it does not replace our custom lifecycle, cache or policy.
 The stdio client adds no SDK dependency; TOML configuration uses the `toml`
 crate. Supported protocol
-versions: 2024-11-05, 2025-03-26, 2025-06-18. Each request has a 30-second
-deadline and a 4-MiB message cap; discovery has a 100-page cap. Calls to each
+versions: 2024-11-05, 2025-03-26, 2025-06-18. Each request has a 4-MiB message
+cap; tool calls use the configured timeout (default 30 seconds), and discovery
+has a fixed 30-second deadline and a 100-page cap. Calls to each
 upstream are serialized. Client `ping` is supported; other server-initiated
 requests receive method-not-found. No sampling, roots, elicitation or progress
 relay. Failed/uncertain calls are never retried automatically; a later explicit

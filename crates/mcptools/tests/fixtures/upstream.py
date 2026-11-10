@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import subprocess
+import time
 
 descendant = subprocess.Popen(["sleep", "3600"])
 
@@ -16,6 +17,7 @@ for line in sys.stdin:
     if "id" not in request:
         continue
     if method == "initialize":
+        time.sleep(float(os.environ.get("FIXTURE_START_DELAY_SECS", "0")))
         result = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}, "serverInfo": {"name": "fake", "version": "1"}}
     elif method == "tools/list":
         if os.environ.get("FIXTURE_FAIL_LIST"):
@@ -23,6 +25,7 @@ for line in sys.stdin:
             continue
         result = {"tools": [{"name": name, "description": "Echo fixture arguments", "inputSchema": {"type": "object", "properties": {"value": {"type": "string"}}}, "annotations": {"readOnlyHint": True}} for name in json.loads(os.environ.get("FIXTURE_TOOLS", '["echo", "resolve-library-id", "query.docs"]'))]}
     elif method == "tools/call":
+        time.sleep(request["params"]["arguments"].get("delay_secs", 0))
         result = {"content": [{"type": "text", "text": "opaque"}], "structuredContent": {"name": request["params"]["name"], "arguments": request["params"]["arguments"]}, "_meta": {"untouched": True}}
     else:
         continue

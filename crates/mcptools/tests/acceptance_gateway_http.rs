@@ -4,6 +4,115 @@ use std::process::Command;
 use std::thread;
 
 #[test]
+fn http_configured_timeout_limits_calls_but_not_discovery() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    for (shared, upstream, succeeds) in [
+        (1, None, false),
+        (3, None, true),
+        (1, Some(3), true),
+        (3, Some(1), false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let override_setting = upstream
+            .map(|value| format!("timeout_secs = {value}\n"))
+            .unwrap_or_default();
+        std::fs::write(&config, format!("[gateway]\ntimeout_secs = {shared}\n[[gateway.upstreams]]\nprefix = 'remote'\nurl = 'http://{address}/mcp'\nreadOnly = ['echo']\n{override_setting}")).unwrap();
+        let checked = Command::new(env!("CARGO_BIN_EXE_mcptools"))
+            .env("MCPTOOLS_CONFIG", &config)
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+        let server = thread::spawn(move || {
+            let mut calls = 0;
+            for expected in [
+                "initialize",
+                "notifications/initialized",
+                "tools/list",
+                "tools/call",
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = BufReader::new(&mut stream);
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length: ")
+                    {
+                        length = value.trim().parse::<usize>().unwrap();
+                    }
+                }
+                let mut bytes = vec![0; length];
+                reader.read_exact(&mut bytes).unwrap();
+                let request: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(request["method"], expected);
+                let result = match expected {
+                    "initialize" => {
+                        serde_json::json!({"protocolVersion":"2025-06-18","capabilities":{"tools":{}}})
+                    }
+                    "tools/list" => {
+                        thread::sleep(Duration::from_millis(1200));
+                        serde_json::json!({"tools":[{"name":"echo","inputSchema":{"type":"object"}}]})
+                    }
+                    "tools/call" => {
+                        calls += 1;
+                        thread::sleep(Duration::from_secs(2));
+                        serde_json::json!({"content":[{"type":"text","text":"ok"}]})
+                    }
+                    _ => serde_json::Value::Null,
+                };
+                let body = serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":result})
+                    .to_string();
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            }
+            calls
+        });
+        let mut child = Command::new(env!("CARGO_BIN_EXE_mcptools"))
+            .env("MCPTOOLS_CONFIG", &config)
+            .args(["mcp", "stdio"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut input = child.stdin.take().unwrap();
+        writeln!(input, "{}", serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"call_tool","arguments":{"name":"remote_echo","input":{}}}})).unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        drop(input);
+        assert!(child.wait().unwrap().success());
+        assert_eq!(server.join().unwrap(), 1);
+        let response: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if succeeds {
+            assert!(response.get("error").is_none(), "{line}");
+            assert!(line.contains("ok"), "{line}");
+        } else {
+            assert_eq!(
+                response["error"]["message"], "Upstream remote timed out",
+                "{line}"
+            );
+        }
+    }
+}
+
+#[test]
 fn http_discovery_and_cache_keep_header_secret() {
     http_discovery_case(false, false);
 }

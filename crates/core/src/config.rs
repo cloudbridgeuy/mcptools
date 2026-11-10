@@ -424,6 +424,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gateway_timeout_parses_and_preserves_each_level() {
+        let config = parse("[gateway]\ntimeout_secs = 120\n[[gateway.upstreams]]\nprefix = 'a'\ncommand = 'x'\ntimeout_secs = 600\n").unwrap();
+        let value = toml::Value::try_from(&config).unwrap();
+        assert_eq!(value["gateway"]["timeout_secs"].as_integer(), Some(120));
+        assert_eq!(
+            value["gateway"]["upstreams"][0]["timeout_secs"].as_integer(),
+            Some(600)
+        );
+        for timeout in [1, 3600] {
+            assert!(parse(&format!("[gateway]\ntimeout_secs = {timeout}")).is_ok());
+            assert!(parse(&format!(
+                "[[gateway.upstreams]]\nprefix = 'a'\ncommand = 'x'\ntimeout_secs = {timeout}"
+            ))
+            .is_ok());
+        }
+    }
+
+    #[test]
+    fn gateway_timeout_rejects_invalid_values_at_each_level() {
+        for value in [
+            "0",
+            "3601",
+            "-1",
+            "1.5",
+            "'secret-timeout'",
+            "true",
+            "[]",
+            "9223372036854775807",
+        ] {
+            for section in [
+                "[gateway]",
+                "[[gateway.upstreams]]\nprefix = 'a'\ncommand = 'x'",
+            ] {
+                let error = parse(&format!("{section}\ntimeout_secs = {value}"))
+                    .err()
+                    .unwrap()
+                    .to_string();
+                assert!(
+                    error.contains("timeout_secs") || error.contains("TOML at line"),
+                    "{error}"
+                );
+                assert!(!error.contains("secret-timeout"), "{error}");
+            }
+        }
+    }
+
+    #[test]
     fn empty_file_and_section_layer_onto_defaults() {
         for text in ["", "[gateway]"] {
             assert!(parse(text).unwrap().gateway.upstreams.is_empty());

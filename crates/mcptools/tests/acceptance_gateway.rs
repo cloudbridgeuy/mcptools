@@ -101,6 +101,96 @@ impl Drop for Session {
 }
 
 #[test]
+fn config_check_rejects_invalid_gateway_timeouts() {
+    let fixture = Fixture::new(true);
+    for value in ["0", "3601", "-1", "1.5", "'secret-timeout'", "true", "[]"] {
+        for section in [
+            "[gateway]",
+            "[[gateway.upstreams]]\nprefix = 'fake'\ncommand = 'must-not-start'",
+        ] {
+            std::fs::write(
+                &fixture.config,
+                format!("{section}\ntimeout_secs = {value}\n"),
+            )
+            .unwrap();
+            let output = fixture
+                .command()
+                .args(["config", "check"])
+                .output()
+                .unwrap();
+            assert!(!output.status.success());
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                error.contains("timeout_secs") || error.contains("TOML at line"),
+                "{error}"
+            );
+            assert!(!error.contains("secret-timeout"), "{error}");
+        }
+    }
+    assert!(fixture.events().is_empty());
+}
+
+#[test]
+fn stdio_configured_timeout_limits_calls_but_not_startup() {
+    for (shared, timeout, succeeds) in [
+        (1, None, false),
+        (3, None, true),
+        (1, Some(3), true),
+        (3, Some(1), false),
+    ] {
+        let fixture = Fixture::new(true);
+        let original = std::fs::read_to_string(&fixture.config).unwrap();
+        let upstream = timeout.map_or_else(
+            || original.clone(),
+            |value| original.replace("prefix =", &format!("timeout_secs = {value}\nprefix =")),
+        );
+        std::fs::write(
+            &fixture.config,
+            format!(
+                "[gateway]\ntimeout_secs = {shared}\n{upstream}FIXTURE_START_DELAY_SECS = '1.2'\n"
+            ),
+        )
+        .unwrap();
+        let checked = fixture
+            .command()
+            .args(["config", "check"])
+            .output()
+            .unwrap();
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+        let mut session = fixture.start();
+        let response = session.rpc(
+            "tools/call",
+            json!({"name":"call_tool","arguments":{"name":"fake_echo","input":{"delay_secs":2}}}),
+        );
+        if succeeds {
+            assert_eq!(
+                response["result"]["structuredContent"]["name"], "echo",
+                "{response}"
+            );
+        } else {
+            assert_eq!(
+                response["error"]["message"],
+                "Upstream request timed out; outcome may be uncertain; not retried",
+                "{response}"
+            );
+        }
+        session.finish();
+        assert_eq!(
+            fixture
+                .events()
+                .iter()
+                .filter(|event| event["method"] == "tools/call")
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
 fn discovery_cache_and_config_invalidation() {
     let fixture = Fixture::new(false);
     let first = fixture.command().args(["mcp", "catalog"]).output().unwrap();

@@ -3,11 +3,27 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Built-in per-request timeout when neither the upstream nor `[gateway]` sets one.
+pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+const MAX_TIMEOUT_SECS: u64 = 3600;
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
     #[serde(default)]
     pub upstreams: Vec<Upstream>,
+}
+
+impl Config {
+    /// Per-request timeout: upstream `timeout_secs`, else `[gateway].timeout_secs`, else `default_secs`.
+    pub fn request_timeout_secs(&self, upstream: &Upstream, default_secs: u64) -> u64 {
+        upstream
+            .timeout_secs
+            .or(self.timeout_secs)
+            .unwrap_or(default_secs)
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -40,14 +56,6 @@ pub struct Upstream {
     pub read_only: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
-}
-
-pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
-
-impl Upstream {
-    pub fn request_timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(self.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS))
-    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -342,9 +350,24 @@ fn redact_http_secrets(value: &mut Value, secrets: &[String]) -> Result<(), &'st
     Ok(())
 }
 
+fn validate_timeout(field: &str, value: Option<u64>) -> Result<(), Error> {
+    match value {
+        Some(0) => Err(Error(format!("{field} must be greater than 0"))),
+        Some(value) if value > MAX_TIMEOUT_SECS => {
+            Err(Error(format!("{field} must be at most {MAX_TIMEOUT_SECS}")))
+        }
+        _ => Ok(()),
+    }
+}
+
 pub fn validate_config(config: &Config) -> Result<(), Error> {
+    validate_timeout("gateway.timeout_secs", config.timeout_secs)?;
     let mut prefixes = BTreeSet::new();
     for (index, upstream) in config.upstreams.iter().enumerate() {
+        validate_timeout(
+            &format!("gateway.upstreams[{index}].timeout_secs"),
+            upstream.timeout_secs,
+        )?;
         if upstream.prefix.is_empty()
             || !upstream.prefix.as_bytes()[0].is_ascii_alphabetic()
             || !upstream
@@ -354,11 +377,6 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
             || !prefixes.insert(&upstream.prefix)
         {
             return Err(Error(format!("gateway.upstreams[{index}].prefix must be unique ASCII letters/digits starting with a letter")));
-        }
-        if upstream.timeout_secs == Some(0) {
-            return Err(Error(format!(
-                "gateway.upstreams[{index}].timeout_secs must be greater than 0"
-            )));
         }
         if let Some(auth) = &upstream.auth {
             if auth != "oauth"
@@ -526,14 +544,20 @@ mod tests {
     #[test]
     fn timeout_defaults_to_thirty_seconds() {
         let config = config(json!({"upstreams":[{"prefix":"a","command":"x"}]})).unwrap();
-        assert_eq!(config.upstreams[0].request_timeout().as_secs(), 30);
+        assert_eq!(
+            config.request_timeout_secs(&config.upstreams[0], DEFAULT_TIMEOUT_SECS),
+            30
+        );
     }
 
     #[test]
     fn timeout_secs_is_honored() {
         let config =
             config(json!({"upstreams":[{"prefix":"a","command":"x","timeout_secs":120}]})).unwrap();
-        assert_eq!(config.upstreams[0].request_timeout().as_secs(), 120);
+        assert_eq!(
+            config.request_timeout_secs(&config.upstreams[0], DEFAULT_TIMEOUT_SECS),
+            120
+        );
     }
 
     #[test]
@@ -544,6 +568,30 @@ mod tests {
         assert!(error
             .to_string()
             .contains("timeout_secs must be greater than 0"));
+    }
+
+    #[test]
+    fn request_timeout_uses_upstream_then_gateway_then_builtin_default() {
+        for (shared, upstream, expected) in [
+            (None, None, 30),
+            (Some(120), None, 120),
+            (None, Some(600), 600),
+            (Some(120), Some(600), 600),
+            (Some(600), Some(1), 1),
+        ] {
+            let mut value = json!({"upstreams":[{"prefix":"a","command":"x"}]});
+            if let Some(shared) = shared {
+                value["timeout_secs"] = json!(shared);
+            }
+            if let Some(upstream) = upstream {
+                value["upstreams"][0]["timeout_secs"] = json!(upstream);
+            }
+            let config = config(value).unwrap();
+            assert_eq!(
+                config.request_timeout_secs(&config.upstreams[0], DEFAULT_TIMEOUT_SECS),
+                expected
+            );
+        }
     }
 
     #[test]

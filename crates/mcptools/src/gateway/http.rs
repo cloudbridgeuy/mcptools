@@ -52,7 +52,6 @@ impl Client {
         headers.remove("MCP-Protocol-Version");
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(super::upstream_timeout(upstream))
             .build()
             .map_err(|_| eyre!("Cannot create upstream client"))?;
         let mut client = Self {
@@ -89,13 +88,13 @@ impl Client {
             client.secrets.dedup();
         }
         let started = async {
-            let result = client.request("initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcptools","version":env!("MCPTOOLS_VERSION")}})).await?;
+            let result = client.request("initialize", json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcptools","version":env!("MCPTOOLS_VERSION")}}), super::request_timeout()).await?;
             let version = result["protocolVersion"].as_str().filter(|version| matches!(*version, "2024-11-05" | "2025-03-26" | "2025-06-18")).ok_or_else(|| eyre!("Upstream {} incompatible protocol", client.prefix))?;
             if !result["capabilities"]["tools"].is_object() {
                 return Err(eyre!("Upstream {} incompatible tools", client.prefix));
             }
             client.protocol = Some(version.to_owned());
-            client.post(json!({"jsonrpc":"2.0","method":"notifications/initialized"}), None).await?;
+            client.post(json!({"jsonrpc":"2.0","method":"notifications/initialized"}), None, super::request_timeout()).await?;
             Ok(())
         }.await;
         if let Err(error) = started {
@@ -105,18 +104,29 @@ impl Client {
         Ok(client)
     }
 
-    pub async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+    pub async fn request(
+        &mut self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value> {
         self.next_id += 1;
         let id = self.next_id;
         self.post(
             json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
             Some(id),
+            timeout,
         )
         .await?
         .ok_or_else(|| eyre!("Upstream {} missing response", self.prefix))
     }
 
-    async fn post(&mut self, message: Value, id: Option<u64>) -> Result<Option<Value>> {
+    async fn post(
+        &mut self,
+        message: Value,
+        id: Option<u64>,
+        timeout: Duration,
+    ) -> Result<Option<Value>> {
         let mut refreshed = false;
         match oauth::refresh_action(self.tokens.as_ref(), super::oauth::now(), None, false) {
             RefreshAction::Refresh => {
@@ -126,7 +136,7 @@ impl Client {
             RefreshAction::Login => return Err(super::oauth::login_error(&self.upstream)),
             RefreshAction::Send => {}
         }
-        let mut response = self.send(&message).await?;
+        let mut response = self.send(&message, timeout).await?;
         match oauth::refresh_action(
             self.tokens.as_ref(),
             super::oauth::now(),
@@ -135,7 +145,7 @@ impl Client {
         ) {
             RefreshAction::Refresh => {
                 self.refresh().await?;
-                response = self.send(&message).await?;
+                response = self.send(&message, timeout).await?;
                 if oauth::refresh_action(
                     self.tokens.as_ref(),
                     super::oauth::now(),
@@ -213,11 +223,12 @@ impl Client {
         result
     }
 
-    async fn send(&self, message: &Value) -> Result<reqwest::Response> {
+    async fn send(&self, message: &Value, timeout: Duration) -> Result<reqwest::Response> {
         let mut request = self
             .http
             .post(&self.url)
             .headers(self.headers.clone())
+            .timeout(timeout)
             .json(message);
         if let Some(tokens) = &self.tokens {
             request = request.bearer_auth(&tokens.access_token);

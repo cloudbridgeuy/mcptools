@@ -16,21 +16,20 @@ use tokio::sync::Mutex;
 
 static GATEWAY: OnceLock<Gateway> = OnceLock::new();
 const MESSAGE_LIMIT: u64 = 4 * 1024 * 1024;
+/// Fallback when neither the upstream nor `[gateway]` sets `timeout_secs`;
+/// also bounds startup and discovery.
 fn request_timeout() -> Duration {
-    crate::tool_timeout(30)
+    crate::tool_timeout(gateway::DEFAULT_TIMEOUT_SECS)
 }
 
-/// Per-request timeout: the upstream's explicit `timeout_secs`, else the global default.
-fn upstream_timeout(upstream: &Upstream) -> Duration {
-    upstream
-        .timeout_secs
-        .map(Duration::from_secs)
-        .unwrap_or_else(request_timeout)
+/// Per-call timeout: upstream `timeout_secs`, else `[gateway].timeout_secs`, else the default.
+fn upstream_timeout(config: &gateway::Config, upstream: &Upstream) -> Duration {
+    Duration::from_secs(config.request_timeout_secs(upstream, request_timeout().as_secs()))
 }
 
 struct Gateway {
     tools: Vec<GatewayTool>,
-    upstreams: Vec<Upstream>,
+    config: gateway::Config,
     clients: Vec<Mutex<Option<Client>>>,
 }
 
@@ -42,7 +41,6 @@ struct StdioClient {
     reaper_output: ChildStdout,
     lease: Option<ChildStdin>,
     next_id: u64,
-    timeout: Duration,
 }
 
 pub fn tools() -> &'static [GatewayTool] {
@@ -129,7 +127,7 @@ pub async fn initialize() -> Result<()> {
     GATEWAY
         .set(Gateway {
             tools,
-            upstreams: config.upstreams,
+            config,
             clients,
         })
         .map_err(|_| eyre!("Gateway already initialized"))?;
@@ -168,8 +166,9 @@ pub async fn call(name: &str, arguments: Option<Value>) -> Result<Value> {
         return Err(eyre!("Upstream arguments must be an object"));
     }
     let mut slot = gateway.clients[tool.upstream].lock().await;
+    let upstream = &gateway.config.upstreams[tool.upstream];
     if slot.is_none() {
-        *slot = Some(Client::start(&gateway.upstreams[tool.upstream]).await?);
+        *slot = Some(Client::start(upstream).await?);
     }
     let mut client = slot
         .take()
@@ -178,6 +177,7 @@ pub async fn call(name: &str, arguments: Option<Value>) -> Result<Value> {
         .request(
             "tools/call",
             json!({"name": tool.original_name, "arguments": arguments}),
+            upstream_timeout(&gateway.config, upstream),
         )
         .await;
     if result.is_ok() {
@@ -202,10 +202,10 @@ impl Client {
         }
     }
 
-    async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+    async fn request(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
         match self {
-            Self::Stdio(client) => client.request(method, params).await,
-            Self::Http(client) => client.request(method, params).await,
+            Self::Stdio(client) => client.request(method, params, timeout).await,
+            Self::Http(client) => client.request(method, params, timeout).await,
         }
     }
 
@@ -217,7 +217,9 @@ impl Client {
             let params = cursor
                 .as_ref()
                 .map_or_else(|| json!({}), |cursor| json!({"cursor": cursor}));
-            let result = self.request("tools/list", params).await?;
+            let result = self
+                .request("tools/list", params, request_timeout())
+                .await?;
             let page: Vec<UpstreamTool> = serde_json::from_value(result["tools"].clone())
                 .map_err(|_| eyre!("Invalid upstream tools/list"))?;
             tools.extend(page);
@@ -302,7 +304,6 @@ impl StdioClient {
             reaper_output,
             lease,
             next_id: 0,
-            timeout: upstream_timeout(upstream),
         };
         let initialized = client
             .request(
@@ -312,6 +313,7 @@ impl StdioClient {
                     "capabilities": {},
                     "clientInfo": {"name": "mcptools", "version": env!("MCPTOOLS_VERSION")}
                 }),
+                request_timeout(),
             )
             .await?;
         if !matches!(
@@ -340,8 +342,8 @@ impl StdioClient {
         Ok(())
     }
 
-    async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
-        tokio::time::timeout(self.timeout, async {
+    async fn request(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+        tokio::time::timeout(timeout, async {
             let result = self.exchange(method, params).await?;
             self.lease
                 .as_mut()
