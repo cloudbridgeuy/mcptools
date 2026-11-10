@@ -158,11 +158,11 @@ arguments, results, and read policy in direct calls, `call_tool`, and inner
 `execute`. Discovery and declarations expose only `linear_issue_get`. This does
 not add a CLI alias or change other tool names.
 
-38 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
+39 `linear_*` tools expose Linear over MCP (`mcptools mcp stdio` or `mcptools mcp sse`). All return JSON text and matching structured content. List reads return one page (default 25); `all: true` follows cursors until no pages remain. The graph tool has separate hard bounds.
 
 ```bash
 # Reads
-linear_auth_status, linear_issue_get, linear_issue_list, linear_issue_graph
+linear_auth_status, linear_issue_get, linear_issue_list, linear_status_list, linear_issue_graph
 linear_comment_list, linear_relation_list
 linear_team_list, linear_team_get
 linear_initiative_list (workspace initiatives; optional name query; limit/cursor/all)
@@ -269,3 +269,9 @@ Output is `{nodes, pageInfo}`. Each node has returned `id`, `name`, `type`, `col
 For a truncated graph, fetch `pending` as roots or raise the bounds within the hard limits. Use the issue list and relation list tools for larger inventories and explicit paging. Code-mode's own time/output limits still apply; use `call_tool` for graphs that exceed its envelope.
 
 `linear_relation_add` returns `created` or `already_exists`. `linear_relation_remove` matches the `(source, related, type)` triple and returns the deleted relation id.
+
+### Status overview
+
+`mcptools linear status list --assignee me --team GUZ --json` and `linear_status_list({assignee: "me", team: "GUZ", open: true})` fetch all matching pages. Assignee defaults to `me` and accepts a user UUID. Team accepts a key or UUID; project accepts a name or UUID. `open` defaults to true and excludes completed and canceled workflow types; set `--open false` or `open: false` to include them.
+
+Records sort by identifier. They include identifier, URL, title, nullable project and assignee (`id`, `name`), numeric priority, raw state (`name`, `type`), normalizedStatus, updatedAt, nullable parent, children, blockedBy, blocks, prRefs, ticketKeys, and nullable lastComment. Related issues contain identifier and raw state. Workflow types backlog and unstarted map to open, started to in_progress, completed to done, canceled to canceled, and other types to unknown. The newest comment is chosen by creation time; its excerpt has at most 200 Unicode characters. GitHub pull request references and ticket keys from attachment titles and URLs are sorted and deduplicated. If a nested connection exceeds 100 items, the request fails instead of returning incomplete records.

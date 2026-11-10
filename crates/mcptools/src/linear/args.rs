@@ -642,3 +642,12 @@ mod tests {
         assert_eq!(planning.project.as_deref(), Some("MCPTools"));
     }
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StatusListArgs {
+    pub assignee: Option<String>,
+    pub team: Option<String>,
+    pub project: Option<String>,
+    pub open: Option<bool>,
+}

@@ -7,6 +7,7 @@ pub mod config;
 pub mod discover;
 pub mod issue;
 pub mod relations;
+pub mod status;
 
 use crate::prelude::{eprintln, println, *};
 
@@ -22,6 +23,8 @@ pub struct App {
 pub enum Commands {
     #[command(subcommand, about = "Comment operations")]
     Comment(CommentCommands),
+    #[command(subcommand, about = "Status overview")]
+    Status(StatusCommands),
     /// Authentication and access checks
     #[command(subcommand)]
     Auth(AuthCommands),
@@ -50,6 +53,25 @@ pub enum Commands {
     Cycles(CyclesCommands),
     #[command(about = "Render an HTML Mermaid chart of issues, sub-issues, parents, and blockers")]
     Chart(ChartOptions),
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum StatusCommands {
+    List(StatusListOptions),
+}
+
+#[derive(Debug, clap::Args, Clone)]
+pub struct StatusListOptions {
+    #[arg(long, default_value = "me")]
+    pub assignee: String,
+    #[arg(long)]
+    pub team: Option<String>,
+    #[arg(long)]
+    pub project: Option<String>,
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub open: bool,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -654,6 +676,33 @@ pub async fn run(app: App, main_global: crate::Global) -> Result<()> {
         println!("Running Linear command...");
     }
     match app.command {
+        Commands::Status(StatusCommands::List(options)) => {
+            let cfg = config::LinearConfig::from_env()?;
+            let client = client::build_client(&cfg)?;
+            let output = status::status_list(
+                &client,
+                &options.assignee,
+                options.team.as_deref(),
+                options.project.as_deref(),
+                options.open,
+            )
+            .await?;
+            if options.json {
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else {
+                let mut table = new_table();
+                table.add_row(table_row(&["Identifier", "Title", "Status"]));
+                for issue in output.nodes {
+                    table.add_row(table_row(&[
+                        issue.identifier,
+                        issue.title,
+                        issue.normalized_status,
+                    ]));
+                }
+                table.printstd();
+            }
+            Ok(())
+        }
         Commands::Comment(cmd) => match cmd {
             CommentCommands::Update(options) => comment_update_handler(options).await,
             CommentCommands::Delete(options) => comment_delete_handler(options).await,

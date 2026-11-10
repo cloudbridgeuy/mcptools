@@ -882,6 +882,15 @@ pub fn builtin_tools() -> Vec<Tool> {
             destructive: false,
         },
         Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::linear::StatusListOutput>(),
+            name: "linear_status_list".to_string(),
+            description: "List all matching Linear issue status records, sorted by identifier. Assignee defaults to me, open defaults to true. Team is a key or UUID; project is a name or UUID. Requires LINEAR_API_KEY.".to_string(),
+            input_schema: schema::input_schema_for::<crate::linear::args::StatusListArgs>(),
+            summary: "List Linear issue status records",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::IssueGraphOutput>(),
             name: "linear_issue_graph".to_string(),
             description: "Get a bounded structured Linear issue dependency closure from ids. Traverses children, parents, incoming blockers and outgoing blocks targets using the CLI chart traversal; no browser, HTML or local chart server. Returns canonical roots, nodes and relations, existing chart classes, frontier/inprogress lists, missing and unresolved blockers, and explicit issue/page limits, pending selectors and incomplete connections. Canceled nodes are retained with class null; stats exclude them. Frontier excludes nodes with incomplete blocked_by paging; their class/stats remain provisional chart classifications. Missing issues are reported; API failures remain errors. Default limit 100 (max 300), maxPages 2 (max 10). Requires LINEAR_API_KEY.".to_string(),
@@ -1562,6 +1571,7 @@ pub async fn dispatch_tool_call(
         "linear_auth_status" => linear::handle_linear_auth_status(params.arguments, global).await,
         "linear_issue_get" => linear::handle_linear_issue_get(params.arguments, global).await,
         "linear_issue_list" => linear::handle_linear_issue_list(params.arguments, global).await,
+        "linear_status_list" => linear::handle_linear_status_list(params.arguments, global).await,
         "linear_issue_graph" => linear::handle_linear_issue_graph(params.arguments, global).await,
         "linear_comment_list" => linear::handle_linear_comment_list(params.arguments, global).await,
         "linear_relation_list" => {
@@ -1689,7 +1699,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 111);
+        assert_eq!(catalog.len(), 112);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1757,7 +1767,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 114);
+        assert_eq!(super::registered_tools().len(), 115);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1832,7 +1842,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 114);
+        assert_eq!(names(serve_flags(false)).len(), 115);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -1961,7 +1971,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 114);
+        assert_eq!(tools.len(), 115);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -2096,6 +2106,7 @@ mod catalog_tests {
             "linear_auth_status",
             "linear_issue_get",
             "linear_issue_list",
+            "linear_status_list",
             "linear_issue_graph",
             "linear_comment_list",
             "linear_relation_list",
@@ -2120,7 +2131,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 114);
+        assert_eq!(union.len(), 115);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

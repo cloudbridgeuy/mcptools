@@ -157,6 +157,7 @@ fn mcp_contract_pilot() {
             "linear_relation_list",
             "linear_relation_remove",
             "linear_state_list",
+            "linear_status_list",
             "linear_team_get",
             "linear_team_list",
             "linear_user_list",

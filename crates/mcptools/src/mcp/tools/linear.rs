@@ -119,6 +119,25 @@ pub async fn handle_linear_issue_restore(
     super::to_dual_result(restored)
 }
 
+pub async fn handle_linear_status_list(
+    arguments: Option<serde_json::Value>,
+    _global: &crate::Global,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let args: crate::linear::args::StatusListArgs =
+        parse_args(arguments.or_else(|| Some(serde_json::json!({}))))?;
+    let client = linear_client()?;
+    let output = crate::linear::status::status_list(
+        &client,
+        args.assignee.as_deref().unwrap_or("me"),
+        args.team.as_deref(),
+        args.project.as_deref(),
+        args.open.unwrap_or(true),
+    )
+    .await
+    .map_err(exec)?;
+    super::to_dual_result(output)
+}
+
 pub async fn handle_linear_issue_list(
     arguments: Option<serde_json::Value>,
     global: &crate::Global,

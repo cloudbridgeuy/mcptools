@@ -152,6 +152,7 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "linear_issue_delete" => roundtrip::<super::linear::IssueDeleteOutput>(value),
         "linear_issue_restore" => roundtrip::<mcptools_core::linear::RestoredIssue>(value),
         "linear_issue_list" => roundtrip::<mcptools_core::linear::IssueListOutput>(value),
+        "linear_status_list" => roundtrip::<mcptools_core::linear::StatusListOutput>(value),
         "linear_issue_graph" => roundtrip::<mcptools_core::linear::IssueGraphOutput>(value),
         "linear_comment_list" => roundtrip::<mcptools_core::linear::CommentListOutput>(value),
         "linear_relation_list" => roundtrip::<mcptools_core::linear::RelationListOutput>(value),

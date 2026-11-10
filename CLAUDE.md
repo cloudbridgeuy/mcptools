@@ -163,6 +163,7 @@ mcptools linear comment update COMMENT_ID "Updated note" --json
 mcptools linear comment delete COMMENT_ID --json
 mcptools linear issue list --team GUZ --state "In Progress"
 mcptools linear issue list --assignee me --json
+mcptools linear status list --team GUZ --json
 mcptools linear issue list --query "auth" --limit 100 --json
 mcptools linear issue list --query "auth" --limit 100 --cursor <endCursor> --json
 mcptools linear issue list --query "auth" --all --json

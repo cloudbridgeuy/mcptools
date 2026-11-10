@@ -1,0 +1,75 @@
+{
+  "nodes": [
+    {
+      "identifier": "GUZ-1",
+      "url": "https://linear.app/x/issue/GUZ-1",
+      "title": "Title",
+      "project": {
+        "id": "project-id",
+        "name": "Project"
+      },
+      "priority": 2,
+      "state": {
+        "name": "Doing",
+        "type": "started"
+      },
+      "normalizedStatus": "in_progress",
+      "assignee": {
+        "id": "user-id",
+        "name": "User"
+      },
+      "updatedAt": "2026-01-01T00:00:00Z",
+      "parent": {
+        "identifier": "GUZ-9",
+        "state": {
+          "name": "Done",
+          "type": "completed"
+        }
+      },
+      "children": [
+        {
+          "identifier": "GUZ-9",
+          "state": {
+            "name": "Done",
+            "type": "completed"
+          }
+        }
+      ],
+      "blockedBy": [
+        {
+          "identifier": "GUZ-9",
+          "state": {
+            "name": "Done",
+            "type": "completed"
+          }
+        }
+      ],
+      "blocks": [
+        {
+          "identifier": "GUZ-9",
+          "state": {
+            "name": "Done",
+            "type": "completed"
+          }
+        }
+      ],
+      "prRefs": [
+        {
+          "owner": "org",
+          "repo": "repo",
+          "number": 42,
+          "url": "https://github.com/org/repo/pull/42"
+        }
+      ],
+      "ticketKeys": [
+        "GUZ-1",
+        "GUZ-7"
+      ],
+      "lastComment": {
+        "author": "A",
+        "at": "2026-01-01T00:00:00Z",
+        "excerpt": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      }
+    }
+  ]
+}

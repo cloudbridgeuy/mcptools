@@ -1,0 +1,174 @@
+{
+  "issues": {
+    "nodes": [
+      {
+        "identifier": "GUZ-2",
+        "url": "https://linear.app/x/issue/GUZ-2",
+        "title": "Title",
+        "project": null,
+        "priority": 2,
+        "state": {
+          "name": "Doing",
+          "type": "started"
+        },
+        "assignee": null,
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "parent": null,
+        "children": {
+          "nodes": [
+            {
+              "identifier": "GUZ-3",
+              "state": {
+                "name": "Doing",
+                "type": "started"
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "relations": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "inverseRelations": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "attachments": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "comments": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        }
+      },
+      {
+        "identifier": "GUZ-3",
+        "url": "https://linear.app/x/issue/GUZ-3",
+        "title": "Title",
+        "project": null,
+        "priority": 2,
+        "state": {
+          "name": "Doing",
+          "type": "started"
+        },
+        "assignee": null,
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "parent": null,
+        "children": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "relations": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "inverseRelations": {
+          "nodes": [
+            {
+              "type": "blocks",
+              "issue": {
+                "identifier": "GUZ-2",
+                "state": {
+                  "name": "Doing",
+                  "type": "started"
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "attachments": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "comments": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        }
+      },
+      {
+        "identifier": "GUZ-1",
+        "url": "https://linear.app/x/issue/GUZ-1",
+        "title": "Title",
+        "project": null,
+        "priority": 2,
+        "state": {
+          "name": "Doing",
+          "type": "started"
+        },
+        "assignee": null,
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "parent": null,
+        "children": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "relations": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "inverseRelations": {
+          "nodes": [],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "attachments": {
+          "nodes": [
+            {
+              "title": "GUZ-7",
+              "url": "https://github.com/org/repo/pull/42"
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        },
+        "comments": {
+          "nodes": [
+            {
+              "body": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+              "createdAt": "2026-01-01T00:00:00Z",
+              "user": {
+                "name": "A"
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false
+          }
+        }
+      }
+    ],
+    "pageInfo": {
+      "hasNextPage": false,
+      "endCursor": null
+    }
+  }
+}
