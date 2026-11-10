@@ -131,6 +131,8 @@ redacted when nonempty, without the header minimum length. The client retains
 old and new secrets across refresh. Redacted result keys that collide fail the
 call.
 
+`timeout_secs` (optional, defaults to `[mcp].tool_timeout_secs`, else 30; must be above 0) sets that upstream's per-request timeout, stdio and HTTP; startup and discovery use the shared `[mcp].tool_timeout_secs` default, not this value. Example: `timeout_secs = 120`.
+
 `args`, `env` and `readOnly` default to empty. Environment entries override
 the inherited environment; values are literal, not variable substitutions.
 Add environment entries with `[gateway.upstreams.env]` below an upstream.

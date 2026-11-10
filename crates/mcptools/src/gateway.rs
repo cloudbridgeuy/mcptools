@@ -20,6 +20,14 @@ fn request_timeout() -> Duration {
     crate::tool_timeout(30)
 }
 
+/// Per-request timeout: the upstream's explicit `timeout_secs`, else the global default.
+fn upstream_timeout(upstream: &Upstream) -> Duration {
+    upstream
+        .timeout_secs
+        .map(Duration::from_secs)
+        .unwrap_or_else(request_timeout)
+}
+
 struct Gateway {
     tools: Vec<GatewayTool>,
     upstreams: Vec<Upstream>,
@@ -34,6 +42,7 @@ struct StdioClient {
     reaper_output: ChildStdout,
     lease: Option<ChildStdin>,
     next_id: u64,
+    timeout: Duration,
 }
 
 pub fn tools() -> &'static [GatewayTool] {
@@ -293,6 +302,7 @@ impl StdioClient {
             reaper_output,
             lease,
             next_id: 0,
+            timeout: upstream_timeout(upstream),
         };
         let initialized = client
             .request(
@@ -331,7 +341,7 @@ impl StdioClient {
     }
 
     async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
-        tokio::time::timeout(request_timeout(), async {
+        tokio::time::timeout(self.timeout, async {
             let result = self.exchange(method, params).await?;
             self.lease
                 .as_mut()

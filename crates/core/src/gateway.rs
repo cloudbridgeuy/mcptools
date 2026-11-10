@@ -38,6 +38,16 @@ pub struct Upstream {
     pub env: BTreeMap<String, String>,
     #[serde(default, rename = "readOnly")]
     pub read_only: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+pub const DEFAULT_TIMEOUT_SECS: u64 = 30;
+
+impl Upstream {
+    pub fn request_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS))
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -345,6 +355,11 @@ pub fn validate_config(config: &Config) -> Result<(), Error> {
         {
             return Err(Error(format!("gateway.upstreams[{index}].prefix must be unique ASCII letters/digits starting with a letter")));
         }
+        if upstream.timeout_secs == Some(0) {
+            return Err(Error(format!(
+                "gateway.upstreams[{index}].timeout_secs must be greater than 0"
+            )));
+        }
         if let Some(auth) = &upstream.auth {
             if auth != "oauth"
                 || upstream.url.is_none()
@@ -507,6 +522,29 @@ pub fn merge_catalog(mut existing: Vec<CatalogEntry>, tools: &[GatewayTool]) -> 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn timeout_defaults_to_thirty_seconds() {
+        let config = config(json!({"upstreams":[{"prefix":"a","command":"x"}]})).unwrap();
+        assert_eq!(config.upstreams[0].request_timeout().as_secs(), 30);
+    }
+
+    #[test]
+    fn timeout_secs_is_honored() {
+        let config =
+            config(json!({"upstreams":[{"prefix":"a","command":"x","timeout_secs":120}]})).unwrap();
+        assert_eq!(config.upstreams[0].request_timeout().as_secs(), 120);
+    }
+
+    #[test]
+    fn timeout_secs_zero_is_rejected() {
+        let error = config(json!({"upstreams":[{"prefix":"a","command":"x","timeout_secs":0}]}))
+            .err()
+            .unwrap();
+        assert!(error
+            .to_string()
+            .contains("timeout_secs must be greater than 0"));
+    }
 
     #[test]
     fn startup_skips_runtime_failures_without_caching_or_changing_indices() {
