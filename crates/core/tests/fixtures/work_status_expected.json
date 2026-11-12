@@ -1,0 +1,349 @@
+{
+  "items": [
+    {
+      "source": "jira",
+      "key": "VIT-27908",
+      "url": "https://jira.example/browse/VIT-27908",
+      "title": "Patient merge",
+      "status": "In Review",
+      "stage": "draft",
+      "prs": [
+        {
+          "repo": "acme/vitals",
+          "number": 19606,
+          "title": "VIT-27908 base migration",
+          "url": "https://github.com/acme/vitals/pull/19606",
+          "state": "open",
+          "isDraft": false,
+          "stage": "ci_failing",
+          "ci": {
+            "pass": 2,
+            "pending": 0,
+            "fail": 1,
+            "skipped": 0
+          },
+          "reviews": {
+            "approved": 1,
+            "changesRequested": 0
+          },
+          "threadsUnresolved": 0,
+          "inheritedCiFailures": [],
+          "stackParent": null,
+          "updatedAt": "2026-11-10T08:00:00Z",
+          "flags": [
+            "CI_FAIL"
+          ]
+        },
+        {
+          "repo": "acme/vitals",
+          "number": 19676,
+          "title": "VIT-27908 service layer",
+          "url": "https://github.com/acme/vitals/pull/19676",
+          "state": "open",
+          "isDraft": false,
+          "stage": "ci_failing",
+          "ci": {
+            "pass": 2,
+            "pending": 0,
+            "fail": 1,
+            "skipped": 0
+          },
+          "reviews": {
+            "approved": 0,
+            "changesRequested": 0
+          },
+          "threadsUnresolved": 0,
+          "inheritedCiFailures": [
+            "migrations-run"
+          ],
+          "stackParent": 19606,
+          "updatedAt": "2026-11-10T08:00:00Z",
+          "flags": [
+            "CI_FAIL_INHERITED_FROM_STACK_BASE"
+          ]
+        },
+        {
+          "repo": "acme/vitals",
+          "number": 19689,
+          "title": "VIT-27908 api layer",
+          "url": "https://github.com/acme/vitals/pull/19689",
+          "state": "open",
+          "isDraft": true,
+          "stage": "draft",
+          "ci": {
+            "pass": 2,
+            "pending": 0,
+            "fail": 1,
+            "skipped": 0
+          },
+          "reviews": {
+            "approved": 0,
+            "changesRequested": 0
+          },
+          "threadsUnresolved": 0,
+          "inheritedCiFailures": [
+            "migrations-run"
+          ],
+          "stackParent": 19676,
+          "updatedAt": "2026-11-10T08:00:00Z",
+          "flags": [
+            "CI_FAIL_INHERITED_FROM_STACK_BASE"
+          ]
+        }
+      ],
+      "flags": [
+        "TICKET_REVIEW_PR_DRAFT",
+        "CI_FAIL",
+        "CI_FAIL_INHERITED_FROM_STACK_BASE"
+      ]
+    },
+    {
+      "source": "jira",
+      "key": "VIT-27910",
+      "url": "https://jira.example/browse/VIT-27910",
+      "title": "Schema tidy",
+      "status": "In Progress",
+      "stage": "no_pr",
+      "prs": [],
+      "flags": [
+        "TICKET_NO_PR",
+        "STALE"
+      ]
+    },
+    {
+      "source": "jira",
+      "key": "VIT-27911",
+      "url": "https://jira.example/browse/VIT-27911",
+      "title": "Audit log",
+      "status": "To Do",
+      "stage": "no_pr",
+      "prs": [],
+      "flags": [
+        "TICKET_NO_PR"
+      ]
+    },
+    {
+      "source": "linear",
+      "key": "GUZ-901",
+      "url": "https://linear.example/issue/GUZ-901",
+      "title": "Billing export",
+      "status": "In Review",
+      "stage": "unresolved_threads",
+      "prs": [
+        {
+          "repo": "acme/vitals",
+          "number": 20001,
+          "title": "Billing export",
+          "url": "https://github.com/acme/vitals/pull/20001",
+          "state": "open",
+          "isDraft": false,
+          "stage": "unresolved_threads",
+          "ci": {
+            "pass": 5,
+            "pending": 0,
+            "fail": 0,
+            "skipped": 0
+          },
+          "reviews": {
+            "approved": 1,
+            "changesRequested": 0
+          },
+          "threadsUnresolved": 2,
+          "inheritedCiFailures": [],
+          "stackParent": null,
+          "updatedAt": "2026-11-10T08:00:00Z",
+          "flags": [
+            "UNRESOLVED_THREADS"
+          ]
+        }
+      ],
+      "flags": [
+        "UNRESOLVED_THREADS"
+      ]
+    },
+    {
+      "source": "linear",
+      "key": "GUZ-902",
+      "url": "https://linear.example/issue/GUZ-902",
+      "title": "Retry policy",
+      "status": "In Progress",
+      "stage": "merged",
+      "prs": [
+        {
+          "repo": "acme/vitals",
+          "number": 19500,
+          "title": "GUZ-902 retries",
+          "url": "https://github.com/acme/vitals/pull/19500",
+          "state": "merged",
+          "isDraft": false,
+          "stage": "merged",
+          "ci": {
+            "pass": 4,
+            "pending": 0,
+            "fail": 0,
+            "skipped": 0
+          },
+          "reviews": {
+            "approved": 1,
+            "changesRequested": 0
+          },
+          "threadsUnresolved": 0,
+          "inheritedCiFailures": [],
+          "stackParent": null,
+          "updatedAt": "2026-11-10T08:00:00Z",
+          "flags": []
+        }
+      ],
+      "flags": [
+        "MERGED_TICKET_OPEN"
+      ]
+    },
+    {
+      "source": "linear",
+      "key": "GUZ-903",
+      "url": "https://linear.example/issue/GUZ-903",
+      "title": "Docs refresh",
+      "status": "Todo",
+      "stage": "no_pr",
+      "prs": [],
+      "flags": [
+        "TICKET_NO_PR"
+      ]
+    },
+    {
+      "source": "linear",
+      "key": "GUZ-904",
+      "url": "https://linear.example/issue/GUZ-904",
+      "title": "Old cleanup",
+      "status": "Done",
+      "stage": "awaiting_review",
+      "prs": [
+        {
+          "repo": "acme/vitals",
+          "number": 20003,
+          "title": "GUZ-904 cleanup",
+          "url": "https://github.com/acme/vitals/pull/20003",
+          "state": "open",
+          "isDraft": false,
+          "stage": "awaiting_review",
+          "ci": {
+            "pass": 1,
+            "pending": 0,
+            "fail": 0,
+            "skipped": 0
+          },
+          "reviews": {
+            "approved": 0,
+            "changesRequested": 0
+          },
+          "threadsUnresolved": 0,
+          "inheritedCiFailures": [],
+          "stackParent": null,
+          "updatedAt": "2026-11-10T08:00:00Z",
+          "flags": []
+        }
+      ],
+      "flags": [
+        "TICKET_DONE_PR_OPEN"
+      ]
+    }
+  ],
+  "orphanPrs": [
+    {
+      "repo": "acme/vitals",
+      "number": 20002,
+      "title": "Drive-by typo fix",
+      "url": "https://github.com/acme/vitals/pull/20002",
+      "state": "open",
+      "isDraft": false,
+      "stage": "ci_pending",
+      "ci": {
+        "pass": 1,
+        "pending": 1,
+        "fail": 0,
+        "skipped": 0
+      },
+      "reviews": {
+        "approved": 0,
+        "changesRequested": 0
+      },
+      "threadsUnresolved": 0,
+      "inheritedCiFailures": [],
+      "stackParent": null,
+      "updatedAt": "2026-10-25T08:00:00Z",
+      "flags": [
+        "PR_NO_TICKET",
+        "STALE"
+      ]
+    }
+  ],
+  "flags": [
+    {
+      "code": "CI_FAIL",
+      "ticket": null,
+      "pr": "acme/vitals#19606"
+    },
+    {
+      "code": "CI_FAIL_INHERITED_FROM_STACK_BASE",
+      "ticket": null,
+      "pr": "acme/vitals#19676"
+    },
+    {
+      "code": "CI_FAIL_INHERITED_FROM_STACK_BASE",
+      "ticket": null,
+      "pr": "acme/vitals#19689"
+    },
+    {
+      "code": "UNRESOLVED_THREADS",
+      "ticket": null,
+      "pr": "acme/vitals#20001"
+    },
+    {
+      "code": "PR_NO_TICKET",
+      "ticket": null,
+      "pr": "acme/vitals#20002"
+    },
+    {
+      "code": "STALE",
+      "ticket": null,
+      "pr": "acme/vitals#20002"
+    },
+    {
+      "code": "MERGED_TICKET_OPEN",
+      "ticket": "GUZ-902",
+      "pr": null
+    },
+    {
+      "code": "TICKET_NO_PR",
+      "ticket": "GUZ-903",
+      "pr": null
+    },
+    {
+      "code": "TICKET_DONE_PR_OPEN",
+      "ticket": "GUZ-904",
+      "pr": null
+    },
+    {
+      "code": "TICKET_REVIEW_PR_DRAFT",
+      "ticket": "VIT-27908",
+      "pr": null
+    },
+    {
+      "code": "TICKET_NO_PR",
+      "ticket": "VIT-27910",
+      "pr": null
+    },
+    {
+      "code": "STALE",
+      "ticket": "VIT-27910",
+      "pr": null
+    },
+    {
+      "code": "TICKET_NO_PR",
+      "ticket": "VIT-27911",
+      "pr": null
+    }
+  ],
+  "sourceErrors": [],
+  "markdown": "| Ticket | Status | PR(s) | Stage | CI | Reviews | Threads |\n|---|---|---|---|---|---|---|\n| VIT-27908 | In Review | acme/vitals#19606, acme/vitals#19676, acme/vitals#19689 | draft | pass:6 pend:0 fail:3 | approved:1 changes:0 | 0 |\n| VIT-27910 | In Progress | - | no_pr | - | - | - |\n| VIT-27911 | To Do | - | no_pr | - | - | - |\n| GUZ-901 | In Review | acme/vitals#20001 | unresolved_threads | pass:5 pend:0 fail:0 | approved:1 changes:0 | 2 |\n| GUZ-902 | In Progress | acme/vitals#19500 | merged | - | - | - |\n| GUZ-903 | Todo | - | no_pr | - | - | - |\n| GUZ-904 | Done | acme/vitals#20003 | awaiting_review | pass:1 pend:0 fail:0 | approved:0 changes:0 | 0 |\n\n## Flags\n- CI_FAIL acme/vitals#19606\n- CI_FAIL_INHERITED_FROM_STACK_BASE acme/vitals#19676\n- CI_FAIL_INHERITED_FROM_STACK_BASE acme/vitals#19689\n- UNRESOLVED_THREADS acme/vitals#20001\n- PR_NO_TICKET acme/vitals#20002\n- STALE acme/vitals#20002\n- MERGED_TICKET_OPEN GUZ-902\n- TICKET_NO_PR GUZ-903\n- TICKET_DONE_PR_OPEN GUZ-904\n- TICKET_REVIEW_PR_DRAFT VIT-27908\n- TICKET_NO_PR VIT-27910\n- STALE VIT-27910\n- TICKET_NO_PR VIT-27911\n\n## PRs without ticket\n- acme/vitals#20002 Drive-by typo fix\n"
+}

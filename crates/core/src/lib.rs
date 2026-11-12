@@ -101,6 +101,7 @@ pub mod queries;
 pub mod sandbox;
 pub mod ts_decl;
 pub mod upgrade;
+pub mod work_status;
 
 pub mod config;
 pub mod diagram_endpoint;

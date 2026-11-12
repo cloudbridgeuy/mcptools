@@ -45,7 +45,9 @@
       ],
       "inheritedFromStackParent": []
     },
-    "stage": "ci_failing"
+    "stage": "ci_failing",
+    "mergedAt": null,
+    "updatedAt": null
   },
   {
     "number": 2,
@@ -91,7 +93,9 @@
         "migrations-run"
       ]
     },
-    "stage": "ci_failing"
+    "stage": "ci_failing",
+    "mergedAt": null,
+    "updatedAt": null
   },
   {
     "number": 3,
@@ -137,7 +141,9 @@
         "migrations-run"
       ]
     },
-    "stage": "ci_failing"
+    "stage": "ci_failing",
+    "mergedAt": null,
+    "updatedAt": null
   },
   {
     "number": 4,
@@ -174,7 +180,9 @@
       "failing": [],
       "inheritedFromStackParent": []
     },
-    "stage": "draft"
+    "stage": "draft",
+    "mergedAt": null,
+    "updatedAt": null
   },
   {
     "number": 5,
@@ -218,7 +226,9 @@
       "failing": [],
       "inheritedFromStackParent": []
     },
-    "stage": "changes_requested"
+    "stage": "changes_requested",
+    "mergedAt": null,
+    "updatedAt": null
   },
   {
     "number": 6,
@@ -264,6 +274,8 @@
       "failing": [],
       "inheritedFromStackParent": []
     },
-    "stage": "approved"
+    "stage": "approved",
+    "mergedAt": null,
+    "updatedAt": null
   }
 ]

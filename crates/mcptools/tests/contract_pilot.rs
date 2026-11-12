@@ -181,6 +181,8 @@ fn mcp_contract_pilot() {
             "ui_annotations_get",
             "ui_annotations_list",
             "ui_annotations_resolve",
+            "work_status",
+            "work_status_snapshot_save",
         ]
     );
 }

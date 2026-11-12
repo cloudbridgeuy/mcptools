@@ -323,6 +323,8 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 | `confluence_page_create` | Create a page from storage XHTML; additive Write (`allowWrites` required) |
 | `confluence_page_update` | Update title and/or storage body with version increment; destructive Write (`allowWrites` required) |
 | `github_pr_view` | Read GitHub PR review, CI, and stack status |
+| `work_status` | Join tickets to PRs: stage, flags, Markdown, snapshot diff |
+| `work_status_snapshot_save` | Save a named work_status snapshot; Write (`allowWrites` required) |
 | `bitbucket_pr_list` | List Bitbucket PRs |
 | `bitbucket_pr_read` | Read PR details/diff |
 | `bitbucket_pr_create` | Create a Bitbucket PR |

@@ -212,6 +212,9 @@ pub fn merge(input: &[Pull], selected: &[u64]) -> Result<Vec<Value>, String> {
             .or_else(|| pull.pr.get("isDraft"))
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let timestamp = |keys: &[&str]| Some(string(&pull.pr, keys)).filter(|at| !at.is_empty());
+        let merged_at = timestamp(&["merged_at", "mergedAt"]);
+        let updated_at = timestamp(&["updated_at", "updatedAt"]);
         let mergeable = pull.pr.get("mergeable").and_then(Value::as_bool);
         let ready = mergeable == Some(true)
             && unresolved.is_empty()
@@ -224,7 +227,7 @@ pub fn merge(input: &[Pull], selected: &[u64]) -> Result<Vec<Value>, String> {
         if let Some(parent) = pull.parent {
             base["stackParent"] = json!(parent);
         }
-        output.push(json!({"number":number,"title":title,"url":pull.pr.get("html_url").or_else(|| pull.pr.get("url")),"state":pull.pr["state"],"isDraft":draft,"mergeable":mergeable,"head":{"branch":branch,"sha":pull.pr["head"]["sha"]},"base":base,"ticketKeys":ticket_keys,"reviews":{"latestByReviewer":review_values},"threads":{"total":threads.len(),"unresolved":unresolved.len(),"unresolvedIds":unresolved},"ci":{"summary":summary,"failing":failing,"inheritedFromStackParent":inherited},"stage":stage(draft,summary["fail"] != 0 || matches!(string(&pull.combined, &["state"]), "failure" | "error"),changes,approved,ready)}));
+        output.push(json!({"number":number,"title":title,"url":pull.pr.get("html_url").or_else(|| pull.pr.get("url")),"state":pull.pr["state"],"isDraft":draft,"mergedAt":merged_at,"updatedAt":updated_at,"mergeable":mergeable,"head":{"branch":branch,"sha":pull.pr["head"]["sha"]},"base":base,"ticketKeys":ticket_keys,"reviews":{"latestByReviewer":review_values},"threads":{"total":threads.len(),"unresolved":unresolved.len(),"unresolvedIds":unresolved},"ci":{"summary":summary,"failing":failing,"inheritedFromStackParent":inherited},"stage":stage(draft,summary["fail"] != 0 || matches!(string(&pull.combined, &["state"]), "failure" | "error"),changes,approved,ready)}));
     }
     Ok(output)
 }
@@ -446,6 +449,36 @@ mod tests {
             pull.statuses.reverse();
         }
         assert_eq!(merge(&input, &[6, 5, 4, 3, 2, 1]).unwrap(), expected);
+    }
+
+    #[test]
+    fn merged_at_is_set_only_when_github_reports_it() {
+        let pull = |extra: Value| {
+            let mut pr = json!({"number":1,"title":"FAKE-1","state":"closed","head":{"ref":"branch","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"base":{"ref":"main"}});
+            pr.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            Pull {
+                pr,
+                reviews: vec![],
+                threads: vec![],
+                checks: vec![],
+                statuses: vec![],
+                combined: json!({}),
+                parent: None,
+            }
+        };
+        let closed = merge(&[pull(json!({}))], &[1]).unwrap();
+        assert_eq!(closed[0]["mergedAt"], Value::Null);
+        let merged = merge(
+            &[pull(
+                json!({"merged_at":"2026-11-07T15:00:00Z","updated_at":"2026-11-08T00:00:00Z"}),
+            )],
+            &[1],
+        )
+        .unwrap();
+        assert_eq!(merged[0]["mergedAt"], "2026-11-07T15:00:00Z");
+        assert_eq!(merged[0]["updatedAt"], "2026-11-08T00:00:00Z");
     }
 
     #[test]

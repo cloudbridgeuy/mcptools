@@ -13,7 +13,7 @@ pub struct Args {
 }
 
 pub fn output_schema() -> Value {
-    json!({"type":"object","required":["pullRequests"],"properties":{"pullRequests":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["number","title","url","state","isDraft","mergeable","head","base","ticketKeys","reviews","threads","ci","stage"],"properties":{
+    let mut schema = json!({"type":"object","required":["pullRequests"],"properties":{"pullRequests":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["number","title","url","state","isDraft","mergeable","head","base","ticketKeys","reviews","threads","ci","stage"],"properties":{
         "number":{"type":"integer"},"title":{"type":"string"},"url":{"type":["string","null"]},"state":{"type":"string"},"isDraft":{"type":"boolean"},"mergeable":{"type":["boolean","null"]},
         "head":{"type":"object","required":["branch","sha"],"properties":{"branch":{"type":"string"},"sha":{"type":"string"}}},
         "base":{"type":"object","required":["branch"],"properties":{"branch":{"type":"string"},"stackParent":{"type":"integer"}}},
@@ -22,7 +22,16 @@ pub fn output_schema() -> Value {
         "threads":{"type":"object","required":["total","unresolved","unresolvedIds"],"properties":{"total":{"type":"integer"},"unresolved":{"type":"integer"},"unresolvedIds":{"type":"array","items":{"type":"string"}}}},
         "ci":{"type":"object","required":["summary","failing","inheritedFromStackParent"],"properties":{"summary":{"type":"object","required":["pass","pending","fail","skipped"],"properties":{"pass":{"type":"integer"},"pending":{"type":"integer"},"fail":{"type":"integer"},"skipped":{"type":"integer"}}},"failing":{"type":"array","items":{"type":"object","required":["name","source","url"],"properties":{"name":{"type":"string"},"source":{"enum":["check_run","status"]},"url":{"type":["string","null"]}}}},"inheritedFromStackParent":{"type":"array","items":{"type":"string"}}}},
         "stage":{"enum":["draft","awaiting_review","changes_requested","approved","ci_failing","mergeable"]}
-    }}}}})
+    }}}}});
+    let item = &mut schema["properties"]["pullRequests"]["items"];
+    for field in ["mergedAt", "updatedAt"] {
+        item["required"]
+            .as_array_mut()
+            .expect("required list")
+            .push(json!(field));
+        item["properties"][field] = json!({"type":["string","null"]});
+    }
+    schema
 }
 
 fn error(message: impl ToString) -> JsonRpcError {

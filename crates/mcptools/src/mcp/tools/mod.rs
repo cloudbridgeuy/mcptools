@@ -14,6 +14,7 @@ mod md;
 mod pdf;
 mod plan;
 pub mod schema;
+mod work_status;
 
 #[cfg(test)]
 mod conformance_tests;
@@ -568,6 +569,24 @@ pub fn builtin_tools() -> Vec<Tool> {
             input_schema: schema::input_schema_for::<atlassian::JiraQueryLoadArgs>(),
             summary: "Show the JQL text of a saved Jira query",
             kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<mcptools_core::work_status::Report>(),
+            name: "work_status".to_string(),
+            description: "Join Linear and Jira tickets to GitHub pull requests into one deterministic status report. Reuses linear_status_list, jira_status_list and github_pr_view. sources lists linear.teams, jira.projects and github.repos; github.author also lists that author's open PRs, otherwise only PRs referenced by tickets (and their stack) are found. Returns items (one per ticket with PRs and a stage), orphanPrs, flags, sourceErrors (failed sources, report still renders), markdown, and changes when snapshot names a saved snapshot. A PR is merged only with a mergedAt time. staleDays defaults to 7; asOf (YYYY-MM-DD) pins the clock; includeClosed also lists done tickets. format markdown puts the table in the text content. Requires the credentials of each queried source.".to_string(),
+            input_schema: schema::input_schema_for::<work_status::Args>(),
+            summary: "Report tickets joined to PRs with stage, flags and snapshot diff",
+            kind: ToolKind::Read,
+            destructive: false,
+        },
+        Tool {
+            output_schema: schema::output_schema_for::<work_status::SnapshotSaveOutput>(),
+            name: "work_status_snapshot_save".to_string(),
+            description: "Build the work_status report and save its item stages and flags as a named snapshot under the mcptools state directory (work-status/). name is 1-64 characters of A-Z, a-z, 0-9, _ or -; paths are rejected. Overwrites a snapshot of the same name. Pass the name as snapshot to work_status to see changes.".to_string(),
+            input_schema: schema::input_schema_for::<work_status::SnapshotSaveArgs>(),
+            summary: "Save a named work_status snapshot",
+            kind: ToolKind::Write,
             destructive: false,
         },
         Tool {
@@ -1461,6 +1480,10 @@ pub fn dispatch_tool_call(
             "plan_diff" => plan::handle_plan_diff(params.arguments).await,
             "plan_png" => plan::handle_plan_png(params.arguments).await,
             "github_pr_view" => github::view(params.arguments).await,
+            "work_status" => work_status::handle_work_status(params.arguments, global).await,
+            "work_status_snapshot_save" => {
+                work_status::handle_work_status_snapshot_save(params.arguments, global).await
+            }
             "http_request" => http_request::request(params.arguments).await,
             "file_stat" => http_request::stat(params.arguments).await,
             "lane_list" => lane::list(params.arguments).await,
@@ -1764,7 +1787,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 114);
+        assert_eq!(catalog.len(), 116);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1806,7 +1829,8 @@ mod catalog_tests {
                 "md",
                 "pdf",
                 "plan",
-                "ui"
+                "ui",
+                "work"
             ])
         );
     }
@@ -1833,7 +1857,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 117);
+        assert_eq!(super::registered_tools().len(), 119);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1908,7 +1932,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 117);
+        assert_eq!(names(serve_flags(false)).len(), 119);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -2037,7 +2061,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 117);
+        assert_eq!(tools.len(), 119);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -2121,6 +2145,7 @@ mod catalog_tests {
             "linear_relation_remove",
             "ui_annotations_resolve",
             "ui_annotations_clear",
+            "work_status_snapshot_save",
             "execute",
             "call_tool",
         ]
@@ -2156,6 +2181,7 @@ mod catalog_tests {
             "jira_query_list",
             "jira_query_load",
             "github_pr_view",
+            "work_status",
             "bitbucket_pr_list",
             "bitbucket_pr_read",
             "bitbucket_pr_comment_list",
@@ -2199,7 +2225,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 117);
+        assert_eq!(union.len(), 119);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

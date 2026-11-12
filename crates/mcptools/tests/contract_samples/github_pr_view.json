@@ -6,6 +6,8 @@
       "url": "https://example.invalid/pr/2",
       "state": "open",
       "isDraft": false,
+      "mergedAt": "2026-01-03T00:00:00Z",
+      "updatedAt": "2026-01-02T00:00:00Z",
       "mergeable": true,
       "head": {
         "branch": "fake-2",

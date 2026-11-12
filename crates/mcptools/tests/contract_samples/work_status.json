@@ -1,0 +1,107 @@
+{
+  "items": [
+    {
+      "source": "linear",
+      "key": "GUZ-1",
+      "url": "https://linear.app/x/issue/GUZ-1",
+      "title": "Add thing",
+      "status": "In Review",
+      "stage": "ci_failing",
+      "prs": [
+        {
+          "repo": "org/repo",
+          "number": 42,
+          "title": "GUZ-1 add thing",
+          "url": "https://github.com/org/repo/pull/42",
+          "state": "open",
+          "isDraft": false,
+          "stage": "ci_failing",
+          "ci": {
+            "pass": 2,
+            "pending": 0,
+            "fail": 1,
+            "skipped": 0
+          },
+          "reviews": {
+            "approved": 1,
+            "changesRequested": 0
+          },
+          "threadsUnresolved": 1,
+          "inheritedCiFailures": [
+            "migrations-run"
+          ],
+          "stackParent": 41,
+          "updatedAt": "2026-11-09T10:00:00Z",
+          "flags": [
+            "CI_FAIL_INHERITED_FROM_STACK_BASE",
+            "UNRESOLVED_THREADS"
+          ]
+        }
+      ],
+      "flags": [
+        "CI_FAIL_INHERITED_FROM_STACK_BASE",
+        "UNRESOLVED_THREADS"
+      ]
+    }
+  ],
+  "orphanPrs": [
+    {
+      "repo": "org/repo",
+      "number": 43,
+      "title": "GUZ-1 add thing",
+      "url": "https://github.com/org/repo/pull/42",
+      "state": "open",
+      "isDraft": false,
+      "stage": "ci_failing",
+      "ci": {
+        "pass": 2,
+        "pending": 0,
+        "fail": 1,
+        "skipped": 0
+      },
+      "reviews": {
+        "approved": 1,
+        "changesRequested": 0
+      },
+      "threadsUnresolved": 1,
+      "inheritedCiFailures": [
+        "migrations-run"
+      ],
+      "stackParent": 41,
+      "updatedAt": "2026-11-09T10:00:00Z",
+      "flags": [
+        "PR_NO_TICKET"
+      ]
+    }
+  ],
+  "flags": [
+    {
+      "code": "TICKET_NO_PR",
+      "ticket": "GUZ-2",
+      "pr": "org/repo#43"
+    }
+  ],
+  "sourceErrors": [
+    {
+      "source": "jira",
+      "scope": "ENG",
+      "message": "401 unauthorized"
+    }
+  ],
+  "markdown": "| Ticket | Status | PR(s) | Stage | CI | Reviews | Threads |\n|---|---|---|---|---|---|---|\n",
+  "changes": [
+    {
+      "kind": "changed",
+      "source": "linear",
+      "key": "GUZ-1",
+      "stageFrom": "draft",
+      "stageTo": "ci_failing",
+      "flagsAdded": [
+        "CI_FAIL"
+      ],
+      "flagsRemoved": [
+        "STALE"
+      ]
+    }
+  ]
+}

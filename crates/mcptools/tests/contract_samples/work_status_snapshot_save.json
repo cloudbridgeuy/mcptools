@@ -1,0 +1,12 @@
+{
+  "name": "daily",
+  "path": "/state/work-status/daily.json",
+  "items": 3,
+  "sourceErrors": [
+    {
+      "source": "github",
+      "scope": "org/repo",
+      "message": "missing scope"
+    }
+  ]
+}

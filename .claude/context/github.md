@@ -7,3 +7,5 @@ Configure a read-only GitHub MCP gateway with `pull_request_read`, `list_pull_re
 Stage precedence is `draft`, `ci_failing`, `changes_requested`, `mergeable`, `approved`, then `awaiting_review`. Mergeable requires approval, a known mergeable state, no unresolved threads, and complete CI. Unknown mergeability is `null`.
 
 The tool fetches reviews, threads, checks, combined commit status, and up to 100 detailed commit statuses per pull request, including ancestors outside the requested set. It fails if more than 100 statuses exist. Stack parents require one cached pull request search per base branch. No configuration is changed.
+
+Each record also carries `mergedAt` and `updatedAt` (RFC 3339 or `null`), taken from GitHub's `merged_at` and `updated_at`. A closed pull request without `mergedAt` was not merged.
