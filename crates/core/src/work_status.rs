@@ -870,3 +870,131 @@ pub fn build_report(input: ReportInput) -> Report {
     report.markdown = render(&report);
     report
 }
+
+pub fn author_search_args(author: &str, page: u32) -> Result<serde_json::Value, String> {
+    let valid = !author.is_empty()
+        && author
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    if !valid {
+        return Err(format!("invalid GitHub author: {author:?}"));
+    }
+    Ok(serde_json::json!({
+        "query": format!("is:pr is:open author:{author}"),
+        "perPage": 100,
+        "page": page,
+    }))
+}
+
+fn repo_of_search_item(item: &serde_json::Value) -> Option<String> {
+    let segments = |url: &str, marker: &str, skip: usize| -> Option<String> {
+        let rest = url.split_once(marker)?.1;
+        let mut parts = rest.split('/').skip(skip);
+        let (owner, name) = (parts.next()?, parts.next()?);
+        (!owner.is_empty() && !name.is_empty()).then(|| format!("{owner}/{name}"))
+    };
+    item["repository_url"]
+        .as_str()
+        .and_then(|url| segments(url, "/repos/", 0))
+        .or_else(|| {
+            item["html_url"]
+                .as_str()
+                .and_then(|url| segments(url, "://", 1))
+        })
+}
+
+pub fn pr_keys_from_search(items: &[serde_json::Value]) -> Result<Vec<PrKey>, String> {
+    items
+        .iter()
+        .map(|item| {
+            let number = item["number"]
+                .as_u64()
+                .filter(|number| *number > 0)
+                .ok_or("Invalid GitHub search result number")?;
+            let repo =
+                repo_of_search_item(item).ok_or("Invalid GitHub search result repository")?;
+            Ok(PrKey { repo, number })
+        })
+        .collect::<Result<BTreeSet<_>, String>>()
+        .map(|keys| keys.into_iter().collect())
+}
+
+pub fn view_requests(keys: &[PrKey]) -> Vec<(String, serde_json::Value)> {
+    let mut grouped: BTreeMap<&str, Vec<u64>> = BTreeMap::new();
+    for key in keys {
+        grouped.entry(&key.repo).or_default().push(key.number);
+    }
+    grouped
+        .into_iter()
+        .map(|(repo, numbers)| {
+            (
+                repo.to_owned(),
+                serde_json::json!({"repo": repo, "numbers": numbers}),
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod author_search_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn search_args_query_every_repo_for_the_authors_open_prs() {
+        let args = author_search_args("guzmonne", 2).unwrap();
+        assert_eq!(args["query"], "is:pr is:open author:guzmonne");
+        assert_eq!(args["perPage"], 100);
+        assert_eq!(args["page"], 2);
+        assert!(args.get("owner").is_none());
+        assert!(args.get("repo").is_none());
+    }
+
+    #[test]
+    fn search_args_reject_authors_that_could_alter_the_query() {
+        assert!(author_search_args("a b", 1).is_err());
+        assert!(author_search_args("a repo:x/y", 1).is_err());
+        assert!(author_search_args("", 1).is_err());
+    }
+
+    #[test]
+    fn search_results_become_sorted_unique_keys_across_repos() {
+        let items = [
+            json!({"number":9,"repository_url":"https://api.github.com/repos/acme/zeta"}),
+            json!({"number":3,"repository_url":"https://api.github.com/repos/acme/alpha"}),
+            json!({"number":3,"repository_url":"https://api.github.com/repos/acme/alpha"}),
+            json!({"number":5,"html_url":"https://github.com/other/beta/pull/5"}),
+        ];
+        let keys = pr_keys_from_search(&items).unwrap();
+        let shown: Vec<(&str, u64)> = keys.iter().map(|k| (k.repo.as_str(), k.number)).collect();
+        assert_eq!(
+            shown,
+            [("acme/alpha", 3), ("acme/zeta", 9), ("other/beta", 5)]
+        );
+    }
+
+    #[test]
+    fn search_results_without_a_repo_or_number_are_errors() {
+        assert!(pr_keys_from_search(&[json!({"number":1})]).is_err());
+        assert!(pr_keys_from_search(&[
+            json!({"repository_url":"https://api.github.com/repos/a/b"})
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn view_requests_group_numbers_per_repo() {
+        let key = |repo: &str, number| PrKey {
+            repo: repo.into(),
+            number,
+        };
+        let requests = view_requests(&[key("a/x", 1), key("a/x", 2), key("b/y", 7)]);
+        assert_eq!(
+            requests,
+            [
+                ("a/x".to_owned(), json!({"repo":"a/x","numbers":[1,2]})),
+                ("b/y".to_owned(), json!({"repo":"b/y","numbers":[7]})),
+            ]
+        );
+    }
+}

@@ -1,8 +1,11 @@
 use super::{atlassian, github, linear, JsonRpcError};
+use mcptools_core::github as core_github;
+use mcptools_core::work_status::pr_keys_from_search;
 use mcptools_core::work_status::NaiveDate;
 use mcptools_core::work_status::{
-    as_of_from_unix_secs, build_report, jira_ticket, linear_ticket, parse_as_of, snapshot_of,
-    GithubPr, PrInput, Report, ReportInput, Snapshot, SnapshotName, SourceError, TicketInput,
+    as_of_from_unix_secs, author_search_args, build_report, jira_ticket, linear_ticket,
+    parse_as_of, snapshot_of, view_requests, GithubPr, PrInput, PrKey, Report, ReportInput,
+    Snapshot, SnapshotName, SourceError, TicketInput,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -10,6 +13,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_STALE_DAYS: i64 = 7;
+const MAX_SEARCH_PAGES: u32 = 100;
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -187,6 +191,10 @@ async fn fetch_prs(request: Value) -> Result<Vec<GithubPr>, JsonRpcError> {
     serde_json::from_value(output["pullRequests"].clone()).map_err(internal)
 }
 
+async fn search_prs(args: Value) -> Result<Value, JsonRpcError> {
+    github::search(args).await
+}
+
 async fn collect(query: &Query, global: &crate::Global) -> Collected {
     let person = query.person.as_deref().unwrap_or("me");
     let open = !query.include_closed.unwrap_or(false);
@@ -217,26 +225,79 @@ async fn collect(query: &Query, global: &crate::Global) -> Collected {
             .filter(|r| &r.repo == repo)
             .map(|r| r.number)
             .collect();
-        let mut requests = Vec::new();
-        if !linked.is_empty() {
-            requests.push(json!({"repo":repo,"numbers":linked}));
+        if linked.is_empty() {
+            continue;
         }
-        if let Some(author) = &query.sources.github.author {
-            requests.push(json!({"repo":repo,"author":author}));
+        match fetch_prs(json!({"repo":repo,"numbers":linked})).await {
+            Ok(records) => collected
+                .prs
+                .extend(records.into_iter().map(|record| PrInput {
+                    repo: repo.clone(),
+                    record,
+                })),
+            Err(error) => collected.errors.push(source_error("github", repo, &error)),
         }
-        for request in requests {
-            match fetch_prs(request).await {
-                Ok(records) => collected
-                    .prs
-                    .extend(records.into_iter().map(|record| PrInput {
+    }
+    if let Some(author) = &query.sources.github.author {
+        let (prs, errors) = collect_author_prs(author, search_prs, fetch_prs).await;
+        for pr in prs {
+            let known = collected
+                .prs
+                .iter()
+                .any(|p| p.repo == pr.repo && p.record.number == pr.record.number);
+            if !known {
+                collected.prs.push(pr);
+            }
+        }
+        collected.errors.extend(errors);
+    }
+    collected
+}
+
+async fn search_author_keys<S>(author: &str, search: &S) -> Result<Vec<PrKey>, JsonRpcError>
+where
+    S: AsyncFn(Value) -> Result<Value, JsonRpcError>,
+{
+    let mut items: Vec<Value> = Vec::new();
+    for page in 1..=MAX_SEARCH_PAGES {
+        let response = search(author_search_args(author, page).map_err(invalid)?).await?;
+        let batch = core_github::page_items("search_pull_requests", &response).map_err(internal)?;
+        let count = batch.len();
+        items.extend(batch.iter().cloned());
+        if core_github::page_complete(&response, count, items.len()) {
+            return pr_keys_from_search(&items).map_err(internal);
+        }
+    }
+    Err(internal("GitHub author search exceeded 100 pages"))
+}
+
+async fn collect_author_prs<S, V>(
+    author: &str,
+    search: S,
+    view: V,
+) -> (Vec<PrInput>, Vec<SourceError>)
+where
+    S: AsyncFn(Value) -> Result<Value, JsonRpcError>,
+    V: AsyncFn(Value) -> Result<Vec<GithubPr>, JsonRpcError>,
+{
+    let scope = format!("author:{author}");
+    let mut prs = Vec::new();
+    let mut errors = Vec::new();
+    match search_author_keys(author, &search).await {
+        Err(error) => errors.push(source_error("github", &scope, &error)),
+        Ok(keys) => {
+            for (repo, request) in view_requests(&keys) {
+                match view(request).await {
+                    Ok(records) => prs.extend(records.into_iter().map(|record| PrInput {
                         repo: repo.clone(),
                         record,
                     })),
-                Err(error) => collected.errors.push(source_error("github", repo, &error)),
+                    Err(error) => errors.push(source_error("github", &scope, &error)),
+                }
             }
         }
     }
-    collected
+    (prs, errors)
 }
 
 fn as_of(query: &Query) -> Result<NaiveDate, JsonRpcError> {
@@ -328,6 +389,68 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    fn fake_pr(number: u64) -> GithubPr {
+        serde_json::from_value(json!({"number":number,"title":format!("T-{number}"),"url":null,"state":"open","isDraft":false}))
+            .unwrap()
+    }
+
+    fn search_page(items: &[(&str, u64)]) -> Value {
+        let items: Vec<Value> = items
+            .iter()
+            .map(|(repo, n)| json!({"number":n,"repository_url":format!("https://api.github.com/repos/{repo}")}))
+            .collect();
+        json!({"total_count":items.len(),"items":items})
+    }
+
+    #[tokio::test]
+    async fn author_without_repos_gets_prs_from_several_repos() {
+        let search = async |args: Value| -> Result<Value, JsonRpcError> {
+            assert_eq!(args["query"], "is:pr is:open author:ada");
+            Ok(search_page(&[
+                ("acme/a", 1),
+                ("acme/b", 2),
+                ("acme/b", 3),
+                ("zed/c", 4),
+            ]))
+        };
+        let view = async |args: Value| -> Result<Vec<GithubPr>, JsonRpcError> {
+            let numbers = args["numbers"].as_array().unwrap();
+            Ok(numbers
+                .iter()
+                .map(|n| fake_pr(n.as_u64().unwrap()))
+                .collect())
+        };
+        let (prs, errors) = collect_author_prs("ada", search, view).await;
+        let got: Vec<(String, u64)> = prs
+            .iter()
+            .map(|p| (p.repo.clone(), p.record.number))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("acme/a".to_owned(), 1),
+                ("acme/b".to_owned(), 2),
+                ("acme/b".to_owned(), 3),
+                ("zed/c".to_owned(), 4)
+            ]
+        );
+        assert!(errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn author_search_failure_becomes_a_source_error_naming_the_author() {
+        let search = async |_: Value| -> Result<Value, JsonRpcError> {
+            Err(internal("tool search_pull_requests not found"))
+        };
+        let view = async |_: Value| -> Result<Vec<GithubPr>, JsonRpcError> { Ok(Vec::new()) };
+        let (prs, errors) = collect_author_prs("ada", search, view).await;
+        assert!(prs.is_empty());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].source, "github");
+        assert_eq!(errors[0].scope.as_deref(), Some("author:ada"));
+        assert!(errors[0].message.contains("search_pull_requests"));
     }
 
     #[test]

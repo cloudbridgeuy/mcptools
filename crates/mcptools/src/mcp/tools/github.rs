@@ -49,6 +49,10 @@ async fn call(name: &str, args: Value) -> Result<Value, JsonRpcError> {
     github::unwrap_response(raw).map_err(error)
 }
 
+pub async fn search(args: Value) -> Result<Value, JsonRpcError> {
+    call("search_pull_requests", args).await
+}
+
 async fn page(
     method: &str,
     owner: &str,

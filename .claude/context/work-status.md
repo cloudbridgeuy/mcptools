@@ -9,7 +9,7 @@
 ```
 
 - An empty or missing source list skips that source.
-- `person` is the Linear and Jira assignee (default `me`). `github.author` is a GitHub login; without it only PRs referenced by tickets are fetched (plus stack ancestors that `github_pr_view` already walks).
+- `person` is the Linear and Jira assignee (default `me`). `github.author` is a GitHub login. It searches that author's open PRs across all of GitHub with the upstream `search_pull_requests` tool (`is:pr is:open author:<login>`), independent of `repos`, then fetches each PR's details like `github_pr_view`. `repos` only scope the PRs that tickets reference (plus stack ancestors that `github_pr_view` already walks). Without `author`, only ticket-referenced PRs are fetched.
 - `includeClosed` also lists done tickets, which `TICKET_DONE_PR_OPEN` needs.
 - `asOf` (`YYYY-MM-DD`) pins the clock for `STALE`; default is today (UTC).
 - `format: "markdown"` puts the table in the text content; `structuredContent` is always the full report.
@@ -32,7 +32,7 @@ Per open PR: `draft`, `ci_failing`, `changes_requested`, `ci_pending`, `unresolv
 
 ## Partial failure
 
-A failing source (auth, scope, network) adds `{source, scope, message}` to `sourceErrors[]` and the report still renders.
+A failing source (auth, scope, network) adds `{source, scope, message}` to `sourceErrors[]` and the report still renders. A failed author search or author PR fetch uses scope `author:<login>`, so the author is never dropped silently.
 
 ## Snapshots
 
