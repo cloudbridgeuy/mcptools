@@ -198,3 +198,29 @@ fn status_request_accepts_valid_inputs() {
     assert_eq!(variables["filter"]["team"]["key"]["eq"], "GUZ");
     assert_eq!(variables["filter"]["project"]["name"]["eq"], "MCPTools");
 }
+
+#[test]
+fn status_request_input_errors_are_not_response_parse_errors() {
+    for message in [
+        request_error("any", None, None),
+        request_error("", None, None),
+        request_error("me", Some(" "), None),
+        request_error("me", None, Some(" ")),
+    ] {
+        assert!(
+            !message.contains("Failed to parse Linear response"),
+            "{message}"
+        );
+        assert!(message.starts_with("Invalid input: "), "{message}");
+    }
+}
+
+#[test]
+fn status_response_errors_still_say_parse() {
+    let page = status_page(json!({"issues": {"nodes": []}})).unwrap_err();
+    assert!(page.to_string().contains("Failed to parse Linear response"));
+    let records = status_records(json!([{"identifier": 1}])).unwrap_err();
+    assert!(records
+        .to_string()
+        .contains("Failed to parse Linear response"));
+}

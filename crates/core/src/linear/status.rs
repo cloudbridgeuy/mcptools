@@ -121,18 +121,22 @@ pub fn status_request(
 ) -> Result<(&'static str, serde_json::Value), LinearError> {
     let assignee = assignee.trim();
     if assignee.is_empty() {
-        return Err(LinearError::Parse("assignee must not be empty".into()));
+        return Err(LinearError::InvalidInput(
+            "assignee must not be empty".into(),
+        ));
     }
     if !assignee.eq_ignore_ascii_case("me") && !super::is_uuid(assignee) {
-        return Err(LinearError::Parse(format!(
+        return Err(LinearError::InvalidInput(format!(
             "assignee must be \"me\" or a Linear user UUID, got \"{assignee}\""
         )));
     }
     if team.is_some_and(|v| v.trim().is_empty()) {
-        return Err(LinearError::Parse("team must not be empty".into()));
+        return Err(LinearError::InvalidInput("team must not be empty".into()));
     }
     if project.is_some_and(|v| v.trim().is_empty()) {
-        return Err(LinearError::Parse("project must not be empty".into()));
+        return Err(LinearError::InvalidInput(
+            "project must not be empty".into(),
+        ));
     }
     let (_, mut variables) = issues_list_request(&IssueListFilter::default(), None, 5, cursor)?;
     let filter = variables["filter"]

@@ -1316,6 +1316,8 @@ pub enum LinearError {
     Http(u16, String),
     #[error("Failed to parse Linear response: {0}")]
     Parse(String),
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
     #[error("Linear GraphQL error: {0}")]
     GraphQl(String),
     #[error("Linear GraphQL error: {errors}; partial data: {data}")]
