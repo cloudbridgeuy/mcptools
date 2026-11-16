@@ -1,5 +1,6 @@
 mod http;
 mod oauth;
+mod status;
 
 #[cfg(test)]
 mod github_tests;

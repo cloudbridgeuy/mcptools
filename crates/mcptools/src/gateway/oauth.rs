@@ -1,6 +1,7 @@
 use crate::prelude::*;
 use mcptools_core::{
     gateway::Upstream,
+    gateway_status::Credential,
     oauth::{self, Tokens},
 };
 use rand::RngCore;
@@ -18,17 +19,38 @@ pub struct App {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
-    Login { name: String },
-    Logout { name: String },
+    Login {
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        name: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    Logout {
+        name: String,
+    },
+    Status {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        offline: bool,
+    },
 }
 
 pub async fn run(app: App) -> Result<()> {
-    let (name, login) = match app.command {
-        Command::Login { name } => (name, true),
-        Command::Logout { name } => (name, false),
-    };
     let config =
         crate::config::optional()?.ok_or_else(|| eyre!("Missing gateway configuration"))?;
+    let (name, login) = match app.command {
+        Command::Login { name: None, .. } => {
+            return super::status::login_all(&config.gateway).await
+        }
+        Command::Login {
+            name: Some(name), ..
+        } => (name, true),
+        Command::Logout { name } => (name, false),
+        Command::Status { json, offline } => {
+            return super::status::report(&config.gateway, json, offline).await
+        }
+    };
     let upstream = config
         .gateway
         .upstreams
@@ -109,12 +131,33 @@ fn save(upstream: &Upstream, tokens: &Tokens) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
+pub struct LoginRequired(String);
+
+impl std::fmt::Display for LoginRequired {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "OAuth authentication failed for {0}; run mcptools gateway login {0}",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for LoginRequired {}
+
 pub fn login_error(upstream: &Upstream) -> color_eyre::eyre::Report {
-    eyre!(
-        "OAuth authentication failed for {}; run mcptools gateway login {}",
-        upstream.prefix,
-        upstream.prefix
-    )
+    color_eyre::eyre::Report::new(LoginRequired(upstream.prefix.clone()))
+}
+
+pub(super) fn credential(upstream: &Upstream) -> Credential {
+    load(upstream).map_or(Credential::Missing, |tokens| Credential::Valid {
+        expires_at: tokens.expires_at,
+        refreshable: tokens
+            .refresh_token
+            .as_deref()
+            .is_some_and(|token| !token.is_empty()),
+    })
 }
 
 pub(super) fn now() -> u64 {
@@ -163,7 +206,7 @@ fn random() -> String {
     oauth::verifier(&bytes)
 }
 
-async fn login_upstream(upstream: &Upstream) -> Result<()> {
+pub(super) async fn login_upstream(upstream: &Upstream) -> Result<()> {
     let configured_secret = resolve_client_secret(upstream)?;
     let client = client()?;
     let resource = upstream

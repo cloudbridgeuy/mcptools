@@ -1,8 +1,26 @@
 use crate::prelude::*;
 use mcptools_core::gateway::{self, HttpResponseType, Upstream};
+use mcptools_core::gateway_status;
 use mcptools_core::oauth::{self, RefreshAction};
 use serde_json::{json, Value};
 use std::time::Duration;
+
+#[derive(Debug)]
+pub struct Rejected {
+    prefix: String,
+    pub status: u16,
+    pub reason: String,
+}
+
+impl std::fmt::Display for Rejected {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "Upstream {} HTTP {}", self.prefix, self.status)
+    }
+}
+
+impl std::error::Error for Rejected {}
+
+const REJECTION_BODY_LIMIT: usize = 8192;
 
 pub struct Client {
     http: reqwest::Client,
@@ -161,7 +179,23 @@ impl Client {
         }
         let status = response.status();
         if !status.is_success() {
-            return Err(eyre!("Upstream {} HTTP {}", self.prefix, status.as_u16()));
+            let mut body = Vec::new();
+            while body.len() < REJECTION_BODY_LIMIT {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+                    _ => break,
+                }
+            }
+            body.truncate(REJECTION_BODY_LIMIT);
+            return Err(color_eyre::eyre::Report::new(Rejected {
+                prefix: self.prefix.clone(),
+                status: status.as_u16(),
+                reason: gateway_status::safe_reason(
+                    status.as_u16(),
+                    &String::from_utf8_lossy(&body),
+                    &self.secrets,
+                ),
+            }));
         }
         if let Some(session) = gateway::http_session_header(
             message["method"].as_str().unwrap_or_default(),
