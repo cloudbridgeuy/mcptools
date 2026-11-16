@@ -913,7 +913,7 @@ pub fn builtin_tools() -> Vec<Tool> {
         Tool {
             output_schema: schema::output_schema_for::<mcptools_core::linear::StatusListOutput>(),
             name: "linear_status_list".to_string(),
-            description: "List all matching Linear issue status records, sorted by identifier. Assignee defaults to me, open defaults to true. Team is a key or UUID; project is a name or UUID. Requires LINEAR_API_KEY.".to_string(),
+            description: "List all matching Linear issue status records, sorted by identifier. Assignee is me or a user UUID and defaults to me; open defaults to true. Team is a key or UUID; project is a name or UUID. Requires LINEAR_API_KEY.".to_string(),
             input_schema: schema::input_schema_for::<crate::linear::args::StatusListArgs>(),
             summary: "List Linear issue status records",
             kind: ToolKind::Read,

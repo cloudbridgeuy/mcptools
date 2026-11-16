@@ -162,3 +162,39 @@ fn nested_metadata_is_complete_sorted_and_deduplicated() {
         serde_json::to_value(records).unwrap()
     );
 }
+
+fn request_error(assignee: &str, team: Option<&str>, project: Option<&str>) -> String {
+    status_request(assignee, team, project, true, None)
+        .unwrap_err()
+        .to_string()
+}
+
+#[test]
+fn status_request_rejects_unsupported_assignee_by_value() {
+    assert!(request_error("any", None, None)
+        .contains(r#"assignee must be "me" or a Linear user UUID, got "any""#));
+}
+
+#[test]
+fn status_request_rejects_empty_assignee() {
+    assert!(request_error("", None, None).contains("assignee must not be empty"));
+    assert!(request_error("  ", None, None).contains("assignee must not be empty"));
+}
+
+#[test]
+fn status_request_rejects_blank_team() {
+    assert!(request_error("me", Some(" "), None).contains("team must not be empty"));
+}
+
+#[test]
+fn status_request_rejects_blank_project() {
+    assert!(request_error("me", None, Some(" ")).contains("project must not be empty"));
+}
+
+#[test]
+fn status_request_accepts_valid_inputs() {
+    let (_, variables) = status_request("ME", Some("GUZ"), Some("MCPTools"), true, None).unwrap();
+    assert_eq!(variables["filter"]["assignee"]["isMe"]["eq"], true);
+    assert_eq!(variables["filter"]["team"]["key"]["eq"], "GUZ");
+    assert_eq!(variables["filter"]["project"]["name"]["eq"], "MCPTools");
+}
