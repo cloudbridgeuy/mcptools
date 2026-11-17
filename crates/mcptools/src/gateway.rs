@@ -1,9 +1,12 @@
 mod http;
+mod login;
 mod oauth;
 mod status;
 
 #[cfg(test)]
 mod github_tests;
+#[cfg(test)]
+mod login_tests;
 
 pub use oauth::{run, App};
 
@@ -12,7 +15,7 @@ use mcptools_core::gateway::{self, Cache, GatewayTool, StartupFailure, Upstream,
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, PoisonError, RwLock};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -36,9 +39,19 @@ fn upstream_timeout(config: &gateway::Config, upstream: &Upstream) -> Duration {
 }
 
 struct Gateway {
-    tools: Vec<GatewayTool>,
+    tools: RwLock<Vec<GatewayTool>>,
+    discovered: std::sync::Mutex<Vec<Vec<UpstreamTool>>>,
     config: gateway::Config,
     clients: Vec<Mutex<Option<Client>>>,
+}
+
+impl Gateway {
+    fn tools(&self) -> Vec<GatewayTool> {
+        self.tools
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
 }
 
 struct StdioClient {
@@ -51,8 +64,75 @@ struct StdioClient {
     next_id: u64,
 }
 
-pub fn tools() -> &'static [GatewayTool] {
-    GATEWAY.get().map_or(&[], |gateway| &gateway.tools)
+pub fn tools() -> Vec<GatewayTool> {
+    GATEWAY.get().map_or_else(Vec::new, Gateway::tools)
+}
+
+pub async fn status_rows(offline: bool) -> Vec<mcptools_core::gateway_status::Row> {
+    let Some(gateway) = GATEWAY.get() else {
+        return Vec::new();
+    };
+    login::overlay(status::collect(&gateway.config, !offline).await)
+}
+
+pub async fn login(name: &str) -> Result<mcptools_core::gateway_login::LoginOutput> {
+    login::start(name).await
+}
+
+async fn reconnect(name: &str) -> Result<()> {
+    let gateway = GATEWAY
+        .get()
+        .ok_or_else(|| eyre!("Gateway not initialized"))?;
+    let index = gateway
+        .config
+        .upstreams
+        .iter()
+        .position(|upstream| upstream.prefix == name)
+        .ok_or_else(|| eyre!("Unknown upstream"))?;
+    let upstream = &gateway.config.upstreams[index];
+    let mut slot = gateway.clients[index].lock().await;
+    if let Some(stale) = slot.take() {
+        stale.stop().await;
+    }
+    let mut client = tokio::time::timeout(request_timeout(), Client::start(upstream))
+        .await
+        .map_err(|_| eyre!("Upstream connection timed out"))??;
+    let tools = match tokio::time::timeout(request_timeout(), client.discover()).await {
+        Ok(Ok(tools)) => tools,
+        _ => {
+            client.stop().await;
+            return Err(eyre!("Upstream catalog fetch failed"));
+        }
+    };
+    let merged = {
+        let mut discovered = gateway
+            .discovered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let previous = std::mem::replace(&mut discovered[index], tools);
+        let merged = gateway::merge_tools(
+            &gateway.config,
+            &discovered,
+            crate::mcp::tools::reserved_names(),
+        );
+        if merged.is_err() {
+            discovered[index] = previous;
+        }
+        merged
+    };
+    let merged = match merged {
+        Ok(merged) => merged,
+        Err(error) => {
+            client.stop().await;
+            return Err(error.into());
+        }
+    };
+    *gateway
+        .tools
+        .write()
+        .unwrap_or_else(PoisonError::into_inner) = merged;
+    *slot = Some(client);
+    Ok(())
 }
 
 pub async fn initialize() -> Result<()> {
@@ -106,6 +186,10 @@ async fn initialize_from(path: &Path) -> Result<()> {
             }
         }
     }
+    let discovered: Vec<Vec<UpstreamTool>> = outcomes
+        .iter()
+        .map(|outcome| outcome.as_ref().map_or_else(|_| Vec::new(), Clone::clone))
+        .collect();
     let result = (|| -> Result<Vec<GatewayTool>> {
         let catalog =
             gateway::startup_catalog(&config, outcomes, crate::mcp::tools::reserved_names())?;
@@ -138,7 +222,8 @@ async fn initialize_from(path: &Path) -> Result<()> {
     };
     GATEWAY
         .set(Gateway {
-            tools,
+            tools: RwLock::new(tools),
+            discovered: std::sync::Mutex::new(discovered),
             config,
             clients,
         })
@@ -169,8 +254,8 @@ pub async fn call(name: &str, arguments: Option<Value>) -> Result<Value> {
         .get()
         .ok_or_else(|| eyre!("Gateway not initialized"))?;
     let tool = gateway
-        .tools
-        .iter()
+        .tools()
+        .into_iter()
         .find(|tool| tool.name == name)
         .ok_or_else(|| eyre!("Unknown upstream tool"))?;
     let arguments = arguments.unwrap_or_else(|| json!({}));
@@ -494,12 +579,12 @@ pub fn reap(args: ReaperArgs) -> Result<()> {
     Ok(())
 }
 
-fn github_tool(name: &str) -> Result<(&'static Gateway, &'static GatewayTool)> {
+fn github_tool(name: &str) -> Result<(&'static Gateway, GatewayTool)> {
     let gateway = GATEWAY
         .get()
         .ok_or_else(|| eyre!("Gateway not initialized"))?;
-    let mut roots = gateway
-        .tools
+    let tools = gateway.tools();
+    let mut roots = tools
         .iter()
         .filter(|tool| tool.original_name == "pull_request_read" && !tool.requires_writes);
     let root = roots
@@ -522,14 +607,13 @@ fn github_tool(name: &str) -> Result<(&'static Gateway, &'static GatewayTool)> {
             upstream.prefix
         ));
     }
-    let tool = gateway
-        .tools
+    let tool = tools
         .iter()
         .find(|tool| {
             tool.upstream == root.upstream && tool.original_name == name && !tool.requires_writes
         })
         .ok_or_else(|| eyre!("Missing read-only GitHub upstream tool {name}"))?;
-    Ok((gateway, tool))
+    Ok((gateway, tool.clone()))
 }
 
 pub async fn github_call(name: &str, arguments: Value) -> Result<Value> {

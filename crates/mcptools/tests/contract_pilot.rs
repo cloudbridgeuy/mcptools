@@ -90,6 +90,8 @@ fn mcp_contract_pilot() {
             "execute",
             "file_stat",
             "find_tools",
+            "gateway_login",
+            "gateway_status",
             "github_pr_view",
             "hn_list_items",
             "hn_read_item",

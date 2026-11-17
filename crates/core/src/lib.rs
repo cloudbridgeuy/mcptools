@@ -106,6 +106,7 @@ pub mod work_status;
 pub mod config;
 pub mod diagram_endpoint;
 pub mod gateway;
+pub mod gateway_login;
 pub mod gateway_status;
 pub mod github;
 

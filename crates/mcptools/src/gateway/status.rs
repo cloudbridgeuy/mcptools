@@ -38,7 +38,7 @@ async fn probe(upstream: &Upstream) -> Probe {
     }
 }
 
-async fn collect(config: &gateway::Config, live: bool) -> Vec<Row> {
+pub(super) async fn collect(config: &gateway::Config, live: bool) -> Vec<Row> {
     let now = oauth::now();
     let mut rows = Vec::new();
     for upstream in &config.upstreams {

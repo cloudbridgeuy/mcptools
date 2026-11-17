@@ -4,6 +4,7 @@ mod atlassian;
 mod call_tool;
 mod execute;
 pub mod find_tools;
+mod gateway;
 mod github;
 mod hn;
 mod http_request;
@@ -291,6 +292,24 @@ pub fn builtin_tools() -> Vec<Tool> {
             destructive: true,
             input_schema: schema::input_schema_for::<mcptools_core::lane::CreateArgs>(),
             output_schema: schema::output_schema_for::<mcptools_core::lane::CreateOutput>(),
+        },
+        Tool {
+            name: "gateway_status".into(),
+            description: "Report the state of each configured gateway upstream: name, transport, auth, state, reason. Live check by default; offline true reads only configuration and credential files. States: ok, expired, refreshable, not_logged_in, unreachable, failed, pending (an OAuth login is in progress). Never returns tokens, codes, secrets or header values.".into(),
+            summary: "List gateway upstream connection and login states",
+            kind: ToolKind::Read,
+            destructive: false,
+            input_schema: schema::input_schema_for::<mcptools_core::gateway_login::StatusArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::gateway_login::StatusOutput>(),
+        },
+        Tool {
+            name: "gateway_login".into(),
+            description: "Start the OAuth login for one configured OAuth gateway upstream and return at once with state pending and the authorization url; the browser is opened too. The callback listener keeps running in the background for 180 seconds. A repeat call while pending returns the same login. After the callback succeeds the upstream reconnects inside this server and its tools become available without a restart. Poll gateway_status for pending, ok or failed. Requires allowWrites. The url is untrusted-initiated: approve only logins you asked for.".into(),
+            summary: "Start OAuth login for a gateway upstream",
+            kind: ToolKind::Write,
+            destructive: false,
+            input_schema: schema::input_schema_for::<mcptools_core::gateway_login::LoginArgs>(),
+            output_schema: schema::output_schema_for::<mcptools_core::gateway_login::LoginOutput>(),
         },
         Tool {
             output_schema: schema::projected_output_schema_for::<mcptools_core::atlassian::jira::SearchOutput>(),
@@ -1359,7 +1378,7 @@ pub fn tool_catalog() -> Vec<mcptools_core::catalog::CatalogEntry> {
                 .filter(|tool| !is_meta_tool(&tool.name))
                 .map(|tool| (tool.name.as_str(), tool.summary)),
         ),
-        crate::gateway::tools(),
+        &crate::gateway::tools(),
     )
 }
 
@@ -1490,6 +1509,8 @@ pub fn dispatch_tool_call(
             "lane_cleanup_plan" => lane::cleanup_plan(params.arguments).await,
             "lane_cleanup_apply" => lane::cleanup_apply(params.arguments).await,
             "lane_create" => lane::create(params.arguments).await,
+            "gateway_status" => gateway::status(params.arguments).await,
+            "gateway_login" => gateway::login(params.arguments).await,
             "jira_status_list" => {
                 atlassian::handle_jira_status_list(params.arguments, global).await
             }
@@ -1787,7 +1808,7 @@ mod catalog_tests {
         let catalog = super::tool_catalog();
         let registered = super::registered_tools();
         assert_eq!(catalog.len() + 3, registered.len());
-        assert_eq!(catalog.len(), 116);
+        assert_eq!(catalog.len(), 118);
         let catalog_names: BTreeSet<String> = catalog.into_iter().map(|entry| entry.name).collect();
         let registry_names: BTreeSet<String> = registered
             .into_iter()
@@ -1819,6 +1840,7 @@ mod catalog_tests {
                 "bitbucket",
                 "confluence",
                 "file",
+                "gateway",
                 "github",
                 "hn",
                 "http",
@@ -1857,7 +1879,7 @@ mod catalog_tests {
     }
     #[test]
     fn registry_tool_count_matches_expected() {
-        assert_eq!(super::registered_tools().len(), 119);
+        assert_eq!(super::registered_tools().len(), 121);
     }
 
     const FIND_TOOLS_BUDGET_CHARS: usize = 2400;
@@ -1932,7 +1954,7 @@ mod catalog_tests {
                 .map(|tool| tool["name"].as_str().unwrap().to_string())
                 .collect()
         };
-        assert_eq!(names(serve_flags(false)).len(), 119);
+        assert_eq!(names(serve_flags(false)).len(), 121);
         assert_eq!(names(serve_flags(true)), ["find_tools", "call_tool"]);
         assert_eq!(
             names(ServeFlags {
@@ -2061,7 +2083,7 @@ mod catalog_tests {
         let registry = super::registered_tools();
         let list = super::handle_tools_list(serve_flags(false)).unwrap();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 119);
+        assert_eq!(tools.len(), 121);
         for tool in registry {
             let entry = tools
                 .iter()
@@ -2103,6 +2125,7 @@ mod catalog_tests {
             "plan_write",
             "lane_cleanup_apply",
             "lane_create",
+            "gateway_login",
             "confluence_page_create",
             "confluence_page_update",
             "jira_create",
@@ -2191,6 +2214,7 @@ mod catalog_tests {
             "bitbucket_deploy_key_list",
             "ui_annotations_list",
             "ui_annotations_get",
+            "gateway_status",
             "pdf_toc",
             "pdf_read",
             "pdf_peek",
@@ -2225,7 +2249,7 @@ mod catalog_tests {
         .collect();
         let union: std::collections::BTreeSet<&str> =
             write.union(&spend).chain(read.iter()).copied().collect();
-        assert_eq!(union.len(), 119);
+        assert_eq!(union.len(), 121);
         let mut actual_write = BTreeSet::new();
         let mut actual_spend = BTreeSet::new();
         let mut actual_read = BTreeSet::new();

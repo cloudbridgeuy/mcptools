@@ -395,6 +395,17 @@ non-meta tools. No CLI aliases or general `view` → `get` rewrite exists.
 
 All four deny access when the operator-controlled server environment `MCPTOOLS_LANE_REPOS` is unset or empty. Set an exact canonical path list, or explicitly set the whole value to `'*'` to authorize all otherwise-supported repository roots. Mixed wildcard/path lists and whitespace wildcards are invalid; repository-root, containment, identity, and executable-filter guards remain unchanged. Requests and repository configuration cannot opt in. `lane_create` and `lane_cleanup_apply` need `allowWrites: true` in direct `tools/call`, `call_tool`, and `execute`; apply has `destructiveHint: true`. `lane_cleanup_plan` is Read and needs neither write nor spend permission. Omit `laneIds` to assess all registered worktrees, or pass 1 to 100 unique managed IDs; unknown IDs fail. Apply always replans and skips every blocked lane. It uses non-force Git worktree and merged-branch deletion, removes the matching ownership record last, and reports possible partial mutation on failure. No merge or push tools exist. CLI exposes the same apply operation as `mcptools lane cleanup --repo <absolute-root> [--lane-id <id> ...]`. See [Lanes](lanes.md).
 
+### Gateway
+
+| Tool | Description |
+|------|-------------|
+| `gateway_status` | Read-only rows (name, transport, auth, state, reason) for every configured upstream; live by default, `offline: true` reads only config and credential files; never returns tokens, codes, secrets or header values |
+| `gateway_login` | Write tool (`allowWrites`): start the OAuth login for one configured OAuth upstream and return `{name, state: "pending", url}` at once |
+
+`gateway_login` accepts only names of configured `auth = "oauth"` HTTP upstreams; anything else fails with `Unknown OAuth upstream` before any network call. It runs discovery and registration, opens the browser, and returns the authorization URL within about 5 seconds, so harness tool timeouts (around 60 s) never cut it off. The callback listener and token exchange run in a background task for the existing 180 s login timeout. A repeat call while the login is pending returns the same pending login: no second listener and no port clash. `gateway_status` shows `pending` while it runs, then `ok` or `failed` (with a bounded single-line reason). A finished login (ok or failed) lets a later call start a new one.
+
+After a successful callback the server reconnects that upstream in process: it starts a client, discovers its tools, merges the catalog and replaces the shared tool list, so the tools work in `find_tools`, `call_tool` and `execute` without a restart. The upstream stays `pending` until the reconnect finishes. The on-disk catalog cache is not rewritten. Tools of upstreams that failed at startup are absent from `tools/list` until their login or reconnect succeeds; a `tools/list_changed` notification is not sent, so clients that cache `tools/list` may need to refresh, while `find_tools`, `call_tool` and `execute` see the change at once.
+
 ### HackerNews
 
 | Tool | Description |

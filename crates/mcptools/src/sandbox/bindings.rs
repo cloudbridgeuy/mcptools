@@ -233,7 +233,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn read_only_set_has_expected_names_and_no_writes() {
         let read = bound_names(&registered_tools(), &[ToolKind::Read]);
-        assert_eq!(read.len(), 64);
+        assert_eq!(read.len(), 65);
         assert!(read.contains(&"linear_status_list".to_string()));
         assert!(read.contains(&"file_stat".to_string()));
         assert!(!read.contains(&"http_request".to_string()));
@@ -287,7 +287,7 @@ mod tests {
             &registered_tools(),
             &[ToolKind::Read, ToolKind::Write, ToolKind::Spend],
         );
-        assert_eq!(all.len(), 117);
+        assert_eq!(all.len(), 119);
         assert!(all.contains(&"http_request".to_string()));
         assert!(all.contains(&"file_stat".to_string()));
         assert!(!read.contains(&"md_render".to_string()));

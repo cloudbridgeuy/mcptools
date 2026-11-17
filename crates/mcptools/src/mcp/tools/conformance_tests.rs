@@ -30,6 +30,8 @@ fn roundtrip_by_tool(tool: &str, value: &serde_json::Value) -> serde_json::Value
         "lane_cleanup_plan" => roundtrip::<mcptools_core::lane::CleanupPlanOutput>(value),
         "lane_cleanup_apply" => roundtrip::<mcptools_core::lane::CleanupApplyOutput>(value),
         "lane_create" => roundtrip::<mcptools_core::lane::CreateOutput>(value),
+        "gateway_status" => roundtrip::<mcptools_core::gateway_login::StatusOutput>(value),
+        "gateway_login" => roundtrip::<mcptools_core::gateway_login::LoginOutput>(value),
         "jira_status_list" => {
             roundtrip::<mcptools_core::atlassian::jira::status::StatusListOutput>(value)
         }

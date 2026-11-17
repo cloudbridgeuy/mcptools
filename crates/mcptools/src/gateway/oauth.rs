@@ -206,7 +206,33 @@ fn random() -> String {
     oauth::verifier(&bytes)
 }
 
+pub(super) fn open_browser(url: &str) {
+    #[cfg(not(test))]
+    {
+        let _ = std::process::Command::new(crate::open::opener())
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+    #[cfg(test)]
+    let _ = url;
+}
+
 pub(super) async fn login_upstream(upstream: &Upstream) -> Result<()> {
+    let (url, finish) = begin_login(upstream).await?;
+    std::println!("Open this URL to authorize: {url}");
+    open_browser(&url);
+    finish.await
+}
+
+pub(super) async fn begin_login(
+    upstream: &Upstream,
+) -> Result<(
+    String,
+    impl std::future::Future<Output = Result<()>> + Send + 'static,
+)> {
     let configured_secret = resolve_client_secret(upstream)?;
     let client = client()?;
     let resource = upstream
@@ -234,7 +260,9 @@ pub(super) async fn login_upstream(upstream: &Upstream) -> Result<()> {
         oauth::metadata_url(resource, &metadata_url).map_err(|error| eyre!(error))?;
     let metadata = get_json(&client, metadata_url.as_str()).await?;
     let issuer_text = oauth::issuer(&metadata, resource).map_err(|error| eyre!(error))?;
-    let resource = oauth::resource(&metadata, resource).map_err(|error| eyre!(error))?;
+    let resource = oauth::resource(&metadata, resource)
+        .map_err(|error| eyre!(error))?
+        .to_owned();
     let [discovery, openid] = oauth::discovery_urls(issuer_text).map_err(|error| eyre!(error))?;
     let server = match get_json(&client, discovery.as_str()).await {
         Ok(server) => server,
@@ -270,81 +298,77 @@ pub(super) async fn login_upstream(upstream: &Upstream) -> Result<()> {
             &redirect,
             &state,
             &verifier,
-            resource,
+            &resource,
             &upstream.scopes,
         )
         .map_err(|error| eyre!(error))?;
-    std::println!("Open this URL to authorize: {url}");
-    #[cfg(target_os = "macos")]
-    let browser = "open";
-    #[cfg(not(target_os = "macos"))]
-    let browser = "xdg-open";
-    let _ = std::process::Command::new(browser)
-        .arg(url.as_str())
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
-    let code = tokio::time::timeout(Duration::from_secs(180), async {
-        loop {
-            let (mut socket, _) = listener
-                .accept()
-                .await
-                .map_err(|_| eyre!("OAuth callback failed"))?;
-            let mut bytes = [0u8; 8192];
-            let size =
-                match tokio::time::timeout(Duration::from_secs(3), socket.read(&mut bytes)).await {
-                    Ok(Ok(size)) => size,
-                    _ => continue,
-                };
-            let request = String::from_utf8_lossy(&bytes[..size]);
-            let target = request
-                .lines()
-                .next()
-                .and_then(|line| line.strip_prefix("GET "))
-                .and_then(|line| line.split_once(' '))
-                .map(|(target, _)| target);
-            let (code, response) = oauth::callback_response(
-                &upstream.prefix,
-                target.unwrap_or_default(),
-                &state,
-                callback_url.path(),
-            );
-            let _ = socket.write_all(response.as_bytes()).await;
-            if let Some(code) = code {
-                break Ok::<_, color_eyre::eyre::Report>(code);
+    let upstream = upstream.clone();
+    let url = url.to_string();
+    let finish = async move {
+        let code = tokio::time::timeout(Duration::from_secs(180), async {
+            loop {
+                let (mut socket, _) = listener
+                    .accept()
+                    .await
+                    .map_err(|_| eyre!("OAuth callback failed"))?;
+                let mut bytes = [0u8; 8192];
+                let size =
+                    match tokio::time::timeout(Duration::from_secs(3), socket.read(&mut bytes))
+                        .await
+                    {
+                        Ok(Ok(size)) => size,
+                        _ => continue,
+                    };
+                let request = String::from_utf8_lossy(&bytes[..size]);
+                let target = request
+                    .lines()
+                    .next()
+                    .and_then(|line| line.strip_prefix("GET "))
+                    .and_then(|line| line.split_once(' '))
+                    .map(|(target, _)| target);
+                let (code, response) = oauth::callback_response(
+                    &upstream.prefix,
+                    target.unwrap_or_default(),
+                    &state,
+                    callback_url.path(),
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                if let Some(code) = code {
+                    break Ok::<_, color_eyre::eyre::Report>(code);
+                }
             }
-        }
-    })
-    .await
-    .map_err(|_| eyre!("OAuth callback timed out"))??;
-    let tokens = Tokens {
-        access_token: String::new(),
-        refresh_token: None,
-        client_id,
-        client_secret,
-        client_auth,
-        token_endpoint: server.token_endpoint,
-        resource: resource.to_owned(),
-        expires_at: None,
-    };
-    let form = vec![
-        ("grant_type", "authorization_code"),
-        ("code", code.as_str()),
-        ("redirect_uri", redirect.as_str()),
-        ("code_verifier", verifier.as_str()),
-        ("resource", resource),
-    ];
-    let response = token_request(&client, configured_secret.as_deref(), &tokens, form)
-        .send()
+        })
         .await
-        .map_err(|_| eyre!("OAuth token request failed"))?;
-    let value = json_response(response).await?;
-    let tokens = tokens
-        .updated(&value, now())
-        .map_err(|error| eyre!(error))?;
-    save(upstream, &tokens)?;
-    Ok(())
+        .map_err(|_| eyre!("OAuth callback timed out"))??;
+        let tokens = Tokens {
+            access_token: String::new(),
+            refresh_token: None,
+            client_id,
+            client_secret,
+            client_auth,
+            token_endpoint: server.token_endpoint,
+            resource: resource.clone(),
+            expires_at: None,
+        };
+        let form = vec![
+            ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("redirect_uri", redirect.as_str()),
+            ("code_verifier", verifier.as_str()),
+            ("resource", resource.as_str()),
+        ];
+        let response = token_request(&client, configured_secret.as_deref(), &tokens, form)
+            .send()
+            .await
+            .map_err(|_| eyre!("OAuth token request failed"))?;
+        let value = json_response(response).await?;
+        let tokens = tokens
+            .updated(&value, now())
+            .map_err(|error| eyre!(error))?;
+        save(&upstream, &tokens)?;
+        Ok(())
+    };
+    Ok((url, finish))
 }
 
 fn token_request<'a>(

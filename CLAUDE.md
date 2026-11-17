@@ -240,6 +240,7 @@ mcptools config check # Validate the global TOML config without starting upstrea
 mcptools gateway login NAME # Authorize an OAuth HTTP upstream
 mcptools gateway login --all # Log in to every OAuth upstream that is not ok, one at a time; skips healthy ones, continues past failures, exits non-zero if any login failed
 mcptools gateway status [--json] [--offline] # One row per upstream: transport, auth, state; live initialize by default, config and credential files only with --offline; exits non-zero if any upstream is not ok
+mcptools mcp declarations gateway_status gateway_login # MCP: gateway_status (read-only, offline option) and gateway_login {name} (allowWrites): returns pending + url at once; background callback; in-process reconnect on success
 mcptools gateway logout NAME # Remove its OAuth credentials
 mcptools mcp stdio   # For local agents (Claude Desktop)
 mcptools mcp stdio --discovery  # tools/list returns find_tools,call_tool (env: MCPTOOLS_DISCOVERY=true)
