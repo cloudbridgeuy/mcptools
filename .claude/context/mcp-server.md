@@ -455,6 +455,7 @@ After a successful callback the server reconnects that upstream in process: it s
 - Local backend: each score is matched-weighted-IDF over twice the task IDF sum, with name 2.0 / domain 1.5 / summary 1.0 weights, so values near 0.2 are normal. Compare tools relative to each other, not against an absolute cutoff.
 - Cross-domain leakage is expected: Jira tools can surface for a Linear task when the top-1 match is right but `none` stays near 0.8.
 - Jev backend contrast: scores are verbatim classifier probabilities, kept at or above 0.05 with at most 3 tools returned, so extremes like 1.0 or 0 are normal.
+- Jev sends catalogs larger than 254 tools as concurrent batches of at most 254 tools plus `none`. Scores are sorted across batches, though those independent probabilities are advisory rather than calibrated against each other. The returned `none` is the minimum batch `none`: one batch with a credible match means the complete catalog is not confidently a no-match. Any failed or malformed batch falls back to local ranking for the whole call; `fallbackDetail`, when the failure is HTTP, contains `HTTP <status>: <body>` with at most 500 response-body bytes.
 - Jev enables with a provider and API key from the file or environment (see table).
 
 **Jev environment variables**

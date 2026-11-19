@@ -15,8 +15,8 @@ pub const JEV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 pub enum JevError {
     #[error("gateway unreachable")]
     Unreachable,
-    #[error("gateway returned an error status")]
-    HttpStatus,
+    #[error("gateway returned HTTP {status}: {body}")]
+    HttpStatus { status: u16, body: String },
 }
 
 pub async fn classify(
@@ -35,7 +35,10 @@ pub async fn classify(
         .await
         .map_err(|_| JevError::Unreachable)?;
     if !resp.status().is_success() {
-        return Err(JevError::HttpStatus);
+        let status = resp.status().as_u16();
+        let bytes = resp.bytes().await.map_err(|_| JevError::Unreachable)?;
+        let body = String::from_utf8_lossy(&bytes[..bytes.len().min(500)]).into_owned();
+        return Err(JevError::HttpStatus { status, body });
     }
     resp.text().await.map_err(|_| JevError::Unreachable)
 }

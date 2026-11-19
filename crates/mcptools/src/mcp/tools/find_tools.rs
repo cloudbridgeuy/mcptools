@@ -32,6 +32,9 @@ pub struct FoundTools {
     pub backend: Backend,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback: Option<FallbackReason>,
+    #[serde(rename = "fallbackDetail", skip_serializing_if = "Option::is_none")]
+    #[schemars(skip)]
+    pub fallback_detail: Option<String>,
     pub usage: String,
 }
 
@@ -51,6 +54,9 @@ pub enum FindToolsOutput {
         backend: Backend,
         #[serde(skip_serializing_if = "Option::is_none")]
         fallback: Option<FallbackReason>,
+        #[serde(rename = "fallbackDetail", skip_serializing_if = "Option::is_none")]
+        #[schemars(skip)]
+        fallback_detail: Option<String>,
         usage: String,
     },
     Domain {
@@ -67,6 +73,11 @@ enum Selector {
     ListDomains,
     Domain(String),
     Task { task: String, k: Option<usize> },
+}
+
+enum BatchError {
+    Gateway(crate::jev::JevError),
+    InvalidResponse,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -104,6 +115,7 @@ fn attach_schemas(
     ranking: mcptools_core::find_tools::Ranking,
     backend: Backend,
     fallback: Option<FallbackReason>,
+    fallback_detail: Option<String>,
 ) -> FoundTools {
     let registered = super::registered_tools();
     let tools: Vec<FoundTool> = ranking
@@ -126,6 +138,7 @@ fn attach_schemas(
         tools,
         backend,
         fallback,
+        fallback_detail,
         usage: mcptools_core::find_tools::USAGE.to_string(),
     }
 }
@@ -135,42 +148,88 @@ pub async fn find_tools_with(
     task: &str,
     k: usize,
 ) -> Result<FoundTools, mcptools_core::find_tools::FindToolsError> {
-    let catalog = super::tool_catalog();
+    find_tools_with_catalog(config, task, k, false, super::tool_catalog()).await
+}
+
+async fn find_tools_with_verbose(
+    config: Result<Option<mcptools_core::jev::GatewayConfig>, mcptools_core::jev::ConfigError>,
+    task: &str,
+    k: usize,
+    verbose: bool,
+) -> Result<FoundTools, mcptools_core::find_tools::FindToolsError> {
+    find_tools_with_catalog(config, task, k, verbose, super::tool_catalog()).await
+}
+
+async fn find_tools_with_catalog(
+    config: Result<Option<mcptools_core::jev::GatewayConfig>, mcptools_core::jev::ConfigError>,
+    task: &str,
+    k: usize,
+    verbose: bool,
+    catalog: Vec<mcptools_core::catalog::CatalogEntry>,
+) -> Result<FoundTools, mcptools_core::find_tools::FindToolsError> {
     let local = mcptools_core::find_tools::rank_tools(task, &catalog, k)?;
     match config {
         Ok(Some(cfg)) => {
-            let body = mcptools_core::jev::build_request(task, &catalog, &cfg.model);
-            match crate::jev::classify(&cfg, &body).await {
-                Ok(text) => match mcptools_core::jev::parse_ranking(&text, &catalog) {
-                    Ok(r) => {
-                        let sel = mcptools_core::jev::select(r, k);
-                        Ok(attach_schemas(sel, Backend::Jev, None))
+            let batches = catalog
+                .chunks(mcptools_core::jev::MAX_JEV_BATCH_TOOLS)
+                .collect::<Vec<_>>();
+            let requests = mcptools_core::jev::build_requests(task, &catalog, &cfg.model);
+            let responses = futures::future::join_all(
+                requests
+                    .iter()
+                    .map(|request| crate::jev::classify(&cfg, request)),
+            )
+            .await;
+            let parsed = responses
+                .into_iter()
+                .zip(batches)
+                .map(|(response, batch)| match response {
+                    Ok(text) => mcptools_core::jev::parse_ranking(&text, batch)
+                        .map_err(|_| BatchError::InvalidResponse),
+                    Err(error) => Err(BatchError::Gateway(error)),
+                })
+                .collect::<Result<Vec<_>, _>>();
+            // A partial batch response could make a relevant tool disappear, so any
+            // batch failure falls back to local ranking for the entire request.
+            match parsed {
+                Ok(rankings) => {
+                    let ranking = mcptools_core::jev::merge_rankings(rankings);
+                    let sel = mcptools_core::jev::select(ranking, k);
+                    Ok(attach_schemas(sel, Backend::Jev, None, None))
+                }
+                Err(BatchError::Gateway(crate::jev::JevError::HttpStatus { status, body })) => {
+                    let detail = format!("HTTP {status}: {body}");
+                    if verbose {
+                        eprintln!("JEV ranking fallback: {detail}");
                     }
-                    Err(mcptools_core::jev::ClassifyError::MalformedBody)
-                    | Err(mcptools_core::jev::ClassifyError::MissingAnswer) => Ok(attach_schemas(
+                    Ok(attach_schemas(
                         local,
                         Backend::Local,
-                        Some(FallbackReason::InvalidResponse),
-                    )),
-                },
-                Err(crate::jev::JevError::Unreachable) => Ok(attach_schemas(
+                        Some(FallbackReason::HttpStatus),
+                        Some(detail),
+                    ))
+                }
+                Err(BatchError::Gateway(crate::jev::JevError::Unreachable)) => Ok(attach_schemas(
                     local,
                     Backend::Local,
                     Some(FallbackReason::Unreachable),
+                    None,
                 )),
-                Err(crate::jev::JevError::HttpStatus) => Ok(attach_schemas(
+                Err(BatchError::InvalidResponse) => Ok(attach_schemas(
                     local,
                     Backend::Local,
-                    Some(FallbackReason::HttpStatus),
+                    Some(FallbackReason::InvalidResponse),
+                    None,
                 )),
             }
         }
-        Ok(None) => Ok(attach_schemas(local, Backend::Local, None)),
+        Ok(None) => Ok(attach_schemas(local, Backend::Local, None, None)),
         Err(mcptools_core::jev::ConfigError::UnknownProvider)
         | Err(mcptools_core::jev::ConfigError::MissingKey) => Ok(attach_schemas(
             local,
             Backend::Local,
             Some(FallbackReason::InvalidConfig),
+            None,
         )),
     }
 }
@@ -248,6 +307,14 @@ fn decide(args: FindToolsArgs, known_domains: &[String]) -> Result<Selector, Que
 }
 
 pub async fn query(args: FindToolsArgs, code_mode: bool) -> Result<FindToolsOutput, QueryError> {
+    query_with_verbose(args, code_mode, false).await
+}
+
+async fn query_with_verbose(
+    args: FindToolsArgs,
+    code_mode: bool,
+    verbose: bool,
+) -> Result<FindToolsOutput, QueryError> {
     let domains = list_domain_names();
     let sel = decide(args, &domains)?;
     match sel {
@@ -263,13 +330,15 @@ pub async fn query(args: FindToolsArgs, code_mode: bool) -> Result<FindToolsOutp
         }
         Selector::Task { task, k } => {
             let k = k.unwrap_or(mcptools_core::find_tools::DEFAULT_K);
-            let inner = find_tools(&task, k).await?;
+            let inner =
+                find_tools_with_verbose(crate::jev::gateway_config(), &task, k, verbose).await?;
             let usage = usage_for(code_mode);
             Ok(FindToolsOutput::Rank {
                 none: inner.none,
                 tools: inner.tools,
                 backend: inner.backend,
                 fallback: inner.fallback,
+                fallback_detail: inner.fallback_detail,
                 usage,
             })
         }
@@ -287,7 +356,7 @@ pub async fn handle_find_tools(
             message: format!("Invalid arguments: {e}"),
             data: None,
         })?;
-    let result = query(args, flags.code_mode)
+    let result = query_with_verbose(args, flags.code_mode, _global.verbose)
         .await
         .map_err(|e| JsonRpcError {
             code: -32602,
@@ -435,6 +504,7 @@ mod find_tools_tests {
             tools: inner.tools,
             backend: inner.backend,
             fallback: inner.fallback,
+            fallback_detail: inner.fallback_detail,
             usage: inner.usage,
         })
         .unwrap();
@@ -627,6 +697,7 @@ mod find_tools_tests {
             .unwrap();
         assert_eq!(jev_res.backend, Backend::Local);
         assert_eq!(jev_res.fallback, Some(FallbackReason::HttpStatus));
+        assert_eq!(jev_res.fallback_detail.as_deref(), Some("HTTP 529: "));
         let local_res = find_tools_with(Ok(None), "close GUZ-22", 5).await.unwrap();
         assert_eq!(jev_res.tools, local_res.tools);
         assert_eq!(local_res.fallback, None);
@@ -689,6 +760,50 @@ mod find_tools_tests {
             .unwrap();
         assert_eq!(res.backend, Backend::Local);
         assert_eq!(res.fallback, Some(FallbackReason::HttpStatus));
+        assert_eq!(res.fallback_detail.as_deref(), Some("HTTP 401: "));
+    }
+
+    #[tokio::test]
+    async fn partial_batch_failure_falls_back_to_local() {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let url = spawn_stub(
+            vec![
+                Stub::ok(
+                    r#"{"answers":{"tool":{"probabilities":{"jira_update":0.8,"none":0.1}}}}"#,
+                ),
+                Stub {
+                    status: 422,
+                    headers: vec![],
+                    body: "too many criteria",
+                    delay_ms: 0,
+                },
+            ],
+            hits.clone(),
+        )
+        .await;
+        let cfg = mcptools_core::jev::GatewayConfig {
+            endpoint: url,
+            model: "test".into(),
+            api_key: mcptools_core::jev::Secret::new("k"),
+        };
+        let entries = (0..430)
+            .map(|i| (format!("tool_{i}"), "summary".to_string()))
+            .collect::<Vec<_>>();
+        let catalog = mcptools_core::catalog::build_catalog(
+            entries
+                .iter()
+                .map(|(name, summary)| (name.as_str(), summary.as_str())),
+        );
+        let result = find_tools_with_catalog(Ok(Some(cfg)), "close GUZ-22", 5, false, catalog)
+            .await
+            .unwrap();
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        assert_eq!(result.backend, Backend::Local);
+        assert_eq!(result.fallback, Some(FallbackReason::HttpStatus));
+        assert_eq!(
+            result.fallback_detail.as_deref(),
+            Some("HTTP 422: too many criteria")
+        );
     }
 
     #[tokio::test]
@@ -737,7 +852,14 @@ mod find_tools_tests {
         let json = serde_json::to_string(&res).unwrap();
         assert!(!json.contains(sentinel));
         assert!(!format!("{:?}", mcptools_core::jev::ConfigError::MissingKey).contains(sentinel));
-        assert!(!format!("{:?}", crate::jev::JevError::HttpStatus).contains(sentinel));
+        assert!(!format!(
+            "{:?}",
+            crate::jev::JevError::HttpStatus {
+                status: 401,
+                body: "unauthorized".into(),
+            }
+        )
+        .contains(sentinel));
         assert!(
             !format!("{:?}", mcptools_core::jev::ClassifyError::MalformedBody).contains(sentinel)
         );

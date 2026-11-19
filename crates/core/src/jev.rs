@@ -132,6 +132,9 @@ pub fn gateway_config_with_file(
     }))
 }
 
+pub const MAX_JEV_CRITERIA: usize = 255;
+pub const MAX_JEV_BATCH_TOOLS: usize = MAX_JEV_CRITERIA - 1;
+
 pub fn build_request(
     task: &str,
     catalog: &[crate::catalog::CatalogEntry],
@@ -153,6 +156,21 @@ pub fn build_request(
             }
         }
     })
+}
+
+/// Builds independent JEV questions with at most 254 tools plus the `none` choice.
+///
+/// The classifier limit is 255 criteria, and every batch includes `none` so it can
+/// express that none of that batch's tools are relevant.
+pub fn build_requests(
+    task: &str,
+    catalog: &[crate::catalog::CatalogEntry],
+    model: &str,
+) -> Vec<serde_json::Value> {
+    catalog
+        .chunks(MAX_JEV_BATCH_TOOLS)
+        .map(|batch| build_request(task, batch, model))
+        .collect()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -208,6 +226,29 @@ pub fn parse_ranking(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(crate::find_tools::Ranking { none, tools })
+}
+
+/// Merges independently classified catalog batches.
+///
+/// A `none` probability applies only to its batch. The global value is the minimum:
+/// if any batch has a credible matching tool, the whole catalog cannot confidently
+/// be considered a no-match. Tool probabilities remain batch-local estimates, so
+/// cross-batch score ordering is advisory rather than calibrated.
+pub fn merge_rankings(
+    rankings: impl IntoIterator<Item = crate::find_tools::Ranking>,
+) -> crate::find_tools::Ranking {
+    let mut none = 1.0_f64;
+    let mut tools = vec![];
+    for ranking in rankings {
+        none = none.min(ranking.none);
+        tools.extend(ranking.tools);
+    }
+    tools.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    crate::find_tools::Ranking { none, tools }
 }
 
 pub const MIN_PROBABILITY: f64 = 0.05;
@@ -360,6 +401,42 @@ mod tests {
     }
 
     #[test]
+    fn build_requests_splits_catalog_under_choice_limit() {
+        let catalog = (0..430)
+            .map(|i| (format!("tool_{i}"), "summary".to_string()))
+            .collect::<Vec<_>>();
+        let catalog = crate::catalog::build_catalog(
+            catalog
+                .iter()
+                .map(|(name, summary)| (name.as_str(), summary.as_str())),
+        );
+        let requests = build_requests("do", &catalog, "m");
+        assert_eq!(requests.len(), 2);
+
+        let mut names = vec![];
+        for request in requests {
+            let criteria = request["questions"]["tool"]["criteria"]
+                .as_object()
+                .unwrap();
+            assert!(criteria.len() <= MAX_JEV_CRITERIA);
+            assert_eq!(
+                criteria.get("none").unwrap(),
+                "No listed tool can do this task"
+            );
+            names.extend(
+                criteria
+                    .keys()
+                    .filter(|name| name.as_str() != "none")
+                    .cloned(),
+            );
+        }
+        names.sort();
+        let mut expected: Vec<_> = catalog.into_iter().map(|entry| entry.name).collect();
+        expected.sort();
+        assert_eq!(names, expected);
+    }
+
+    #[test]
     fn parse_ranking_drops_non_catalog_key() {
         let cat = build_catalog([("jira_update", "u")]);
         let body =
@@ -392,6 +469,31 @@ mod tests {
         let body = r#"{"answers":{"tool":{"probabilities":{"jira_update":"x","none":0.1}}}}"#;
         let e = parse_ranking(body, &cat);
         assert!(matches!(e, Err(ClassifyError::MalformedBody)));
+    }
+
+    #[test]
+    fn merge_rankings_sorts_scores_and_uses_lowest_none() {
+        let catalog = build_catalog([("a", "s"), ("b", "s"), ("c", "s")]);
+        let first = parse_ranking(
+            r#"{"answers":{"tool":{"probabilities":{"a":0.2,"b":0.8,"none":0.7}}}}"#,
+            &catalog,
+        )
+        .unwrap();
+        let second = parse_ranking(
+            r#"{"answers":{"tool":{"probabilities":{"c":0.9,"none":0.1}}}}"#,
+            &catalog,
+        )
+        .unwrap();
+        let merged = merge_rankings([first, second]);
+        assert_eq!(merged.none, 0.1);
+        assert_eq!(
+            merged
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["c", "b", "a"]
+        );
     }
 
     #[test]
